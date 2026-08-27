@@ -1,0 +1,12 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  # Lane A runs everywhere and catches malformed output fast.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version: '1.25' }
+      - run: make lint
+      - run: make test
