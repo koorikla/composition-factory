@@ -17,6 +17,15 @@ import (
 // every s, so an empty query matches every Kind and this collapses to "all
 // kinds, optionally capped at limit" without a separate branch for the
 // no-query case.
+//
+// This response deliberately carries no "total", even though
+// /api/kinds/{apiVersion}/{kind}/fields does. The asymmetry is real and is
+// acknowledged rather than smoothed over: {"kinds":[Kind]} is the frozen
+// contract both this milestone and the frontend milestone are built against
+// (see the route table in docs/superpowers/plans/2026-08-28-m3-canvas.md),
+// and adding a key is a contract change, not a fix. If a caller ever needs
+// to know that limit truncated the kind list, that is a revision to make
+// deliberately and on both sides at once.
 func (srv *server) handleKinds(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 

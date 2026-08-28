@@ -430,10 +430,29 @@ func writeBlueprintFile(path string, b *blueprint.Blueprint) error {
 // This marshals the blueprint.Blueprint struct directly (already
 // json-tagged; sigs.k8s.io/yaml marshals through those same tags) rather
 // than hand-assembling YAML the way internal/emit's emitters do, per the
-// brief's explicit direction: the file is meant to stay hand-editable, and
-// preserving its apiVersion/kind/metadata/spec{sources,xrd,resources}
-// structure this way means every key the user might have added or reordered
-// by hand round-trips through the same Go types cf gen already trusts.
+// brief's explicit direction.
+//
+// What that costs, stated plainly (fix round 2 — an earlier version of this
+// comment claimed the opposite, that "every key the user might have added or
+// reordered by hand round-trips", which is simply false): THE FILE IS NOT
+// PRESERVED. Every edit through this API rewrites the whole document from
+// the Go structs, so on the first edit anyone makes:
+//
+//   - every comment is gone, including a file header;
+//   - blank lines and hand-chosen key order are gone (keys come back
+//     sorted), as is any block-vs-flow style choice;
+//   - any key the blueprint.* structs do not model is dropped silently,
+//     not rejected;
+//   - every modeled key is written explicitly, set or not (see below).
+//
+// "Hand-editable" holds only in the direction that matters for `cf gen`: a
+// human can write this file and both the CLI and this server will read it.
+// It does not hold in reverse — a hand-written file that has been edited
+// through the API comes back canonically reformatted, carrying only what
+// the Go types model. Preserving comments and unmodeled keys would mean
+// editing a yaml.Node tree in place instead of marshaling structs; that is
+// a different design from the one the brief directs, and it is deliberately
+// out of scope here rather than half-attempted.
 //
 // One consequence worth noting: neither blueprint.Parameter nor
 // blueprint.Field carries `omitempty` json tags, so every field this struct
