@@ -5,13 +5,18 @@
 Generate Crossplane Compositions and XRDs from provider schemas — through a drag-and-drop
 canvas, a CLI, or an MCP server, all over one engine.
 
-Grounded in two research documents in this repo, both built from measurement rather than
+Grounded in four research documents in this repo, all built from measurement rather than
 recollection:
 
 - [`docs/research/2026-08-27-crossplane-generator-research.md`](../../research/2026-08-27-crossplane-generator-research.md)
   — schema sourcing, XRD v2, function-go-templating, validation tooling, prior art.
 - [`docs/research/2026-08-27-composition-pattern-taxonomy.md`](../../research/2026-08-27-composition-pattern-taxonomy.md)
   — ~1,200–1,600 real Compositions across ~350–450 repos; 815 GCP + 563 AWS CRDs.
+- [`docs/research/2026-08-28-permissions-derivation.md`](../../research/2026-08-28-permissions-derivation.md)
+  — RBAC and cloud-IAM derivation: feasibility, exact mechanism, coverage, fidelity — verified against
+  a live cluster.
+- [`docs/research/2026-08-28-provider-discovery.md`](../../research/2026-08-28-provider-discovery.md)
+  — catalogue channel comparison, static-index design, reference resolution, caching.
 
 A clickable UX prototype exists at [`docs/design/canvas-prototype.html`](../../design/canvas-prototype.html).
 
@@ -90,11 +95,49 @@ Three things the naive version gets wrong:
 1. **Follow `spec.dependsOn` yourself.** `provider-aws-sqs` ships **zero** ProviderConfig CRDs —
    they live in `provider-family-aws`. `crossplane xpkg get-crds` does *not* resolve dependencies.
    Worse, **34.1% of GCP references cross API groups** (30.0% on AWS), so an editor that loads only
-   the packages named in the blueprint fails to resolve a third of its edges. Load the family.
+   the packages named in the blueprint fails to resolve a third of its edges. Load the family — cheaply:
+   `GET api.upbound.io/v2/packageMetadata/{acct}/{repo}/{ver|latest}` returns `familyRepoKey` in one
+   anonymous request, no `crossplane.yaml` parse.
 2. **Pick the `storage: true` version, skip `deprecated: true`, never `versions[0]`.** 14 of 102
    legacy EC2 CRDs serve two versions with inconsistent storage flags.
-3. **Digest-pin in a lockfile.** `:v2` is a moving tag; without pinning the same blueprint emits a
-   different Composition next month.
+3. **Digest-pin in a lockfile — resolve tag→digest once.** `:v2` is a moving tag; without pinning
+   the same blueprint emits a different Composition next month. Reuse that digest for every later
+   request on the pull, including the signature check — closes the TOCTOU gap in Crossplane advisory
+   GHSA-wfqx-gjrf-g28r.
+
+**Discovery is a first-class feature, not a naming exercise** — users browse and search providers;
+they do not need to arrive already knowing an exact xpkg reference. But no channel permits anonymous
+run-time enumeration of the provider *namespace*: `xpkg.upbound.io/v2/_catalog` and
+`api.github.com/orgs/{org}/packages` both return **401** unauthenticated. So the catalogue is built
+once daily by CI in a separate repo (`cf-index`), every entry validated against the registry before
+publication so nothing unresolvable reaches a picker, and shipped two ways: `go:embed`ed as a seed
+(offline on first run) and fetched from a mirrorable URL (**~40 KB gzipped** at the 900-package upper
+bound). `cf` itself never calls the marketplace API or GitHub at request time — only the daily build
+does. Two sources were ruled out as inputs to it: **GitHub is a wrong *version* source**, not merely
+incomplete — `provider-upjet-aws`'s latest GitHub release is `v2.7.0` while every registry ships
+`v2.7.1` (no Git tag, no GitHub release), and GitHub is blind to the ~350 family packages with no
+repository at all (`upbound/provider-aws-sqs` → 404); **Artifact Hub indexes zero Crossplane
+packages** (21,142 packages, 29 kinds, none of them ours) — settled, not reopened.
+
+**Retraction:** `xpkg.upbound.io/v2/<repo>/tags/list` does not return an empty tag list. Unauthenticated
+it is **401**; with a repository-scoped anonymous bearer minted at `https://xpkg.upbound.io/service/token`
+(note `/service/token`, not `/token`, which 404s) it is **200 with 446 tags** for
+`upbound/provider-aws-sqs` (344 cosign sidecars to filter, 102 real — tags sort lexicographically, so a
+naive first page is 100% noise). Use `go-containerregistry`'s `remote.List`, never hand-rolled — it
+unmarshals the 401 body into `struct{Tags []string}` and silently returns `nil`; treat `len(tags)==0`
+as a bug to investigate, never as "no versions."
+
+**Publisher tier is not a licence signal — label, don't hide.** OCI image labels carry no licence
+data at all (zero `org.opencontainers.image.licenses` across every image inspected); the real signal
+is `meta.crossplane.io/license` inside the in-band Crossplane package meta (9 of 12 packages probed),
+GitHub's API as fallback. "Official" and "community" can be the same build wearing different badges:
+at v2.4.0, `upbound/provider-aws-sqs` declares `license: Apache-2.0` and names
+`crossplane-contrib/provider-upjet-aws` as its source; all 8 CRDs are byte-identical between the two,
+and the entire delta is ~17 lines of annotations plus a `dependsOn` pin. Show `source:`, licence and
+signature verdict as separate facts — never collapse them into one "official" badge implying
+proprietary. `xpkg.crossplane.io` is itself a **partial mirror** of `ghcr.io` (authenticate against
+whatever `WWW-Authenticate` names, never the hostname) and can carry fewer tags than the marketplace
+(`provider-kubernetes`: 9 vs 27).
 
 **Native Kubernetes kinds come from vendored OpenAPI**, pinned per minor version (`cf k8s use 1.34`),
 because Crossplane v2 composes any Kubernetes object directly — **36% of v2 Compositions in the
@@ -107,6 +150,13 @@ reasons: N providers per family, descriptions are 71% of payload and are the fie
 the cluster is authoritative when present. Index eager (**1.0 KB brotli for 204 CRDs**), full schema
 per-kind on demand (median 4.5 KB). Gzip/brotli middleware is mandatory — `http.FileServer` does not
 compress.
+
+**A second schema source is a candidate, not yet trusted** —
+`.../v1/packages/{acct}/{repo}/{ver}/resources/{group}/{kind}` returns a full CRD anonymously in
+~20 KB, cheaper than a pull for one or two kinds, but whether it matches the xpkg-extracted CRD
+byte-for-byte is untested (§14). Cache is content-addressed below the tag: an exact semver tag is
+immutable and cached forever, a floating tag is revalidated hourly, and a failed refresh never
+invalidates what is already cached.
 
 ## 5. Scope: the `.m.` fork
 
@@ -269,25 +319,62 @@ absent from `resources:` is **deleted** under `prune: true`.
 ## 9. Permissions from the canvas
 
 The set of resources on the canvas determines the permissions the control plane will need, and
-nothing in the ecosystem derives them. Two artifacts, two very different confidence levels:
+nothing in the ecosystem derives them. Full analysis, datasets and licences in
+[`docs/research/2026-08-28-permissions-derivation.md`](../../research/2026-08-28-permissions-derivation.md).
+The two halves ship on different timelines because they earn very different confidence.
 
-**Kubernetes RBAC — derivable, high confidence.** Composing native objects requires the control
-plane to hold rights on every composed GVK; without it the failure is the "#1 why-nothing-happens"
-class. The GVKs are known at design time, which is precisely the case existing tools (`audit2rbac`,
-`rbac-tool`) cannot serve, since they infer from observed traffic. `emit: {rbac: true}` produces an
-aggregated ClusterRole over every composed native GVK.
+**Kubernetes RBAC — fully derivable offline, at exact fidelity, and no prior art competes.**
+`emit: {rbac: true}` produces one aggregated `ClusterRole` per XRD, labelled
+`rbac.crossplane.io/aggregate-to-crossplane: "true"` (exact string, quoted lowercase — aggregation
+*is* the binding mechanism, no `RoleBinding` needed): one un-merged rule per canvas node,
+comment-attributed (RBAC is an additive union with no deny, so N rules cost nothing and buy the
+attribution `controller-gen` throws away), all seven verbs
+(`get,list,watch,create,update,patch,delete`), never subresources on composed objects — the composite
+controller only `Patch`es/`Get`s/`Delete`s composed resources, never `Update`s or touches
+`/status`/`/finalizers` (that's the XR's, already covered by rbac-manager). Kind → resource-plural
+resolves offline from vendored OpenAPI v3 **paths** (the `post` operation's
+`x-kubernetes-group-version-kind` on the collection path) — **177/177** correct, zero guessing —
+falling back to Kubernetes' own `UnsafeGuessKindToResource` for a bare Kind — **148/148**.
 
-**Cloud IAM — derivable only as a reviewed starting point.** Upjet providers are generated from
-Terraform providers, so `Queue@sqs.aws.m.upbound.io` traces to `aws_sqs_queue` and from there to an
-action set. The chain is real but each hop loses fidelity, and upjet additionally needs read/list
-permissions for drift detection and tag permissions on most resources.
+**The failure mode this replaces:** rbac-manager's static role *accidentally* authorizes a handful of
+common kinds via unrelated package-management rules — **71% of a common-composable sample is denied**
+the moment the canvas grows past those. The denial (`Forbidden` on `patch`, server-side apply)
+degrades after one reconcile into a misleading informer timeout (open bug
+crossplane/crossplane#7398) — surface that exact string in the GUI, mapped to "missing ClusterRole."
+**The oracle no prior art has:** a read-only `SubjectAccessReview` turns each rule from *inferred* to
+*verified* and yields `already-satisfied` for free when a kubeconfig is reachable — degrade to
+`inferred`, and say so, when it is not.
 
-**A wrong policy is worse than none** — it either blocks provisioning or silently over-grants. So
-every entry is attributed to the node that caused it and carries a confidence marker, and the
-generated file says in a header comment that it is a starting point for review, not an authority.
-Exact mechanism, dataset, licence and coverage are being researched separately
-(`docs/research/2026-08-28-permissions-derivation.md`); §11 sequences RBAC ahead of IAM because the
-first is cheap and certain and the second is neither.
+**Cloud IAM — derivable only as an approximate, review-required draft, never a v1 feature.** The
+chain is MR kind → Terraform resource (`zz_<kind>_terraformed.go`, exact) → CloudFormation type (the
+lossy hop — Terraform and CFN carve resources up differently) → IAM actions (AWS's own CFN registry
+schemas, mechanical). End to end over `provider-upjet-aws`: **53.2% automated coverage** with a real
+per-resource action set and zero curation; where it completes, measured against real SDK call sites,
+it **leaks both ways on every resource tested — recall 69–100%, precision 57–94%.** GCP: **40.6%**
+via the naive convention join. A ~180-entry alias file is *estimated*, not measured, to lift AWS to
+~70% — do not promise that number until it is.
+
+**A wrong policy is worse than none**, so IAM output carries three visible tiers — `verified`
+(AWS-authored or SAR-confirmed), `inferred` (heuristic, badged with the rule), `unknown` (an
+actionable to-do list, never dropped or silently wildcarded) — plus a header comment that it is a
+starting point for review, never an authority. Read (`Describe`/`Get`) actions are never trimmed even
+at a precision cost: upjet re-reads on every reconcile, so a missing read permission is a silent,
+continuous failure, not a loud one-time error.
+
+**Neither artifact ships inside the Configuration package** — `crossplane xpkg build` hard-fails
+parsing a `ClusterRole`, and no `permissionRequests` field exists on `Configuration` /
+`ConfigurationRevision` / `ProviderRevision`. Both live as sibling files to commit and apply:
+`permissions/rbac.yaml`, `permissions/iam-controlplane.json` (M6), `permissions/permissions.lock.json`
+(provenance — comments and a lockfile, never annotations, §8), `permissions/overrides.yaml`
+(hand-edited, never regenerated). **Control-plane vs workload is a second axis, and only the
+control-plane half is a file:** workload IAM (what the *running app* needs, e.g. `sqs:SendMessage`)
+is composition content — a composed `Policy`/`QueuePolicy` node on the canvas, attached to the
+**edge** between two resources, AWS-SAM-connector style — not a side artifact. Deferred past M6.
+
+**UNRESOLVED:** explicit seven verbs with no subresources (above), or mirror rbac-manager's XR
+template (`["*"]` + `/status` + `update` on `/finalizers`)? The two source briefs disagree; decidable
+only by applying the minimal role, composing a `Job` and an `Ingress`, and watching for
+`RoleBasedAccessControl` warnings across reconcile cycles. Blocking for M5 (§14).
 
 ## 10. Testing
 
@@ -314,8 +401,21 @@ crashed" from "someone hand-edited generated YAML".
 
 ## 11. Interfaces
 
-**CLI.** `cf provider add <xpkg-ref>` · `cf k8s use <ver>` · `cf gen [--check]` · `cf validate` ·
-`cf adopt <composition.yaml>` · `cf serve` · `cf mcp`.
+**CLI.** `cf provider search|list|versions|info|add|pin` ·
+`cf index update|status|add|remove|list|export` · `cf k8s use <ver>` · `cf gen [--check]` ·
+`cf validate` · `cf adopt <composition.yaml>` · `cf serve` · `cf mcp`. Global `--offline` /
+`CF_OFFLINE=1` (a network attempt is an error, for CI reproducibility) and `CF_NO_AUTO_UPDATE=1` from
+day one — Homebrew's blocking auto-update is the anti-pattern to avoid.
+
+**Provider references.** Four forms, first match wins: a full OCI ref (needs no index);
+`<index>/<publisher>/<name>`; `<publisher>/<name>` — the canonical short form, unambiguous by
+construction; a bare name, resolved only if exactly one publisher ships it. `@` marks the version,
+never `:`. **15% of short names are published by more than one account** with disagreeing signals
+(downloads, signing, tier) — on ambiguity no default is applied: both options print side by side with
+copy-pasteable fixes, and a `.cf/providers.yaml` pin (checked into git) is the only legitimate scope
+for a default. `cf` always prints the full ref it resolved to; everything written to disk carries the
+full ref **and** the digest, never the short name — a `.cf` directory reproduces byte-identically on
+a machine with a different index, or none at all.
 
 **GUI.** Node graph; wires are data dependencies compiled to template expressions. Four wire hues
 chosen for **hue** separation (blue XRD 215°, teal status 173°, gold shared 51°, rust ref 15°), with
@@ -324,6 +424,15 @@ path-addressed tree — the mass of provider schemas sits at depth 3–5, so des
 a raw-YAML escape below it. Do not build a virtualised form renderer: rjsf defaults arrays to zero
 items, so Kyverno's 1,445-property `ClusterPolicy` renders in 19 ms producing 10 inputs.
 
+The provider palette is **synchronous and local** (hundreds of records fuzzy-matched in
+microseconds, no debounce, no spinner); a multi-publisher collision is one expandable row, never two
+lookalikes; the staleness badge is always visible, never a modal; offline is a badge, not a blocker.
+`api.upbound.io` sends **no CORS headers**, so `cf serve` proxies every discovery call — the same
+"thin adapter over `internal/`" rule as everything else (§3), not an exception. Signature verdict and
+vendor-tier claim must **never share a badge style** — one is cryptographic, the other marketing
+(§4). Never hotlink a marketplace icon URL (a signed URL expiring in ~5 minutes; re-host at index
+build time); HTML-escape every third-party description unconditionally.
+
 A **Permissions** panel lists what the current canvas requires, attributed per node — Kubernetes
 RBAC for native GVKs, cloud IAM for managed resources — so the answer to "why is nothing happening"
 is visible before you apply rather than after.
@@ -331,7 +440,8 @@ is visible before you apply rather than after.
 **MCP.** Full authoring parity, writes confined to a declared workspace root, `--read-only` for
 inspection. The context-window problem an agent has is the *same* problem the browser has — a 1.7 MB
 CRD fits neither — so `schema_search` / `kind_describe(required_only)` / `kind_fields(path, depth)`
-serve all three front doors.
+serve all three front doors, alongside `provider_search` / `provider_versions`, local-index-only, no
+network from an MCP call ever.
 
 ## 12. Milestones
 
@@ -341,12 +451,16 @@ story, and `cf serve` on a laptop covers the authoring case.
 
 | | Milestone | Proves |
 |---|---|---|
-| **M1** | xpkg ingest + index + lock; `cf gen` single resource | Reproduces your `XQueue` and passes `crossplane composition render` |
+| **M1** | xpkg ingest + index + lock; embedded seed provider index + `cf provider search`; `cf gen` single resource | Reproduces your `XQueue`, passes `crossplane composition render`, and `cf provider add aws-sqs` works with the network off |
 | **M2** | XRD builder; `parameters:`; required-first schema API | The API shared by GUI, CLI and MCP |
 | **M3** | Canvas + wires + reference inference (data-driven, golden-tested) | The central risk, retired early |
 | **M4** | Pipelines, `when`, `forEach`, `dependsOn`, user-defined templates, other functions as nodes | Full T1 |
-| **M5** | MCP server, `adopt`, `functions.yaml` + **K8s RBAC** emission, distribution | Ship |
-| **M6** | Cloud IAM derivation, once §9's dataset question is settled | Reviewed-starting-point policies |
+| **M5** | MCP server, `adopt`, `functions.yaml` + **K8s RBAC** emission (§9), `cf index export` air-gap bundle + in-process cosign verification, distribution | Ship |
+| **M6** | Cloud IAM derivation, gated on all four of: the `zz_*_terraformed.go` extractor, a measured (not estimated) alias-file coverage number, the three-tier badge UI with a visible `unknown` to-do list, and a resolved CFN-dataset licence posture (§9) | Reviewed-starting-point policies |
+
+Parallel, not gated on M1–M6: the `cf-index` build job (separate repo, daily CI, seven steps, §4),
+whose own gate is that registry validation of every catalogue entry is non-optional before M1 trusts
+the index.
 
 ## 13. Risks
 
@@ -359,16 +473,43 @@ story, and `cf serve` on a laptop covers the authoring case.
    ship `adopt` so onboarding is lossless.
 4. **GitOps churn cascade.** *Mitigation:* §8 determinism, enforced by byte-exact goldens.
 5. **The Docker cliff.** *Mitigation:* §10 three-lane CI, `--timeout=5m`, named container reuse.
+6. **Discovery depends on an undocumented, single-consumer API.** `api.upbound.io/v2/search` has no
+   published OpenAPI and one known caller — Upbound can change or gate it without notice, and
+   `github.com/upbound/up` going 404 is a live precedent. *Mitigation:* only the daily `cf-index`
+   build calls it, never `cf`; the embedded seed index and the GitHub+registry fallback (resolves
+   49/60 repos plus every family member, no Upbound dependency) both work with zero marketplace
+   access.
+7. **The index is a mirror, not a live view** — freshness is a build-job SLO, not a client guarantee;
+   a version can ship the morning after a build. *Mitigation:* age is shown and escalates by band
+   (§4); `cf provider add` with no explicit version does a live `tags/list` rather than trust the
+   index; a failed refresh never invalidates what is already cached.
 
 ## 14. Open questions
 
 1. **Is a non-upjet provider the portability anchor, and when?** GCP does not validate portability —
    it shares the upjet generator with AWS. `provider-helm` / `provider-terraform` are the real test.
 2. **Does `cf` ever read a cluster?** `generate` needs none. But a cluster is the only way to populate
-   the palette from **Active** `ManagedResourceDefinition`s and to resolve `functionRef.name` against
-   installed Functions. This decides whether `client-go` is core or an optional adapter.
-3. **How much IAM fidelity is worth shipping?** If the best dataset covers, say, 70% of AWS MRs, is a
-   70%-complete reviewed policy useful or actively misleading? Answer depends on §9's research.
+   the palette from **Active** `ManagedResourceDefinition`s, to resolve `functionRef.name` against
+   installed Functions, and to run the `SubjectAccessReview` that is the RBAC panel's strongest
+   differentiator (§9). This decides whether `client-go` is core or an optional adapter — and whether
+   the RBAC panel ships `inferred`-only when it is not.
+3. **RBAC output shape — decidable only by cluster experiment.** Explicit seven verbs with no
+   subresources, or mirror rbac-manager's XR template (`["*"]` + `/status` + `update` on
+   `/finalizers`)? One rule per apiGroup, or one un-merged rule per node (proposed, needs a golden
+   test proving byte-stability across regeneration and node reordering)? Both blocking for M5 (§9).
+4. **What is the IAM alias table's real, measured coverage (the ~70% figure is estimated, not
+   measured, and someone must own refreshing it per release), and does Magic Modules actually
+   deliver for GCP** (the strongest untested lead — until measured, 40.6% stands)? **Both block M6
+   scope-in** (§9, §12).
+5. **Two integration facts are unverified before M5 ships:** whether
+   `/v1/packages/{acct}/{repo}/{ver}/resources/{group}/{kind}` is byte-identical to an
+   xpkg-extracted CRD, deciding a second schema source (§4); and whether `sigstore-go` verifies
+   Upbound's cosign bundles end to end with no Rekor round-trip, blocking in-process signature
+   verification (§12).
 
 **Resolved since first draft:** `forEach` follows `range` semantics over array/map/count (§7);
-user-defined template functions generalise conventions (§7); the in-cluster UI is out of v1 (§12).
+user-defined template functions generalise conventions (§7); the in-cluster UI is out of v1 (§12);
+Kubernetes RBAC is fully derivable offline at exact fidelity, Cloud IAM is not — 53.2% AWS / 40.6%
+GCP automated coverage, gated into M6 behind four conditions (§9, §12); provider discovery has a
+concrete design — static CI-built index, no live enumeration, GitHub and Artifact Hub ruled out as
+catalogue sources (§4, §11, §12).
