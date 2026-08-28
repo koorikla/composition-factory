@@ -122,7 +122,7 @@ type errorBody struct {
 
 // writeJSONError writes {"error": message} with status, for handlers in
 // this package that fail explicitly (as opposed to the ServeMux-generated
-// 404/405 responses, which wrap's jsonifyErrors step normalizes instead).
+// 404/405 responses, which wrap's error-normalization step handles instead).
 func writeJSONError(w http.ResponseWriter, status int, message string) {
 	body, _ := json.Marshal(errorBody{Error: message}) // errorBody always marshals
 	w.Header().Set("Content-Type", "application/json")
