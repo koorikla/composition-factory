@@ -1,0 +1,24 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.hooli.tech
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      location:       {type: string, required: true, enum: [EU, US]}
+      providerName:   {type: string, required: true}
+      maxMessageSize: {type: integer, default: "2048"}
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region:         {value: "eu-north-1"}
+        maxMessageSize: {from: params.maxMessageSize}
