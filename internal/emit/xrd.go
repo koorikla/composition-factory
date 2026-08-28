@@ -50,12 +50,19 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 		d.Line(7, "%s:", n)
 		d.Line(8, "type: %s", p.Type)
 		if p.Description != "" {
-			d.Line(8, "description: %s", p.Description)
+			// User-authored free text: quote it. Unquoted, a ": " sequence is
+			// an invalid mapping-value indicator (parse error) and a " #"
+			// sequence silently truncates the rest of the string as a comment.
+			d.Line(8, "description: %s", quoteYAML(p.Description))
 		}
 		if len(p.Enum) > 0 {
 			d.Line(8, "enum:")
 			for _, e := range p.Enum {
-				d.Line(8, "- %s", e)
+				// User-authored value: quote it. Unquoted, values like "yes",
+				// "no", "1.0" or "" are YAML keywords/numbers and would be
+				// silently reinterpreted as bool/number/null on a
+				// type: string field, corrupting the enum.
+				d.Line(8, "- %s", quoteYAML(e))
 			}
 		}
 		if p.Type == "object" {

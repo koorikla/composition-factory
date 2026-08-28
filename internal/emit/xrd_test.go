@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"sigs.k8s.io/yaml"
 )
 
 func testBlueprint() *blueprint.Blueprint {
@@ -93,5 +94,134 @@ func TestProvenanceIsACommentNotAnAnnotation(t *testing.T) {
 	}
 	if strings.Contains(s, "annotations:") {
 		t.Error("provenance must not be an annotation: it causes a perpetual ArgoCD sync loop")
+	}
+}
+
+// dig walks a decoded YAML/JSON document (nested map[string]any / []any, as
+// produced by sigs.k8s.io/yaml) following path, failing the test immediately
+// with context if any step doesn't match. A string element indexes a map; an
+// int element indexes a slice.
+func dig(t *testing.T, v any, path ...any) any {
+	t.Helper()
+	cur := v
+	for i, key := range path {
+		switch k := key.(type) {
+		case string:
+			m, ok := cur.(map[string]any)
+			if !ok {
+				t.Fatalf("dig %v: at step %d (%q), expected a map, got %T (%v)", path, i, k, cur, cur)
+			}
+			cur, ok = m[k]
+			if !ok {
+				t.Fatalf("dig %v: at step %d, key %q not found in %v", path, i, k, m)
+			}
+		case int:
+			s, ok := cur.([]any)
+			if !ok {
+				t.Fatalf("dig %v: at step %d (index %d), expected a slice, got %T (%v)", path, i, k, cur, cur)
+			}
+			if k < 0 || k >= len(s) {
+				t.Fatalf("dig %v: at step %d, index %d out of range (len %d)", path, i, k, len(s))
+			}
+			cur = s[k]
+		default:
+			t.Fatalf("dig %v: unsupported path element %v (%T)", path, key, key)
+		}
+	}
+	return cur
+}
+
+// paramProps decodes the emitted XRD and returns the openAPIV3Schema
+// properties map for spec.<name> parameters, i.e. the map keyed by parameter
+// name whose values carry type/description/enum.
+func paramProps(t *testing.T, doc []byte) map[string]any {
+	t.Helper()
+	var parsed map[string]any
+	if err := yaml.Unmarshal(doc, &parsed); err != nil {
+		t.Fatalf("emitted document is not valid YAML: %v\n---\n%s", err, doc)
+	}
+	props := dig(t, parsed, "spec", "versions", 0, "schema", "openAPIV3Schema",
+		"properties", "spec", "properties")
+	m, ok := props.(map[string]any)
+	if !ok {
+		t.Fatalf("parameter properties: expected a map, got %T (%v)", props, props)
+	}
+	return m
+}
+
+// A description containing ": " (colon-space) is a YAML mapping-value
+// indicator when written as an unquoted plain scalar, so the whole document
+// fails to parse. It must be quoted, and the original text must round-trip.
+func TestDescriptionWithColonRoundTrips(t *testing.T) {
+	want := "Region: must be EU or US"
+	b := testBlueprint()
+	p := b.Spec.XRD.Parameters["location"]
+	p.Description = want
+	b.Spec.XRD.Parameters["location"] = p
+
+	got, err := XRD(b)
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
+	props := paramProps(t, got)
+	desc := dig(t, props, "location", "description")
+	if desc != want {
+		t.Errorf("description round-tripped as %q, want %q", desc, want)
+	}
+}
+
+// A description containing " #" (space then hash) starts a YAML comment when
+// written as an unquoted plain scalar, so everything from the '#' onward is
+// silently dropped with no parse error. It must be quoted, and the original
+// text must round-trip intact, not truncated.
+func TestDescriptionWithHashRoundTrips(t *testing.T) {
+	want := "Region code # primary"
+	b := testBlueprint()
+	p := b.Spec.XRD.Parameters["location"]
+	p.Description = want
+	b.Spec.XRD.Parameters["location"] = p
+
+	got, err := XRD(b)
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
+	props := paramProps(t, got)
+	desc := dig(t, props, "location", "description")
+	if desc != want {
+		t.Errorf("description round-tripped as %q, want %q (must not be truncated at '#')", desc, want)
+	}
+}
+
+// Enum values that look like YAML 1.1 keywords or numbers ("yes", "no",
+// "1.0", "") must round-trip as the literal strings they are, not get
+// reinterpreted as bool/number/null. That would silently corrupt an enum on
+// a type: string field.
+func TestEnumValuesRoundTripAsStrings(t *testing.T) {
+	risky := []string{"yes", "no", "1.0", ""}
+	b := testBlueprint()
+	b.Spec.XRD.Parameters["riskyEnum"] = blueprint.Parameter{Type: "string", Enum: risky}
+
+	got, err := XRD(b)
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
+	props := paramProps(t, got)
+	enumAny := dig(t, props, "riskyEnum", "enum")
+	enum, ok := enumAny.([]any)
+	if !ok {
+		t.Fatalf("enum is not a list: %T (%v)", enumAny, enumAny)
+	}
+	if len(enum) != len(risky) {
+		t.Fatalf("enum has %d entries, want %d: %v", len(enum), len(risky), enum)
+	}
+	for i, want := range risky {
+		got, ok := enum[i].(string)
+		if !ok {
+			t.Errorf("enum[%d] = %#v (%T), want string %q", i, enum[i], enum[i], want)
+			continue
+		}
+		if got != want {
+			t.Errorf("enum[%d] = %q, want %q", i, got, want)
+		}
 	}
 }

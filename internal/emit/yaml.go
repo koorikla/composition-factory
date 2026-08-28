@@ -28,6 +28,12 @@ func (d *Doc) Line(indent int, format string, args ...any) {
 }
 
 // Comment writes a top-level comment line.
+//
+// format must be a compile-time string constant, not a variable: go vet's
+// printf-wrapper check treats Line (and by extension Comment, since it calls
+// Line) as a printf wrapper because of their (format string, args ...any)
+// shape, so a call like d.Comment(someVar) fails `go build`/`go test` with a
+// "non-constant format string" error that does not obviously point back here.
 func (d *Doc) Comment(format string, args ...any) {
 	// The format arg to Line must be a constant so `go vet`'s printf check
 	// (which treats Line as a printf wrapper) doesn't flag this call.
@@ -38,6 +44,19 @@ func (d *Doc) Comment(format string, args ...any) {
 func (d *Doc) Bytes() []byte {
 	out := bytes.ReplaceAll(d.buf.Bytes(), []byte("\r\n"), []byte("\n"))
 	return append(bytes.TrimRight(out, "\n"), '\n')
+}
+
+// quoteYAML renders s as a YAML single-quoted scalar: '...', with any
+// embedded ' doubled. Single-quoted style is valid in any YAML context (flow
+// or block) and needs no escape table beyond that one doubling rule, unlike
+// double-quoted style. Use this for any scalar that originates from
+// user-controlled blueprint content (free text, enum values) before
+// interpolating it into a document built with Line/Comment — those write raw
+// text, so an unquoted value containing ": ", " #", or a value that looks
+// like a YAML keyword ("yes", "1.0", "") changes the document's meaning
+// instead of just its formatting.
+func quoteYAML(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 // header is the provenance every generated file carries, as comments.
