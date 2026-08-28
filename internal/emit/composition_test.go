@@ -227,6 +227,60 @@ func TestOptionalFieldRendersUnderMissingKeyError(t *testing.T) {
 	})
 }
 
+// TestForProviderIsEmptyMapNotNullWhenAllOptionalFieldsAbsent proves the
+// render-time fix for a bare `forProvider:` key with no children. Every
+// field on testBlueprint's only resource is optional (maxMessageSize), so an
+// XR that omits it is exactly the case where, without this fix, the emitted
+// template would render nothing under forProvider at all. YAML parses that
+// as null, and a structural schema with `type: object` and no
+// `nullable: true` rejects an explicit null at apply time — not silent
+// corruption, but still a generated artifact the API server refuses, which
+// this project's determinism/validity rule forbids. A string match on
+// "forProvider: {}" would not prove this: it wouldn't catch the parent
+// still decoding as null if the fallback line were nested wrong, so this
+// executes the real template and decodes the real YAML output, the same way
+// TestOptionalFieldRendersUnderMissingKeyError does.
+func TestForProviderIsEmptyMapNotNullWhenAllOptionalFieldsAbsent(t *testing.T) {
+	got, err := Composition(testBlueprint(), testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmplBody := extractTemplate(t, got)
+
+	rendered, err := renderTemplate(t, tmplBody, map[string]any{
+		"providerName": "aws-provider",
+		// maxMessageSize intentionally absent — the only field this
+		// resource maps, and it's optional.
+	})
+	if err != nil {
+		t.Fatalf("render must succeed when every optional field is absent, got: %v\n---\n%s", err, tmplBody)
+	}
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(rendered), &doc); err != nil {
+		t.Fatalf("rendered output is not valid YAML: %v\n---\n%s", err, rendered)
+	}
+	spec, ok := doc["spec"].(map[string]any)
+	if !ok {
+		t.Fatalf("spec: expected a map, got %T (%v)\n---\n%s", doc["spec"], doc["spec"], rendered)
+	}
+	fp, present := spec["forProvider"]
+	if !present {
+		t.Fatalf("forProvider key missing entirely\n---\n%s", rendered)
+	}
+	if fp == nil {
+		t.Fatalf("forProvider decoded as null, not an empty map — a structural schema with "+
+			"type: object (no nullable: true) rejects this at apply time\n---\n%s", rendered)
+	}
+	m, ok := fp.(map[string]any)
+	if !ok {
+		t.Fatalf("forProvider: expected a map, got %T (%v)\n---\n%s", fp, fp, rendered)
+	}
+	if len(m) != 0 {
+		t.Errorf("forProvider: expected an empty map, got %v\n---\n%s", m, rendered)
+	}
+}
+
 func TestProviderConfigRefCarriesKindAndName(t *testing.T) {
 	got, _ := Composition(testBlueprint(), testCRDs(t))
 	s := string(got)

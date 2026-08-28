@@ -62,11 +62,12 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		d.Line(ti, "metadata:")
 		d.Line(ti, "  annotations:")
 		d.Line(ti, "    {{ setResourceNameAnnotation %q }}", r.Name)
-		d.Line(ti, "spec:")
-		d.Line(ti, "  forProvider:")
-		if err := writeFields(d, ti+2, r, b); err != nil {
+		plan, err := planFields(r, b)
+		if err != nil {
 			return nil, err
 		}
+		d.Line(ti, "spec:")
+		writeMapField(d, ti, "forProvider", ti+2, plan)
 		// The v2 namespaced envelope requires both kind and name here; the
 		// cluster-scoped variant instead takes {name, policy}. deletionPolicy
 		// is never emitted for a namespaced MR: it is absent from that
@@ -85,7 +86,20 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 	return d.Bytes(), nil
 }
 
-// writeFields emits the forProvider body for one resource, sorted for determinism.
+// forProviderField is one blueprint field resolved to a template line,
+// ready to write. optional is set (with param carrying the parameter name)
+// when the line must be gated on hasKey — see writeMapField.
+type forProviderField struct {
+	path     string
+	rhs      string
+	optional bool
+	param    string
+}
+
+// planFields resolves r.Fields into a deterministic, path-sorted plan,
+// erroring on any field that references an unknown parameter. It does not
+// write anything: writeMapField needs the full plan up front to decide
+// whether the parent key can ever render with zero children.
 //
 // Quoting: the template body is a YAML block scalar (`template: |`), so the
 // outer document never needs escaping for what we write into it — the block
@@ -103,32 +117,33 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 // is emitted as a bare `{{ $spec.param }}` template expression, not a
 // literal string, so it isn't a quoting candidate here either — its value
 // arrives at render time from the composite's own (schema-typed) spec.
-func writeFields(d *Doc, indent int, r blueprint.Resource, b *blueprint.Blueprint) error {
+func planFields(r blueprint.Resource, b *blueprint.Blueprint) ([]forProviderField, error) {
 	paths := make([]string, 0, len(r.Fields))
 	for p := range r.Fields {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
 
+	plan := make([]forProviderField, 0, len(paths))
 	for _, p := range paths {
 		f := r.Fields[p]
 		switch {
 		case f.Value != "":
-			d.Line(indent, "%s: %s", p, quoteYAML(f.Value))
+			plan = append(plan, forProviderField{path: p, rhs: quoteYAML(f.Value)})
 		case f.Raw != "":
-			d.Line(indent, "%s: %s", p, f.Raw)
+			plan = append(plan, forProviderField{path: p, rhs: f.Raw})
 		case f.From != "":
 			param := strings.TrimPrefix(f.From, "params.")
 			decl, ok := b.Spec.XRD.Parameters[param]
 			if !ok {
-				return fmt.Errorf("resource %q field %q: unknown parameter %q", r.Name, p, param)
+				return nil, fmt.Errorf("resource %q field %q: unknown parameter %q", r.Name, p, param)
 			}
-			expr := "$spec." + param
+			rhs := fmt.Sprintf("{{ $spec.%s }}", param)
 			if decl.Required {
-				d.Line(indent, "%s: {{ %s }}", p, expr)
+				plan = append(plan, forProviderField{path: p, rhs: rhs})
 				continue
 			}
-			// Optional: guard with hasKey, not `with`. Under
+			// Optional: gated on hasKey, not `with`. Under
 			// options: ["missingkey=error"], `{{- with $spec.foo }}`
 			// evaluates the pipeline (indexing the map) before deciding
 			// truthiness, so a genuinely absent key — the normal case for
@@ -139,12 +154,80 @@ func writeFields(d *Doc, indent int, r blueprint.Resource, b *blueprint.Blueprin
 			// Direct $spec.field access inside the guarded branch is safe:
 			// Go templates never evaluate an untaken branch, and inside the
 			// taken one the key provably exists.
-			d.Line(indent, "{{- if hasKey $spec %q }}", param)
-			d.Line(indent, "%s: {{ %s }}", p, expr)
-			d.Line(indent, "{{- end }}")
+			plan = append(plan, forProviderField{path: p, rhs: rhs, optional: true, param: param})
 		}
 	}
-	return nil
+	return plan, nil
+}
+
+// writeMapField emits "key:" (or "key: {}") at keyIndent, plus plan's fields
+// as children at childIndent.
+//
+// A parent key whose every child is conditional needs care: if the fields
+// were simply written one after another, each behind its own
+// {{- if hasKey ... }} guard, an XR that sets none of them would render a
+// bare "key:" with nothing under it. YAML parses that as null, not an empty
+// mapping, and a structural schema with `type: object` and no
+// `nullable: true` rejects an explicit null at apply time.
+//
+// If plan has no fields at all, the key is known empty at generation time,
+// so it's written inline as "key: {}" — no template logic needed. If plan
+// has at least one unconditional field (Value, Raw, or a required
+// parameter — the XRD gate makes a required field's presence unconditional
+// on any valid XR), that field's line always renders regardless of which
+// optional fields the XR happens to set, so the key can never end up empty;
+// children are written exactly as their individual guards dictate. Only
+// when every field in the plan is optional does the whole block need a
+// render-time fallback: wrapped in {{- if or (hasKey ...) ... -}} that falls
+// back to an explicit {} when none of the optional keys are present.
+func writeMapField(d *Doc, keyIndent int, key string, childIndent int, plan []forProviderField) {
+	if len(plan) == 0 {
+		d.Line(keyIndent, "  %s: {}", key)
+		return
+	}
+
+	anyGuaranteed := false
+	for _, fld := range plan {
+		if !fld.optional {
+			anyGuaranteed = true
+			break
+		}
+	}
+
+	d.Line(keyIndent, "  %s:", key)
+
+	if anyGuaranteed {
+		for _, fld := range plan {
+			writeField(d, childIndent, fld)
+		}
+		return
+	}
+
+	// Every field is optional: without this wrapper an XR that sets none of
+	// them renders a bare key with nothing under it. See the function
+	// comment above.
+	conds := make([]string, len(plan))
+	for i, fld := range plan {
+		conds[i] = fmt.Sprintf("(hasKey $spec %q)", fld.param)
+	}
+	d.Line(childIndent, "{{- if or %s }}", strings.Join(conds, " "))
+	for _, fld := range plan {
+		writeField(d, childIndent, fld)
+	}
+	d.Line(childIndent, "{{- else }}")
+	d.Line(childIndent, "{}")
+	d.Line(childIndent, "{{- end }}")
+}
+
+// writeField emits one resolved field, gated on hasKey when optional.
+func writeField(d *Doc, indent int, fld forProviderField) {
+	if !fld.optional {
+		d.Line(indent, "%s: %s", fld.path, fld.rhs)
+		return
+	}
+	d.Line(indent, "{{- if hasKey $spec %q }}", fld.param)
+	d.Line(indent, "%s: %s", fld.path, fld.rhs)
+	d.Line(indent, "{{- end }}")
 }
 
 // resolveKind finds the CRD for kind, preferring the scope the XRD needs. For a
