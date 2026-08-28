@@ -82,6 +82,20 @@ interface BlueprintStore {
   removeNode(id: string): void
   connect(fromParam: string, toNode: string, toPath: string): void
   disconnect(wireId: string): void
+  /** Writes a literal `{ value }` assignment onto one field of the resource
+   * behind `nodeId`, replacing whatever was there before (a wire, a raw
+   * escape hatch, or a previous literal) — mirrors `connect`'s "the
+   * assignment IS the field" rule, just for a typed-in value instead of a
+   * parameter reference. Called on every keystroke from the Inspector's
+   * field editor, so — like `moveNode` and unlike `connect`/`disconnect` —
+   * it deliberately does NOT pushHistory(): a history entry per character
+   * would make Ctrl+Z undo one letter at a time, the exact anti-pattern
+   * `commitMove()` exists to avoid for drags. There is no equivalent
+   * "commit at gesture end" here yet (the Inspector has no blur/commit
+   * hook), so a field edit is not undoable today — a known, narrow gap
+   * versus wiring or adding a node, not an oversight to be silently masked
+   * by spamming history instead. */
+  setField(nodeId: string, path: string, value: string): void
   undo(): void
   canUndo(): boolean
   /** Folds the pending drag baseline (if any) into a single history entry.
@@ -370,6 +384,33 @@ export const useBlueprint = create<BlueprintStore>()(
           dres.fields[toPath] = { from: `params.${fromParam}` }
           draft.wires = computeWires(draft.doc, draft.nodes)
         })
+        noteOwnMutation()
+      },
+
+      setField(nodeId, path, value) {
+        // No reconcile()/pushHistory(): see the interface doc comment above
+        // — this mutates `doc` on every keystroke, so it follows moveNode's
+        // "continuous input, no per-event history" rule, not connect's.
+        const s = get()
+        if (!s.doc) return
+        const node = s.nodes.find(n => n.id === nodeId)
+        if (!node) return
+        const res = s.doc.spec.resources.find(r => r.name === node.name)
+        if (!res) return
+        set(draft => {
+          if (!draft.doc) return
+          const dnode = draft.nodes.find(n => n.id === nodeId)
+          if (!dnode) return
+          const dres = draft.doc.spec.resources.find(r => r.name === dnode.name)
+          if (!dres) return
+          // A fresh object, not a merge: a literal value replaces whatever
+          // assignment (from/value/raw) previously lived at this path,
+          // exactly like connect() does for a wire.
+          dres.fields[path] = { value }
+        })
+        // setField DOES touch `doc`, unlike moveNode, so trackedDoc must
+        // stay current or the next history-touching action's reconcile()
+        // would wrongly see an "external" doc replacement and wipe history.
         noteOwnMutation()
       },
 
