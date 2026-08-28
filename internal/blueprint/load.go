@@ -390,6 +390,27 @@ func (b *Blueprint) Validate() error {
 		}
 	}
 
+	// The full resource-name set is built before the per-resource loop
+	// because a status wire may legally reference a resource declared LATER
+	// in the list (observed.resources is keyed by name at render time, so
+	// declaration order carries no meaning), and the existence check below
+	// needs every name up front. Uniqueness is enforced here too: a
+	// resources.<name> reference must be unambiguous, and the name is also
+	// the composition-resource-name annotation — node identity (spec §7) —
+	// so two resources sharing one name would silently collapse into one
+	// composed resource.
+	resourceNames := make(map[string]bool, len(b.Spec.Resources))
+	for i, r := range b.Spec.Resources {
+		if resourceNames[r.Name] {
+			return fmt.Errorf("spec.resources[%d]: duplicate resource name %q -- the name is the "+
+				"composition-resource-name annotation (node identity) and the key status wires "+
+				"reference, so it must be unique", i, r.Name)
+		}
+		if r.Name != "" {
+			resourceNames[r.Name] = true
+		}
+	}
+
 	for i, r := range b.Spec.Resources {
 		if r.Name == "" || r.Kind == "" {
 			switch {
@@ -475,11 +496,27 @@ func (b *Blueprint) Validate() error {
 				}
 			}
 			if f.From != "" {
-				param, ok := strings.CutPrefix(f.From, "params.")
-				if !ok {
-					return fmt.Errorf("resource %q field %q: from must start with params. (got %q)",
-						r.Name, p, f.From)
+				ref, err := ParseFrom(f.From)
+				if err != nil {
+					return fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
 				}
+				if ref.Resource != "" {
+					// A status wire. The path's existence in the source CRD's
+					// status schema is checked by the emit layer (it has the
+					// CRDs; this function deliberately does not) -- what can
+					// be checked here is that the wire points at a declared
+					// resource and is not a self-loop.
+					if ref.Resource == r.Name {
+						return fmt.Errorf("resource %q field %q: references its own status (%q) -- "+
+							"a status wire must connect two different resources", r.Name, p, f.From)
+					}
+					if !resourceNames[ref.Resource] {
+						return fmt.Errorf("resource %q field %q: references the status of unknown "+
+							"resource %q (declared resources are checked by name)", r.Name, p, ref.Resource)
+					}
+					continue
+				}
+				param := ref.Param
 				decl, exists := x.Parameters[param]
 				if !exists {
 					return fmt.Errorf("resource %q field %q: references unknown parameter %q",
