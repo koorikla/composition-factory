@@ -1,0 +1,51 @@
+{
+  "apiVersion": "factory.crossplane.io/v1alpha1",
+  "kind": "Blueprint",
+  "metadata": {
+    "name": "xqueue"
+  },
+  "spec": {
+    "sources": [
+      {
+        "provider": "xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0"
+      }
+    ],
+    "xrd": {
+      "group": "platform.hooli.tech",
+      "kind": "XQueue",
+      "plural": "xqueues",
+      "version": "v1alpha1",
+      "scope": "Namespaced",
+      "parameters": {
+        "providerName": {
+          "type": "string",
+          "required": true,
+          "enum": [],
+          "default": "",
+          "description": "ProviderConfig to reconcile the composed resources against."
+        },
+        "maxMessageSize": {
+          "type": "integer",
+          "required": false,
+          "enum": [],
+          "default": "",
+          "description": "Maximum message size in bytes, forwarded to the queue's forProvider.maxMessageSize."
+        }
+      }
+    },
+    "resources": [
+      {
+        "name": "main-queue",
+        "kind": "Queue",
+        "provider": "xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0",
+        "fields": {
+          "maxMessageSize": {
+            "from": "params.maxMessageSize",
+            "value": "",
+            "raw": ""
+          }
+        }
+      }
+    ]
+  }
+}

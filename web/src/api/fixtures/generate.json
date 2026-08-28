@@ -1,0 +1,8 @@
+{
+  "outputs": [
+    { "path": "definition.yaml", "bytes": 1487 },
+    { "path": "composition.yaml", "bytes": 3122 },
+    { "path": "functions.yaml", "bytes": 418 }
+  ],
+  "written": false
+}

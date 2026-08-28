@@ -1,0 +1,146 @@
+/*
+ * Design tokens — "Schematic Instrument" direction.
+ *
+ * Values are copied verbatim from the reviewed interaction prototype at
+ * docs/design/canvas-prototype.html, whose :root block was tuned against
+ * real contrast measurements after a review found the light theme unreadable.
+ * Do not re-tune these here; if a value needs to change, it changes in the
+ * prototype first and gets re-copied.
+ *
+ * Three-state theming, enforced by src/styles/tokens.test.ts:
+ *   1. The complete light palette lives on bare :root.
+ *   2. The dark-scheme media query, guarded by :root:not([data-theme="light"]),
+ *      redefines the same tokens so system dark mode applies unless the user
+ *      has explicitly chosen light.
+ *   3. :root[data-theme="dark"] redefines them again so an explicit dark
+ *      choice wins even on a system set to light.
+ * A colour defined only inside one of the theme blocks is undefined in the
+ * un-stamped default state — that is the bug this file must never reintroduce.
+ */
+
+:root {
+  --ground: #E2E8F0;
+  --surface: #FFFFFF;
+  --surface-2: #F4F7FA;
+  --sunk: #D8E0EA;
+  --ink: #0B0F14;
+  --ink-2: #2F3945;
+  --muted: #54606F;
+  --faint: #67727F;
+  --rule: #BCC7D6;
+  --rule-2: #9AA8BA;
+
+  /* Wire colour is semantic — colour encodes meaning, never decoration. */
+  --wire-xrd: #1560C8;
+  --wire-status: #0A776B;
+  --wire-ref: #A54524;
+  --shared: #877200;
+  --wire-xrd-soft: #DAE7F8;
+  --wire-status-soft: #D3EDE9;
+  --wire-ref-soft: #F8E4DB;
+  --shared-soft: #F4ECCE;
+
+  /* Rust (--wire-ref) and gold (--shared) sit only ~35 degrees apart in hue —
+     too close to trust colour alone. The native-ref wire is also dashed; this
+     is the stroke-dasharray value carried over from the prototype's inline
+     `stroke-dasharray="5 3"` on its ref-type wire paths. */
+  --wire-ref-dash: 5 3;
+
+  --ok: #0D6D4B;
+  --warn: #877200;
+  --err: #B12A32;
+
+  --shadow: 0 1px 2px rgba(11, 15, 20, .10), 0 4px 14px rgba(11, 15, 20, .09);
+  --shadow-lg: 0 2px 6px rgba(11, 15, 20, .13), 0 18px 40px rgba(11, 15, 20, .18);
+  --grid: #C3CEDD;
+
+  --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cond: "IBM Plex Sans Condensed", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0C1015;
+    --surface: #161B22;
+    --surface-2: #1C222B;
+    --sunk: #0F141A;
+    --ink: #E8ECF2;
+    --ink-2: #B4BDC9;
+    --muted: #8A94A2;
+    --faint: #6A747F;
+    --rule: #272E39;
+    --rule-2: #3B4450;
+
+    --wire-xrd: #5CA0F5;
+    --wire-status: #38B6A8;
+    --wire-ref: #DE8055;
+    --shared: #D6AB33;
+    --wire-xrd-soft: #152741;
+    --wire-status-soft: #0F2E2B;
+    --wire-ref-soft: #331F16;
+    --shared-soft: #2E2712;
+
+    --ok: #37B98C;
+    --warn: #D6AB33;
+    --err: #E96A72;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .45), 0 4px 14px rgba(0, 0, 0, .4);
+    --shadow-lg: 0 2px 6px rgba(0, 0, 0, .55), 0 18px 40px rgba(0, 0, 0, .55);
+    --grid: #1C222B;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0C1015;
+  --surface: #161B22;
+  --surface-2: #1C222B;
+  --sunk: #0F141A;
+  --ink: #E8ECF2;
+  --ink-2: #B4BDC9;
+  --muted: #8A94A2;
+  --faint: #6A747F;
+  --rule: #272E39;
+  --rule-2: #3B4450;
+
+  --wire-xrd: #5CA0F5;
+  --wire-status: #38B6A8;
+  --wire-ref: #DE8055;
+  --shared: #D6AB33;
+  --wire-xrd-soft: #152741;
+  --wire-status-soft: #0F2E2B;
+  --wire-ref-soft: #331F16;
+  --shared-soft: #2E2712;
+
+  --ok: #37B98C;
+  --warn: #D6AB33;
+  --err: #E96A72;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .45), 0 4px 14px rgba(0, 0, 0, .4);
+  --shadow-lg: 0 2px 6px rgba(0, 0, 0, .55), 0 18px 40px rgba(0, 0, 0, .55);
+  --grid: #1C222B;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--wire-xrd);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+.mono {
+  font-family: var(--mono);
+}
