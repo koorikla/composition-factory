@@ -4,12 +4,29 @@ import { resolve } from "node:path"
 
 const css = readFileSync(resolve(__dirname, "tokens.css"), "utf8")
 
+// The bare :root block only — from `:root{` or `:root {` to its first closing
+// brace. Slicing to end-of-file (an earlier draft of this test did that) scans
+// into the dark-mode blocks too, where every token is redefined, so a token
+// missing ONLY from the bare block would never be caught.
+function bareRootBlock(source: string): string {
+  const start = source.indexOf(":root{") >= 0 ? source.indexOf(":root{") : source.indexOf(":root {")
+  const end = source.indexOf("}", start)
+  return source.slice(start, end)
+}
+
+// Exact custom-property match, not a substring check: "--wire-ref" as a bare
+// substring is satisfied by "--wire-ref-soft" or "--wire-ref-dash" even when
+// "--wire-ref" itself has been deleted, which would silently defeat this test.
+function definesToken(block: string, token: string): boolean {
+  return new RegExp(String.raw`${token}\s*:`).test(block)
+}
+
 describe("token system", () => {
   it("defines the complete light palette on bare :root", () => {
-    const root = css.slice(css.indexOf(":root{") >= 0 ? css.indexOf(":root{") : css.indexOf(":root {"))
+    const root = bareRootBlock(css)
     for (const t of ["--ground", "--surface", "--ink", "--rule",
                      "--wire-xrd", "--wire-status", "--wire-ref", "--shared"]) {
-      expect(root.includes(t), `${t} missing from :root`).toBe(true)
+      expect(definesToken(root, t), `${t} missing from :root`).toBe(true)
     }
   })
 
@@ -24,9 +41,9 @@ describe("token system", () => {
 
   it("never defines a colour ONLY inside a theme block", () => {
     // every --wire-* / --shared token must appear in the bare :root block too
-    const bare = css.slice(0, css.indexOf("@media"))
+    const bare = bareRootBlock(css)
     for (const t of ["--wire-xrd", "--wire-status", "--wire-ref", "--shared"]) {
-      expect(bare.includes(t), `${t} defined only inside a theme block — it would be undefined in the un-stamped state`).toBe(true)
+      expect(definesToken(bare, t), `${t} defined only inside a theme block — it would be undefined in the un-stamped state`).toBe(true)
     }
   })
 

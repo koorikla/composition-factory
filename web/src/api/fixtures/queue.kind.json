@@ -13,30 +13,23 @@
   },
   "envelope": [
     {
-      "path": "deletionPolicy",
-      "type": "string",
-      "description": "DeletionPolicy specifies what will happen to the underlying external when this managed resource is deleted - either \"Delete\" or \"Orphan\" the external resource.",
-      "required": false,
-      "depth": 0
-    },
-    {
       "path": "managementPolicies",
       "type": "array",
-      "description": "ManagementPolicies specify the array of actions Crossplane is allowed to take on the managed and external resources. This field is planned to replace the deletionPolicy field.",
+      "description": "Actions the provider may take. Defaults to [\"*\"].",
       "required": false,
       "depth": 0
     },
     {
-      "path": "providerConfigRef.name",
+      "path": "providerConfigRef.kind",
       "type": "string",
-      "description": "Name of a provider config, referenced by the resource being provisioned.",
+      "description": "ProviderConfig or ClusterProviderConfig.",
       "required": true,
       "depth": 1
     },
     {
-      "path": "publishConnectionDetailsTo.name",
+      "path": "providerConfigRef.name",
       "type": "string",
-      "description": "Name is the name of the connection secret.",
+      "description": "Name of the provider config.",
       "required": true,
       "depth": 1
     },
@@ -44,13 +37,6 @@
       "path": "writeConnectionSecretToRef.name",
       "type": "string",
       "description": "Name of the secret.",
-      "required": true,
-      "depth": 1
-    },
-    {
-      "path": "writeConnectionSecretToRef.namespace",
-      "type": "string",
-      "description": "Namespace of the secret.",
       "required": true,
       "depth": 1
     }

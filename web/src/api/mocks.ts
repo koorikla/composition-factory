@@ -13,6 +13,16 @@ import queueKindFixture from "./fixtures/queue.kind.json"
 import blueprintFixture from "./fixtures/blueprint.json"
 import generateFixture from "./fixtures/generate.json"
 
+// queue.kind.json's "envelope" array is NOT a fixed list — it is
+// Fields(crd.Envelope(), FieldQuery{}) for the v2 NAMESPACED Queue variant,
+// where Envelope() (internal/schema/tree.go) computes
+// spec.properties minus {forProvider, initProvider}. Namespaced (v2, ".m."
+// API groups) and cluster-scoped (v1, legacy) managed resources have
+// DIFFERENT envelopes: v2 requires providerConfigRef.kind (Provider vs.
+// ClusterProvider config) where v1 does not, and v1's deletionPolicy /
+// publishConnectionDetailsTo do not exist on v2 resources at all. Do not
+// hand-edit this list from memory or from a v1 example — regenerate it from
+// Envelope() for the specific CRD variant you are fixturing.
 const KINDS: Kind[] = kindsFixture.kinds as Kind[]
 const QUEUE_FIELDS: Field[] = queueFieldsFixture.fields as Field[]
 
@@ -132,9 +142,15 @@ export const handlers = [
     if (!match) {
       return errorJSON(404, `kind not found: ${apiVersion}/${kind}`)
     }
-    // Both the namespaced and cluster-scoped Queue variants share the same
-    // forProvider/envelope shape — scope is the only structural difference
-    // between what upjet emits for each.
+    // queue.kind.json's envelope is the v2 NAMESPACED Queue's envelope only
+    // (see the note above KINDS): v1 (cluster-scoped) and v2 envelopes
+    // genuinely differ (providerConfigRef.kind is v2-only;
+    // deletionPolicy/publishConnectionDetailsTo are v1-only). Reusing it here
+    // for both variants is a known simplification — correct for `match`
+    // when it's the namespaced Queue, a placeholder otherwise — until a
+    // cluster-scoped envelope fixture exists. forProvider is identical
+    // across both (scope is the only difference there), which is why
+    // QUEUE_FIELDS is shared safely but this envelope is not.
     return HttpResponse.json({ kind: match, envelope: queueKindFixture.envelope })
   }),
 
