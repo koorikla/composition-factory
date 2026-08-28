@@ -41,15 +41,24 @@ func (c *ProviderAddCmd) Run(out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", c.Ref, err)
 	}
-	if err := cache.New(c.CacheDir).Save(pkg, crds); err != nil {
-		return err
-	}
+	// Pin the lock BEFORE caching the schemas. If a step fails partway
+	// through (permissions, disk full), which of these two runs first
+	// decides what state that failure leaves behind. Cache-first would
+	// leave cached schemas that nothing pins — silently unpinned, which
+	// defeats the reproducibility guarantee the lockfile exists to
+	// provide. Lock-first instead leaves a pin with no cached entry, and
+	// Load then fails loudly with its own "run: cf provider add <ref>"
+	// message — a visible, recoverable state. Do not swap this order
+	// without re-reading that tradeoff.
 	l, err := cache.ReadLock(c.Lock)
 	if err != nil {
 		return err
 	}
 	l.Set(c.Ref, pkg.Digest)
 	if err := l.Write(c.Lock); err != nil {
+		return err
+	}
+	if err := cache.New(c.CacheDir).Save(pkg, crds); err != nil {
 		return err
 	}
 

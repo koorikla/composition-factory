@@ -96,3 +96,34 @@ spec:
 		t.Errorf("output = %q, want it to report zero managed resources", out.String())
 	}
 }
+
+// TestProviderAddLockFailureLeavesCacheUnpopulated pins the lock-before-cache
+// ordering: if the lock can't be written, Run must fail before it caches any
+// schemas, so a partial failure never leaves cached CRDs that nothing pins.
+//
+// The lock path points at an existing directory rather than a file. This is
+// portable (no reliance on permission bits, which root ignores in many CI
+// containers) and deterministic: os.ReadFile on a directory fails on both
+// Linux and macOS, so cache.ReadLock returns an error before Run ever gets
+// to Set/Write, let alone to caching the schemas.
+func TestProviderAddLockFailureLeavesCacheUnpopulated(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".cf.lock")
+	if err := os.Mkdir(lockPath, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	cacheDir := filepath.Join(dir, "cache")
+	cmd := &ProviderAddCmd{
+		Ref:      "example.org/provider-test:v2",
+		CacheDir: cacheDir,
+		Lock:     lockPath,
+		fetch:    fakeFetch,
+	}
+	var out bytes.Buffer
+	if err := cmd.Run(&out); err == nil {
+		t.Fatal("Run: want an error when the lock path cannot be written")
+	}
+	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
+		t.Errorf("cache dir stat = %v, want it not to exist: Run must pin the lock before it caches schemas", err)
+	}
+}

@@ -7,14 +7,12 @@ import (
 	"testing"
 
 	"github.com/alecthomas/kong"
-
-	"github.com/koorikla/compositionfactory/internal/cache"
 )
 
 func TestVersionCommand(t *testing.T) {
 	var cli CLI
-	parser, err := kong.New(&cli, kong.Name("cf"), kong.Exit(func(int) {}),
-		kong.Vars{"cachedir": cache.DefaultRoot()})
+	opts := append(kongOptions(), kong.Exit(func(int) {}))
+	parser, err := kong.New(&cli, opts...)
 	if err != nil {
 		t.Fatalf("kong.New: %v", err)
 	}
