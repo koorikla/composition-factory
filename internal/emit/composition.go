@@ -128,9 +128,19 @@ func writeFields(d *Doc, indent int, r blueprint.Resource, b *blueprint.Blueprin
 				d.Line(indent, "%s: {{ %s }}", p, expr)
 				continue
 			}
-			// Optional: omit the key entirely when unset rather than writing empty.
-			d.Line(indent, "{{- with %s }}", expr)
-			d.Line(indent, "%s: {{ . }}", p)
+			// Optional: guard with hasKey, not `with`. Under
+			// options: ["missingkey=error"], `{{- with $spec.foo }}`
+			// evaluates the pipeline (indexing the map) before deciding
+			// truthiness, so a genuinely absent key — the normal case for
+			// an optional field the caller never set — hard-fails the
+			// entire render instead of gracefully omitting it. hasKey
+			// performs the presence check inside the function argument,
+			// sidestepping the template engine's own strict indexing.
+			// Direct $spec.field access inside the guarded branch is safe:
+			// Go templates never evaluate an untaken branch, and inside the
+			// taken one the key provably exists.
+			d.Line(indent, "{{- if hasKey $spec %q }}", param)
+			d.Line(indent, "%s: {{ %s }}", p, expr)
 			d.Line(indent, "{{- end }}")
 		}
 	}
