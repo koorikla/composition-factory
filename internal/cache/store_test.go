@@ -12,10 +12,46 @@ import (
 func TestSaveThenLoadRoundTrips(t *testing.T) {
 	s := New(t.TempDir())
 	pkg := &xpkg.Package{Ref: "example.org/provider-test:v2", Digest: "sha256:abc123"}
+	// Properties is the actual payload the cache exists to preserve: nested
+	// several levels deep, with both a nested map and a nested slice. Every
+	// numeric literal below is a float64 (never an int), because decoding
+	// arbitrary JSON into map[string]any always produces float64 for numbers
+	// — using an int here would make cmp.Diff report a mismatch that has
+	// nothing to do with a real bug in Save/Load.
 	crds := []schema.CRD{{
 		Group: "test.m.example.org", Kind: "Widget", Plural: "widgets",
 		Scope: "Namespaced", Categories: []string{"managed"},
-		Versions: []schema.Version{{Name: "v1beta1", Served: true, Storage: true}},
+		Versions: []schema.Version{{
+			Name: "v1beta1", Served: true, Storage: true,
+			Properties: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"spec": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"forProvider": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"region": map[string]any{
+										"type":      "string",
+										"maxLength": float64(63),
+									},
+									"tags": map[string]any{
+										"type":  "array",
+										"items": map[string]any{"type": "string"},
+									},
+								},
+								"required": []any{"region"},
+							},
+						},
+					},
+				},
+				"oneOf": []any{
+					map[string]any{"required": []any{"spec"}},
+					map[string]any{"type": "null"},
+				},
+			},
+		}},
 	}}
 	if err := s.Save(pkg, crds); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -33,6 +69,82 @@ func TestLoadUnknownProviderErrors(t *testing.T) {
 	s := New(t.TempDir())
 	if _, err := s.Load("example.org/never-added:v1"); err == nil {
 		t.Fatal("want an error loading a provider that was never added, got nil")
+	}
+}
+
+// TestSlugIsCollisionFreeAndStable covers the failure mode where a
+// private-registry port number collides with a path segment: mapping '/',
+// ':' and '@' all to the same separator would flatten "registry:5000/repo"
+// and "registry/5000/repo" to the same directory name, and one provider's
+// cached CRDs would silently overwrite another's.
+func TestSlugIsCollisionFreeAndStable(t *testing.T) {
+	refA := "registry:5000/repo"
+	refB := "registry/5000/repo"
+
+	slugA := slug(refA)
+	slugB := slug(refB)
+	if slugA == slugB {
+		t.Fatalf("slug collision: slug(%q) == slug(%q) == %q", refA, refB, slugA)
+	}
+
+	if got := slug(refA); got != slugA {
+		t.Errorf("slug(%q) not stable: got %q, want %q", refA, got, slugA)
+	}
+}
+
+// TestSaveWithColludingRefsDoesNotClobberCache exercises the same collision
+// through the public Save/Load API rather than the internal slug() helper,
+// since that is the actual observable failure the fix must prevent.
+func TestSaveWithColludingRefsDoesNotClobberCache(t *testing.T) {
+	s := New(t.TempDir())
+	pkgA := &xpkg.Package{Ref: "registry:5000/repo", Digest: "sha256:aaa"}
+	pkgB := &xpkg.Package{Ref: "registry/5000/repo", Digest: "sha256:bbb"}
+	crdsA := []schema.CRD{{Kind: "WidgetA"}}
+	crdsB := []schema.CRD{{Kind: "WidgetB"}}
+
+	if err := s.Save(pkgA, crdsA); err != nil {
+		t.Fatalf("Save A: %v", err)
+	}
+	if err := s.Save(pkgB, crdsB); err != nil {
+		t.Fatalf("Save B: %v", err)
+	}
+
+	gotA, err := s.Load(pkgA.Ref)
+	if err != nil {
+		t.Fatalf("Load A: %v", err)
+	}
+	if diff := cmp.Diff(crdsA, gotA); diff != "" {
+		t.Errorf("provider A clobbered (-want +got):\n%s", diff)
+	}
+
+	gotB, err := s.Load(pkgB.Ref)
+	if err != nil {
+		t.Fatalf("Load B: %v", err)
+	}
+	if diff := cmp.Diff(crdsB, gotB); diff != "" {
+		t.Errorf("provider B clobbered (-want +got):\n%s", diff)
+	}
+}
+
+func TestSaveThenLoadDigestRoundTrips(t *testing.T) {
+	s := New(t.TempDir())
+	pkg := &xpkg.Package{Ref: "example.org/provider-test:v2", Digest: "sha256:abc123"}
+	if err := s.Save(pkg, []schema.CRD{{Kind: "Widget"}}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := s.LoadDigest(pkg.Ref)
+	if err != nil {
+		t.Fatalf("LoadDigest: %v", err)
+	}
+	if got != pkg.Digest {
+		t.Errorf("LoadDigest = %q, want %q", got, pkg.Digest)
+	}
+}
+
+func TestLoadDigestUnknownProviderErrors(t *testing.T) {
+	s := New(t.TempDir())
+	if _, err := s.LoadDigest("example.org/never-added:v1"); err == nil {
+		t.Fatal("want an error loading the digest for a provider that was never added, got nil")
 	}
 }
 

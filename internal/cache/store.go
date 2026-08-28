@@ -3,6 +3,8 @@
 package cache
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -29,37 +31,109 @@ func DefaultRoot() string {
 	return filepath.Join(dir, "compositionfactory")
 }
 
-// slug turns an image reference into a filesystem-safe directory name.
+// slug turns an image reference into a filesystem-safe, collision-free
+// directory name: <readable>-<12 hex chars of sha256(ref)>.
+//
+// The hash covers the FULL reference, so it alone guarantees no two distinct
+// refs ever collide. The readable prefix (the ref's last path segment, tag
+// or digest suffix stripped, sanitised to [A-Za-z0-9._-]) exists only so the
+// cache directory is browsable with `ls`; it is not relied on for
+// uniqueness. That distinction matters because a naive scheme that maps `/`,
+// `:` and `@` all to the same separator is lossy: "registry:5000/repo" and
+// "registry/5000/repo" would both flatten to "registry_5000_repo" and one
+// provider's cached CRDs would silently overwrite another's.
 func slug(ref string) string {
-	r := strings.NewReplacer("/", "_", ":", "_", "@", "_")
-	return r.Replace(ref)
+	sum := sha256.Sum256([]byte(ref))
+	hash := hex.EncodeToString(sum[:])[:12]
+
+	last := ref
+	if i := strings.LastIndex(last, "/"); i >= 0 {
+		last = last[i+1:]
+	}
+	if i := strings.Index(last, "@"); i >= 0 {
+		last = last[:i]
+	} else if i := strings.LastIndex(last, ":"); i >= 0 {
+		last = last[:i]
+	}
+	last = sanitizeSlugSegment(last)
+	if last == "" {
+		last = "ref"
+	}
+	return last + "-" + hash
 }
 
-// Save writes the parsed CRDs for pkg into the cache.
+// sanitizeSlugSegment replaces every rune outside [A-Za-z0-9._-] with "_".
+func sanitizeSlugSegment(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
+
+// Entry is what Store persists for one provider: the CRDs it extracted plus
+// the ref and digest they came from, so a cache entry can later be checked
+// against the digest pinned in .cf.lock (see LoadDigest). Without this, Save
+// and Lock.Set falling out of sync would let Load silently serve schemas
+// that no longer match the pin — quietly breaking the reproducibility
+// guarantee the lockfile exists to provide.
+type Entry struct {
+	Ref    string       `json:"ref"`
+	Digest string       `json:"digest"`
+	CRDs   []schema.CRD `json:"crds"`
+}
+
+// Save writes the parsed CRDs for pkg, along with pkg.Ref and pkg.Digest, into the cache.
 func (s *Store) Save(pkg *xpkg.Package, crds []schema.CRD) error {
 	dir := filepath.Join(s.Root, slug(pkg.Ref))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create cache dir: %w", err)
 	}
-	body, err := json.MarshalIndent(crds, "", " ")
+	entry := Entry{Ref: pkg.Ref, Digest: pkg.Digest, CRDs: crds}
+	body, err := json.MarshalIndent(entry, "", " ")
 	if err != nil {
-		return fmt.Errorf("encode CRDs: %w", err)
+		return fmt.Errorf("encode cache entry: %w", err)
 	}
 	return os.WriteFile(filepath.Join(dir, "crds.json"), body, 0o644)
 }
 
-// Load returns the cached CRDs for ref.
-func (s *Store) Load(ref string) ([]schema.CRD, error) {
+// loadEntry reads and decodes the cache entry for ref.
+func (s *Store) loadEntry(ref string) (*Entry, error) {
 	path := filepath.Join(s.Root, slug(ref), "crds.json")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("provider %q is not in the cache; run: cf provider add %s", ref, ref)
 	}
-	var crds []schema.CRD
-	if err := json.Unmarshal(body, &crds); err != nil {
-		return nil, fmt.Errorf("decode cached CRDs for %q: %w", ref, err)
+	var entry Entry
+	if err := json.Unmarshal(body, &entry); err != nil {
+		return nil, fmt.Errorf("decode cached entry for %q: %w", ref, err)
 	}
-	return crds, nil
+	return &entry, nil
+}
+
+// Load returns the cached CRDs for ref.
+func (s *Store) Load(ref string) ([]schema.CRD, error) {
+	entry, err := s.loadEntry(ref)
+	if err != nil {
+		return nil, err
+	}
+	return entry.CRDs, nil
+}
+
+// LoadDigest returns the digest recorded for ref when it was saved, so a
+// caller can cross-check a cache entry against the pin in .cf.lock.
+func (s *Store) LoadDigest(ref string) (string, error) {
+	entry, err := s.loadEntry(ref)
+	if err != nil {
+		return "", err
+	}
+	return entry.Digest, nil
 }
 
 // LockEntry pins one provider reference to a resolved digest.
