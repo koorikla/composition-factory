@@ -144,6 +144,30 @@ func (c CRD) ForProvider() ([]*Node, error) {
 	return BuildTree(inner, stringSlice(fp["required"])), nil
 }
 
+// Status returns the top-level .status subtree of the preferred version's
+// schema, built the same way ForProvider builds spec.forProvider. It is the
+// schema a cross-resource status wire (`from:
+// resources.<name>.status.<path>`) resolves its path against.
+//
+// Nothing here assumes an upjet envelope: the tree is whatever the CRD's own
+// status schema declares (for upjet that is atProvider plus the Crossplane
+// machinery fields; a native-shaped resource carries whatever it carries).
+// A CRD with no status schema returns nil, not an error — mirroring
+// ForProvider's contract for a missing forProvider — because only the
+// caller knows whether anything is actually being wired from it.
+func (c CRD) Status() ([]*Node, error) {
+	v, err := c.Preferred()
+	if err != nil {
+		return nil, err
+	}
+	st, ok := v.Properties["status"].(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	inner, _ := st["properties"].(map[string]any)
+	return BuildTree(inner, stringSlice(st["required"])), nil
+}
+
 // Envelope returns spec.properties minus forProvider and initProvider. It is
 // computed rather than hard-coded: the envelope is not universal across providers.
 func (c CRD) Envelope() ([]*Node, error) {

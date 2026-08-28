@@ -197,3 +197,126 @@ func TestEnvelopeExcludesForProviderAndInitProvider(t *testing.T) {
 		t.Errorf("Envelope (-want +got):\n%s", diff)
 	}
 }
+
+// statusCRD carries a realistic upjet-shaped status (atProvider + machinery
+// fields) so Status() can be proven against the shape the reference layer
+// actually wires from. It deliberately also carries an array-of-objects
+// (conditions) and a map (tags) so leaf classification is pinned for status
+// trees the same way it is for forProvider trees.
+var statusCRD = []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.test.m.example.org}
+spec:
+  group: test.m.example.org
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                properties:
+                  region: {type: string}
+          status:
+            properties:
+              atProvider:
+                properties:
+                  url: {type: string, description: The queue URL.}
+                  maxMessageSize: {type: integer}
+                  tags:
+                    type: object
+                    additionalProperties: {type: string}
+              conditions:
+                type: array
+                items:
+                  properties:
+                    type: {type: string}
+                    status: {type: string}
+              observedGeneration: {type: integer}
+`)
+
+func TestStatusBuildsTheStatusSubtree(t *testing.T) {
+	c := parseOne(t, statusCRD)
+	st, err := c.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	var got []string
+	for _, l := range Leaves(st, "") {
+		got = append(got, l.Path)
+	}
+	want := []string{
+		"atProvider.maxMessageSize",
+		"atProvider.tags",
+		"atProvider.url",
+		"conditions[0].status",
+		"conditions[0].type",
+		"observedGeneration",
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("status leaves mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// A CRD with no status schema at all (a native-envelope difference: nothing
+// guarantees a status subtree exists) must return nil, not an error — the
+// same contract ForProvider has for a missing forProvider. The caller (the
+// emit layer) is the one that turns "no status schema" into a user-facing
+// refusal, because only it knows a wire is being drawn from it.
+func TestStatusIsNilWhenTheCRDHasNoStatusSchema(t *testing.T) {
+	c := parseOne(t, nestedCRD) // nestedCRD declares no status property
+	st, err := c.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st != nil {
+		t.Errorf("Status = %v, want nil for a CRD with no status schema", st)
+	}
+}
+
+// Status must come from the preferred (storage) version, not versions[0] —
+// the same rule Preferred() enforces everywhere else.
+func TestStatusUsesThePreferredVersion(t *testing.T) {
+	doc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: things.test.m.example.org}
+spec:
+  group: test.m.example.org
+  scope: Namespaced
+  names: {kind: Thing, plural: things, categories: [managed]}
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: false
+    schema:
+      openAPIV3Schema:
+        properties:
+          status:
+            properties:
+              old: {type: string}
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          status:
+            properties:
+              current: {type: string}
+`)
+	c := parseOne(t, doc)
+	st, err := c.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(st) != 1 || st[0].Name != "current" {
+		t.Errorf("Status = %+v, want exactly the storage version's [current]", st)
+	}
+}
