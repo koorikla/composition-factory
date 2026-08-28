@@ -3,6 +3,7 @@ package emit
 import (
 	"bytes"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"text/template"
@@ -163,10 +164,27 @@ func extractTemplate(t *testing.T, doc []byte) string {
 // rendered form isn't what this test is checking.
 func renderTemplate(t *testing.T, tmplBody string, xrSpec map[string]any) (string, error) {
 	t.Helper()
+	return renderTemplateObserved(t, tmplBody, xrSpec, nil)
+}
+
+// renderTemplateObserved is renderTemplate with observed composed resources:
+// observedResources becomes .observed.resources, keyed by
+// composition-resource-name, each entry carrying the object under .resource
+// — the shape function-go-templating hands the template. nil means the
+// resources key is ABSENT entirely (what protojson produces for an empty
+// map), which is exactly the case a status-wire guard must survive.
+func renderTemplateObserved(t *testing.T, tmplBody string, xrSpec map[string]any, observedResources map[string]any) (string, error) {
+	t.Helper()
 	funcs := template.FuncMap{
 		"hasKey": func(d map[string]any, key string) bool {
 			_, ok := d[key]
 			return ok
+		},
+		// sprig's kindIs, verbatim semantics: the reflect kind name of the
+		// value compared to the target string. reflect.ValueOf(nil) is the
+		// Invalid kind ("invalid"), never a panic.
+		"kindIs": func(kind string, v any) bool {
+			return reflect.ValueOf(v).Kind().String() == kind
 		},
 		"setResourceNameAnnotation": func(name string) string {
 			return "crossplane.io/composition-resource-name: " + name
@@ -176,16 +194,18 @@ func renderTemplate(t *testing.T, tmplBody string, xrSpec map[string]any) (strin
 	if err != nil {
 		t.Fatalf("template body does not parse: %v\n---\n%s", err, tmplBody)
 	}
-	data := map[string]any{
-		"observed": map[string]any{
-			"composite": map[string]any{
-				"resource": map[string]any{
-					"metadata": map[string]any{"name": "my-xqueue"},
-					"spec":     xrSpec,
-				},
+	observed := map[string]any{
+		"composite": map[string]any{
+			"resource": map[string]any{
+				"metadata": map[string]any{"name": "my-xqueue"},
+				"spec":     xrSpec,
 			},
 		},
 	}
+	if observedResources != nil {
+		observed["resources"] = observedResources
+	}
+	data := map[string]any{"observed": observed}
 	var out bytes.Buffer
 	err = tmpl.Execute(&out, data)
 	return out.String(), err
