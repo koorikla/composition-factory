@@ -1,0 +1,175 @@
+package blueprint
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/google/go-cmp/cmp"
+)
+
+func editable() *Blueprint {
+	return &Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   Metadata{Name: "xqueue"},
+		Spec: Spec{
+			Sources: []Source{{Provider: "ghcr.io/x/provider-aws-sqs:v2.7.0"}},
+			XRD: XRD{
+				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]Parameter{
+					"providerName":   {Type: "string", Required: true},
+					"maxMessageSize": {Type: "integer"},
+				},
+			},
+			Resources: []Resource{{
+				Name: "main-queue", Kind: "Queue",
+				Fields: map[string]Field{"maxMessageSize": {From: "params.maxMessageSize"}},
+			}},
+		},
+	}
+}
+
+func TestAddParameter(t *testing.T) {
+	b := editable()
+	if err := b.AddParameter("location", Parameter{Type: "string", Required: true, Enum: []string{"EU", "US"}}); err != nil {
+		t.Fatalf("AddParameter: %v", err)
+	}
+	if got := b.Spec.XRD.Parameters["location"]; got.Type != "string" || !got.Required || len(got.Enum) != 2 {
+		t.Errorf("added parameter = %+v", got)
+	}
+	if err := b.Validate(); err != nil {
+		t.Errorf("blueprint invalid after a valid add: %v", err)
+	}
+}
+
+func TestAddParameterRejectsDuplicate(t *testing.T) {
+	b := editable()
+	err := b.AddParameter("providerName", Parameter{Type: "string"})
+	if err == nil || !strings.Contains(err.Error(), "providerName") {
+		t.Fatalf("err = %v, want a duplicate error naming providerName", err)
+	}
+}
+
+// An invalid add must leave the blueprint untouched, not partially applied.
+func TestAddParameterRejectsInvalidAndChangesNothing(t *testing.T) {
+	b := editable()
+	before := len(b.Spec.XRD.Parameters)
+	if err := b.AddParameter("not a valid name", Parameter{Type: "string"}); err == nil {
+		t.Fatal("want an error for an invalid parameter name")
+	}
+	if err := b.AddParameter("zones", Parameter{Type: "array"}); err == nil {
+		t.Fatal("want an error: array parameters are unsupported")
+	}
+	if len(b.Spec.XRD.Parameters) != before {
+		t.Errorf("parameter count changed to %d after failed adds; edits must be atomic", len(b.Spec.XRD.Parameters))
+	}
+	if err := b.Validate(); err != nil {
+		t.Errorf("blueprint left invalid after failed adds: %v", err)
+	}
+}
+
+// The rename must rewrite every reference, or generation breaks.
+func TestRenameParameterRewritesReferences(t *testing.T) {
+	b := editable()
+	if err := b.RenameParameter("maxMessageSize", "maxBytes"); err != nil {
+		t.Fatalf("RenameParameter: %v", err)
+	}
+	if _, still := b.Spec.XRD.Parameters["maxMessageSize"]; still {
+		t.Error("old parameter name still present")
+	}
+	if _, ok := b.Spec.XRD.Parameters["maxBytes"]; !ok {
+		t.Fatal("new parameter name absent")
+	}
+	got := b.Spec.Resources[0].Fields["maxMessageSize"].From
+	if got != "params.maxBytes" {
+		t.Errorf("reference = %q, want params.maxBytes — a dangling reference emits a Composition that cannot render", got)
+	}
+	if err := b.Validate(); err != nil {
+		t.Errorf("blueprint invalid after rename: %v", err)
+	}
+}
+
+func TestRenameParameterRejectsCollisionAndChangesNothing(t *testing.T) {
+	b := editable()
+	want := b.Spec.Resources[0].Fields["maxMessageSize"].From
+	if err := b.RenameParameter("maxMessageSize", "providerName"); err == nil {
+		t.Fatal("want an error renaming onto an existing parameter")
+	}
+	if _, ok := b.Spec.XRD.Parameters["maxMessageSize"]; !ok {
+		t.Error("original parameter was removed by a failed rename")
+	}
+	if got := b.Spec.Resources[0].Fields["maxMessageSize"].From; got != want {
+		t.Errorf("reference mutated by a failed rename: %q", got)
+	}
+}
+
+func TestRenameUnknownParameterErrors(t *testing.T) {
+	b := editable()
+	if err := b.RenameParameter("nope", "other"); err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("err = %v, want an error naming the unknown parameter", err)
+	}
+}
+
+func TestSetParameterReplacesInPlace(t *testing.T) {
+	b := editable()
+	if err := b.SetParameter("maxMessageSize", Parameter{Type: "integer", Default: "2048", Description: "Max size."}); err != nil {
+		t.Fatalf("SetParameter: %v", err)
+	}
+	got := b.Spec.XRD.Parameters["maxMessageSize"]
+	if got.Default != "2048" || got.Description != "Max size." {
+		t.Errorf("parameter = %+v", got)
+	}
+	if err := b.Validate(); err != nil {
+		t.Errorf("blueprint invalid after set: %v", err)
+	}
+}
+
+func TestSetParameterRejectsInvalidAndChangesNothing(t *testing.T) {
+	b := editable()
+	before := b.Spec.XRD.Parameters["maxMessageSize"]
+	if err := b.SetParameter("maxMessageSize", Parameter{Type: "integer", Default: "not-a-number"}); err == nil {
+		t.Fatal("want an error: an integer default must parse")
+	}
+	if diff := cmp.Diff(before, b.Spec.XRD.Parameters["maxMessageSize"]); diff != "" {
+		t.Errorf("parameter mutated by a failed set (-before +after):\n%s", diff)
+	}
+}
+
+// Deleting a parameter something references must be refused, not cascade.
+func TestDeleteParameterRefusesWhenReferenced(t *testing.T) {
+	b := editable()
+	err := b.DeleteParameter("maxMessageSize")
+	if err == nil {
+		t.Fatal("want an error deleting a referenced parameter")
+	}
+	if !strings.Contains(err.Error(), "main-queue") {
+		t.Errorf("err = %v, want it to name the resource still referencing the parameter", err)
+	}
+	if _, ok := b.Spec.XRD.Parameters["maxMessageSize"]; !ok {
+		t.Error("parameter was deleted despite the error")
+	}
+}
+
+func TestDeleteParameterSucceedsWhenUnreferenced(t *testing.T) {
+	b := editable()
+	if err := b.AddParameter("spare", Parameter{Type: "string"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.DeleteParameter("spare"); err != nil {
+		t.Fatalf("DeleteParameter: %v", err)
+	}
+	if _, still := b.Spec.XRD.Parameters["spare"]; still {
+		t.Error("parameter still present after delete")
+	}
+	if err := b.Validate(); err != nil {
+		t.Errorf("blueprint invalid after delete: %v", err)
+	}
+}
+
+func TestDeleteProviderNameIsRefusedForNamespacedScope(t *testing.T) {
+	b := editable()
+	if err := b.DeleteParameter("providerName"); err == nil {
+		t.Fatal("want an error: a Namespaced XRD requires providerName")
+	}
+}
