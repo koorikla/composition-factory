@@ -190,4 +190,94 @@ describe("blueprint store", () => {
       expect(useBlueprint.getState().loadEpoch).toBe(afterFirstLoad + 1)
     })
   })
+
+  // Task 5's own fix round 1 (distinct from the loadEpoch block above, which
+  // is Task 2's fix round 1): the Inspector's setField/commitField
+  // machinery, reviewed and found to have three store-level defects.
+  describe("setField / commitField (Task 5 fix round 1, Findings 1-3)", () => {
+    it("Finding 1: an empty literal value deletes the field key, never leaves {value: \"\"}", () => {
+      const s = useBlueprint.getState()
+      s.addNode(queueKind, 0, 0)
+      const id = useBlueprint.getState().nodes[0].id
+      const name = useBlueprint.getState().nodes[0].name
+
+      s.setField(id, "region", "eu-north-1")
+      let res = useBlueprint.getState().doc!.spec.resources.find(r => r.name === name)!
+      expect(res.fields["region"]).toEqual({ value: "eu-north-1" })
+
+      s.setField(id, "region", "")
+      res = useBlueprint.getState().doc!.spec.resources.find(r => r.name === name)!
+      expect(res.fields["region"]).toBeUndefined()
+    })
+
+    it("Finding 3: refuses to clobber a wired field unless overwriteWire is passed", () => {
+      const s = useBlueprint.getState()
+      s.addNode(queueKind, 0, 0)
+      const id = useBlueprint.getState().nodes[0].id
+      const name = useBlueprint.getState().nodes[0].name
+      s.connect("maxMessageSize", id, "maxMessageSize")
+
+      const refused = s.setField(id, "maxMessageSize", "12345")
+      expect(refused).toBe(false)
+      let res = useBlueprint.getState().doc!.spec.resources.find(r => r.name === name)!
+      expect(res.fields["maxMessageSize"]).toEqual({ from: "params.maxMessageSize" })
+
+      const overwrote = s.setField(id, "maxMessageSize", "12345", { overwriteWire: true })
+      expect(overwrote).toBe(true)
+      res = useBlueprint.getState().doc!.spec.resources.find(r => r.name === name)!
+      expect(res.fields["maxMessageSize"]).toEqual({ value: "12345" })
+    })
+
+    it("Finding 2: committing a field edit folds it into exactly one undo step that restores the pre-edit field (the commitMove test pattern)", () => {
+      const s = useBlueprint.getState()
+      s.addNode(queueKind, 0, 0)
+      const id = useBlueprint.getState().nodes[0].id
+      const name = useBlueprint.getState().nodes[0].name
+
+      for (let i = 0; i < 20; i++) s.setField(id, "region", `eu-north-${i}`)
+      const historyLenBeforeCommit = useBlueprint.getState().history.length
+      s.commitField(id, "region")
+      // 20 setField calls captured exactly ONE baseline (on the first
+      // call); commitField folds that one baseline into exactly one entry
+      // -- not twenty.
+      expect(useBlueprint.getState().history.length).toBe(historyLenBeforeCommit + 1)
+
+      let res = useBlueprint.getState().doc!.spec.resources.find(r => r.name === name)!
+      expect(res.fields["region"]).toEqual({ value: "eu-north-19" })
+
+      // THE UNDO TRAP this whole finding exists to close: exactly one
+      // undo() must restore the pre-edit state (no "region" field) while
+      // leaving the node itself alone. Before this fix, setField pushed no
+      // history at all, so this undo() would instead have popped addNode's
+      // own history entry, and `nodes` would come back empty.
+      s.undo()
+      expect(useBlueprint.getState().nodes).toHaveLength(1)
+      res = useBlueprint.getState().doc!.spec.resources.find(r => r.name === name)!
+      expect(res.fields["region"]).toBeUndefined()
+
+      // A second commitField with no intervening setField calls has
+      // nothing pending to fold (editBaseline is already null) and must
+      // not grow history -- mirrors commitMove's identical no-op case.
+      const historyLenBeforeSecondCommit = useBlueprint.getState().history.length
+      s.commitField(id, "region")
+      expect(useBlueprint.getState().history.length).toBe(historyLenBeforeSecondCommit)
+    })
+
+    it("Finding 2: a commitField call for a different field than the pending edit does not fold it", () => {
+      const s = useBlueprint.getState()
+      s.addNode(queueKind, 0, 0)
+      const id = useBlueprint.getState().nodes[0].id
+
+      s.setField(id, "region", "eu-north-1")
+      const historyLenBefore = useBlueprint.getState().history.length
+      // Wrong path: a stray/late commit for a field that isn't the one
+      // currently pending must not fold (or drop) the real pending edit.
+      s.commitField(id, "tags")
+      expect(useBlueprint.getState().history.length).toBe(historyLenBefore)
+
+      // The real commit still works afterward.
+      s.commitField(id, "region")
+      expect(useBlueprint.getState().history.length).toBe(historyLenBefore + 1)
+    })
+  })
 })

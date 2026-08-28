@@ -70,6 +70,16 @@ interface BlueprintStore {
    * moveNode() call, captured lazily and folded into `history` by
    * commitMove(). Null when no drag is in progress. */
   dragBaseline: Snapshot | null
+  /** setField's analogue of dragBaseline: the state as it stood before the
+   * current field-edit gesture's first setField() call, captured lazily and
+   * folded into `history` by commitField(). Null when no edit is pending. */
+  editBaseline: Snapshot | null
+  /** Which (nodeId, path) `editBaseline` belongs to. commitField() only
+   * folds the baseline when it's called for THIS field — a stray or
+   * mis-ordered commit for a different field must not silently swallow (or
+   * mis-attribute) another field's still-pending edit. Null exactly when
+   * editBaseline is null. */
+  editingField: { nodeId: string; path: string } | null
 
   load(): Promise<void>
   addNode(k: Kind, x: number, y: number): void
@@ -83,25 +93,59 @@ interface BlueprintStore {
   connect(fromParam: string, toNode: string, toPath: string): void
   disconnect(wireId: string): void
   /** Writes a literal `{ value }` assignment onto one field of the resource
-   * behind `nodeId`, replacing whatever was there before (a wire, a raw
-   * escape hatch, or a previous literal) — mirrors `connect`'s "the
-   * assignment IS the field" rule, just for a typed-in value instead of a
-   * parameter reference. Called on every keystroke from the Inspector's
-   * field editor, so — like `moveNode` and unlike `connect`/`disconnect` —
-   * it deliberately does NOT pushHistory(): a history entry per character
-   * would make Ctrl+Z undo one letter at a time, the exact anti-pattern
-   * `commitMove()` exists to avoid for drags. There is no equivalent
-   * "commit at gesture end" here yet (the Inspector has no blur/commit
-   * hook), so a field edit is not undoable today — a known, narrow gap
-   * versus wiring or adding a node, not an oversight to be silently masked
-   * by spamming history instead. */
-  setField(nodeId: string, path: string, value: string): void
+   * behind `nodeId`, replacing whatever was there before (a previous
+   * literal or a raw escape hatch) — mirrors `connect`'s "the assignment IS
+   * the field" rule, just for a typed-in value instead of a parameter
+   * reference. Called on every keystroke from the Inspector's field editor,
+   * so — like `moveNode` and unlike `connect`/`disconnect` — it
+   * deliberately does NOT pushHistory() itself; see `editBaseline` and
+   * `commitField()` below for the drag-protocol equivalent that makes a
+   * whole typing gesture into exactly one undo step (fix round 1, Finding
+   * 2: without this, Ctrl+Z after an edit popped the PREVIOUS history
+   * entry instead — e.g. the addNode() that created the node being edited,
+   * making the node itself vanish).
+   *
+   * Two more rules, both from fix round 1:
+   * - Finding 1: an empty `value` DELETES the field key entirely, never
+   *   leaves `{ value: "" }` behind — mirrors `disconnect`'s "never leave
+   *   an empty mapping" rule. `{ value: "" }` is indistinguishable on the
+   *   wire from "the user cleared this field back out," and leaving it set
+   *   trips `blueprint.Validate()`'s "set exactly one of from, value or
+   *   raw" check the moment it's satisfied by zero of the three instead —
+   *   backspacing a field you just typed into should return it to "unset,"
+   *   not hand you a confusing generate-time error.
+   * - Finding 3: refuses (no mutation, no history touched) when the field
+   *   currently holds a wire (`from` is set) unless the caller passes
+   *   `{ overwriteWire: true }`. The Inspector's own rendering already
+   *   never shows an editable box for a wired field, but the STORE is the
+   *   single source of truth per this file's header — a UI-only guard
+   *   would leave every other caller free to silently clobber a wire.
+   *   Returns `false` on refusal (never throws: a rejected edit is
+   *   expected, recoverable UI feedback, not exceptional control flow) and
+   *   `true` once the field is actually written. */
+  setField(
+    nodeId: string,
+    path: string,
+    value: string,
+    options?: { overwriteWire?: boolean },
+  ): boolean
   undo(): void
   canUndo(): boolean
   /** Folds the pending drag baseline (if any) into a single history entry.
    * The canvas calls this once at drag end (pointer-up); moveNode() itself
    * never touches history. A no-op if no drag is in progress. */
   commitMove(): void
+  /** setField's counterpart to commitMove(): folds `editBaseline` (if it
+   * belongs to this exact `(nodeId, path)`) into one history entry and
+   * clears both `editBaseline` and `editingField`. The Inspector calls this
+   * on the field's blur — which, by ordinary DOM focus semantics, fires
+   * before a different element (including a different field's textarea)
+   * ever gains focus, so "call it on blur" already satisfies "commit
+   * before a different field gains focus." A no-op if no edit is pending,
+   * or if it's called for a field other than the one `editBaseline` was
+   * captured for (a stray/late commit must not fold — or silently drop —
+   * a DIFFERENT field's still-pending edit). */
+  commitField(nodeId: string, path: string): void
 }
 
 const HISTORY_CAP = 50
@@ -227,6 +271,8 @@ export const useBlueprint = create<BlueprintStore>()(
         set(draft => {
           draft.history = []
           draft.dragBaseline = null
+          draft.editBaseline = null
+          draft.editingField = null
         })
         trackedDoc = get().doc
       }
@@ -252,6 +298,8 @@ export const useBlueprint = create<BlueprintStore>()(
       loadEpoch: 0,
       history: [],
       dragBaseline: null,
+      editBaseline: null,
+      editingField: null,
 
       async load() {
         const doc = await api.blueprint()
@@ -267,6 +315,8 @@ export const useBlueprint = create<BlueprintStore>()(
           draft.loadEpoch += 1
           draft.history = []
           draft.dragBaseline = null
+          draft.editBaseline = null
+          draft.editingField = null
         })
         noteOwnMutation()
       },
@@ -387,31 +437,74 @@ export const useBlueprint = create<BlueprintStore>()(
         noteOwnMutation()
       },
 
-      setField(nodeId, path, value) {
-        // No reconcile()/pushHistory(): see the interface doc comment above
-        // — this mutates `doc` on every keystroke, so it follows moveNode's
-        // "continuous input, no per-event history" rule, not connect's.
+      setField(nodeId, path, value, options) {
+        // reconcile() first, same reason moveNode() calls it first: a test
+        // (or any caller) that replaced `doc` out from under us since our
+        // last own mutation must not let a stale editBaseline/history
+        // survive the swap.
+        reconcile()
         const s = get()
-        if (!s.doc) return
+        if (!s.doc) return false
         const node = s.nodes.find(n => n.id === nodeId)
-        if (!node) return
+        if (!node) return false
         const res = s.doc.spec.resources.find(r => r.name === node.name)
-        if (!res) return
+        if (!res) return false
+        // Finding 3: never silently clobber a wire. The Inspector's own
+        // rendering already keeps a wired field out of reach of this call,
+        // but the store is the single source of truth, so it enforces the
+        // rule itself rather than trusting every future caller to.
+        if (res.fields[path]?.from && !options?.overwriteWire) return false
+        // Finding 2 / the undo trap: capture the pre-edit snapshot on the
+        // FIRST setField of a gesture only (exactly moveNode's dragBaseline
+        // pattern) — never pushed straight to `history` here, so a run of
+        // keystrokes still costs zero history entries until commitField()
+        // folds them into one.
+        const startingNewEdit = s.editBaseline === null
+        const baseline = startingNewEdit ? snapshotOf(s) : null
         set(draft => {
+          if (startingNewEdit) {
+            draft.editBaseline = baseline
+            draft.editingField = { nodeId, path }
+          }
           if (!draft.doc) return
           const dnode = draft.nodes.find(n => n.id === nodeId)
           if (!dnode) return
           const dres = draft.doc.spec.resources.find(r => r.name === dnode.name)
           if (!dres) return
-          // A fresh object, not a merge: a literal value replaces whatever
-          // assignment (from/value/raw) previously lived at this path,
-          // exactly like connect() does for a wire.
-          dres.fields[path] = { value }
+          if (value === "") {
+            // Finding 1: an empty value is "unset," not `{ value: "" }` —
+            // mirrors disconnect()'s "delete the key outright" rule.
+            delete dres.fields[path]
+          } else {
+            // A fresh object, not a merge: a literal value replaces
+            // whatever assignment previously lived at this path, exactly
+            // like connect() does for a wire.
+            dres.fields[path] = { value }
+          }
         })
         // setField DOES touch `doc`, unlike moveNode, so trackedDoc must
         // stay current or the next history-touching action's reconcile()
         // would wrongly see an "external" doc replacement and wipe history.
         noteOwnMutation()
+        return true
+      },
+
+      commitField(nodeId, path) {
+        reconcile()
+        set(draft => {
+          if (draft.editBaseline === null) return
+          const editing = draft.editingField
+          // Only fold when this commit is for the field the pending
+          // baseline actually belongs to — a stray or late commit for a
+          // DIFFERENT field must not fold (or drop) that field's own still-
+          // pending edit. In the normal case (Inspector calls this from
+          // the field's own onBlur) this always matches.
+          if (!editing || editing.nodeId !== nodeId || editing.path !== path) return
+          draft.history.push(draft.editBaseline)
+          if (draft.history.length > HISTORY_CAP) draft.history.shift()
+          draft.editBaseline = null
+          draft.editingField = null
+        })
       },
 
       disconnect(wireId) {
@@ -441,6 +534,15 @@ export const useBlueprint = create<BlueprintStore>()(
           draft.nodes = prev.nodes
           draft.wires = prev.wires
           draft.dragBaseline = null
+          // Same reasoning as dragBaseline: an in-progress field edit's
+          // baseline was captured against the pre-undo doc. Once undo()
+          // has replaced doc/nodes/wires wholesale, that baseline (and
+          // whatever it was mid-typing into) no longer corresponds to
+          // anything live — carrying it forward would let a later
+          // commitField() fold a snapshot of a document state that no
+          // longer exists on this timeline.
+          draft.editBaseline = null
+          draft.editingField = null
         })
         noteOwnMutation()
       },

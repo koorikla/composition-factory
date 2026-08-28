@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { setupServer } from "msw/node"
 import { handlers } from "../api/mocks"
 import { useBlueprint } from "../store/blueprint"
-import { Inspector } from "./Inspector"
+import { Inspector, checkScalar } from "./Inspector"
 import blueprintFixture from "../api/fixtures/blueprint.json"
 
 const server = setupServer(...handlers)
@@ -77,5 +77,53 @@ describe("inspector", () => {
     const input = await screen.findByTestId("value-region")
     await user.type(input, "eu\nnorth")   // a control character; the server rejects these
     expect(await screen.findByRole("alert")).toBeInTheDocument()
+  })
+})
+
+// Coordinator fix round 1: four Important findings on setField/commitField
+// and the checkScalar mirror, all reviewer-verified empirically.
+describe("inspector (fix round 1)", () => {
+  it("Finding 2 (the undo trap): type, blur, undo restores the pre-edit field and leaves the node intact", async () => {
+    const user = userEvent.setup()
+    const id = useBlueprint.getState().nodes[0].id
+    const name = useBlueprint.getState().nodes[0].name
+    render(<Inspector nodeId={id} />)
+    const input = await screen.findByTestId("value-region")
+
+    await user.type(input, "eu-north-1")
+    fireEvent.blur(input)
+
+    let res = useBlueprint.getState().doc!.spec.resources.find(r => r.name === name)!
+    expect(res.fields["region"]).toEqual({ value: "eu-north-1" })
+
+    // Before the fix, setField pushed no history at all, so this undo()
+    // would instead pop addNode's own entry -- the node disappearing, not
+    // the field reverting.
+    useBlueprint.getState().undo()
+
+    expect(useBlueprint.getState().nodes.find(n => n.id === id)).toBeDefined()
+    res = useBlueprint.getState().doc!.spec.resources.find(r => r.name === name)!
+    expect(res.fields["region"]).toBeUndefined()
+  })
+
+  describe("Finding 4: checkScalar's rune quoting matches Go's fmt %q exactly for the detected set", () => {
+    const cases: Array<[string, number, string]> = [
+      ["BEL (0x07)", 0x07, "'\\a'"],
+      ["backspace (0x08)", 0x08, "'\\b'"],
+      ["vertical tab (0x0b)", 0x0b, "'\\v'"],
+      ["form feed (0x0c)", 0x0c, "'\\f'"],
+      ["an unnamed C0 control (0x01)", 0x01, "'\\x01'"],
+      ["DEL (0x7f)", 0x7f, "'\\x7f'"],
+      ["a C1 control / NEL (0x85)", 0x85, "'\\u0085'"],
+      ["line separator U+2028", 0x2028, "'\\u2028'"],
+      ["paragraph separator U+2029", 0x2029, "'\\u2029'"],
+    ]
+
+    it.each(cases)("%s quotes as %s", (_label, codePoint, expectedQuoted) => {
+      const ch = String.fromCodePoint(codePoint)
+      const message = checkScalar("queue", "region", ch)
+      expect(message).not.toBeNull()
+      expect(message).toContain(`contains the control character ${expectedQuoted}`)
+    })
   })
 })

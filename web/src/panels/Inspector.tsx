@@ -46,6 +46,12 @@ import { useBlueprint } from "../store/blueprint"
 // shape, client-side — "server validation, mirrored" rather than a literal
 // round trip that the current contract has no vehicle for. See the task
 // report for why this was not routed through MSW instead.
+//
+// THIS IS A SECOND COPY OF A RULE THAT LIVES IN GO. If
+// internal/blueprint/load.go's checkScalar ever changes — which runes it
+// rejects, the message shape, the byte-offset convention — update this
+// mirror to match. It WILL drift silently otherwise: nothing here is
+// generated from, or tested against, the Go source.
 // ---------------------------------------------------------------------------
 
 const CONTROL_CHAR_EXPLANATION =
@@ -64,30 +70,48 @@ function isControlRune(codePoint: number): boolean {
   return false
 }
 
-const GO_RUNE_ESCAPES: Record<string, string> = {
-  "\n": "\\n",
-  "\r": "\\r",
-  "\t": "\\t",
+// Go's fmt %q for a rune (strconv.QuoteRune) names seven control characters
+// individually; everything else control-ish falls through to a numeric
+// escape. Keyed by code point, not by JS string, so 0x07 etc. don't need a
+// second "which literal char is this" lookup.
+const GO_NAMED_RUNE_ESCAPES: Record<number, string> = {
+  0x07: "\\a", // alert / BEL
+  0x08: "\\b", // backspace
+  0x09: "\\t", // tab
+  0x0a: "\\n", // line feed
+  0x0b: "\\v", // vertical tab
+  0x0c: "\\f", // form feed
+  0x0d: "\\r", // carriage return
 }
 
-/** Formats one rune the way Go's fmt %q would for the runes checkScalar
- * actually rejects (control runes) — single-quoted, escaped. */
+/** Formats one rune exactly the way Go's fmt %q (strconv.QuoteRune) does,
+ * for the specific set checkScalar ever hands it: the seven named C0
+ * escapes above; \xHH (two lowercase hex digits) for every other C0
+ * control and DEL; \uHHHH (four lowercase hex digits, NO braces — that's
+ * JS's \u{...} syntax, not Go's) for the C1 controls (0x80-0x9f, which
+ * includes NEL, U+0085) and for U+2028/U+2029. isControlRune() below never
+ * passes this anything outside that set, so those three branches are
+ * exhaustive for this mirror's actual input — not a general %q
+ * implementation. */
 function quoteRune(ch: string): string {
-  const escaped = GO_RUNE_ESCAPES[ch]
-  if (escaped) return `'${escaped}'`
   const codePoint = ch.codePointAt(0)!
+  const named = GO_NAMED_RUNE_ESCAPES[codePoint]
+  if (named) return `'${named}'`
   if (codePoint < 0x20 || codePoint === 0x7f) {
     return `'\\x${codePoint.toString(16).padStart(2, "0")}'`
   }
-  return `'\\u{${codePoint.toString(16)}}'`
+  return `'\\u${codePoint.toString(16).padStart(4, "0")}'`
 }
 
 const byteLength = (s: string) => new TextEncoder().encode(s).length
 
-/** Returns the verbatim-style error checkScalar(fieldPath, s) would return,
- * or null if s is clean. fieldPath mirrors the shape Validate() builds for
- * a resource field: `resource "<name>" field "<path>": value`. */
-function checkScalar(resourceName: string, fieldPath: string, s: string): string | null {
+/** Returns the verbatim-style error Go's checkScalar(fieldPath, s) would
+ * return, or null if s is clean. fieldPath mirrors the shape Validate()
+ * builds for a resource field: `resource "<name>" field "<path>": value`.
+ * Exported for direct unit testing (fix round 1, Finding 4) — the rune
+ * table this exists to get exactly right is easier to assert against
+ * directly than through a live textarea and RTL. */
+export function checkScalar(resourceName: string, fieldPath: string, s: string): string | null {
   let byteOffset = 0
   for (const ch of s) {
     const codePoint = ch.codePointAt(0)!
@@ -146,6 +170,7 @@ export function Inspector({ nodeId }: InspectorProps) {
     node ? s.doc?.spec.resources.find(r => r.name === node.name) : undefined,
   )
   const setField = useBlueprint(s => s.setField)
+  const commitField = useBlueprint(s => s.commitField)
 
   const [filter, setFilter] = useState<Filter>("required")
   const [fields, setFields] = useState<Field[]>([])
@@ -293,6 +318,12 @@ export function Inspector({ nodeId }: InspectorProps) {
                     rows={1}
                     value={assignment?.value ?? ""}
                     onChange={event => handleChange(f.path, event.target.value)}
+                    // Folds the whole typing gesture into one undo step
+                    // (fix round 1, Finding 2) — blur reliably fires before
+                    // a different field's textarea gains focus, so this
+                    // alone also satisfies "commit before a different field
+                    // gains focus," with no separate onFocus bookkeeping.
+                    onBlur={() => commitField(nodeId, f.path)}
                     style={{
                       resize: "vertical",
                       minHeight: 26,
