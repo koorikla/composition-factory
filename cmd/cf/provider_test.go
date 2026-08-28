@@ -101,18 +101,21 @@ spec:
 // ordering: if the lock can't be written, Run must fail before it caches any
 // schemas, so a partial failure never leaves cached CRDs that nothing pins.
 //
-// The lock path points at an existing directory rather than a file. This is
-// portable (no reliance on permission bits, which root ignores in many CI
-// containers) and deterministic: os.ReadFile on a directory fails on both
-// Linux and macOS, so cache.ReadLock returns an error before Run ever gets
-// to Set/Write, let alone to caching the schemas.
+// The lock path's PARENT DIRECTORY does not exist. This specifically
+// discriminates on write-before-cache order, unlike pointing Lock at an
+// existing directory (which fails inside cache.ReadLock's os.ReadFile
+// regardless of Save/Write order, and so does not actually guard the
+// ordering). Here, cache.ReadLock(missing file) returns (&Lock{}, nil) per
+// its documented "a missing file is an empty lock, not an error" behaviour
+// (internal/cache/store.go), so execution proceeds past ReadLock and Set (a
+// no-op on an empty lock) and only fails at l.Write, which hits ENOENT
+// because the parent directory is absent. That failure point is on the far
+// side of ReadLock/Set, so it only leaves the cache unpopulated if Write
+// really does run before Save. It depends on no permission bits, so it
+// behaves identically as root or non-root.
 func TestProviderAddLockFailureLeavesCacheUnpopulated(t *testing.T) {
-	dir := t.TempDir()
-	lockPath := filepath.Join(dir, ".cf.lock")
-	if err := os.Mkdir(lockPath, 0o755); err != nil {
-		t.Fatalf("Mkdir: %v", err)
-	}
-	cacheDir := filepath.Join(dir, "cache")
+	lockPath := filepath.Join(t.TempDir(), "no-such-dir", ".cf.lock")
+	cacheDir := filepath.Join(t.TempDir(), "cache")
 	cmd := &ProviderAddCmd{
 		Ref:      "example.org/provider-test:v2",
 		CacheDir: cacheDir,
@@ -121,7 +124,7 @@ func TestProviderAddLockFailureLeavesCacheUnpopulated(t *testing.T) {
 	}
 	var out bytes.Buffer
 	if err := cmd.Run(&out); err == nil {
-		t.Fatal("Run: want an error when the lock path cannot be written")
+		t.Fatal("Run: want an error when the lock's parent directory does not exist")
 	}
 	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
 		t.Errorf("cache dir stat = %v, want it not to exist: Run must pin the lock before it caches schemas", err)
