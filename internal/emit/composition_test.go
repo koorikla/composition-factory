@@ -311,3 +311,47 @@ func TestUnknownKindIsAClearError(t *testing.T) {
 		t.Fatalf("err = %v, want an error naming the unknown kind", err)
 	}
 }
+
+// --- Final review, I2: Generate is the one entry point, so it validates ---
+//
+// blueprint.Load validates, but Load is only the CLI's path to a Blueprint.
+// The HTTP and MCP front doors build one in memory from a request body, and
+// this is the function all three call. Scope: "" is the reproduction: it is
+// compared against a bool inside resolveKind, which silently selects the
+// LEGACY cluster-scoped variant (whose fields the API server prunes), while
+// the XRD emits a null scope:.
+func TestGenerateValidatesTheBlueprintItWasHanded(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.XRD.Scope = ""
+
+	outs, err := Generate(b, testCRDs(t), "out")
+	if err != nil {
+		if !strings.Contains(err.Error(), "scope") {
+			t.Errorf("err = %v, want it to name scope", err)
+		}
+		return
+	}
+
+	// Not refused: then show precisely what an unvalidated Blueprint bought.
+	for _, o := range outs {
+		var doc map[string]any
+		if err := yaml.Unmarshal(o.Body, &doc); err != nil {
+			continue // functions.yaml is a multi-document stream; not the point here.
+		}
+		if doc["kind"] == "CompositeResourceDefinition" {
+			spec, _ := doc["spec"].(map[string]any)
+			if scope, present := spec["scope"]; !present || scope == nil || scope == "" {
+				t.Errorf("XRD emitted scope: %v -- an omitted scope is defaulted to Namespaced by "+
+					"the API server and to LegacyCluster by `crossplane xrd convert`", scope)
+			}
+		}
+		if doc["kind"] == "Composition" {
+			if !bytes.Contains(o.Body, []byte("sqs.aws.m.upbound.io")) {
+				t.Errorf("Composition selected the legacy cluster-scoped variant, whose extra "+
+					"fields the API server silently prunes\n---\n%s", o.Body)
+			}
+		}
+	}
+	t.Fatal("Generate accepted a Blueprint with no scope; it must validate what it is handed, " +
+		"because the HTTP and MCP front doors never go through blueprint.Load")
+}
