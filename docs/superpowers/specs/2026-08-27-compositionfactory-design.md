@@ -304,10 +304,27 @@ all from day one:
 
 1. `options: ["missingkey=error"]` emitted **top-level**, not under `inline` (the function's README
    is wrong; the nested form is a fatal error).
-2. Every optional field wrapped in `{{- with }}`.
-3. Every dereferenced field marked `required` in the generated XRD, so the XR gate catches it upstream.
+2. Every optional field guarded with `{{- if hasKey $spec "x" }}`, **not** `{{- with $spec.x }}`.
+3. Blueprint content validated before it can reach a template: control characters rejected in every
+   user-controlled scalar, `type: array` and composite `from:` sources rejected, and every field path
+   checked against the provider CRD's own schema so a typo cannot be silently pruned.
 4. `grep -rn '<no value>\|<nil>'` in every generated Makefile.
-5. The same guard in our own golden tests.
+5. The same guard in our own golden tests, and in the acceptance gate.
+
+> **Corrected during M1, against the original design.** Layers 2 and 3 above replace what this spec
+> first specified — "wrap every optional field in `{{- with }}`" and "mark every dereferenced field
+> `required` in the generated XRD". Both were wrong, and the correction was forced by rendering
+> against the real engine:
+>
+> - `{{- with $spec.x }}` is **incompatible with `missingkey=error`**. When the key is genuinely
+>   absent the render fails outright (`map has no entry for key`), so the two defences cancelled.
+>   `hasKey` satisfies both: it prevents `<no value>` *and* renders nothing when the key is missing.
+> - Force-marking every dereferenced parameter `required` then became redundant *and* harmful — it
+>   made any parameter a template reads mandatory, silently abolishing optional parameters. It was
+>   removed, along with the `DereferencedParams` function that computed it.
+>
+> Do not reinstate either. The `hasKey` idiom is what five independent agents chose unprompted in a
+> baseline experiment before this spec overrode them.
 
 **Determinism is a correctness requirement, not a nicety.** On a `prune: true` + `selfHeal: true`
 ArgoCD repo, a churning file is a live-cluster incident. Sorted keys, stable field order, LF only,
