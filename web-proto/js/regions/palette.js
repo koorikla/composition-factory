@@ -9,9 +9,8 @@
  *             prototype's Vars card look; badge = fan-out count (wires.js).
  *   SOURCES — doc.spec.sources refs as src-rows; add flow disabled for now.
  *
- * Exported init(rootEl, {store, api}) is the integrator entry point; the
- * module also self-initializes (once) against #region-palette when imported
- * by main.js without an explicit init call.
+ * Exported init(rootEl, {store, api}) is the single entry point — main.js
+ * calls it once with the region root and the shared store/api.
  */
 
 import { store as defaultStore } from "../store.js";
@@ -52,8 +51,7 @@ export function init(rootEl, deps) {
   booted = true;
 
   const store = deps && deps.store || defaultStore;
-  const api = deps && deps.api || defaultApi; // frozen getKinds() lacks ?q= — see fetchKinds
-  void api;
+  const api = deps && deps.api || defaultApi;
 
   const tabsEl = rootEl.querySelector("#rtabs");
   const searchWrapEl = rootEl.querySelector("#lsearch");
@@ -68,33 +66,11 @@ export function init(rootEl, deps) {
   let searchSeq = 0;
   let debounceTimer = null;
 
-  /* ---- kinds fetch (server-side search) --------------------------------
-   * Frozen api.getKinds() takes no parameters, but the live endpoint
-   * supports ?q= substring search — call it directly (same-origin,
-   * same error shape as api.js). Reported as a contract gap. */
-  async function fetchKinds(q) {
-    const url = "/api/kinds" + (q ? "?q=" + encodeURIComponent(q) : "");
-    let res;
-    try {
-      res = await fetch(url);
-    } catch (e) {
-      throw { status: 0, message: "network error: " + (e && e.message || e) };
-    }
-    const text = await res.text();
-    let data = null;
-    if (text) { try { data = JSON.parse(text); } catch (_) { /* non-JSON */ } }
-    if (!res.ok) {
-      const message = (data && typeof data.error === "string" && data.error)
-        || text || (res.status + " " + res.statusText);
-      throw { status: res.status, message };
-    }
-    return data;
-  }
-
+  /* ---- kinds fetch (server-side search via api.getKinds(q)) ---- */
   function loadKinds() {
     const q = (searchEl && searchEl.value || "").trim();
     const seq = ++searchSeq;
-    fetchKinds(q).then(function (d) {
+    api.getKinds(q).then(function (d) {
       if (seq !== searchSeq) return; // stale response
       kinds = d && d.kinds || [];
       kindsError = null;
@@ -233,12 +209,3 @@ export function init(rootEl, deps) {
   drawRail();   // paints "Loading kinds…" immediately
   loadKinds();
 }
-
-/* Self-init for the scaffold's import-time wiring (main.js imports region
- * modules and never calls init). A microtask keeps an explicit synchronous
- * init(rootEl, {store, api}) from a future integrator authoritative. */
-queueMicrotask(function () {
-  if (booted) return;
-  const rootEl = document.getElementById("region-palette");
-  if (rootEl) init(rootEl, { store: defaultStore, api: defaultApi });
-});

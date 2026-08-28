@@ -58,13 +58,14 @@ async function request(method, path, body) {
 
 /**
  * GET /api/kinds
+ * @param {string} [q] Substring search over kind names (server param: q).
  * @returns {Promise<{kinds: Array<{kind:string, group:string, version:string,
  *   apiVersion:string, plural:string, scope:string, provider:string,
  *   namespaced:boolean, required:number, fields:number}>}>}
  * @throws {ApiError}
  */
-export function getKinds() {
-  return request("GET", "/api/kinds");
+export function getKinds(q) {
+  return request("GET", "/api/kinds" + (q ? "?q=" + encodeURIComponent(q) : ""));
 }
 
 /**

@@ -505,9 +505,8 @@ function onFsegClick(e) {
 var initialized = false;
 
 /**
- * Initialize the inspector region. Idempotent — the integrator may call it
- * explicitly; importing this module also auto-initializes against the default
- * store/api and #region-inspector.
+ * Initialize the inspector region (idempotent). main.js calls it once with
+ * the region root and the shared store/api.
  * @param {HTMLElement} rootEl  #region-inspector
  * @param {{store?: Object, api?: Object}} [deps]
  */
@@ -535,7 +534,3 @@ export function init(rootEl, deps) {
 
   render();
 }
-
-/* Auto-init on import (main.js imports region modules for side effects). */
-var autoRoot = typeof document !== "undefined" && document.getElementById("region-inspector");
-if (autoRoot) init(autoRoot, { store: defaultStore, api: defaultApi });

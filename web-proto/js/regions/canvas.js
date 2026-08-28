@@ -9,9 +9,8 @@
  * Contract: subscribes to store topics "doc" and "selection"; wires are
  * derived from the doc via ../wires.js. Never edits store.js/api.js/wires.js.
  *
- * Exported init(rootEl, {store, api}) is idempotent — the module also
- * self-initializes on import (main.js's import-time pattern), so a later
- * explicit init() call from the integrator is a harmless no-op.
+ * Exported init(rootEl, {store, api}) is the single entry point — main.js
+ * calls it once with the region root and the shared store/api (idempotent).
  */
 
 import { store as defaultStore } from "../store.js";
@@ -447,5 +446,3 @@ export function init(rootEl, deps) {
   render();
 }
 
-// Self-initialize on import (main.js import-time pattern); explicit init() is a no-op after this.
-init(document.getElementById("cw"), { store: defaultStore, api: defaultApi });
