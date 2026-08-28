@@ -111,6 +111,21 @@ func TestPrefixExpandsOneSubtree(t *testing.T) {
 	}
 }
 
+// TestPrefixMatchesALeafsOwnPathExactly pins exact-path lookup: a Prefix that
+// names a leaf itself (not a branch above it) returns just that leaf. This
+// is safe because a schema.Node is either a leaf or a branch, never both, so
+// a branch-shaped Prefix can never collide with a real leaf path — but the
+// inspector uses this exact form for single-field lookup, so the behavior
+// needs to be pinned rather than left as an untested side effect of the
+// path-segment-boundary check.
+func TestPrefixMatchesALeafsOwnPathExactly(t *testing.T) {
+	got := paths(Fields(deepTree(t), FieldQuery{Prefix: "replicas"}))
+	want := []string{"replicas"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("Prefix=leaf's own path (-want +got):\n%s", diff)
+	}
+}
+
 func TestSearchMatchesPathAndDescription(t *testing.T) {
 	if got := paths(Fields(deepTree(t), FieldQuery{Search: "image"})); len(got) != 1 {
 		t.Errorf("Search(image) = %v, want exactly the image field", got)
@@ -123,6 +138,25 @@ func TestSearchMatchesPathAndDescription(t *testing.T) {
 func TestLimitApplies(t *testing.T) {
 	if got := Fields(deepTree(t), FieldQuery{Limit: 2}); len(got) != 2 {
 		t.Errorf("Limit=2 returned %d", len(got))
+	}
+}
+
+// TestNegativeLimitIsUnlimited pins Limit<=0 as "unlimited", matching the
+// documented behavior of MaxDepth's zero value. A malformed limit string
+// (e.g. "abc") is Task 5's job to reject with 400 at the HTTP boundary,
+// before it ever becomes an int; a negative int reaching this function is
+// therefore never the result of that rejected input; it's a caller's
+// legitimate way to ask for "no limit" internally. Do not make negative
+// values an error here — that would fight the boundary validation rather
+// than complement it.
+func TestNegativeLimitIsUnlimited(t *testing.T) {
+	unlimited := Fields(deepTree(t), FieldQuery{Limit: 0})
+	negative := Fields(deepTree(t), FieldQuery{Limit: -1})
+	if len(unlimited) != 4 {
+		t.Fatalf("Limit=0 returned %d fields, want 4 (sanity check)", len(unlimited))
+	}
+	if diff := cmp.Diff(unlimited, negative); diff != "" {
+		t.Errorf("Limit=-1 (-Limit=0 +Limit=-1):\n%s", diff)
 	}
 }
 
