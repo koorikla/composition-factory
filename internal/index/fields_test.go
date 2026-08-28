@@ -1,0 +1,144 @@
+package index
+
+import (
+	"testing"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/koorikla/compositionfactory/internal/schema"
+)
+
+// deepTree mirrors a real Deployment shape: an object nested inside an object
+// inside an array of objects, plus a required scalar and a map leaf.
+func deepTree(t *testing.T) []*schema.Node {
+	t.Helper()
+	props := map[string]any{
+		"replicas": map[string]any{"type": "integer", "description": "Desired pods."},
+		"selector": map[string]any{
+			"type": "object", "required": []any{"matchLabels"},
+			"properties": map[string]any{
+				"matchLabels": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+			},
+		},
+		"template": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"spec": map[string]any{
+					"type": "object", "required": []any{"containers"},
+					"properties": map[string]any{
+						"containers": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"required": []any{"name"},
+								"properties": map[string]any{
+									"name":  map[string]any{"type": "string", "description": "Container name."},
+									"image": map[string]any{"type": "string"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	return schema.BuildTree(props, []string{"template"})
+}
+
+func paths(fs []Field) []string {
+	out := make([]string, 0, len(fs))
+	for _, f := range fs {
+		out = append(out, f.Path)
+	}
+	return out
+}
+
+func TestFieldsReturnsEveryLeafByDefault(t *testing.T) {
+	got := paths(Fields(deepTree(t), FieldQuery{}))
+	want := []string{
+		"replicas",
+		"selector.matchLabels",
+		"template.spec.containers[0].image",
+		"template.spec.containers[0].name",
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("default field list (-want +got):\n%s", diff)
+	}
+}
+
+func TestDepthIsCountedFromZero(t *testing.T) {
+	for _, f := range Fields(deepTree(t), FieldQuery{}) {
+		var want int
+		switch f.Path {
+		case "replicas":
+			want = 0
+		case "selector.matchLabels":
+			want = 1
+		case "template.spec.containers[0].image", "template.spec.containers[0].name":
+			want = 3
+		}
+		if f.Depth != want {
+			t.Errorf("%s: Depth=%d, want %d", f.Path, f.Depth, want)
+		}
+	}
+}
+
+func TestMaxDepthPrunes(t *testing.T) {
+	got := paths(Fields(deepTree(t), FieldQuery{MaxDepth: 1}))
+	want := []string{"replicas", "selector.matchLabels"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("MaxDepth=1 (-want +got):\n%s", diff)
+	}
+	if len(Fields(deepTree(t), FieldQuery{MaxDepth: 0})) != 4 {
+		t.Error("MaxDepth=0 must mean unlimited, not zero fields")
+	}
+}
+
+func TestRequiredOnlyKeepsOnlyRequiredLeaves(t *testing.T) {
+	got := paths(Fields(deepTree(t), FieldQuery{RequiredOnly: true}))
+	want := []string{"selector.matchLabels", "template.spec.containers[0].name"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("RequiredOnly (-want +got):\n%s\n(a required LEAF, not a leaf under a required branch)", diff)
+	}
+}
+
+func TestPrefixExpandsOneSubtree(t *testing.T) {
+	got := paths(Fields(deepTree(t), FieldQuery{Prefix: "template.spec"}))
+	want := []string{"template.spec.containers[0].image", "template.spec.containers[0].name"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("Prefix (-want +got):\n%s", diff)
+	}
+	if len(Fields(deepTree(t), FieldQuery{Prefix: "no.such.path"})) != 0 {
+		t.Error("an unmatched Prefix must return nothing, not everything")
+	}
+}
+
+func TestSearchMatchesPathAndDescription(t *testing.T) {
+	if got := paths(Fields(deepTree(t), FieldQuery{Search: "image"})); len(got) != 1 {
+		t.Errorf("Search(image) = %v, want exactly the image field", got)
+	}
+	if got := paths(Fields(deepTree(t), FieldQuery{Search: "desired pods"})); len(got) != 1 {
+		t.Errorf("Search must match description case-insensitively; got %v", got)
+	}
+}
+
+func TestLimitApplies(t *testing.T) {
+	if got := Fields(deepTree(t), FieldQuery{Limit: 2}); len(got) != 2 {
+		t.Errorf("Limit=2 returned %d", len(got))
+	}
+}
+
+func TestMapIsALeafNotABranch(t *testing.T) {
+	for _, f := range Fields(deepTree(t), FieldQuery{}) {
+		if f.Path == "selector.matchLabels" && f.Type != "map" {
+			t.Errorf("selector.matchLabels Type=%q, want map", f.Type)
+		}
+	}
+}
+
+func TestOutputIsDeterministic(t *testing.T) {
+	a := Fields(deepTree(t), FieldQuery{})
+	for n := 0; n < 20; n++ {
+		if diff := cmp.Diff(a, Fields(deepTree(t), FieldQuery{})); diff != "" {
+			t.Fatalf("run %d differs:\n%s", n, diff)
+		}
+	}
+}
