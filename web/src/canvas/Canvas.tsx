@@ -2,12 +2,13 @@
 // them, all real DOM (see the brief on why @xyflow/react over a <canvas>-
 // drawing library — node bodies need to be selectable, focusable text and
 // form controls, which a <canvas> tag cannot give us).
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type JSX } from "react"
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type DragEvent, type JSX } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
   applyNodeChanges,
+  useReactFlow,
   type Node as RFNode,
   type Edge as RFEdge,
   type NodeChange,
@@ -17,7 +18,7 @@ import {
 import "@xyflow/react/dist/style.css"
 import { useBlueprint } from "../store/blueprint"
 import { api } from "../api/contract"
-import type { Field } from "../api/contract"
+import type { Field, Kind } from "../api/contract"
 import { ResourceNode } from "./ResourceNode"
 import { XRNode } from "./XRNode"
 import { wireKind, wireStyle, rejectionMessage, typesCompatible } from "./wires"
@@ -56,6 +57,32 @@ const canvasStyle = `
   }
 `
 
+// The palette (Task 4, Palette.tsx's dragKindData) serializes the WHOLE
+// Kind object as JSON onto this MIME type; this is the one place on the
+// canvas side that has to agree on that shape. A minimal runtime check
+// (rather than trusting the cast) because dataTransfer content is, in
+// principle, whatever a browser extension or a stray drag from elsewhere on
+// the page put there — not just this app's own Palette.
+function parseDraggedKind(dataTransfer: DataTransfer): Kind | null {
+  const raw = dataTransfer.getData("application/x-compositionfactory-kind")
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    typeof (parsed as Kind).kind === "string" &&
+    typeof (parsed as Kind).apiVersion === "string"
+  ) {
+    return parsed as Kind
+  }
+  return null
+}
+
 const visuallyHiddenStyle: CSSProperties = {
   position: "absolute",
   width: 1,
@@ -73,7 +100,17 @@ const visuallyHiddenStyle: CSSProperties = {
  * (nothing to guard behind prefers-reduced-motion), just a timeout. */
 const REJECTION_MESSAGE_MS = 4000
 
-function CanvasInner() {
+export interface CanvasProps {
+  /** Reports the currently selected resource node's id (never the XR node's
+   * — the XR node has no resource to inspect), or null once nothing is
+   * selected. Optional and backward-compatible: every existing test in this
+   * file renders `<Canvas />` with no props at all. Added so the app shell
+   * (App.tsx, Task 6) can wire the Inspector to whatever the user actually
+   * clicked, rather than guessing. */
+  onSelectionChange?: (nodeId: string | null) => void
+}
+
+function CanvasInner({ onSelectionChange }: CanvasProps) {
   const doc = useBlueprint(s => s.doc)
   const storeNodes = useBlueprint(s => s.nodes)
   const wires = useBlueprint(s => s.wires)
@@ -82,6 +119,8 @@ function CanvasInner() {
   const commitMove = useBlueprint(s => s.commitMove)
   const removeNode = useBlueprint(s => s.removeNode)
   const connect = useBlueprint(s => s.connect)
+  const addNode = useBlueprint(s => s.addNode)
+  const { screenToFlowPosition } = useReactFlow()
 
   // The XR node isn't a store `Node` (it has no resource, no name, nothing
   // to key it into the blueprint document) — its position is UI-local.
@@ -172,6 +211,13 @@ function CanvasInner() {
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       setRfNodes(nds => applyNodeChanges(changes, nds))
+      // Only reported when this batch actually contains a selection change
+      // (xyflow emits one 'select' change per node whose selected flag
+      // flips — a click on node B ordinarily arrives as [deselect A,
+      // select B] in one batch): a plain drag's batch is all 'position'
+      // changes and must not be misread as "selection cleared."
+      let selectionChanged = false
+      let selectedId: string | null = null
       for (const change of changes) {
         if (change.type === "position" && change.position) {
           if (change.id === XR_ID) {
@@ -182,10 +228,17 @@ function CanvasInner() {
           if (change.dragging === false) commitMove()
         } else if (change.type === "remove" && change.id !== XR_ID) {
           removeNode(change.id)
+        } else if (change.type === "select") {
+          selectionChanged = true
+          // The XR node has no resource, so it is never a reportable
+          // selection — a click that selects only the XR node reports as
+          // "nothing selected," same as clicking empty canvas.
+          if (change.selected && change.id !== XR_ID) selectedId = change.id
         }
       }
+      if (selectionChanged) onSelectionChange?.(selectedId)
     },
-    [moveNode, commitMove, removeNode],
+    [moveNode, commitMove, removeNode, onSelectionChange],
   )
 
   const onConnect = useCallback(
@@ -265,8 +318,32 @@ function CanvasInner() {
     [],
   )
 
+  // Drop-to-create: the palette (Palette.tsx's KindRow) sets
+  // "application/x-compositionfactory-kind" as the serialized Kind on drag
+  // start. onDragOver must call preventDefault() — the browser's default is
+  // to refuse the drop entirely, firing no "drop" event at all — and
+  // screenToFlowPosition converts the browser's client coordinates into the
+  // same flow-space coordinates addNode's x/y already expect (accounting
+  // for the canvas's own pan/zoom), exactly like dragging an existing node
+  // already does via xyflow's own onNodesChange.
+  const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = "copy"
+  }, [])
+
+  const onDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      const kind = parseDraggedKind(event.dataTransfer)
+      if (!kind) return
+      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      addNode(kind, position.x, position.y)
+    },
+    [addNode, screenToFlowPosition],
+  )
+
   return (
-    <div style={{ width: "100%", height: "100%" }}>
+    <div style={{ width: "100%", height: "100%" }} onDragOver={onDragOver} onDrop={onDrop}>
       <style>{canvasStyle}</style>
       {/* Screen-reader-only: the same refusal xyflow expresses visually
           (the --err ring in canvasStyle above) as text, since a hover/
@@ -295,10 +372,10 @@ function CanvasInner() {
   )
 }
 
-export function Canvas(): JSX.Element {
+export function Canvas({ onSelectionChange }: CanvasProps = {}): JSX.Element {
   return (
     <ReactFlowProvider>
-      <CanvasInner />
+      <CanvasInner onSelectionChange={onSelectionChange} />
     </ReactFlowProvider>
   )
 }

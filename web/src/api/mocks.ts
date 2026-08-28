@@ -5,6 +5,7 @@
 // order: Prefix, then MaxDepth, then RequiredOnly, then Search, then Limit)
 // rather than faking just enough to pass one assertion.
 import { http, HttpResponse } from "msw"
+import type { HttpHandler } from "msw"
 import type { Blueprint, Field, Kind, Parameter } from "./contract"
 
 import kindsFixture from "./fixtures/kinds.json"
@@ -170,6 +171,29 @@ export const handlers = [
 
   http.get("/api/blueprint", () => HttpResponse.json(blueprintState)),
 
+  // Full-document replace: the client-authoritative canvas document
+  // overwrites the mock's "disk" state outright, so a following GET or
+  // /api/generate reflects it — the same contract the real PUT /api/blueprint
+  // route serves (see api/contract.ts's putBlueprint doc comment). A doc
+  // whose XRD scope is "Cluster" is rejected with a 400 to emulate a real
+  // engine validation failure (Blueprint's XRD schema only supports the
+  // scopes the real Go engine's blueprint.Validate() accepts today —
+  // "Cluster" is a stand-in for "the engine rejected this document," not a
+  // claim that scope itself is invalid).
+  http.put("/api/blueprint", async ({ request }) => {
+    let body: Blueprint
+    try {
+      body = (await request.json()) as Blueprint
+    } catch {
+      return errorJSON(400, "malformed JSON body")
+    }
+    if (body?.spec?.xrd?.scope === "Cluster") {
+      return errorJSON(400, `invalid blueprint: xrd scope "Cluster" is unsupported`)
+    }
+    blueprintState = body
+    return HttpResponse.json(blueprintState)
+  }),
+
   http.post("/api/blueprint/parameters", async ({ request }) => {
     let body: { name?: string; parameter?: Parameter }
     try {
@@ -265,3 +289,13 @@ export const handlers = [
     return HttpResponse.json({ ...generateFixture, written: Boolean(body.write) })
   }),
 ]
+
+/** A one-off MSW handler override that makes /api/generate fail with a 400,
+ * for tests that need to exercise "a generation failure surfaces instead of
+ * stale output" (Output.test.tsx) without hand-rolling the same
+ * http.post("/api/generate", ...) override in every file that needs it.
+ * Install with `server.use(failGenerate())`; MSW's own resetHandlers()
+ * (afterEach in every test file that calls it) undoes it automatically. */
+export function failGenerate(message = "generation failed: engine returned a non-zero exit"): HttpHandler {
+  return http.post("/api/generate", () => errorJSON(400, message))
+}

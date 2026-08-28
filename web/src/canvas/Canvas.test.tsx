@@ -57,6 +57,58 @@ describe("canvas", () => {
     const node = await screen.findByTestId(/^node-/)
     expect(node.getAttribute("tabindex")).not.toBeNull()
   })
+
+  describe("drop-to-create", () => {
+    // A resource-free document: the fixture's own "main-queue" resource
+    // would otherwise race Canvas's own async hydration effect (it fetches
+    // api.kinds() then calls hydrateNodes() — see Canvas.tsx), which can
+    // land a node before this test's own assertions run and make "zero
+    // nodes before the drop" flaky. Starting from zero resources sidesteps
+    // that race entirely: hydrateNodes() has nothing to hydrate.
+    beforeEach(() => {
+      const empty = structuredClone(blueprintFixture) as any
+      empty.spec.resources = []
+      useBlueprint.setState({ doc: empty, nodes: [], wires: [] })
+    })
+
+    it("adds a resource when a palette kind is dropped onto the canvas", async () => {
+      // Mirrors Palette.tsx's KindRow.onDragStart exactly: the whole Kind,
+      // JSON-serialized onto this one MIME type — Canvas's onDrop is the
+      // only consumer of it.
+      const dataTransfer = {
+        getData: (type: string) =>
+          type === "application/x-compositionfactory-kind" ? JSON.stringify(queueKind) : "",
+        dropEffect: "",
+      } as unknown as DataTransfer
+      const { container } = render(<Canvas />)
+      await screen.findByTestId("node-xr")
+      expect(useBlueprint.getState().nodes).toHaveLength(0)
+      const dropTarget = container.firstElementChild as HTMLElement
+      fireEvent.dragOver(dropTarget, { dataTransfer })
+      fireEvent.drop(dropTarget, { dataTransfer, clientX: 300, clientY: 150 })
+      expect(useBlueprint.getState().nodes).toHaveLength(1)
+      const added = useBlueprint.getState().nodes[0]
+      expect(added.kind).toBe("Queue")
+      expect(added.apiVersion).toBe(queueKind.apiVersion)
+      // The resource the node represents landed in the document too — a
+      // dropped kind isn't just a visual node, it's the same addNode() the
+      // palette's Enter-to-add keyboard path already uses
+      // (store/blueprint.ts).
+      expect(useBlueprint.getState().doc!.spec.resources.some(r => r.name === added.name)).toBe(true)
+    })
+
+    it("ignores a drop that doesn't carry the palette's kind payload", async () => {
+      const dataTransfer = {
+        getData: () => "",
+        dropEffect: "",
+      } as unknown as DataTransfer
+      const { container } = render(<Canvas />)
+      await screen.findByTestId("node-xr")
+      const dropTarget = container.firstElementChild as HTMLElement
+      fireEvent.drop(dropTarget, { dataTransfer, clientX: 300, clientY: 150 })
+      expect(useBlueprint.getState().nodes).toHaveLength(0)
+    })
+  })
 })
 
 describe("fix round 1, Finding 1 — hydration re-arms on load(), not just on Canvas mount", () => {

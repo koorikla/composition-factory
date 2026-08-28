@@ -217,6 +217,16 @@ export const api = {
     return request("/blueprint")
   },
 
+  /** Full-document replace. The canvas document lives client-side (in the
+   * store), but /api/generate reads the document from DISK — without this,
+   * the preview would ignore everything the user has done on the canvas.
+   * Returns the persisted doc (same shape GET returns); a 400 carries the
+   * engine's own validation error verbatim, exactly like every other
+   * mutation route in this file. */
+  putBlueprint(doc: Blueprint): Promise<Blueprint> {
+    return request("/blueprint", jsonInit("PUT", doc))
+  },
+
   addParameter(name: string, p: Parameter): Promise<void> {
     return request("/blueprint/parameters", jsonInit("POST", { name, parameter: p }))
   },
