@@ -90,6 +90,10 @@ func ParseCRDs(docs [][]byte) ([]CRD, error) {
 
 // Preferred returns the storage version, falling back to the first served
 // non-deprecated version. It never blindly returns Versions[0].
+//
+// If more than one version has storage: true (a malformed CRD; the
+// apiextensions API only allows one), the first such version in list order
+// wins. This is a deliberate, documented tie-break, not an oversight.
 func (c CRD) Preferred() (Version, error) {
 	for _, v := range c.Versions {
 		if v.Storage {
@@ -118,11 +122,13 @@ func (c CRD) IsManaged() bool {
 // namespaced managed-resource variants live in ".m." groups.
 func (c CRD) Namespaced() bool { return c.Scope == "Namespaced" }
 
-// APIVersion returns group/version for the preferred version, or group/ if none.
-func (c CRD) APIVersion() string {
+// APIVersion returns group/version for the preferred version. It returns an
+// error instead of a malformed apiVersion string (e.g. "group/" with an empty
+// version segment) when the CRD has no usable version.
+func (c CRD) APIVersion() (string, error) {
 	v, err := c.Preferred()
 	if err != nil {
-		return c.Group + "/"
+		return "", fmt.Errorf("%s: %w", c.Kind, err)
 	}
-	return c.Group + "/" + v.Name
+	return c.Group + "/" + v.Name, nil
 }

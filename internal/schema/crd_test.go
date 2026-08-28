@@ -69,7 +69,11 @@ func TestParseCRDsPicksStorageVersion(t *testing.T) {
 	if v.Name != "v1beta2" {
 		t.Errorf("Preferred = %q, want v1beta2 (the storage version, not versions[0])", v.Name)
 	}
-	if got, want := c.APIVersion(), "test.m.example.org/v1beta2"; got != want {
+	apiVersion, err := c.APIVersion()
+	if err != nil {
+		t.Fatalf("APIVersion: %v", err)
+	}
+	if got, want := apiVersion, "test.m.example.org/v1beta2"; got != want {
 		t.Errorf("APIVersion = %q, want %q", got, want)
 	}
 	if !c.IsManaged() {
@@ -98,5 +102,90 @@ func TestParseCRDsIgnoresNonCRDDocuments(t *testing.T) {
 	}
 	if len(crds) != 1 {
 		t.Fatalf("got %d CRDs, want 1 (the meta document must be skipped)", len(crds))
+	}
+}
+
+// TestPreferred covers the consequential branches of Preferred(): the
+// domain's most-cited bug is a legacy CRD serving two versions with
+// inconsistent storage flags, so the fallback and failure paths need
+// explicit coverage, not just the happy path exercised above.
+func TestPreferred(t *testing.T) {
+	tests := []struct {
+		name     string
+		crd      CRD
+		wantName string
+		wantErr  bool
+	}{
+		{
+			name:    "no versions at all",
+			crd:     CRD{Kind: "Widget", Plural: "widgets", Group: "test.example.org"},
+			wantErr: true,
+		},
+		{
+			name: "all versions unserved",
+			crd: CRD{
+				Kind: "Widget", Plural: "widgets", Group: "test.example.org",
+				Versions: []Version{
+					{Name: "v1beta1", Served: false, Storage: false, Deprecated: false},
+					{Name: "v1beta2", Served: false, Storage: false, Deprecated: false},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "all versions deprecated",
+			crd: CRD{
+				Kind: "Widget", Plural: "widgets", Group: "test.example.org",
+				Versions: []Version{
+					{Name: "v1beta1", Served: true, Storage: false, Deprecated: true},
+					{Name: "v1beta2", Served: true, Storage: false, Deprecated: true},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "two versions both storage:true takes the first in list order",
+			crd: CRD{
+				Kind: "Widget", Plural: "widgets", Group: "test.example.org",
+				Versions: []Version{
+					{Name: "v1beta1", Served: true, Storage: true, Deprecated: false},
+					{Name: "v1beta2", Served: true, Storage: true, Deprecated: false},
+				},
+			},
+			wantName: "v1beta1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := tt.crd.Preferred()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Preferred() = %+v, nil; want an error", v)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Preferred(): unexpected error: %v", err)
+			}
+			if v.Name != tt.wantName {
+				t.Errorf("Preferred().Name = %q, want %q", v.Name, tt.wantName)
+			}
+		})
+	}
+}
+
+// TestAPIVersionErrorsRatherThanReturningMalformedString guards against the
+// exact defect class this project cares most about: a legal-looking string
+// that is quietly wrong. A CRD with no usable version must not produce
+// "group/" (an apiVersion with an empty version segment) -- it must return
+// an error and an empty string.
+func TestAPIVersionErrorsRatherThanReturningMalformedString(t *testing.T) {
+	c := CRD{Kind: "Widget", Plural: "widgets", Group: "test.example.org"}
+	got, err := c.APIVersion()
+	if err == nil {
+		t.Fatalf("APIVersion() = %q, nil; want an error for a CRD with no usable version", got)
+	}
+	if got != "" {
+		t.Errorf("APIVersion() = %q, want empty string on error", got)
 	}
 }
