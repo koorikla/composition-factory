@@ -210,18 +210,43 @@ func wrap(h http.Handler) http.Handler {
 		// error or 304 — declares that.
 		header.Set("Vary", "Accept-Encoding")
 
+		// The ETag is computed over the exact bytes of every response, so
+		// even an error response carries a validator a client can quote
+		// back. Whether that validator is allowed to turn the response into
+		// a 304 is a separate, much narrower question — see below.
 		etag := etagFor(body)
 		header.Set("ETag", etag)
 
-		if inm := r.Header.Get("If-None-Match"); etagMatches(inm, etag) {
-			// A 304 carries no body and, per RFC 7232 §4.1, should not
-			// repeat entity headers like Content-Type or Content-Length —
-			// only validators and caching headers.
-			out := w.Header()
-			out.Set("ETag", etag)
-			out.Set("Vary", "Accept-Encoding")
-			w.WriteHeader(http.StatusNotModified)
-			return
+		// Fix round 2 (Important): If-None-Match was previously honoured on
+		// every method and every status, which is wrong twice over.
+		//
+		//   - On a mutating method it is a silent lie. POST
+		//     /api/blueprint/parameters with `If-None-Match: *` came back
+		//     304 with an empty body — after the handler had already loaded,
+		//     edited and persisted the blueprint. The caller was told
+		//     "nothing changed"; the file on disk said otherwise. A 304 is
+		//     only ever meaningful as a substitute for a response the client
+		//     could have cached from an earlier safe request, and a POST/PUT/
+		//     DELETE response is not that.
+		//   - On an error status it is nonsense: two consecutive GETs of the
+		//     same unknown route produce the same 404 body and therefore the
+		//     same ETag, so echoing the first response's ETag turned the
+		//     second 404 into a 304 — a client would read that as "your
+		//     cached copy of this resource is still fresh" for a resource
+		//     that does not exist.
+		//
+		// So: only GET and HEAD, and only a 200, may be answered with a 304.
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && status == http.StatusOK {
+			if inm := r.Header.Get("If-None-Match"); etagMatches(inm, etag) {
+				// A 304 carries no body and, per RFC 7232 §4.1, should not
+				// repeat entity headers like Content-Type or Content-Length —
+				// only validators and caching headers.
+				out := w.Header()
+				out.Set("ETag", etag)
+				out.Set("Vary", "Accept-Encoding")
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
 		}
 
 		// Never double-compress: skip if something upstream already set an

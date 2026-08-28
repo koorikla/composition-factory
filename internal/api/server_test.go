@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"compress/gzip"
 	"io"
 	"net/http"
@@ -412,6 +413,110 @@ func TestNewRejectsIncompleteOptions(t *testing.T) {
 				t.Errorf("New(%s) = nil error, want a complaint about the missing field", tt.name)
 			}
 		})
+	}
+}
+
+// --- Fix round 2 ---
+//
+// Conditional-request handling (If-None-Match -> 304) used to run on every
+// method and every status. The two tests below pin the two ways that was
+// wrong; see wrap's comment in server.go for the full reasoning.
+
+// TestConditionalRequestsDoNotApplyToMutations is the serious half: a POST
+// carrying `If-None-Match: *` used to come back 304 with an empty body —
+// AFTER the handler had already edited and persisted the blueprint. The
+// caller was told nothing had changed while the file on disk said otherwise,
+// which is exactly the silent-wrongness class this project exists to
+// prevent.
+func TestConditionalRequestsDoNotApplyToMutations(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	req := httptest.NewRequest("POST", "/api/blueprint/parameters",
+		bytes.NewBufferString(`{"name":"location","parameter":{"type":"string"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-None-Match", "*")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 — a mutation is never a cache hit, whatever the request's "+
+			"If-None-Match says: %s", rec.Code, rec.Body)
+	}
+	if rec.Body.Len() == 0 {
+		t.Error("the edit's response body was suppressed as if it were a 304")
+	}
+
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if _, ok := reloaded.Spec.XRD.Parameters["location"]; !ok {
+		t.Error("the edit did not persist — this test's premise (the mutation ran) is broken")
+	}
+}
+
+// TestErrorResponsesAreNeverAnsweredWith304 is the other half: two identical
+// GETs of an unknown route produce the same 404 body and therefore the same
+// ETag, so echoing the first response's validator back used to turn the
+// second 404 into a 304 — telling the client its cached copy of a resource
+// that does not exist is still fresh.
+func TestErrorResponsesAreNeverAnsweredWith304(t *testing.T) {
+	h := testHandler(t)
+
+	first := httptest.NewRecorder()
+	h.ServeHTTP(first, httptest.NewRequest("GET", "/api/nope", nil))
+	if first.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", first.Code)
+	}
+	tag := first.Header().Get("ETag")
+	if tag == "" {
+		t.Fatal("no ETag on the 404 — this test needs one to echo back")
+	}
+
+	// The previous response's own validator, and the wildcard, which matches
+	// unconditionally.
+	for _, inm := range []string{tag, "*"} {
+		req := httptest.NewRequest("GET", "/api/nope", nil)
+		req.Header.Set("If-None-Match", inm)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("If-None-Match: %s on a 404 route gave status %d, want 404 — an error is never "+
+				"'your cached copy is still fresh'", inm, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), `"error"`) {
+			t.Errorf("If-None-Match: %s: body = %q, want the JSON error shape", inm, rec.Body.String())
+		}
+	}
+}
+
+// TestVaryAcceptEncodingIsSetOnEveryResponse pins the header that keeps a
+// shared cache from serving a gzipped body to a client that did not ask for
+// one. It is set on the 200 path and, separately, on the 304 path (they are
+// two different lines in wrap, so either can drift alone).
+func TestVaryAcceptEncodingIsSetOnEveryResponse(t *testing.T) {
+	h := testHandler(t)
+
+	ok := httptest.NewRecorder()
+	h.ServeHTTP(ok, httptest.NewRequest("GET", "/api/kinds", nil))
+	if ok.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", ok.Code)
+	}
+	if got := ok.Header().Get("Vary"); got != "Accept-Encoding" {
+		t.Errorf("200: Vary = %q, want Accept-Encoding — the same URL is served gzipped or plain "+
+			"depending on the request, and a cache that does not know that will serve the wrong one", got)
+	}
+
+	req := httptest.NewRequest("GET", "/api/kinds", nil)
+	req.Header.Set("If-None-Match", ok.Header().Get("ETag"))
+	notModified := httptest.NewRecorder()
+	h.ServeHTTP(notModified, req)
+	if notModified.Code != http.StatusNotModified {
+		t.Fatalf("status = %d, want 304", notModified.Code)
+	}
+	if got := notModified.Header().Get("Vary"); got != "Accept-Encoding" {
+		t.Errorf("304: Vary = %q, want Accept-Encoding", got)
 	}
 }
 
