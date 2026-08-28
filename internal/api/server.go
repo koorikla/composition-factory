@@ -75,8 +75,9 @@ func New(o Options) (http.Handler, error) {
 	// is what actually gives 405-vs-404 "for free", per this task's brief.
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /api/kinds", o.handleKinds)
-	// Tasks 5 and 6 register further routes here, e.g.:
-	//   mux.HandleFunc("GET /api/kinds/{kind}", o.handleKind)
+	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}", o.handleKind)
+	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}/fields", o.handleKindFields)
+	// Task 6 registers further routes here, e.g.:
 	//   mux.HandleFunc("GET /api/blueprint", o.handleBlueprint)
 
 	return wrap(mux), nil
@@ -89,15 +90,6 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
-}
-
-// handleKinds returns every indexed Kind. This is a minimal placeholder —
-// Task 5 owns filtering, search and the full response shape — but it is
-// wired up here because the middleware tests in this task exercise it
-// directly (gzip, ETag and the 404/405 tests all need a real GET route to
-// call).
-func (o Options) handleKinds(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"kinds": o.Index.All()})
 }
 
 // writeJSON encodes v as the response body with the project's one
@@ -148,6 +140,31 @@ func writeJSONError(w http.ResponseWriter, status int, message string) {
 // compression on genuinely tiny bodies (healthz's "ok", a short JSON error)
 // where gzip's per-message overhead would dominate. See the task report for
 // the full reasoning and the byte counts behind it.
+//
+// Re-measured in Task 5 against the real handlers (no longer Task 4's
+// placeholder) on the same two-Queue fixture, now that /api/kinds's search
+// and limit logic and the two new per-kind routes exist:
+//   - GET /api/kinds (no filters): still 485 raw / 214 gzipped — byte-for-
+//     byte the same as Task 4's placeholder, because handleKinds' fallback
+//     for "no q" is index.Search("", limit), and strings.Contains(s, "") is
+//     always true, so it returns exactly what All() did.
+//   - GET /api/kinds/{apiVersion}/{kind}/fields (2 fields on this fixture):
+//     172 raw / 122 gzipped — under gzipMinBytes, so not compressed on this
+//     fixture. That is the right call for a body this small (122 bytes
+//     still carries gzip's ~20-byte container overhead against very little
+//     redundancy to exploit); a real provider's forProvider tree runs to
+//     dozens or hundreds of fields with the same repeated path/type/
+//     description/required/depth keys, which is squarely the "compresses
+//     about 18:1" case TestResponsesAreGzippedWhenAccepted's comment
+//     describes, not this fixture's minimal case.
+//   - GET /api/kinds/{apiVersion}/{kind} (identity + envelope): 262 raw /
+//     192 gzipped — just over the line, compressed.
+//
+// None of that moves the threshold: 256 was never derived from this
+// fixture's specific byte counts, only from "smaller than the smallest body
+// a test requires compressed, bigger than the tiny fixed-size ones that
+// shouldn't be." Both new routes' fixture-sized bodies land where that
+// reasoning already predicted, so the constant is unchanged.
 const gzipMinBytes = 256
 
 // wrap combines JSON error normalization, ETag caching and gzip compression
