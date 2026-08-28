@@ -136,20 +136,24 @@ export const useBlueprint = create<BlueprintStore>()(
   immer((set, get) => {
     // `history`/`dragBaseline` are bookkeeping for OUR OWN actions, not
     // application data — nothing outside this module should read or reset
-    // them directly. But zustand's `setState(partial)` is a shallow merge:
-    // a caller that replaces `doc`/`nodes`/`wires` directly (e.g. loading a
-    // different blueprint, or a test resetting fixture state between cases)
-    // leaves `history` and `dragBaseline` completely untouched, so they'd
-    // keep referring to a document lineage that no longer exists.
+    // them directly. In the real app this is moot: the only place `doc` is
+    // ever replaced wholesale is `load()`, which already clears `history`
+    // and `dragBaseline` itself. It matters for *tests*: zustand's
+    // `setState(partial)` is a shallow merge, so a test resetting fixture
+    // state between cases via `useBlueprint.setState({ doc, nodes, wires })`
+    // (bypassing `load()` and our actions entirely) leaves `history` and
+    // `dragBaseline` completely untouched — and since this store is a single
+    // module-level instance shared across every test in a file, those stale
+    // entries would otherwise accumulate across unrelated test cases.
     //
     // `trackedDoc` remembers the `doc` reference as of the end of our own
     // last internal mutation. Anywhere we're about to read or push onto
     // `history`, `reconcile()` compares `get().doc` against it: a mismatch
-    // means something replaced `doc` without going through us, so the old
-    // history is meaningless and gets dropped. This keeps multi-step undo
-    // within one continuous session intact while making a wholesale `doc`
-    // replacement — from any source — implicitly clear undo, the same way
-    // `load()` explicitly does.
+    // means something replaced `doc` without going through us — in practice,
+    // only ever a test's direct `setState` — so the old history is
+    // meaningless and gets dropped. Multi-step undo within one continuous
+    // session is unaffected; this only fires across the boundary a test
+    // reset creates.
     let trackedDoc: Blueprint | null = null
 
     function reconcile() {
@@ -209,9 +213,13 @@ export const useBlueprint = create<BlueprintStore>()(
             draft.doc.spec.resources.map(r => r.name),
             k.kind,
           )
-          // Prepended, not appended: newest-first keeps the resource just
-          // added easy to find at the front of the list.
-          draft.doc.spec.resources.unshift({ name, kind: k.kind, provider: k.provider, fields: {} })
+          // Appended, not prepended: the Go emitter (internal/emit/composition.go)
+          // ranges over spec.resources in array order and writes one `---`
+          // block per resource, so array position is byte-load-bearing in
+          // the generated Composition. Prepending would reorder every
+          // previously-added resource's block on each new add, producing
+          // needless diff churn in ArgoCD-tracked output.
+          draft.doc.spec.resources.push({ name, kind: k.kind, provider: k.provider, fields: {} })
           draft.nodes.push({ id: makeId(), kind: k.kind, apiVersion: k.apiVersion, name, x, y })
           draft.wires = computeWires(draft.doc, draft.nodes)
         })

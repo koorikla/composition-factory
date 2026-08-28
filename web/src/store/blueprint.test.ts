@@ -34,7 +34,7 @@ describe("blueprint store", () => {
     s.addNode(queueKind, 0, 0)
     const nodeId = useBlueprint.getState().nodes[0].id
     s.connect("maxMessageSize", nodeId, "maxMessageSize")
-    const res = useBlueprint.getState().doc!.spec.resources.find(r => r.name.includes("queue"))!
+    const res = useBlueprint.getState().doc!.spec.resources.find(r => r.name === useBlueprint.getState().nodes[0].name)!
     expect(res.fields["maxMessageSize"]).toEqual({ from: "params.maxMessageSize" })
   })
 
@@ -45,7 +45,7 @@ describe("blueprint store", () => {
     s.connect("maxMessageSize", nodeId, "maxMessageSize")
     const wireId = useBlueprint.getState().wires[0].id
     s.disconnect(wireId)
-    const res = useBlueprint.getState().doc!.spec.resources.find(r => r.name.includes("queue"))!
+    const res = useBlueprint.getState().doc!.spec.resources.find(r => r.name === useBlueprint.getState().nodes[0].name)!
     expect(res.fields["maxMessageSize"]).toBeUndefined()
   })
 
@@ -76,5 +76,31 @@ describe("blueprint store", () => {
     let steps = 0
     while (useBlueprint.getState().canUndo() && steps < 60) { useBlueprint.getState().undo(); steps++ }
     expect(steps).toBeLessThan(5)
+  })
+
+  it("committing a drag folds it into exactly one undo step that restores the pre-drag position", () => {
+    const s = useBlueprint.getState()
+    s.addNode(queueKind, 0, 0)
+    const id = useBlueprint.getState().nodes[0].id
+    const before = { x: useBlueprint.getState().nodes[0].x, y: useBlueprint.getState().nodes[0].y }
+
+    for (let i = 0; i < 50; i++) s.moveNode(id, i, i)
+    s.commitMove()
+    expect(useBlueprint.getState().canUndo()).toBe(true)
+
+    // Exactly one undo() call — not a loop — must land back on the pre-drag
+    // position, because commitMove() folded the whole 50-move gesture into
+    // a single history entry.
+    s.undo()
+    const node = useBlueprint.getState().nodes.find(n => n.id === id)!
+    expect(node.x).toBe(before.x)
+    expect(node.y).toBe(before.y)
+
+    // A second commitMove with no intervening moveNode calls has nothing
+    // pending to fold (dragBaseline is already null) and must not grow
+    // history.
+    const historyLenBeforeSecondCommit = useBlueprint.getState().history.length
+    s.commitMove()
+    expect(useBlueprint.getState().history.length).toBe(historyLenBeforeSecondCommit)
   })
 })
