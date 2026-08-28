@@ -1,0 +1,293 @@
+package api
+
+import (
+	"compress/gzip"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/index"
+	"github.com/koorikla/compositionfactory/internal/schema"
+)
+
+// testProviderRef is the xpkg ref testFixtureCRDs' two Queue CRDs are
+// indexed under, and the provider the test blueprint's resource references.
+const testProviderRef = "ghcr.io/x/provider-aws-sqs:v2.7.0"
+
+// testFixtureCRDs returns the same two-Queue shape internal/index's own
+// tests use: one namespaced Queue (sqs.aws.m.upbound.io) and one
+// cluster-scoped Queue (sqs.aws.upbound.io), the pairing every upjet
+// provider ships. internal/index's fixture helper is unexported to its own
+// test package, so this is an independent copy rather than a shared import —
+// but it is deliberately kept to the same two entries so a test failure here
+// means the same thing it would there.
+func testFixtureCRDs(t *testing.T) map[string][]schema.CRD {
+	t.Helper()
+	docs := [][]byte{[]byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+                  tags: {type: object, additionalProperties: {type: string}}
+`), []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.upbound.io}
+spec:
+  group: sqs.aws.upbound.io
+  scope: Cluster
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - {name: v1beta1, served: true, storage: true}
+`)}
+	parsed, err := schema.ParseCRDs(docs)
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+	return map[string][]schema.CRD{testProviderRef: parsed}
+}
+
+// testIndex builds an *index.Index over testFixtureCRDs.
+func testIndex(t *testing.T) *index.Index {
+	t.Helper()
+	idx, err := index.Build(testFixtureCRDs(t))
+	if err != nil {
+		t.Fatalf("index.Build: %v", err)
+	}
+	return idx
+}
+
+// testBlueprintYAML is a valid blueprint: a Namespaced XRD with the
+// providerName parameter every Namespaced XRD requires (see
+// internal/blueprint/load.go's Validate), plus maxMessageSize, and one
+// resource — main-queue, kind Queue — whose maxMessageSize field is sourced
+// from the maxMessageSize parameter. This mirrors internal/blueprint's own
+// "valid" test fixture, adjusted to reference testProviderRef so it lines up
+// with testIndex's fixture.
+const testBlueprintYAML = `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue
+spec:
+  sources:
+    - provider: ghcr.io/x/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.hooli.tech
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+      maxMessageSize: {type: integer}
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/x/provider-aws-sqs:v2.7.0
+      fields:
+        maxMessageSize: {from: params.maxMessageSize}
+`
+
+// testBlueprintPath writes testBlueprintYAML into t.TempDir() and returns
+// its path, after confirming (via blueprint.Load) that the fixture itself
+// is actually valid — New does not parse the blueprint eagerly (see
+// Options.validate), so nothing else would catch a broken fixture here.
+func testBlueprintPath(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "xqueue.cf.yaml")
+	if err := os.WriteFile(path, []byte(testBlueprintYAML), 0o644); err != nil {
+		t.Fatalf("write test blueprint: %v", err)
+	}
+	if _, err := blueprint.Load(path); err != nil {
+		t.Fatalf("test blueprint fixture does not itself validate: %v", err)
+	}
+	return path
+}
+
+// testHandler builds the http.Handler New produces, wired to an index over
+// the two-Queue fixture (testFixtureCRDs), a cache.Store rooted at a fresh
+// t.TempDir(), and the valid blueprint above written to another t.TempDir().
+// Tasks 5 and 6 reuse this helper — see the task brief — so its shape
+// (no arguments beyond t, a ready-to-use http.Handler out) is a cross-task
+// contract, not just a convenience for this file's own tests.
+func testHandler(t *testing.T) http.Handler {
+	t.Helper()
+	h, err := New(Options{
+		Index:     testIndex(t),
+		Store:     cache.New(t.TempDir()),
+		Blueprint: testBlueprintPath(t),
+		OutDir:    t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return h
+}
+
+func TestHealthzIsPlainAndCheap(t *testing.T) {
+	h := testHandler(t)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestUnknownRouteIs404WithJSONError(t *testing.T) {
+	h := testHandler(t)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/nope", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want JSON so a browser client can parse the error", ct)
+	}
+}
+
+func TestResponsesAreGzippedWhenAccepted(t *testing.T) {
+	h := testHandler(t)
+	req := httptest.NewRequest("GET", "/api/kinds", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip — schemas compress about 18:1 and this is the "+
+			"highest-leverage line of server code in the project", got)
+	}
+	zr, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatalf("body is not valid gzip: %v", err)
+	}
+	body, err := io.ReadAll(zr)
+	if err != nil || len(body) == 0 {
+		t.Fatalf("gzip body unreadable: %v", err)
+	}
+}
+
+func TestResponsesAreNotGzippedWhenNotAccepted(t *testing.T) {
+	h := testHandler(t)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/kinds", nil))
+	if got := rec.Header().Get("Content-Encoding"); got != "" {
+		t.Errorf("Content-Encoding = %q with no Accept-Encoding; must not compress unasked", got)
+	}
+}
+
+func TestETagIsStableAndReturns304(t *testing.T) {
+	h := testHandler(t)
+	first := httptest.NewRecorder()
+	h.ServeHTTP(first, httptest.NewRequest("GET", "/api/kinds", nil))
+	tag := first.Header().Get("ETag")
+	if tag == "" {
+		t.Fatal("no ETag on /api/kinds")
+	}
+	second := httptest.NewRecorder()
+	h.ServeHTTP(second, httptest.NewRequest("GET", "/api/kinds", nil))
+	if got := second.Header().Get("ETag"); got != tag {
+		t.Errorf("ETag changed between identical requests: %q then %q", tag, got)
+	}
+	req := httptest.NewRequest("GET", "/api/kinds", nil)
+	req.Header.Set("If-None-Match", tag)
+	third := httptest.NewRecorder()
+	h.ServeHTTP(third, req)
+	if third.Code != http.StatusNotModified {
+		t.Errorf("status = %d with matching If-None-Match, want 304", third.Code)
+	}
+	if third.Body.Len() != 0 {
+		t.Errorf("304 carried a %d-byte body", third.Body.Len())
+	}
+}
+
+func TestMethodNotAllowedRatherThan404(t *testing.T) {
+	h := testHandler(t)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("DELETE", "/api/kinds", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d for DELETE /api/kinds, want 405", rec.Code)
+	}
+}
+
+// --- Additional coverage beyond the brief's verbatim tests ---
+//
+// These are not from the brief's Step 1 listing; they cover two other
+// requirements the brief's Step 3 states explicitly (New must error rather
+// than panic on incomplete Options, and a handler's own JSON error must
+// survive normalization unchanged) but that the given test list does not
+// exercise on its own.
+
+// TestNewRejectsIncompleteOptions covers "New returns an error rather than
+// panicking if Options is incomplete": each required field, zeroed one at a
+// time, must produce an error instead of a handler built on a nil Index or
+// empty path.
+func TestNewRejectsIncompleteOptions(t *testing.T) {
+	valid := func() Options {
+		return Options{
+			Index:     testIndex(t),
+			Store:     cache.New(t.TempDir()),
+			Blueprint: testBlueprintPath(t),
+			OutDir:    t.TempDir(),
+		}
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*Options)
+	}{
+		{"nil Index", func(o *Options) { o.Index = nil }},
+		{"nil Store", func(o *Options) { o.Store = nil }},
+		{"empty Blueprint path", func(o *Options) { o.Blueprint = "" }},
+		{"empty OutDir", func(o *Options) { o.OutDir = "" }},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			o := valid()
+			tt.mutate(&o)
+			if _, err := New(o); err == nil {
+				t.Errorf("New(%s) = nil error, want a complaint about the missing field", tt.name)
+			}
+		})
+	}
+}
+
+// TestHandlerJSONErrorsPassThroughUnnormalized checks the other half of
+// error normalization: a handler that already wrote the project's
+// {"error": "..."} shape with Content-Type: application/json (via
+// writeJSONError) must not be rewritten by wrap's normalization step, which
+// exists only to catch ServeMux's own plain-text 404/405 responses.
+func TestHandlerJSONErrorsPassThroughUnnormalized(t *testing.T) {
+	h := wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSONError(w, http.StatusBadRequest, "specific handler-authored message")
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/whatever", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "specific handler-authored message") {
+		t.Errorf("body = %q, want the handler's own message preserved verbatim", rec.Body.String())
+	}
+}

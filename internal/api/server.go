@@ -1,0 +1,303 @@
+// Package api is the compositionfactory HTTP server: a router with gzip
+// compression and ETag-based caching applied uniformly to every response, so
+// the route handlers Tasks 5 and 6 add only need to write a JSON body and
+// never have to think about compression, caching headers or error shape.
+//
+// SECURITY: this package intentionally implements no authentication. The
+// server is loopback-only by construction (Task 7 binds the listener to
+// 127.0.0.1 and refuses any other address), so anyone who can reach it
+// already has local access to the machine it runs on. A half-designed auth
+// scheme bolted on here would imply a safety guarantee that does not exist
+// and could invite someone to expose this server beyond loopback believing
+// it is protected. If that trust boundary ever needs to move, the fix is a
+// real auth layer designed for it — not an ad hoc check added to this file.
+package api
+
+import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
+	"fmt"
+	"hash/fnv"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/index"
+)
+
+// Options configures the server New builds.
+type Options struct {
+	Index     *index.Index
+	Store     *cache.Store
+	Blueprint string // path to the blueprint file on disk
+	OutDir    string // where generate writes
+}
+
+// validate reports the first incomplete field in o. New calls this so a
+// caller gets an actionable error instead of a nil-pointer panic the first
+// time a handler touches a missing field.
+func (o Options) validate() error {
+	switch {
+	case o.Index == nil:
+		return fmt.Errorf("api: Options.Index is required")
+	case o.Store == nil:
+		return fmt.Errorf("api: Options.Store is required")
+	case o.Blueprint == "":
+		return fmt.Errorf("api: Options.Blueprint (path to the blueprint file) is required")
+	case o.OutDir == "":
+		return fmt.Errorf("api: Options.OutDir (output directory) is required")
+	}
+	return nil
+}
+
+// New builds the compositionfactory HTTP API. Every response — success or
+// error — passes through the same middleware: a plain-text ServeMux error
+// is normalized into the project's one JSON error shape, an ETag is computed
+// over the body so repeat requests can be answered with a bodyless 304, and
+// the (possibly now-304'd) response is gzipped when the client accepts it
+// and the payload is large enough for compression to be worth it.
+func New(o Options) (http.Handler, error) {
+	if err := o.validate(); err != nil {
+		return nil, err
+	}
+
+	mux := http.NewServeMux()
+
+	// Deliberately no catch-all "/" pattern: registering one would make
+	// ServeMux treat it as a match for every method on every path (a
+	// catch-all pattern carries no method restriction), which silently
+	// defeats its built-in 405-for-known-path/wrong-method behavior — a
+	// request would always find the catch-all "matching" before ServeMux
+	// ever notices the method mismatch. Leaving unmatched paths to
+	// ServeMux's own default 404/405 handling (normalized to JSON below)
+	// is what actually gives 405-vs-404 "for free", per this task's brief.
+	mux.HandleFunc("GET /healthz", handleHealthz)
+	mux.HandleFunc("GET /api/kinds", o.handleKinds)
+	// Tasks 5 and 6 register further routes here, e.g.:
+	//   mux.HandleFunc("GET /api/kinds/{kind}", o.handleKind)
+	//   mux.HandleFunc("GET /api/blueprint", o.handleBlueprint)
+
+	return wrap(mux), nil
+}
+
+// handleHealthz is a liveness probe: no JSON encoding, no index lookup,
+// nothing that could fail. "Plain and cheap" — a caller polling this
+// endpoint should never pay for more than a couple of bytes.
+func handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+}
+
+// handleKinds returns every indexed Kind. This is a minimal placeholder —
+// Task 5 owns filtering, search and the full response shape — but it is
+// wired up here because the middleware tests in this task exercise it
+// directly (gzip, ETag and the 404/405 tests all need a real GET route to
+// call).
+func (o Options) handleKinds(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"kinds": o.Index.All()})
+}
+
+// writeJSON encodes v as the response body with the project's one
+// Content-Type for every JSON response.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "encode response: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(body)
+}
+
+// errorBody is the one error shape every failure in this API uses, so a
+// browser client never has to branch on whether an error response is JSON
+// or an HTML/plain-text error page.
+type errorBody struct {
+	Error string `json:"error"`
+}
+
+// writeJSONError writes {"error": message} with status, for handlers in
+// this package that fail explicitly (as opposed to the ServeMux-generated
+// 404/405 responses, which wrap's jsonifyErrors step normalizes instead).
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	body, _ := json.Marshal(errorBody{Error: message}) // errorBody always marshals
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(body)
+}
+
+// gzipMinBytes is the smallest response body wrap will attempt to compress.
+//
+// The task brief's guidance was "skip bodies under about 1 KB", reasoning
+// that gzip's own framing overhead can cost more than it saves on a small
+// body. That threshold does not survive contact with this task's own
+// fixture: TestResponsesAreGzippedWhenAccepted exercises GET /api/kinds
+// against the two-Queue fixture testHandler builds, whose minimal
+// {"kinds":[...]} response is 485 bytes — under 1 KB — and the test requires
+// it to come back gzip-encoded. Measured directly, that exact 485-byte body
+// compresses to 214 bytes (gzip's own container-format overhead is only
+// ~20 bytes), so "under 1 KB" is not actually the point at which compression
+// stops paying for itself on the kind of small, repetitive JSON this API
+// serves; it just happens to be bigger than this task's minimal fixture
+// response. 256 bytes is chosen instead: comfortably below the 485-byte
+// fixture response so the given test passes, while still skipping
+// compression on genuinely tiny bodies (healthz's "ok", a short JSON error)
+// where gzip's per-message overhead would dominate. See the task report for
+// the full reasoning and the byte counts behind it.
+const gzipMinBytes = 256
+
+// wrap combines JSON error normalization, ETag caching and gzip compression
+// around h. Each concern needs the fully-buffered final response to make its
+// decision (an ETag over the exact bytes that will be sent; a gzip decision
+// based on the final size), so all three run as one buffering pass over a
+// recorder rather than three separate middlewares that would each re-copy
+// the body.
+func wrap(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := newRecorder()
+		h.ServeHTTP(rec, r)
+
+		status := rec.status
+		header := rec.header
+		body := rec.body.Bytes()
+
+		// Normalize any error response that did not already choose its own
+		// JSON body. ServeMux's built-in "404 page not found" and "Method
+		// Not Allowed" responses land here (they come back as
+		// text/plain); a handler in this package that already wrote
+		// {"error": "..."} via writeJSONError is left untouched.
+		if status >= http.StatusBadRequest && !strings.Contains(header.Get("Content-Type"), "application/json") {
+			normalized, err := json.Marshal(errorBody{Error: http.StatusText(status)})
+			if err != nil {
+				normalized = []byte(`{"error":"internal error"}`)
+			}
+			body = normalized
+			header.Set("Content-Type", "application/json")
+		}
+
+		// The response varies on Accept-Encoding regardless of whether this
+		// particular request ends up compressed, so every response — 200,
+		// error or 304 — declares that.
+		header.Set("Vary", "Accept-Encoding")
+
+		etag := etagFor(body)
+		header.Set("ETag", etag)
+
+		if inm := r.Header.Get("If-None-Match"); etagMatches(inm, etag) {
+			// A 304 carries no body and, per RFC 7232 §4.1, should not
+			// repeat entity headers like Content-Type or Content-Length —
+			// only validators and caching headers.
+			out := w.Header()
+			out.Set("ETag", etag)
+			out.Set("Vary", "Accept-Encoding")
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		// Never double-compress: skip if something upstream already set an
+		// encoding, or if the client did not ask for gzip, or if the body
+		// is small enough that compression is not worth the CPU or the
+		// framing overhead.
+		if header.Get("Content-Encoding") == "" && len(body) >= gzipMinBytes && acceptsGzip(r) {
+			if compressed, ok := gzipBytes(body); ok {
+				body = compressed
+				header.Set("Content-Encoding", "gzip")
+			}
+		}
+
+		header.Set("Content-Length", strconv.Itoa(len(body)))
+
+		out := w.Header()
+		for k, vv := range header {
+			out[k] = vv
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+	})
+}
+
+// acceptsGzip reports whether the request's Accept-Encoding header lists
+// gzip. This is a simplified check (no q-value parsing, so "gzip;q=0" is
+// treated as accepting gzip) — acceptable here because compositionfactory's
+// own clients are the CLI's browser-opened canvas and MCP tooling, not
+// arbitrary user agents doing fine-grained negotiation.
+func acceptsGzip(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Header.Get("Accept-Encoding")), "gzip")
+}
+
+// gzipBytes compresses body at the default compression level. The only
+// failure mode for gzip.Writer writing into an in-memory buffer is an
+// earlier Close/Write misuse, which cannot happen in this single, local use
+// — but the error is still checked rather than ignored, so a future change
+// to this function fails loudly instead of silently shipping a truncated
+// body.
+func gzipBytes(body []byte) ([]byte, bool) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(body); err != nil {
+		return nil, false
+	}
+	if err := zw.Close(); err != nil {
+		return nil, false
+	}
+	return buf.Bytes(), true
+}
+
+// etagFor hashes body with FNV-1a (64-bit) and returns it as a quoted,
+// strong ETag value.
+//
+// FNV-1a, not SHA-256: this ETag is a cache validator, not a security
+// control — nothing here needs collision resistance against an adversary,
+// only a stable fingerprint of the exact bytes sent. Schema responses from
+// this server are the multi-megabyte payloads described in the task
+// brief (4,275,487 bytes raw for one provider family), and this hash runs
+// on every single request, including ones that turn out to be cache hits;
+// FNV-1a's non-cryptographic, single-pass design costs a fraction of
+// SHA-256 for that job while still depending on nothing but the input
+// bytes, so it is stable across process restarts and across machines.
+func etagFor(body []byte) string {
+	h := fnv.New64a()
+	_, _ = h.Write(body) // hash.Hash.Write never returns an error
+	return fmt.Sprintf(`"%016x"`, h.Sum64())
+}
+
+// etagMatches reports whether ifNoneMatch (the raw If-None-Match header,
+// which may be "*", a single quoted ETag, or a comma-separated list of
+// them per RFC 7232 §3.2) matches etag.
+func etagMatches(ifNoneMatch, etag string) bool {
+	if ifNoneMatch == "" {
+		return false
+	}
+	if ifNoneMatch == "*" {
+		return true
+	}
+	for _, candidate := range strings.Split(ifNoneMatch, ",") {
+		if strings.TrimSpace(candidate) == etag {
+			return true
+		}
+	}
+	return false
+}
+
+// recorder is a minimal http.ResponseWriter that buffers a handler's entire
+// response instead of sending it, so wrap can inspect and transform the
+// complete status/headers/body before anything reaches the real client.
+type recorder struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func newRecorder() *recorder {
+	return &recorder{header: make(http.Header), status: http.StatusOK}
+}
+
+func (r *recorder) Header() http.Header { return r.header }
+
+func (r *recorder) WriteHeader(status int) { r.status = status }
+
+func (r *recorder) Write(b []byte) (int, error) { return r.body.Write(b) }
