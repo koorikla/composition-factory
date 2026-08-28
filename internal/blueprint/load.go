@@ -55,6 +55,18 @@ var (
 	// resourceNameRE matches a Kubernetes-style DNS label, since a resource's
 	// name becomes a composition-resource-name annotation value.
 	resourceNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	// providerRefRE matches an OCI image reference: registry/path[:tag] or
+	// registry/path@digest, optionally with a :port on the registry host
+	// (registry:5000/path). Deliberately permissive -- it is not a full OCI
+	// reference grammar, just the character class every legal reference is
+	// built from ([a-zA-Z0-9._/:@-]), covering the plain-tag, digest-pinned
+	// and port forms actually used by cmd/cf/gen.go, cmd/cf/serve.go and
+	// internal/api/generate.go (all pass Source.Provider / Resource.Provider
+	// straight to cache.Store.Load). It exists to reject control characters
+	// and other junk here, at the source, rather than let a malformed value
+	// reach the cache's filesystem slug or the registry client unchecked;
+	// it does not attempt to fully validate OCI reference syntax.
+	providerRefRE = regexp.MustCompile(`^[a-zA-Z0-9._/:@-]+$`)
 )
 
 // yamlKeywords are scalars that go-yaml (used transitively by
@@ -174,6 +186,32 @@ func (b *Blueprint) Validate() error {
 	// document that otherwise parses fine.
 	if err := checkScalar("metadata.name", b.Metadata.Name); err != nil {
 		return err
+	}
+
+	// spec.sources[*].provider was never checked here before PUT
+	// /api/blueprint existed: no route made the full document
+	// client-writable, so an operator hand-editing the file was the only
+	// path in, and a typo'd provider ref just failed loudly at `cf provider
+	// add` / cache.Store.Load time. PUT changes that -- the whole document,
+	// sources included, is now client-writable -- so the same three checks
+	// applied to every other user-controlled scalar apply here too: it must
+	// be present, free of control characters (see checkScalar; a source
+	// reference does not currently reach emitted YAML the way a resource
+	// field does, but it is persisted verbatim by writeBlueprintFile and
+	// re-read on the next request, so a stray newline would still corrupt
+	// the stored document), and shaped like a reference cache.Store.Load can
+	// actually use.
+	for i, s := range b.Spec.Sources {
+		if s.Provider == "" {
+			return fmt.Errorf("spec.sources[%d].provider is required", i)
+		}
+		if err := checkScalar(fmt.Sprintf("spec.sources[%d].provider", i), s.Provider); err != nil {
+			return err
+		}
+		if !providerRefRE.MatchString(s.Provider) {
+			return fmt.Errorf("spec.sources[%d].provider: %q is not a valid provider reference "+
+				"(e.g. ghcr.io/org/provider-name:v1.2.3, or ...@sha256:<digest>)", i, s.Provider)
+		}
 	}
 
 	x := b.Spec.XRD
@@ -365,6 +403,34 @@ func (b *Blueprint) Validate() error {
 		}
 		if !resourceNameRE.MatchString(r.Name) {
 			return fmt.Errorf("spec.resources[%d] %q: invalid resource name (must be a DNS label, e.g. main-queue)", i, r.Name)
+		}
+		// r.Kind is looked up against resolveKind's list of cached CRDs by
+		// exact string equality (internal/emit/composition.go), so a bogus
+		// value fails loudly there ("kind %q not found in any cached
+		// provider") rather than reaching emitted output -- but it still
+		// isn't checkScalar-clean the way r.Name and every field value are,
+		// and every real Kubernetes Kind it could ever legitimately match
+		// satisfies kindRE (see spec.xrd.kind above), so enforcing the same
+		// shape here is free and catches a typo before the cache lookup
+		// even runs.
+		if err := checkScalar(fmt.Sprintf("spec.resources[%d].kind", i), r.Kind); err != nil {
+			return err
+		}
+		if !kindRE.MatchString(r.Kind) {
+			return fmt.Errorf("spec.resources[%d].kind: %q is not a valid Kind (must start with an uppercase letter, e.g. Queue)", i, r.Kind)
+		}
+		// r.Provider is optional (M1 resolves a resource's kind against
+		// every cached source, not just one), but when set it reaches
+		// cache.Store.Load exactly the way spec.sources[*].provider does --
+		// see the providerRefRE comment above -- so it gets the same checks.
+		if r.Provider != "" {
+			if err := checkScalar(fmt.Sprintf("spec.resources[%d].provider", i), r.Provider); err != nil {
+				return err
+			}
+			if !providerRefRE.MatchString(r.Provider) {
+				return fmt.Errorf("spec.resources[%d].provider: %q is not a valid provider reference "+
+					"(e.g. ghcr.io/org/provider-name:v1.2.3, or ...@sha256:<digest>)", i, r.Provider)
+			}
 		}
 		paths := make([]string, 0, len(r.Fields))
 		for p := range r.Fields {

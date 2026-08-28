@@ -789,3 +789,168 @@ func TestValidateRejectsClusterScope(t *testing.T) {
 		t.Errorf("err = %v, want it to name Cluster and point at Namespaced", err)
 	}
 }
+
+// --- Follow-up: PUT /api/blueprint made spec.sources and the previously
+// unchecked resource.kind/resource.provider client-writable ---
+//
+// Before PUT /api/blueprint existed, no HTTP route made the whole document
+// client-writable, so Validate() never checked spec.sources[*].provider at
+// all, and skipped checkScalar (the control-character rejection every other
+// user-controlled scalar gets) on Resource.Kind and Resource.Provider. Both
+// are persisted verbatim by writeBlueprintFile and reloaded on the next
+// request, and Resource.Provider/Source.Provider both reach
+// cache.Store.Load (cmd/cf/gen.go, cmd/cf/serve.go,
+// internal/api/generate.go), so a value with a control character or a
+// nonsense shape could silently corrupt the stored document or misdirect a
+// cache lookup. These tests pin the closed gap.
+
+// TestValidateRejectsInvalidSourceProvider covers spec.sources[*].provider:
+// empty, a control character (the same defect class checkScalar closes
+// everywhere else), and a shape no OCI reference can take.
+func TestValidateRejectsInvalidSourceProvider(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		wantSubstr string
+	}{
+		{"empty is rejected", "", "spec.sources[0].provider is required"},
+		{"newline is a control character", "ghcr.io/x/y:v1\ninjected: true", "spec.sources[0].provider"},
+		{"NUL is a control character", "ghcr.io/x/y\x00:v1", "spec.sources[0].provider"},
+		{"space is not a valid reference character", "ghcr.io/x y:v1", "spec.sources[0].provider"},
+		{"internal quote is not a valid reference character", `ghcr.io/x"y:v1`, "spec.sources[0].provider"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := scalarBlueprint(func(b *Blueprint) {
+				b.Spec.Sources = []Source{{Provider: tt.provider}}
+			})
+			err := b.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.wantSubstr) {
+				t.Fatalf("err = %v, want substring %q", err, tt.wantSubstr)
+			}
+		})
+	}
+}
+
+// TestValidateAcceptsValidSourceProviderForms covers the realistic reference
+// shapes providerRefRE must not reject: a plain tag, a digest-pinned
+// reference (which contains '@' and ':'), and a registry with an explicit
+// port (which contains a second ':').
+func TestValidateAcceptsValidSourceProviderForms(t *testing.T) {
+	for _, ref := range []string{
+		"ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0",
+		"ghcr.io/x/y@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"reg:5000/x",
+	} {
+		t.Run(ref, func(t *testing.T) {
+			b := scalarBlueprint(func(b *Blueprint) {
+				b.Spec.Sources = []Source{{Provider: ref}}
+			})
+			if err := b.Validate(); err != nil {
+				t.Errorf("Validate() = %v, want provider ref %q to be accepted", err, ref)
+			}
+		})
+	}
+}
+
+// TestValidateRejectsInvalidResourceKind covers spec.resources[*].kind: a
+// control character (Resource.Kind previously skipped checkScalar entirely,
+// unlike Resource.Name and every field value), and a shape that cannot be a
+// real Kubernetes Kind (kindRE, the same rule already applied to
+// spec.xrd.kind).
+func TestValidateRejectsInvalidResourceKind(t *testing.T) {
+	tests := []struct {
+		name       string
+		kind       string
+		wantSubstr string
+	}{
+		{"newline is a control character", "Queue\ninjected: true", "spec.resources[0].kind"},
+		{"NUL is a control character", "Queue\x00", "spec.resources[0].kind"},
+		{"lowercase initial is not a valid Kind", "queue", "spec.resources[0].kind"},
+		{"internal space is not a valid Kind", "Message Queue", "spec.resources[0].kind"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := scalarBlueprint(func(b *Blueprint) {
+				b.Spec.Resources[0].Kind = tt.kind
+			})
+			err := b.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.wantSubstr) {
+				t.Fatalf("err = %v, want substring %q", err, tt.wantSubstr)
+			}
+		})
+	}
+}
+
+// TestValidateRejectsInvalidResourceProvider covers spec.resources[*].provider,
+// which -- unlike Source.Provider -- is optional: unset must still be
+// accepted (TestValidateStillAcceptsTheValidFixture and
+// TestValidateAcceptsValidResourceProviderForms below both exercise both the
+// unset and set-and-valid cases), but a set-and-bad value gets exactly the
+// same checks as Source.Provider.
+func TestValidateRejectsInvalidResourceProvider(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		wantSubstr string
+	}{
+		{"newline is a control character", "ghcr.io/x/y:v1\ninjected: true", "spec.resources[0].provider"},
+		{"NUL is a control character", "ghcr.io/x/y\x00:v1", "spec.resources[0].provider"},
+		{"space is not a valid reference character", "ghcr.io/x y:v1", "spec.resources[0].provider"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := scalarBlueprint(func(b *Blueprint) {
+				b.Spec.Resources[0].Provider = tt.provider
+			})
+			err := b.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.wantSubstr) {
+				t.Fatalf("err = %v, want substring %q", err, tt.wantSubstr)
+			}
+		})
+	}
+}
+
+// TestValidateAcceptsValidResourceProviderForms covers the accepted side: an
+// unset provider (optional field, no regression) and the same realistic
+// reference shapes as TestValidateAcceptsValidSourceProviderForms, since
+// resource.provider is checked identically to source.provider.
+func TestValidateAcceptsValidResourceProviderForms(t *testing.T) {
+	for _, ref := range []string{
+		"",
+		"ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0",
+		"ghcr.io/x/y@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"reg:5000/x",
+	} {
+		name := ref
+		if name == "" {
+			name = "(unset)"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := scalarBlueprint(func(b *Blueprint) {
+				b.Spec.Resources[0].Provider = ref
+			})
+			if err := b.Validate(); err != nil {
+				t.Errorf("Validate() = %v, want provider %q to be accepted", err, name)
+			}
+		})
+	}
+}
+
+// TestValidateStillAcceptsTheOnDiskFixtureWithSourcesAndProvider is a final
+// end-to-end regression check: testdata/xqueue.cf.yaml -- the fixture the
+// acceptance test drives the real binary against -- declares both a
+// spec.sources entry and a spec.resources[*].provider, and must still load
+// cleanly now that both are checked.
+func TestValidateStillAcceptsTheOnDiskFixtureWithSourcesAndProvider(t *testing.T) {
+	b, err := Load("../../testdata/xqueue.cf.yaml")
+	if err != nil {
+		t.Fatalf("Load(testdata/xqueue.cf.yaml) = %v, want no error", err)
+	}
+	if len(b.Spec.Sources) != 1 || b.Spec.Sources[0].Provider == "" {
+		t.Fatalf("Spec.Sources = %+v, want one source with a provider", b.Spec.Sources)
+	}
+	if len(b.Spec.Resources) != 1 || b.Spec.Resources[0].Provider == "" {
+		t.Fatalf("Spec.Resources = %+v, want one resource with a provider", b.Spec.Resources)
+	}
+}
