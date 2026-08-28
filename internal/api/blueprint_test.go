@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/emit"
+	"github.com/koorikla/compositionfactory/internal/schema"
 )
 
 func do(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -108,29 +111,116 @@ func TestMalformedJSONBodyIs400(t *testing.T) {
 }
 
 // The whole architecture rests on this: the API must not have its own emitter.
+//
+// Fix round 2, Critical finding: this test could not fail for what it is
+// named. It asserted only that write:false came back with three outputs and
+// did not report Written — both true of any handler that returns three
+// plausible-looking paths, including one rendering its own bytes with a
+// private emitter, which is the single failure this test exists to catch. It
+// never sent write:true, never touched the output tree, and compared no
+// bytes at all (a stray `_ = path` was the fossil of the missing
+// comparison).
+//
+// It now calls emit.Generate — the one entry point cf gen also goes through
+// — directly, with the same three inputs the handler resolves for itself
+// (the same blueprint file, the CRDs from the same seeded cache.Store, the
+// same OutDir), then drives both modes over HTTP: write:false must report
+// exactly the engine's paths and sizes while leaving the output tree
+// untouched, and write:true must leave files on disk that are byte-for-byte
+// the engine's own output.
 func TestGenerateProducesTheSameBytesAsTheEngine(t *testing.T) {
-	h, path := testHandlerWithPath(t)
-	rec := do(t, h, "POST", "/api/generate", `{"write":false}`)
-	if rec.Code != 200 {
-		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	h, path, store, outDir := testServerParts(t)
+
+	// The engine's own answer for these exact inputs. The CRDs are resolved
+	// the way handleGenerate's loadSourceCRDs resolves them — Store.Load for
+	// every provider in spec.sources, in order — so "the same CRDs the
+	// handler uses" is literal here rather than a re-derivation that could
+	// quietly differ.
+	b, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("load the blueprint fixture: %v", err)
 	}
-	var got struct {
-		Outputs []struct {
-			Path  string `json:"path"`
-			Bytes int    `json:"bytes"`
+	var crds []schema.CRD
+	for _, s := range b.Spec.Sources {
+		got, err := store.Load(s.Provider)
+		if err != nil {
+			t.Fatalf("load provider %q from the seeded cache: %v", s.Provider, err)
 		}
-		Written bool
+		crds = append(crds, got...)
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("not JSON: %v", err)
+	want, err := emit.Generate(b, crds, outDir)
+	if err != nil {
+		t.Fatalf("emit.Generate: %v", err)
 	}
-	if len(got.Outputs) != 3 {
-		t.Fatalf("got %d outputs, want 3 (xrd, composition, functions.yaml)", len(got.Outputs))
+	if len(want) != 3 {
+		t.Fatalf("the engine produced %d outputs, want 3 (composition, functions.yaml, xrd) — "+
+			"this test's premise is broken, not the server", len(want))
 	}
-	if got.Written {
+
+	type outputSummary struct {
+		Path  string `json:"path"`
+		Bytes int    `json:"bytes"`
+	}
+	generate := func(body string) ([]outputSummary, bool) {
+		t.Helper()
+		rec := do(t, h, "POST", "/api/generate", body)
+		if rec.Code != 200 {
+			t.Fatalf("POST /api/generate %s: status %d: %s", body, rec.Code, rec.Body)
+		}
+		var got struct {
+			Outputs []outputSummary `json:"outputs"`
+			Written bool            `json:"written"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("not JSON: %v (%s)", err, rec.Body)
+		}
+		if len(got.Outputs) != len(want) {
+			t.Fatalf("got %d outputs, want %d (composition, functions.yaml, xrd)", len(got.Outputs), len(want))
+		}
+		return got.Outputs, got.Written
+	}
+
+	// write:false — a preview: same paths, same sizes, nothing on disk.
+	outputs, written := generate(`{"write":false}`)
+	if written {
 		t.Error("write:false still reported Written")
 	}
-	_ = path
+	for i, out := range outputs {
+		if out.Path != want[i].Path {
+			t.Errorf("output %d path = %q, engine says %q", i, out.Path, want[i].Path)
+		}
+		if out.Bytes != len(want[i].Body) {
+			t.Errorf("%s: reported %d bytes, engine produced %d", out.Path, out.Bytes, len(want[i].Body))
+		}
+		if _, err := os.Stat(out.Path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("write:false put %s on disk (stat err = %v); a preview must not touch the output tree",
+				out.Path, err)
+		}
+	}
+
+	// write:true — the bytes on disk must be the engine's, exactly.
+	outputs, written = generate(`{"write":true}`)
+	if !written {
+		t.Error("write:true did not report Written")
+	}
+	for i, out := range outputs {
+		if out.Path != want[i].Path {
+			t.Errorf("output %d path = %q, engine says %q", i, out.Path, want[i].Path)
+		}
+		onDisk, err := os.ReadFile(out.Path)
+		if err != nil {
+			t.Fatalf("write:true reported %s but it is not readable: %v", out.Path, err)
+		}
+		if !bytes.Equal(onDisk, want[i].Body) {
+			t.Errorf("%s is NOT what the engine produced (%d bytes written, %d from the engine) — "+
+				"the API has grown its own emitter, which is the one thing this architecture forbids\n"+
+				"--- emit.Generate ---\n%s\n--- written by the server ---\n%s",
+				out.Path, len(onDisk), len(want[i].Body), want[i].Body, onDisk)
+		}
+		if out.Bytes != len(onDisk) {
+			t.Errorf("%s: reported %d bytes, wrote %d", out.Path, out.Bytes, len(onDisk))
+		}
+	}
 }
 
 func TestGenerateSurfacesValidationErrorsAsIs(t *testing.T) {

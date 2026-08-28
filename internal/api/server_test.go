@@ -245,22 +245,38 @@ spec:
 // tests.
 func testHandlerWithPath(t *testing.T) (http.Handler, string) {
 	t.Helper()
-	store := cache.New(t.TempDir())
+	h, path, _, _ := testServerParts(t)
+	return h, path
+}
+
+// testServerParts is testHandlerWithPath's full wiring, exposing the two
+// Options fields its narrower signature drops: the seeded *cache.Store and
+// the OutDir. TestGenerateProducesTheSameBytesAsTheEngine needs both — it
+// calls emit.Generate directly with the very inputs the handler will use, so
+// it has to reach the same store and the same output directory the server
+// was built with. Everything else goes through testHandlerWithPath, whose
+// signature stays the cross-task contract it has always been; this exists so
+// there is still exactly ONE construction path for the test server rather
+// than a second, independently-drifting copy of it.
+func testServerParts(t *testing.T) (h http.Handler, blueprintPath string, store *cache.Store, outDir string) {
+	t.Helper()
+	store = cache.New(t.TempDir())
 	if err := store.Save(&xpkg.Package{Ref: testProviderRef, Digest: "sha256:test"}, testGenerateFixtureCRDs(t)); err != nil {
 		t.Fatalf("seed provider cache: %v", err)
 	}
 
-	path := testBlueprintPath(t)
+	blueprintPath = testBlueprintPath(t)
+	outDir = t.TempDir()
 	h, err := New(Options{
 		Index:     testIndex(t),
 		Store:     store,
-		Blueprint: path,
-		OutDir:    t.TempDir(),
+		Blueprint: blueprintPath,
+		OutDir:    outDir,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return h, path
+	return h, blueprintPath, store, outDir
 }
 
 // testHandler is testHandlerWithPath without the blueprint path, for the
