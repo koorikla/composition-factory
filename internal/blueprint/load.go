@@ -193,7 +193,24 @@ func (b *Blueprint) Validate() error {
 	}
 
 	switch x.Scope {
-	case "Namespaced", "Cluster":
+	case "Namespaced":
+	case "Cluster":
+		// Accepted by an earlier version of this function, which was a
+		// half-composition: internal/emit/composition.go only emits a
+		// providerConfigRef for the namespaced envelope, so a Cluster
+		// blueprint generated a Composition whose every managed resource
+		// silently landed on the ProviderConfig named "default" -- a legal,
+		// rendering, exit-0 artifact pointed at the wrong credentials. The
+		// cluster-scoped envelope is genuinely different ({name, policy}
+		// rather than {kind, name}, plus deletionPolicy) and inventing it
+		// here without a rendered test would be guessing. M1 is Namespaced
+		// only, deliberately; Cluster scope is planned future work.
+		return fmt.Errorf("spec.xrd.scope: Cluster is not supported in M1 -- use Namespaced. " +
+			"The cluster-scoped managed-resource envelope differs from the namespaced one " +
+			"(providerConfigRef is {name, policy}, not {kind, name}, and deletionPolicy exists) " +
+			"and the Composition emitter does not yet render it; emitting it untested would " +
+			"silently bind every composed resource to the ProviderConfig named \"default\". " +
+			"Cluster scope is planned work, not a permanent restriction")
 	case "LegacyCluster":
 		return fmt.Errorf("spec.xrd.scope: LegacyCluster is not valid in apiextensions.crossplane.io/v2")
 	case "":

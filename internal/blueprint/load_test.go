@@ -727,3 +727,18 @@ func TestValidateAcceptsFromOnScalarParameter(t *testing.T) {
 		})
 	}
 }
+
+// --- Final review, I3: Cluster scope is refused, not half-composed ---
+
+func TestValidateRejectsClusterScope(t *testing.T) {
+	b := scalarBlueprint(func(b *Blueprint) { b.Spec.XRD.Scope = "Cluster" })
+	err := b.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want Cluster scope refused: the Composition emitter omits " +
+			"providerConfigRef entirely for it, silently binding every composed resource to the " +
+			"ProviderConfig named \"default\"")
+	}
+	if !strings.Contains(err.Error(), "Cluster") || !strings.Contains(err.Error(), "Namespaced") {
+		t.Errorf("err = %v, want it to name Cluster and point at Namespaced", err)
+	}
+}
