@@ -115,6 +115,9 @@ export interface Blueprint {
 export interface GenerateOutput {
   path: string
   bytes: number
+  /** The full generated YAML file content, byte-for-byte what the engine
+   * writes. Always present (not optional — the server always sends it). */
+  body: string
 }
 
 /** Mirrors the /api/generate response body. */

@@ -248,33 +248,3 @@ if (typeof window !== "undefined") {
 if (typeof document !== "undefined" && typeof document.elementFromPoint !== "function") {
   document.elementFromPoint = () => null
 }
-
-// Another known jsdom fidelity gap, same shape as the d3-drag one above:
-// @codemirror/view (the Output pane's read-only YAML view, Task 6)
-// schedules an initial layout measurement pass via requestAnimationFrame
-// right after an EditorView is constructed. That pass calls
-// `Range.getClientRects()` on a text range it built internally — jsdom's
-// Range implementation does not carry that method — so the callback throws
-// TypeError: "textRange(...).getClientRects is not a function". This fires
-// on jsdom's own animation-frame timer, asynchronously, after the
-// constructing test's synchronous body (and often after the test itself)
-// has already finished — confirmed empirically: every assertion in
-// Output.test.tsx passes before this ever fires, and CodeMirror's line
-// content is already present in the DOM without this measurement pass
-// (jsdom computes no real layout for it to measure anyway — see the
-// offsetWidth/getBoundingClientRect polyfill above for the same story with
-// @xyflow/react). Same fix as d3-drag: mark the resulting `error` event on
-// `window` handled, narrowly, only for this exact known signature.
-if (typeof window !== "undefined") {
-  window.addEventListener("error", event => {
-    const err = event.error
-    if (
-      err instanceof TypeError &&
-      err.message === "textRange(...).getClientRects is not a function" &&
-      typeof err.stack === "string" &&
-      err.stack.includes("@codemirror/view")
-    ) {
-      event.preventDefault()
-    }
-  })
-}

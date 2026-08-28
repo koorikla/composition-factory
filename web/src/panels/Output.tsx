@@ -17,19 +17,16 @@
 // `setField` on every keystroke, and firing a PUT+generate round trip per
 // keystroke would be both wasteful and visibly janky.
 //
-// The generated view is a read-only CodeMirror instance for the same reason
-// real generated files carry a do-not-edit header: hand-editing generated
-// output is exactly the drift `cf gen --check` exists to detect. Note what
-// GenerateResult (the frozen /api/generate response shape) actually
-// contains: an output's `path` and `bytes`, never its text — there is no
-// "generated YAML" in this contract to display verbatim. So the read-only
-// view renders that metadata as a small YAML manifest of its own, rather
-// than inventing file content the server never sent.
-import { useEffect, useRef, useState } from "react"
-import { EditorState } from "@codemirror/state"
-import { EditorView } from "@codemirror/view"
-import { yaml } from "@codemirror/lang-yaml"
-import { minimalSetup } from "codemirror"
+// GenerateOutput now carries `body` — the engine's actual generated YAML,
+// byte-for-byte (see api/contract.ts's doc comment; the server extension
+// landed on main as 5817041). So the view renders each output's real
+// content verbatim: a heading naming its `path`, then its `body` in a
+// plain, read-only <pre>. A <pre> is read-only by construction (no
+// contenteditable, nothing to wire up to reject edits) — same guarantee
+// the previous CodeMirror mount enforced explicitly, for free. Deliberately
+// no syntax-highlighting library: this is a straight, unmodified rendering
+// of exactly the bytes the server sent, not a reinterpretation of them.
+import { useEffect, useState } from "react"
 import { api, ApiError } from "../api/contract"
 import type { GenerateResult } from "../api/contract"
 import { useBlueprint } from "../store/blueprint"
@@ -39,87 +36,46 @@ import { useBlueprint } from "../store/blueprint"
 // short enough that the preview still feels live.
 const REGENERATE_DEBOUNCE_MS = 200
 
-/** Renders a GenerateResult as a small read-only YAML manifest: the frozen
- * contract's GenerateResult carries only output metadata (path + bytes), so
- * this is a manifest OF that metadata, not a reconstruction of file
- * contents the server never sent. */
-function manifestYaml(result: GenerateResult): string {
-  const lines = [
-    "# generated -- do not hand-edit; drift here is what `cf gen --check` catches",
-    "outputs:",
-    ...result.outputs.flatMap(o => [`  - path: ${o.path}`, `    bytes: ${o.bytes}`]),
-    `written: ${result.written}`,
-    "",
-  ]
-  return lines.join("\n")
-}
-
 interface YamlViewProps {
-  value: string
+  result: GenerateResult
 }
 
-/** A minimal, read-only CodeMirror mount. No React wrapper package is
- * installed for CodeMirror (the brief rules out new deps), so this wires
- * @codemirror/view directly: one EditorView is created once per mount, and
- * a later `value` change is applied via dispatch() rather than tearing the
- * view down and rebuilding it — the ordinary "update, don't remount" rule
- * for any imperative widget wrapped for React. */
-function YamlView({ value }: YamlViewProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const viewRef = useRef<EditorView | null>(null)
-
-  useEffect(() => {
-    if (!containerRef.current) return
-    const view = new EditorView({
-      state: EditorState.create({
-        doc: value,
-        extensions: [
-          minimalSetup,
-          yaml(),
-          // Belt and braces: EditorState.readOnly blocks every transaction
-          // that isn't explicitly flagged to bypass it (the only path a
-          // generated-output view has no business exposing), and
-          // EditorView.editable additionally drops contenteditable from the
-          // DOM itself, so this is not just "edits are rejected" but "there
-          // is nothing here inviting a click-and-type in the first place."
-          EditorState.readOnly.of(true),
-          EditorView.editable.of(false),
-        ],
-      }),
-      parent: containerRef.current,
-    })
-    viewRef.current = view
-    return () => {
-      view.destroy()
-      viewRef.current = null
-    }
-    // Deliberately mount-once: subsequent `value` changes go through the
-    // dispatch effect below, not a remount (which would lose scroll
-    // position for no reason on every regenerate).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    const view = viewRef.current
-    if (!view || view.state.doc.toString() === value) return
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } })
-  }, [value])
-
+/** Each output's `path` heading, then its `body` rendered verbatim in a
+ * <pre> — no trimming, no reformatting, no syntax highlighting. `body` is
+ * placed as the <pre>'s sole child so its textContent is exactly `body`,
+ * byte for byte. */
+function YamlView({ result }: YamlViewProps) {
   return (
     <div
       data-testid="yaml-view"
       aria-readonly="true"
-      ref={containerRef}
-      className="mono"
-      style={{
-        fontSize: 12,
-        border: "1px solid var(--rule)",
-        borderRadius: 4,
-        background: "var(--surface)",
-        overflow: "auto",
-        maxHeight: 220,
-      }}
-    />
+      style={{ display: "flex", flexDirection: "column", gap: 12, overflow: "auto" }}
+    >
+      {result.outputs.map(o => (
+        <div key={o.path}>
+          <div className="mono" style={{ fontSize: 11, color: "var(--faint)", marginBottom: 4 }}>
+            {o.path}
+          </div>
+          <pre
+            data-testid="yaml-body"
+            className="mono"
+            style={{
+              margin: 0,
+              fontSize: 12,
+              padding: 8,
+              border: "1px solid var(--rule)",
+              borderRadius: 4,
+              background: "var(--surface)",
+              color: "var(--ink)",
+              overflow: "auto",
+              maxHeight: 220,
+            }}
+          >
+            {o.body}
+          </pre>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -197,7 +153,7 @@ export function Output() {
           {error}
         </div>
       ) : (
-        result && <YamlView value={manifestYaml(result)} />
+        result && <YamlView result={result} />
       )}
     </div>
   )

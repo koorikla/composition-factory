@@ -1,8 +1,20 @@
 {
   "outputs": [
-    { "path": "definition.yaml", "bytes": 1487 },
-    { "path": "composition.yaml", "bytes": 3122 },
-    { "path": "functions.yaml", "bytes": 418 }
+    {
+      "path": "definition.yaml",
+      "bytes": 869,
+      "body": "apiVersion: apiextensions.crossplane.io/v1\nkind: CompositeResourceDefinition\nmetadata:\n  name: xqueues.messaging.example.org\n  labels:\n    app.kubernetes.io/managed-by: \"compositionfactory\"\nspec:\n  # group/kind for the composite resource this XRD defines\n  group: messaging.example.org\n  names:\n    kind: XQueue\n    plural: xqueues\n  claimNames:\n    kind: Queue\n    plural: queues\n  versions:\n    - name: v1alpha1\n      served: true\n      referenceable: true\n      schema:\n        openAPIV3Schema:\n          type: object\n          properties:\n            spec:\n              type: object\n              properties:\n                # queue depth requested by the caller\n                maxDepth:\n                  type: integer\n                region:\n                  type: string\n                  default: \"us-east-1\"\n              required:\n                - region\n"
+    },
+    {
+      "path": "composition.yaml",
+      "bytes": 921,
+      "body": "apiVersion: apiextensions.crossplane.io/v1\nkind: Composition\nmetadata:\n  name: xqueues.messaging.example.org\n  labels:\n    crossplane.io/xrd: \"xqueues.messaging.example.org\"\nspec:\n  compositeTypeRef:\n    apiVersion: messaging.example.org/v1alpha1\n    kind: XQueue\n  mode: Pipeline\n  pipeline:\n    # patch-and-transform does the bulk of the field wiring\n    - step: patch-and-transform\n      functionRef:\n        name: function-patch-and-transform\n      input:\n        apiVersion: pt.fn.crossplane.io/v1beta1\n        kind: Resources\n        resources:\n          - name: queue\n            base:\n              apiVersion: sqs.aws.upbound.io/v1beta1\n              kind: Queue\n              spec:\n                forProvider:\n                  region: \"us-east-1\"\n            patches:\n              - type: FromCompositeFieldPath\n                fromFieldPath: spec.region\n                toFieldPath: spec.forProvider.region\n"
+    },
+    {
+      "path": "functions.yaml",
+      "bytes": 560,
+      "body": "apiVersion: pkg.crossplane.io/v1\nkind: Function\nmetadata:\n  name: function-patch-and-transform\n  annotations:\n    # pinned so `cf gen` output is reproducible across runs\n    meta.crossplane.io/maintainer: \"compositionfactory\"\nspec:\n  package: \"xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.7.0\"\n---\napiVersion: pkg.crossplane.io/v1\nkind: Function\nmetadata:\n  name: function-auto-ready\nspec:\n  package: \"xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0\"\n  # marks the composite Ready once every composed resource reports Ready\n"
+    }
   ],
   "written": false
 }
