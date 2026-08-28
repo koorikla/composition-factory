@@ -27,6 +27,16 @@ const testProviderRef = "ghcr.io/x/provider-aws-sqs:v2.7.0"
 // test package, so this is an independent copy rather than a shared import —
 // but it is deliberately kept to the same two entries so a test failure here
 // means the same thing it would there.
+//
+// The namespaced Queue's spec also carries providerConfigRef,
+// managementPolicies and writeConnectionSecretToRef alongside forProvider —
+// a realistic v2 envelope, not just forProvider with nothing around it. This
+// is deliberate: GET /api/kinds/{apiVersion}/{kind}'s envelope is exactly
+// spec minus forProvider/initProvider (see schema.CRD.Envelope), and a fixture
+// with an empty envelope could never catch envelope content actually being
+// wrong end-to-end over HTTP — only that it round-trips as an empty list.
+// forProvider itself (region, tags) is untouched, so tests pinned to
+// "2 forProvider fields" are unaffected.
 func testFixtureCRDs(t *testing.T) map[string][]schema.CRD {
 	t.Helper()
 	docs := [][]byte{[]byte(`
@@ -51,6 +61,19 @@ spec:
                 properties:
                   region: {type: string}
                   tags: {type: object, additionalProperties: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [name]
+                properties:
+                  kind: {type: string}
+                  name: {type: string}
+              managementPolicies:
+                type: array
+                items: {type: string}
+              writeConnectionSecretToRef:
+                type: object
+                properties:
+                  name: {type: string}
 `), []byte(`
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition

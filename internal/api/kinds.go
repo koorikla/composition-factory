@@ -55,16 +55,12 @@ func (o Options) handleKind(w http.ResponseWriter, r *http.Request) {
 	}
 	kindName := r.PathValue("kind")
 
-	crd, ok := o.Index.Lookup(apiVersion, kindName)
+	// LookupKind, not a separate Lookup+scan-All(): both halves of the
+	// response must describe the same provider's resource, which only
+	// holds if they are resolved as one consistent choice — see
+	// index.LookupKind's doc comment for the collision this avoids.
+	kind, crd, ok := o.Index.LookupKind(apiVersion, kindName)
 	if !ok {
-		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("kind not found: %s %s", apiVersion, kindName))
-		return
-	}
-	kind, ok := findKind(o.Index, apiVersion, kindName)
-	if !ok {
-		// Lookup and All are built from the same data in index.Build, so this
-		// only happens if that invariant is ever broken; report it the same
-		// way as any other "we don't have this" case rather than a 500.
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("kind not found: %s %s", apiVersion, kindName))
 		return
 	}
@@ -119,36 +115,26 @@ func (o Options) handleKindFields(w http.ResponseWriter, r *http.Request) {
 		nodes = nil
 	}
 
-	fields := index.Fields(nodes, fq)
+	// total must count the filtered set BEFORE limit truncates it, so a
+	// caller can tell limit cut the response short (total > len(fields)).
+	// index.Fields applies Limit as its own last filter step internally, so
+	// computing fields := index.Fields(nodes, fq) and then total :=
+	// len(fields) would make total tautologically equal len(fields) —
+	// exactly the bug this comment is here to not reintroduce. Run the same
+	// query with Limit zeroed to get the unlimited filtered set once, then
+	// slice it ourselves: one filtering pass, not two.
+	fqUnlimited := fq
+	fqUnlimited.Limit = 0
+	fields := index.Fields(nodes, fqUnlimited)
+	total := len(fields)
+	if fq.Limit > 0 && len(fields) > fq.Limit {
+		fields = fields[:fq.Limit]
+	}
 	if fields == nil {
 		fields = []index.Field{}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"fields": fields, "total": len(fields)})
-}
-
-// findKind returns the Kind entry matching apiVersion and kindName out of
-// idx.All(). index.Index has no direct apiVersion+kind -> Kind lookup (only
-// Lookup, which resolves to the CRD); this is the one place that gap
-// matters, so it is bridged here instead of widening index's own public
-// surface for a single caller.
-//
-// Collision note: idx.Lookup documents that two different providers shipping
-// the same apiVersion+kind is a resolvable-but-ambiguous case, settled by
-// "last write in Build's sorted provider order wins". All() can still
-// contain both entries; this walks it in order and returns the first match,
-// which is the lexicographically *smallest* provider — not necessarily the
-// one Lookup's CRD came from. This mirrors a sharp edge index.Lookup's own
-// doc comment already calls out, not a new one introduced here, and the
-// fixtures this task ships with never hit it (the two Queues differ by
-// apiVersion, not just provider).
-func findKind(idx *index.Index, apiVersion, kindName string) (index.Kind, bool) {
-	for _, k := range idx.All() {
-		if k.APIVersion == apiVersion && k.Kind == kindName {
-			return k, true
-		}
-	}
-	return index.Kind{}, false
+	writeJSON(w, http.StatusOK, map[string]any{"fields": fields, "total": total})
 }
 
 // pathAPIVersion extracts and unescapes the {apiVersion} path wildcard.

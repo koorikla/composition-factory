@@ -35,8 +35,9 @@ type Kind struct {
 // were built from so a caller can resolve one back to its full schema
 // without re-reading the cache.
 type Index struct {
-	kinds []Kind
-	crds  map[string]schema.CRD // keyed by apiVersion + "/" + kind
+	kinds      []Kind
+	crds       map[string]schema.CRD // keyed by apiVersion + "/" + kind
+	kindsByKey map[string]Kind       // keyed by apiVersion + "/" + kind, same key as crds
 }
 
 // Build indexes every managed-resource CRD across byProvider, a map from
@@ -63,6 +64,7 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 
 	var kinds []Kind
 	crds := make(map[string]schema.CRD)
+	kindsByKey := make(map[string]Kind)
 	var attempted, failed int
 	var lastErr error
 
@@ -103,7 +105,7 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 				}
 			}
 
-			kinds = append(kinds, Kind{
+			kind := Kind{
 				Kind:       c.Kind,
 				Group:      c.Group,
 				Version:    v.Name,
@@ -114,12 +116,20 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 				Namespaced: c.Namespaced(),
 				Required:   required,
 				Fields:     len(leaves),
-			})
+			}
+			kinds = append(kinds, kind)
 			// Last write wins: if two providers ship a CRD under the same
 			// apiVersion+kind (see Lookup), the one from the
 			// lexicographically greatest provider ref — processed last,
-			// since providers is sorted above — ends up here.
-			crds[apiVersion+"/"+c.Kind] = c
+			// since providers is sorted above — ends up here. crds and
+			// kindsByKey are written together, in the same loop iteration,
+			// so they always resolve the same collision the same way —
+			// LookupKind can therefore return a CRD and a Kind that are
+			// guaranteed to describe the same provider's resource, never two
+			// independently-resolved halves of a collision.
+			key := apiVersion + "/" + c.Kind
+			crds[key] = c
+			kindsByKey[key] = kind
 		}
 	}
 
@@ -137,7 +147,7 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 		return kinds[i].Provider < kinds[j].Provider
 	})
 
-	return &Index{kinds: kinds, crds: crds}, nil
+	return &Index{kinds: kinds, crds: crds, kindsByKey: kindsByKey}, nil
 }
 
 // All returns every indexed Kind sorted by (APIVersion, Kind). It is a copy
@@ -180,4 +190,26 @@ func (i *Index) Search(q string, limit int) []Kind {
 func (i *Index) Lookup(apiVersion, kind string) (schema.CRD, bool) {
 	c, ok := i.crds[apiVersion+"/"+kind]
 	return c, ok
+}
+
+// LookupKind returns both the Kind and the CRD indexed under apiVersion and
+// kind, resolved as one consistent choice.
+//
+// A caller that needs both halves — a Kind for its identity/summary fields
+// and a CRD for its full schema — must not resolve them independently (e.g.
+// Lookup for the CRD plus a separate scan of All() for the Kind): in the
+// collision case Lookup's own doc comment describes (two different
+// providers shipping the same apiVersion+kind), two independent lookups
+// could each apply the "last write wins" tie-break to a different
+// candidate, silently pairing one provider's Kind with another provider's
+// CRD. LookupKind can't do that, because both are written from the same
+// map key in the same loop iteration of Build — see the comment there.
+func (i *Index) LookupKind(apiVersion, kind string) (Kind, schema.CRD, bool) {
+	key := apiVersion + "/" + kind
+	k, ok := i.kindsByKey[key]
+	if !ok {
+		return Kind{}, schema.CRD{}, false
+	}
+	c := i.crds[key] // guaranteed present: crds and kindsByKey share every key
+	return k, c, true
 }

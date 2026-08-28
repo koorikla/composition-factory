@@ -157,8 +157,13 @@ func writeJSONError(w http.ResponseWriter, status int, message string) {
 //     description/required/depth keys, which is squarely the "compresses
 //     about 18:1" case TestResponsesAreGzippedWhenAccepted's comment
 //     describes, not this fixture's minimal case.
-//   - GET /api/kinds/{apiVersion}/{kind} (identity + envelope): 262 raw /
-//     192 gzipped — just over the line, compressed.
+//   - GET /api/kinds/{apiVersion}/{kind} (identity + envelope): 640 raw /
+//     299 gzipped, comfortably over the line and compressed. (This was
+//     measured a second time, after fix round 1 review finding 3 gave the
+//     fixture's namespaced Queue a realistic non-empty envelope —
+//     providerConfigRef, managementPolicies, writeConnectionSecretToRef —
+//     in place of the original empty one; the first measurement, 262/192
+//     raw/gzipped against an empty envelope, is superseded by this number.)
 //
 // None of that moves the threshold: 256 was never derived from this
 // fixture's specific byte counts, only from "smaller than the smallest body
