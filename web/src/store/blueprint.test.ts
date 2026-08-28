@@ -103,4 +103,54 @@ describe("blueprint store", () => {
     s.commitMove()
     expect(useBlueprint.getState().history.length).toBe(historyLenBeforeSecondCommit)
   })
+
+  describe("hydrateNodes", () => {
+    // blueprintFixture's one resource, "main-queue", is a Queue whose
+    // provider is "xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0" (the
+    // namespaced, v2 variant) — distinct from a same-`kind` cluster-scoped
+    // Queue that a kind-only match could not tell apart.
+    const namespacedQueueKind = {
+      kind: "Queue", group: "sqs.aws.m.upbound.io", version: "v1beta1",
+      apiVersion: "sqs.aws.m.upbound.io/v1beta1", plural: "queues",
+      scope: "Namespaced" as const, provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0",
+      namespaced: true, required: 1, fields: 18,
+    }
+    const clusterQueueKind = {
+      kind: "Queue", group: "sqs.aws.upbound.io", version: "v1beta1",
+      apiVersion: "sqs.aws.upbound.io/v1beta1", plural: "queues",
+      scope: "Cluster" as const, provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.21.0",
+      namespaced: false, required: 1, fields: 18,
+    }
+
+    it("gives an un-hydrated resource a node, matched by (kind, provider) not kind alone", () => {
+      // both kinds share `kind: "Queue"`; only the provider tells them apart.
+      useBlueprint.getState().hydrateNodes([clusterQueueKind, namespacedQueueKind])
+      const { nodes } = useBlueprint.getState()
+      expect(nodes).toHaveLength(1)
+      expect(nodes[0].name).toBe("main-queue")
+      expect(nodes[0].apiVersion).toBe("sqs.aws.m.upbound.io/v1beta1")
+    })
+
+    it("leaves a resource un-hydrated when no Kind matches its (kind, provider) pair", () => {
+      // clusterQueueKind alone shares `kind` with main-queue but not
+      // `provider` — a kind-only match would wrongly hydrate it.
+      useBlueprint.getState().hydrateNodes([clusterQueueKind])
+      expect(useBlueprint.getState().nodes).toHaveLength(0)
+    })
+
+    it("skips a resource that already has a node, and does not duplicate it", () => {
+      const s = useBlueprint.getState()
+      s.addNode(namespacedQueueKind, 5, 5)
+      const before = useBlueprint.getState().nodes.length
+      s.hydrateNodes([namespacedQueueKind])
+      // only "main-queue" (from the fixture) was un-hydrated; the node
+      // addNode() just created for its own new resource is untouched.
+      expect(useBlueprint.getState().nodes.length).toBe(before + 1)
+    })
+
+    it("never grows undo history — loading a document is not a user edit", () => {
+      useBlueprint.getState().hydrateNodes([namespacedQueueKind])
+      expect(useBlueprint.getState().canUndo()).toBe(false)
+    })
+  })
 })

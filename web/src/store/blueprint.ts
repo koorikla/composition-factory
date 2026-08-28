@@ -16,6 +16,7 @@
 //    Ctrl+Z rewinds one pixel at a time.
 import { create } from "zustand"
 import { immer } from "zustand/middleware/immer"
+import dagre from "@dagrejs/dagre"
 import { api } from "../api/contract"
 import type { Blueprint, Kind } from "../api/contract"
 
@@ -60,6 +61,11 @@ interface BlueprintStore {
 
   load(): Promise<void>
   addNode(k: Kind, x: number, y: number): void
+  /** Gives every resource in `doc` that does not already have a node one,
+   * laid out with dagre. The canvas calls this once after a fresh load, so
+   * a document read from disk shows up instead of an empty pane. See the
+   * doc comment on the implementation below for the matching rule. */
+  hydrateNodes(kinds: Kind[]): void
   moveNode(id: string, x: number, y: number): void
   removeNode(id: string): void
   connect(fromParam: string, toNode: string, toPath: string): void
@@ -101,6 +107,40 @@ function makeId(): string {
     return crypto.randomUUID()
   }
   return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+// Rough footprint of a rendered ResourceNode, used only to keep dagre's
+// initial layout from overlapping — not a real measured DOM size (this
+// module has no DOM dependency; the canvas task owns actual rendering).
+const LAYOUT_NODE_WIDTH = 220
+const LAYOUT_NODE_HEIGHT = 120
+// Leaves room at the left edge for the canvas's fixed XR node, which this
+// store has no concept of (it is not a resource and carries no position
+// here — the canvas task owns where it sits).
+const LAYOUT_ORIGIN_X = 420
+
+/** Assigns every name in `names` a non-overlapping (x, y) via dagre. There
+ * are no resource-to-resource edges to feed it yet — every wire today runs
+ * from an XRD parameter to a resource field, never between two resources
+ * (see canvas/wires.ts) — so this is a single-rank layout: dagre still owns
+ * the non-overlap math, the graph just has no edges to route around. */
+function dagreLayout(names: string[]): Map<string, { x: number; y: number }> {
+  const g = new dagre.graphlib.Graph()
+  g.setGraph({ rankdir: "TB", nodesep: 40, ranksep: 80 })
+  g.setDefaultEdgeLabel(() => ({}))
+  for (const name of names) {
+    g.setNode(name, { width: LAYOUT_NODE_WIDTH, height: LAYOUT_NODE_HEIGHT })
+  }
+  dagre.layout(g)
+  const positions = new Map<string, { x: number; y: number }>()
+  for (const name of names) {
+    const n = g.node(name)
+    positions.set(name, {
+      x: LAYOUT_ORIGIN_X + n.x - LAYOUT_NODE_WIDTH / 2,
+      y: n.y - LAYOUT_NODE_HEIGHT / 2,
+    })
+  }
+  return positions
 }
 
 /** Rebuilds `wires` from scratch by scanning every resource's fields for a
@@ -224,6 +264,39 @@ export const useBlueprint = create<BlueprintStore>()(
           draft.wires = computeWires(draft.doc, draft.nodes)
         })
         noteOwnMutation()
+      },
+
+      /** Matches each un-hydrated resource to its Kind by (kind, provider),
+       * NEVER kind alone: the kinds index can hold two entries with the
+       * same `kind` (a namespaced and a cluster-scoped variant of the same
+       * managed resource, differing in provider/scope/apiVersion) — see
+       * src/api/fixtures/kinds.json's two "Queue" entries. Matching on kind
+       * alone would silently hand a hydrated node the wrong apiVersion. A
+       * resource with no matching Kind is left un-hydrated rather than
+       * guessed at.
+       *
+       * Not undoable (no pushHistory(), doc itself is untouched): hydrating
+       * a loaded document into nodes is not a user edit, so it must not be
+       * possible to Ctrl+Z a document back to "no nodes visible". Positions
+       * come from dagreLayout above; a resource that already has a node is
+       * left alone — dragged or not, hydration never overwrites it. */
+      hydrateNodes(kinds) {
+        const s = get()
+        if (!s.doc) return
+        const already = new Set(s.nodes.map(n => n.name))
+        const toHydrate = s.doc.spec.resources.filter(r => !already.has(r.name))
+        if (toHydrate.length === 0) return
+        const positions = dagreLayout(toHydrate.map(r => r.name))
+        set(draft => {
+          if (!draft.doc) return
+          for (const r of toHydrate) {
+            const k = kinds.find(candidate => candidate.kind === r.kind && candidate.provider === r.provider)
+            if (!k) continue
+            const pos = positions.get(r.name) ?? { x: 0, y: 0 }
+            draft.nodes.push({ id: makeId(), kind: r.kind, apiVersion: k.apiVersion, name: r.name, x: pos.x, y: pos.y })
+          }
+          draft.wires = computeWires(draft.doc, draft.nodes)
+        })
       },
 
       moveNode(id, x, y) {
