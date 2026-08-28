@@ -18,6 +18,7 @@ var version = "dev"
 type CLI struct {
 	Version  VersionCmd  `cmd:"" help:"Print the cf version."`
 	Provider ProviderCmd `cmd:"" help:"Manage provider schema sources."`
+	Gen      GenCmd      `cmd:"" help:"Generate XRD, Composition and functions.yaml from a blueprint."`
 }
 
 type VersionCmd struct{}

@@ -1,0 +1,83 @@
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
+	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/emit"
+	"github.com/koorikla/compositionfactory/internal/schema"
+)
+
+// GenCmd renders a blueprint to YAML on disk.
+type GenCmd struct {
+	Blueprint string `arg:"" help:"Path to the blueprint file."`
+	Out       string `short:"o" help:"Output directory." default:"."`
+	CacheDir  string `help:"Schema cache directory." default:"${cachedir}"`
+	Check     bool   `help:"Do not write. Exit 0 if in sync, 2 if the tree has drifted."`
+}
+
+func (c *GenCmd) Run(out io.Writer) error {
+	code, err := c.run(out)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		os.Exit(code)
+	}
+	return nil
+}
+
+// run returns the intended exit code so tests can assert it without exiting.
+// 0 = in sync or written, 1 = tool error (returned as err), 2 = drift.
+func (c *GenCmd) run(out io.Writer) (int, error) {
+	b, err := blueprint.Load(c.Blueprint)
+	if err != nil {
+		return 1, err
+	}
+	store := cache.New(c.CacheDir)
+	var crds []schema.CRD
+	for _, s := range b.Spec.Sources {
+		got, err := store.Load(s.Provider)
+		if err != nil {
+			return 1, err
+		}
+		crds = append(crds, got...)
+	}
+	outputs, err := emit.Generate(b, crds, c.Out)
+	if err != nil {
+		return 1, err
+	}
+
+	if c.Check {
+		drift := false
+		for _, o := range outputs {
+			existing, err := os.ReadFile(o.Path)
+			if err != nil || !bytes.Equal(existing, o.Body) {
+				fmt.Fprintf(out, "drift: %s\n", o.Path)
+				drift = true
+			}
+		}
+		if drift {
+			fmt.Fprintln(out, "generated output is stale; run: cf gen")
+			return 2, nil
+		}
+		fmt.Fprintln(out, "in sync")
+		return 0, nil
+	}
+
+	for _, o := range outputs {
+		if err := os.MkdirAll(filepath.Dir(o.Path), 0o755); err != nil {
+			return 1, err
+		}
+		if err := os.WriteFile(o.Path, o.Body, 0o644); err != nil {
+			return 1, err
+		}
+		fmt.Fprintf(out, "wrote %s\n", o.Path)
+	}
+	return 0, nil
+}

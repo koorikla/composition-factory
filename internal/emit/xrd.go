@@ -85,12 +85,12 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 // requiredParams returns the explicitly-required parameters, sorted.
 //
 // This deliberately does NOT also include every parameter some template
-// dereferences (contrast blueprint.Blueprint.DereferencedParams). An earlier
-// version of this emitter unioned the two: the idea was that a Go template
-// dereferencing a missing XR field renders the literal string "<no value>"
-// into a live managed resource, and since that string is legal YAML the
-// whole validate -> render -> validate pipeline still exits 0 -- so forcing
-// every dereferenced parameter to be required looked like the mitigation.
+// dereferences. An earlier version of this emitter unioned the two: the idea
+// was that a Go template dereferencing a missing XR field renders the
+// literal string "<no value>" into a live managed resource, and since that
+// string is legal YAML the whole validate -> render -> validate pipeline
+// still exits 0 -- so forcing every dereferenced parameter to be required
+// looked like the mitigation.
 //
 // That union is now both unnecessary and actively harmful. The Composition
 // emitter (internal/emit/composition.go) no longer takes a bare dereference
