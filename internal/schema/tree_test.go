@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -31,6 +32,10 @@ spec:
                   tags:
                     type: object
                     additionalProperties: {type: string}
+                  endpoint:
+                    properties:
+                      url: {type: string}
+                      port: {type: integer}
                   containers:
                     type: array
                     items:
@@ -74,11 +79,83 @@ func TestLeavesUsesArrayIndexedPaths(t *testing.T) {
 	want := []string{
 		"containers[0].image",
 		"containers[0].ports[0].containerPort",
+		"endpoint.port",
+		"endpoint.url",
 		"region",
 		"tags",
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("Leaves paths (-want +got):\n%s", diff)
+	}
+}
+
+// TestUntypedObjectWithPropertiesBecomesObjectNode pins buildNode's untyped
+// fallback (the `default:` branch in tree.go). Real provider schemas
+// frequently omit `type: object` on embedded objects; endpoint here has no
+// `type:` key at all but does have `properties`, and is reached through the
+// normal ForProvider() -> BuildTree -> buildNode path (not via items, and
+// not via forProvider itself, both of which are read by direct field access
+// and would bypass buildNode entirely).
+func TestUntypedObjectWithPropertiesBecomesObjectNode(t *testing.T) {
+	c := parseOne(t, nestedCRD)
+	fp, err := c.ForProvider()
+	if err != nil {
+		t.Fatalf("ForProvider: %v", err)
+	}
+	var endpoint *Node
+	for _, n := range fp {
+		if n.Name == "endpoint" {
+			endpoint = n
+		}
+	}
+	if endpoint == nil {
+		t.Fatal("forProvider has no endpoint node")
+	}
+	if endpoint.Type != "object" {
+		t.Errorf("endpoint.Type = %q, want %q (untyped-with-properties must default to object)", endpoint.Type, "object")
+	}
+	if len(endpoint.Children) == 0 {
+		t.Error("endpoint.Children is empty, want url and port")
+	}
+
+	var got []string
+	for _, l := range Leaves(fp, "") {
+		if l.Path == "endpoint.url" || l.Path == "endpoint.port" {
+			got = append(got, l.Path)
+		}
+	}
+	want := []string{"endpoint.port", "endpoint.url"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("endpoint leaves (-want +got):\n%s", diff)
+	}
+}
+
+// TestScalarArrayIsAWholeLeafNotIndexed pins the deliberate semantic that
+// arrays of scalars (managementPolicies: type array, items: {type: string})
+// are addressed as a single leaf with no [0] index -- the whole array is
+// assigned as a value, unlike arrays of objects (e.g. containers) whose
+// element fields are indexed. Task 9's Composition emitter depends on this
+// distinction, so it must be pinned rather than left as incidental behavior.
+func TestScalarArrayIsAWholeLeafNotIndexed(t *testing.T) {
+	c := parseOne(t, nestedCRD)
+	env, err := c.Envelope()
+	if err != nil {
+		t.Fatalf("Envelope: %v", err)
+	}
+	var matches []Leaf
+	for _, l := range Leaves(env, "") {
+		if l.Path == "managementPolicies" || strings.HasPrefix(l.Path, "managementPolicies[") {
+			matches = append(matches, l)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("got %d leaves matching managementPolicies, want exactly 1: %+v", len(matches), matches)
+	}
+	if matches[0].Path != "managementPolicies" {
+		t.Errorf("managementPolicies path = %q, want %q (scalar arrays are assigned whole, not indexed)", matches[0].Path, "managementPolicies")
+	}
+	if matches[0].Node.Type != "array" {
+		t.Errorf("managementPolicies.Type = %q, want %q", matches[0].Node.Type, "array")
 	}
 }
 

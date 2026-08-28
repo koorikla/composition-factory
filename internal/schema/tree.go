@@ -88,7 +88,11 @@ func stringSlice(v any) []string {
 	return out
 }
 
-// Leaves flattens nodes to settable fields with their paths.
+// Leaves flattens nodes to settable fields with their paths. Arrays of
+// scalars (no Children, e.g. managementPolicies) are assigned whole and keep
+// their plain path with no [0] index; only arrays of objects (Children
+// present, Type == "array", e.g. containers) get an indexed path for their
+// element fields.
 func Leaves(nodes []*Node, prefix string) []Leaf {
 	var out []Leaf
 	for _, n := range nodes {
