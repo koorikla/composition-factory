@@ -13,11 +13,14 @@
 //     persistBlueprint (blueprint.go's own file, see below) — never left
 //     in memory for some later "save" step that does not exist in this API.
 //
-// Status codes: 400 for a malformed request body or a validation failure,
-// 409 for an edit that conflicts with current state (a duplicate add, a
-// rename colliding with an existing name, deleting a still-referenced
-// parameter), 404 for an edit naming a parameter that is not declared, 200
-// on success. Every error body carries the underlying blueprint/edit-layer
+// Status codes: 400 for a malformed request body or a validation/parse
+// failure, 409 for an edit that conflicts with current state (a duplicate
+// add, a rename colliding with an existing name, deleting a
+// still-referenced parameter), 404 for an edit naming a parameter that is
+// not declared, 500 when the blueprint file itself cannot be read (see
+// loadBlueprint below — that is the server's fixed path/environment being
+// wrong, not a problem the caller's request can be blamed for), 200 on
+// success. Every error body carries the underlying blueprint/edit-layer
 // error verbatim (see writeJSONError call sites below) — those messages name
 // the offending field path precisely, and paraphrasing them would throw that
 // away.
@@ -26,6 +29,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -36,15 +40,28 @@ import (
 )
 
 // loadBlueprint reads and validates the blueprint at o.Blueprint. On failure
-// it writes the 400 response itself (the only failure mode for a currently
-// well-formed on-disk file is that it no longer validates — see
-// TestGenerateSurfacesValidationErrorsAsIs, which corrupts the file directly
-// to exercise exactly this path) and returns ok=false, so every caller can
+// it writes the response itself and returns ok=false, so every caller can
 // just `if !ok { return }`.
+//
+// Fix round 1 (Finding 1): the failure is classified before it is reported.
+// blueprint.Load can fail two structurally different ways — it could not
+// even read o.Blueprint (missing file, a directory in its place, a
+// permissions problem: the server's own fixed path or environment is wrong,
+// nothing about the current HTTP request caused it), or it read the file
+// fine and then the content failed to parse as YAML or failed Validate() (a
+// data problem, reported the same way a rejected edit's Validate() failure
+// is). blueprint.ReadError marks the first case; errors.As unwraps through
+// Load's %w wrapping to find it. Everything else — parse and Validate()
+// failures — keeps the previous 400 treatment.
 func (o Options) loadBlueprint(w http.ResponseWriter) (*blueprint.Blueprint, bool) {
 	b, err := blueprint.Load(o.Blueprint)
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+		var readErr *blueprint.ReadError
+		status := http.StatusBadRequest
+		if errors.As(err, &readErr) {
+			status = http.StatusInternalServerError
+		}
+		writeJSONError(w, status, err.Error())
 		return nil, false
 	}
 	return b, true

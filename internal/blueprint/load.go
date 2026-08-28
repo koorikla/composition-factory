@@ -134,11 +134,27 @@ func groupIsBareKeyword(group string) bool {
 	return len(segments) == 1 && yamlKeywords[strings.ToLower(segments[0])]
 }
 
+// ReadError indicates that the blueprint file itself could not be read (the
+// path does not exist, is a directory, or is otherwise inaccessible) — as
+// opposed to being read successfully and then failing to parse as YAML or
+// to validate. That distinction is not visible from the error message alone
+// (both cases just wrap an *fs.PathError or a yaml/Validate error via %w)
+// and Load's own signature stays plain `(*Blueprint, error)`, but a caller
+// that wants to react differently to the two cases — the HTTP API does,
+// treating an inaccessible fixed server path as a 500 and a bad document as
+// a 400 — can use errors.As(err, new(*blueprint.ReadError)).
+type ReadError struct {
+	Err error
+}
+
+func (e *ReadError) Error() string { return e.Err.Error() }
+func (e *ReadError) Unwrap() error { return e.Err }
+
 // Load reads and validates a blueprint file.
 func Load(path string) (*Blueprint, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read blueprint: %w", err)
+		return nil, &ReadError{Err: fmt.Errorf("read blueprint: %w", err)}
 	}
 	var b Blueprint
 	if err := yaml.Unmarshal(body, &b); err != nil {

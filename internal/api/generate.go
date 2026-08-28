@@ -51,7 +51,10 @@ type generateOutput struct {
 // blueprint/cache state failing to produce valid output — but they are
 // reported the same way malformed-request errors are (400), matching this
 // task's own given test rather than introducing a finer-grained code this
-// task's tests do not ask for.
+// task's tests do not ask for. The one exception is o.loadBlueprint's own
+// 500 case (Fix round 1, Finding 1): if o.Blueprint itself cannot be read at
+// all, that is the server's fixed path being wrong, not the blueprint's
+// content, and is reported as 500 there — see blueprint.go's loadBlueprint.
 func (o Options) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	var req generateRequest
 	if err := decodeJSON(r, &req); err != nil {
