@@ -14,6 +14,7 @@ import (
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
 
 // testProviderRef is the xpkg ref testFixtureCRDs' two Queue CRDs are
@@ -150,23 +151,125 @@ func testBlueprintPath(t *testing.T) string {
 	return path
 }
 
-// testHandler builds the http.Handler New produces, wired to an index over
-// the two-Queue fixture (testFixtureCRDs), a cache.Store rooted at a fresh
-// t.TempDir(), and the valid blueprint above written to another t.TempDir().
-// Tasks 5 and 6 reuse this helper — see the task brief — so its shape
-// (no arguments beyond t, a ready-to-use http.Handler out) is a cross-task
-// contract, not just a convenience for this file's own tests.
-func testHandler(t *testing.T) http.Handler {
+// testGenerateFixtureCRDs is testFixtureCRDs' namespaced Queue schema plus a
+// maxMessageSize field, for seeding the cache.Store that Task 6's
+// /api/generate route reads via Store.Load (mirroring cf gen — see
+// cmd/cf/gen.go's run).
+//
+// This exists to reconcile two fixture requirements that would otherwise be
+// mutually exclusive. internal/emit/composition.go's checkFieldPaths rejects
+// any blueprint resource field the resolved CRD's own schema does not
+// define, and testBlueprintYAML's main-queue resource sets maxMessageSize —
+// but testFixtureCRDs' namespaced Queue schema deliberately has only region
+// and tags, because two Task 5 tests (kinds_test.go's
+// TestFieldsHonoursRequiredOnly and TestFieldsTotalCountsPreLimitSet) pin
+// that exact CRD's forProvider field count at 2. Adding maxMessageSize to
+// testFixtureCRDs itself would generate correctly but break those two
+// existing tests, and kinds_test.go is outside the file list Task 6 is
+// scoped to touch. Nor can testBlueprintYAML's resource field be pointed at
+// "region" instead: TestRenameRewritesReferencesOnDisk looks up
+// reloaded.Spec.Resources[0].Fields["maxMessageSize"] by that literal key,
+// so both the parameter name and the field key are fixed by the given
+// tests.
+//
+// The resolution: index.Index (what /api/kinds serves) and cache.Store (what
+// /api/generate reads) are independent inputs to Options — nothing requires
+// a provider's indexed schema and its cached schema to be the same object —
+// so only the seed for the Store gets this field added; testIndex and every
+// existing /api/kinds test are untouched. See the Task 6 report for the full
+// reasoning; this was flagged rather than silently patched because it is
+// exactly the "test's fixture/lookup mechanics forcing an unnatural
+// implementation" case, not an ordinary prose/test conflict.
+func testGenerateFixtureCRDs(t *testing.T) []schema.CRD {
 	t.Helper()
+	withMaxMessageSize, err := schema.ParseCRDs([][]byte{[]byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+                  tags: {type: object, additionalProperties: {type: string}}
+                  maxMessageSize: {type: integer}
+              providerConfigRef:
+                type: object
+                required: [name]
+                properties:
+                  kind: {type: string}
+                  name: {type: string}
+              managementPolicies:
+                type: array
+                items: {type: string}
+              writeConnectionSecretToRef:
+                type: object
+                properties:
+                  name: {type: string}
+`)})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	out := append([]schema.CRD(nil), withMaxMessageSize...)
+	for _, c := range testFixtureCRDs(t)[testProviderRef] {
+		if !c.Namespaced() {
+			out = append(out, c) // the cluster-scoped variant, unmodified
+		}
+	}
+	return out
+}
+
+// testHandlerWithPath builds the http.Handler New produces, wired to an
+// index over the two-Queue fixture (testFixtureCRDs), a cache.Store rooted
+// at a fresh t.TempDir() and seeded with testGenerateFixtureCRDs so
+// /api/generate has cached schemas to render against, and the valid
+// blueprint above written to another t.TempDir() — returning that
+// blueprint's path too, since Task 6's tests need to confirm a mutation
+// actually persisted (or, for a rejected edit, did not) by reloading the
+// file directly, something the handler's return value alone can't expose.
+// Tasks 4, 5 and 6 all reuse this helper — see the task brief — so its
+// shape is a cross-task contract, not just a convenience for this file's own
+// tests.
+func testHandlerWithPath(t *testing.T) (http.Handler, string) {
+	t.Helper()
+	store := cache.New(t.TempDir())
+	if err := store.Save(&xpkg.Package{Ref: testProviderRef, Digest: "sha256:test"}, testGenerateFixtureCRDs(t)); err != nil {
+		t.Fatalf("seed provider cache: %v", err)
+	}
+
+	path := testBlueprintPath(t)
 	h, err := New(Options{
 		Index:     testIndex(t),
-		Store:     cache.New(t.TempDir()),
-		Blueprint: testBlueprintPath(t),
+		Store:     store,
+		Blueprint: path,
 		OutDir:    t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	return h, path
+}
+
+// testHandler is testHandlerWithPath without the blueprint path, for the
+// (Task 4 and 5) tests that only need a working handler. A thin wrapper
+// rather than a parallel implementation, so the two helpers cannot drift out
+// of sync with each other.
+func testHandler(t *testing.T) http.Handler {
+	t.Helper()
+	h, _ := testHandlerWithPath(t)
 	return h
 }
 

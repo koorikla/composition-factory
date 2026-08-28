@@ -77,8 +77,12 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("GET /api/kinds", o.handleKinds)
 	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}", o.handleKind)
 	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}/fields", o.handleKindFields)
-	// Task 6 registers further routes here, e.g.:
-	//   mux.HandleFunc("GET /api/blueprint", o.handleBlueprint)
+	mux.HandleFunc("GET /api/blueprint", o.handleGetBlueprint)
+	mux.HandleFunc("POST /api/blueprint/parameters", o.handleAddParameter)
+	mux.HandleFunc("PUT /api/blueprint/parameters/{name}", o.handleSetParameter)
+	mux.HandleFunc("POST /api/blueprint/parameters/{name}/rename", o.handleRenameParameter)
+	mux.HandleFunc("DELETE /api/blueprint/parameters/{name}", o.handleDeleteParameter)
+	mux.HandleFunc("POST /api/generate", o.handleGenerate)
 
 	return wrap(mux), nil
 }
