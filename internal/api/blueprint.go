@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"sigs.k8s.io/yaml"
@@ -126,20 +127,68 @@ func (srv *server) handleAddParameter(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, b)
 }
 
-// setParameterRequest is the PUT /api/blueprint/parameters/{name} body.
+// setParameterRequest is the PUT /api/blueprint/parameters/{name} body. The
+// parameter is held as raw JSON rather than decoded straight into a
+// blueprint.Parameter, so the handler can still tell which keys the caller
+// actually sent — see decodeParameter.
 type setParameterRequest struct {
-	Parameter blueprint.Parameter `json:"parameter"`
+	Parameter json.RawMessage `json:"parameter"`
+}
+
+// parameterKeys is every key of a parameter object, in the order
+// blueprint.Parameter declares them, each paired with "does the current
+// declaration hold a value here". Order is fixed so the error below names
+// omitted keys deterministically.
+//
+// This list has to be kept in step with blueprint.Parameter's fields. It
+// cannot be derived by reflection over the struct without also hard-coding
+// what "unset" means per field, which is the only part that carries any
+// judgement — so it is written out plainly instead.
+var parameterKeys = []struct {
+	name string
+	set  func(blueprint.Parameter) bool
+}{
+	{"type", func(p blueprint.Parameter) bool { return p.Type != "" }},
+	{"required", func(p blueprint.Parameter) bool { return p.Required }},
+	{"enum", func(p blueprint.Parameter) bool { return len(p.Enum) > 0 }},
+	{"default", func(p blueprint.Parameter) bool { return p.Default != "" }},
+	{"description", func(p blueprint.Parameter) bool { return p.Description != "" }},
 }
 
 // handleSetParameter serves PUT /api/blueprint/parameters/{name}: replace an
 // existing parameter's declaration in full (SetParameter is replace-only,
 // not a merge/patch). Unknown name -> 404, matching this API's general
 // unknown-name convention.
+//
+// Fix round 2 (Important): replace-only was silently destructive at the HTTP
+// boundary. blueprint.Parameter carries no omitempty and JSON has no notion
+// of an absent field on decode, so `PUT {"parameter":{"type":"string"}}`
+// against a required parameter with an enum decoded to Required:false,
+// Enum:nil and persisted that — a 200, and the enum and the required flag
+// gone, with nothing in the request or the response indicating a loss. A
+// caller sending what it believed was a partial update got a destructive one.
+//
+// The fix keeps replace-only semantics — a merge/patch would be a second,
+// divergent edit model over the same route — but makes the destruction
+// impossible to trigger by accident: a body that omits a key which currently
+// holds a value is refused with a 400 naming exactly those keys. Clearing a
+// value is still perfectly possible, it just has to be said out loud
+// (`"enum": null`, `"required": false`), which is the whole difference
+// between an edit and an accident.
+//
+// POST /api/blueprint/parameters deliberately does NOT get the same rule:
+// it declares a brand-new parameter, so an omitted key has no existing value
+// behind it to discard — omission there means "unset", unambiguously.
 func (srv *server) handleSetParameter(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
 	var req setParameterRequest
 	if err := decodeJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	param, present, err := decodeParameter(req.Parameter)
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -155,8 +204,20 @@ func (srv *server) handleSetParameter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, existed := b.Spec.XRD.Parameters[name]
-	if err := b.SetParameter(name, req.Parameter); err != nil {
+	// Only meaningful for a parameter that already exists; for an unknown
+	// name there is nothing to discard, and SetParameter's own failure below
+	// is reported as the 404 it is.
+	existing, existed := b.Spec.XRD.Parameters[name]
+	if dropped := silentlyDropped(existing, present); existed && len(dropped) > 0 {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf(
+			"refusing a partial update of parameter %q: PUT replaces the whole parameter, so omitting "+
+				"%s would silently discard the value each of them currently holds. Send those keys "+
+				"explicitly — their zero values (false, null, \"\") are how you clear one.",
+			name, strings.Join(dropped, ", ")))
+		return
+	}
+
+	if err := b.SetParameter(name, param); err != nil {
 		status := http.StatusBadRequest
 		if !existed {
 			status = http.StatusNotFound
@@ -426,6 +487,58 @@ func atomicWriteFile(path string, body []byte, perm os.FileMode) error {
 		return fmt.Errorf("rename into place: %w", err)
 	}
 	return nil
+}
+
+// decodeParameter decodes a raw `parameter` object into a blueprint.Parameter
+// and, separately, reports which keys the body actually carried.
+//
+// The key set cannot be recovered from the decoded struct — that is the whole
+// problem — and pointer fields would not recover it either: encoding/json
+// unmarshals an explicit `null` into a pointer field by setting the pointer
+// to nil, making `"enum": null` (a deliberate clear) indistinguishable from
+// no `enum` key at all (an accident), which is exactly the distinction
+// handleSetParameter needs. Decoding twice — once into the struct for the
+// values, once into a map for the keys — keeps both.
+//
+// The struct decode keeps DisallowUnknownFields, so a typo inside the
+// parameter object ("requird") is still a 400 rather than a silently ignored
+// key; holding the parameter as json.RawMessage in setParameterRequest would
+// otherwise have lost that check for everything below the top level.
+func decodeParameter(raw json.RawMessage) (blueprint.Parameter, map[string]bool, error) {
+	var p blueprint.Parameter
+	present := make(map[string]bool, len(parameterKeys))
+	if len(raw) == 0 { // no "parameter" key at all
+		return p, present, nil
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
+		return p, nil, fmt.Errorf("invalid request body: %w", err)
+	}
+
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return p, nil, fmt.Errorf("invalid request body: %w", err)
+	}
+	for k := range keys {
+		present[k] = true
+	}
+	return p, present, nil
+}
+
+// silentlyDropped returns the keys that are absent from a PUT body but
+// currently hold a value on existing — the ones a whole-parameter replace
+// would discard without the caller having asked for it — in
+// parameterKeys order.
+func silentlyDropped(existing blueprint.Parameter, present map[string]bool) []string {
+	var dropped []string
+	for _, k := range parameterKeys {
+		if !present[k.name] && k.set(existing) {
+			dropped = append(dropped, k.name)
+		}
+	}
+	return dropped
 }
 
 // decodeJSON decodes r's body as JSON into v, rejecting unknown fields so a

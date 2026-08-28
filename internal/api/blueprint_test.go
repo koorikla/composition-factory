@@ -289,6 +289,100 @@ func TestConcurrentAddsDoNotLoseEdits(t *testing.T) {
 	}
 }
 
+// TestPartialParameterUpdateIsRefusedRatherThanSilentlyDestructive is fix
+// round 2's PUT regression.
+//
+// PUT is replace-only, but blueprint.Parameter has no omitempty and JSON
+// decoding cannot tell an absent key from a zero value, so
+// `{"parameter":{"type":"string"}}` against a required parameter with an enum
+// used to return 200 and quietly persist Required:false, Enum:nil — a
+// destructive edit dressed as a partial one, with nothing in the request or
+// the response hinting at the loss.
+//
+// Replace-only stays (a merge/patch would be a second, divergent edit model
+// on the same route); what changes is that the destructive case has to be
+// asked for explicitly. The three cases below are the whole contract: a body
+// that would drop a live value is refused and names what it would have
+// dropped; a complete body is accepted; and clearing a value still works when
+// the caller says so with a zero value.
+func TestPartialParameterUpdateIsRefusedRatherThanSilentlyDestructive(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	// A parameter with something to lose.
+	if rec := do(t, h, "POST", "/api/blueprint/parameters",
+		`{"name":"location","parameter":{"type":"string","required":true,"enum":["EU","US"],"description":"where it runs"}}`,
+	); rec.Code != http.StatusOK {
+		t.Fatalf("seed: status %d: %s", rec.Code, rec.Body)
+	}
+
+	// A partial body: 400, naming every key it would have discarded.
+	rec := do(t, h, "PUT", "/api/blueprint/parameters/location", `{"parameter":{"type":"string"}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 — this body would have dropped required, enum and description "+
+			"without saying so: %s", rec.Code, rec.Body)
+	}
+	for _, key := range []string{"required", "enum", "description"} {
+		if !strings.Contains(rec.Body.String(), key) {
+			t.Errorf("the refusal does not name the omitted %q key, so the caller cannot tell what to "+
+				"send: %s", key, rec.Body)
+		}
+	}
+	if strings.Contains(rec.Body.String(), "default") {
+		t.Errorf("the refusal names \"default\", which is not set on this parameter and so would not "+
+			"have been discarded: %s", rec.Body)
+	}
+
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if p := reloaded.Spec.XRD.Parameters["location"]; !p.Required || len(p.Enum) != 2 {
+		t.Errorf("the refused PUT still changed the file: required=%v enum=%v", p.Required, p.Enum)
+	}
+
+	// A complete body: 200, and the change lands.
+	rec = do(t, h, "PUT", "/api/blueprint/parameters/location",
+		`{"parameter":{"type":"string","required":true,"enum":["EU","US","APAC"],"default":"EU","description":"where it runs"}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for a body carrying every key: %s", rec.Code, rec.Body)
+	}
+	reloaded, err = blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if p := reloaded.Spec.XRD.Parameters["location"]; len(p.Enum) != 3 || p.Default != "EU" {
+		t.Errorf("the accepted PUT did not land: enum=%v default=%q", p.Enum, p.Default)
+	}
+
+	// Clearing is still possible — it just has to be explicit.
+	rec = do(t, h, "PUT", "/api/blueprint/parameters/location",
+		`{"parameter":{"type":"string","required":false,"enum":null,"default":"","description":""}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 — zero values sent explicitly are how a caller clears a "+
+			"field: %s", rec.Code, rec.Body)
+	}
+	reloaded, err = blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if p := reloaded.Spec.XRD.Parameters["location"]; p.Required || len(p.Enum) != 0 || p.Default != "" {
+		t.Errorf("an explicit clear did not clear: %+v", p)
+	}
+}
+
+// TestSetParameterRejectsUnknownKeys pins that holding the parameter as
+// json.RawMessage (so key presence survives decoding) did not cost the
+// unknown-field check: a typo inside the parameter object must still be a
+// 400, not a silently ignored key.
+func TestSetParameterRejectsUnknownKeys(t *testing.T) {
+	h, _ := testHandlerWithPath(t)
+	rec := do(t, h, "PUT", "/api/blueprint/parameters/maxMessageSize",
+		`{"parameter":{"type":"integer","requird":true,"enum":null,"default":"","description":""}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for the misspelled \"requird\" key: %s", rec.Code, rec.Body)
+	}
+}
+
 func TestGenerateSurfacesValidationErrorsAsIs(t *testing.T) {
 	h, path := testHandlerWithPath(t)
 	// Corrupt the blueprint on disk behind the server's back.
