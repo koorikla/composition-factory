@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { setupServer } from "msw/node"
+import { http, HttpResponse } from "msw"
 import { handlers, failGenerate } from "../api/mocks"
+import { api } from "../api/contract"
 import { useBlueprint } from "../store/blueprint"
 import { Output } from "./Output"
 import blueprintFixture from "../api/fixtures/blueprint.json"
@@ -75,8 +77,12 @@ describe("output pane — real YAML bodies", () => {
     expect(pres).toHaveLength(generateFixture.outputs.length)
     // Strict equality against the raw fixture string, not just `.includes` —
     // this catches a stray trim(), an added/dropped trailing newline, or any
-    // other whitespace massaging the brief rules out.
-    expect(pres[0].textContent).toBe(generateFixture.outputs[0].body)
+    // other whitespace massaging the brief rules out. EVERY output's <pre>,
+    // not just pres[0] (fix wave F7): a per-output regression in the second
+    // or third artifact used to pass unexamined.
+    pres.forEach((pre, i) => {
+      expect(pre.textContent).toBe(generateFixture.outputs[i].body)
+    })
   })
 
   it("shows a heading naming each output's path", async () => {
@@ -102,8 +108,76 @@ describe("output pane — PUT/generate refresh flow", () => {
     useBlueprint.setState({ doc })
     render(<Output />)
     await screen.findByTestId("yaml-view")
-    const saved = await fetch("/api/blueprint").then(r => r.json())
+    // Through contract.ts, not a raw fetch (fix wave F10): contract.ts is
+    // the sole fetch site in non-test code, and test code holds to the same
+    // rule so a route or shape change breaks exactly one module.
+    const saved = await api.blueprint()
     expect(saved.metadata.name).toBe("renamed-in-store")
+  })
+
+  it("calls strictly PUT then POST — generate must read the just-persisted document (fix wave F6)", async () => {
+    // Records the ORDER the two routes are hit, not merely that both were:
+    // a generate that outruns its PUT previews a document the user is no
+    // longer editing, and nothing asserted the sequence before.
+    const calls: string[] = []
+    server.use(
+      http.put("/api/blueprint", async ({ request }) => {
+        calls.push("PUT")
+        return HttpResponse.json(await request.json())
+      }),
+      http.post("/api/generate", () => {
+        calls.push("POST")
+        return HttpResponse.json({ ...generateFixture, written: false })
+      }),
+    )
+    useBlueprint.setState({ doc: structuredClone(blueprintFixture) as any })
+    render(<Output />)
+    await screen.findByTestId("yaml-view")
+    expect(calls).toEqual(["PUT", "POST"])
+  })
+
+  it("a stale generate response never overwrites a newer one — last-initiated wins (fix wave F9)", async () => {
+    // Two staggered generate responses held open on deferred promises (no
+    // fake timers, per repo convention), released in REVERSE initiation
+    // order: the first-initiated resolves last, exactly the interleaving
+    // that would paint yesterday's YAML over today's without the refresh
+    // sequence guard.
+    const gates: Array<() => void> = []
+    let generateCalls = 0
+    server.use(
+      http.post("/api/generate", async () => {
+        const index = generateCalls++
+        await new Promise<void>(resolve => {
+          gates[index] = resolve
+        })
+        return HttpResponse.json({
+          outputs: [{ path: `gen-${index}.yaml`, bytes: 16, body: `generation: ${index}\n` }],
+          written: false,
+        })
+      }),
+    )
+
+    useBlueprint.setState({ doc: structuredClone(blueprintFixture) as any })
+    render(<Output />)
+    // Refresh #0 is in flight (its generate is gated open)…
+    await waitFor(() => expect(generateCalls).toBe(1))
+
+    // …when an edit re-triggers the debounce and starts refresh #1.
+    const edited = structuredClone(blueprintFixture) as any
+    edited.metadata.name = "edited-second"
+    useBlueprint.setState({ doc: edited })
+    await waitFor(() => expect(generateCalls).toBe(2))
+
+    // The NEWER response lands first and paints.
+    gates[1]()
+    await screen.findByText("gen-1.yaml")
+
+    // The stale response lands afterwards — give it a real-timer margin to
+    // (wrongly) overwrite, then assert the newer output still stands.
+    gates[0]()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen.getByText("gen-1.yaml")).toBeInTheDocument()
+    expect(screen.queryByText("gen-0.yaml")).toBeNull()
   })
 
   it("surfaces a PUT failure exactly like a generate failure — never stale YAML", async () => {

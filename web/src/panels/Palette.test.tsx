@@ -4,7 +4,9 @@ import userEvent from "@testing-library/user-event"
 import { setupServer } from "msw/node"
 import { http, HttpResponse } from "msw"
 import { handlers } from "../api/mocks"
+import { useBlueprint } from "../store/blueprint"
 import { Palette } from "./Palette"
+import blueprintFixture from "../api/fixtures/blueprint.json"
 
 // This project has no @testing-library/jest-dom (see src/setupTests.ts's own
 // note on this — it's not an installed dependency, and the brief for this
@@ -85,13 +87,23 @@ describe("palette", () => {
   })
 
   it("is keyboard operable — a kind can be added without dragging", async () => {
+    // Keyboard parity means the node actually LANDS (fix wave F1): addNode
+    // writes into `doc`, so the store needs a document — without one, the
+    // previous "was tabindex present" assertion passed while Enter silently
+    // added nothing at all.
+    useBlueprint.setState({ doc: structuredClone(blueprintFixture) as any, nodes: [], wires: [] })
     const user = userEvent.setup()
     render(<Palette />)
     const item = await screen.findByTestId("kind-sqs.aws.m.upbound.io/v1beta1-Queue")
+    expect(item).toHaveAttribute("tabindex")
     item.focus()
     await user.keyboard("{Enter}")
-    // Enter adds at a default position; drag-and-drop is not the only path
-    expect(item).toHaveAttribute("tabindex")
+    // Enter adds at a default position; drag-and-drop is not the only path.
+    const { nodes, doc } = useBlueprint.getState()
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0].kind).toBe("Queue")
+    expect(nodes[0].apiVersion).toBe("sqs.aws.m.upbound.io/v1beta1")
+    expect(doc!.spec.resources.some(r => r.name === nodes[0].name)).toBe(true)
   })
 
   it("renders a kinds() failure as role=\"alert\", never the empty-search copy (fix wave E6)", async () => {

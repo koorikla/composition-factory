@@ -13,6 +13,43 @@ describe("wire semantics", () => {
     expect(wireKind({ id: "w1", fromParam: "location", toNode: "n1", toPath: "region" }, doc)).toBe("xrd")
   })
 
+  // Fix wave F4: the 'shared', 'status' and 'ref' branches were never
+  // exercised — only 'xrd' was — so wireKind could break three of its four
+  // classifications without a test noticing.
+  it("classifies a parameter fanned out to two or more fields as shared", () => {
+    const fannedOut = {
+      spec: {
+        xrd: { parameters: { location: { type: "string" } } },
+        resources: [
+          {
+            name: "main-queue",
+            kind: "Queue",
+            fields: {
+              region: { from: "params.location" },
+              zone: { from: "params.location" },
+            },
+          },
+        ],
+      },
+    } as any
+    expect(wireKind({ id: "w1", fromParam: "location", toNode: "n1", toPath: "region" }, fannedOut)).toBe("shared")
+    // Both ends of the fan-out classify identically.
+    expect(wireKind({ id: "w2", fromParam: "location", toNode: "n1", toPath: "zone" }, fannedOut)).toBe("shared")
+  })
+
+  it("classifies a reference into another resource's status output as status", () => {
+    // a top-level status.* path…
+    expect(wireKind({ id: "w3", fromParam: "status.queueUrl", toNode: "n1", toPath: "policy" }, doc)).toBe("status")
+    // …and a resource-qualified …status… path both take the status branch.
+    expect(
+      wireKind({ id: "w4", fromParam: "main-queue.status.atProvider.url", toNode: "n1", toPath: "policy" }, doc),
+    ).toBe("status")
+  })
+
+  it("classifies a source that is neither a declared parameter nor a status path as a native ref", () => {
+    expect(wireKind({ id: "w5", fromParam: "queueArnRef", toNode: "n1", toPath: "policy" }, doc)).toBe("ref")
+  })
+
   it("gives every wire kind a distinct stroke", () => {
     const kinds = ["xrd", "shared", "status", "ref"] as const
     const strokes = new Set(kinds.map(k => wireStyle(k).stroke))

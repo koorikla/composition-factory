@@ -62,9 +62,16 @@ describe("inspector", () => {
 
   it("shows each field's description, which is the only documentation a CRD carries", async () => {
     render(<Inspector nodeId={useBlueprint.getState().nodes[0].id} />)
-    const region = await screen.findByTestId("field-region")
-    expect(region.textContent).toMatch(/region/i)
-    expect(region.textContent!.length).toBeGreaterThan("region".length)
+    await screen.findByTestId("field-region")
+    // The fixture's full description, exact (fix wave F2): a string that
+    // appears nowhere else in the DOM. The previous "row text is longer
+    // than the path" check was satisfied by the row's own type/marker
+    // decorations even with the description dropped entirely.
+    expect(
+      screen.getByText(
+        "Region where this resource will be managed. Most resources will use the region set in the provider config.",
+      ),
+    ).toBeInTheDocument()
   })
 
   it("setting a literal value writes it into the document", async () => {
@@ -92,6 +99,10 @@ describe("inspector", () => {
     useBlueprint.getState().connect("maxMessageSize", id, "maxMessageSize")
     render(<Inspector nodeId={id} />)
     expect(await screen.findByText(/params\.maxMessageSize/)).toBeInTheDocument()
+    // And no editable input for the wired path (fix wave F8): the wired
+    // chip REPLACES the textarea — an editable box rendered beside it would
+    // reopen the store-level wire-clobber hole through the UI.
+    expect(screen.queryByTestId("value-maxMessageSize")).toBeNull()
   })
 
   it("surfaces a server validation error verbatim rather than paraphrasing it", async () => {
@@ -99,9 +110,25 @@ describe("inspector", () => {
     render(<Inspector nodeId={useBlueprint.getState().nodes[0].id} />)
     const input = await screen.findByTestId("value-region")
     await user.type(input, "eu\nnorth")   // a control character; the server rejects these
-    expect(await screen.findByRole("alert")).toBeInTheDocument()
+    const alert = await screen.findByRole("alert")
+    // The EXACT message the Go checkScalar mirror produces for this input —
+    // "\n" lands at byte 2 of "eu\nnorth" (fix wave F3; the previous
+    // assertion accepted any alert at all, paraphrased or empty).
+    expect(alert.textContent).toBe(expectedScalarError("queue", "region", "'\\n'", 2))
   })
 })
+
+/** Builds the full checkScalar message this project's Go mirror emits —
+ * used wherever a test asserts the message EXACTLY (repo convention:
+ * exact-string matchers, never substrings). */
+function expectedScalarError(resourceName: string, path: string, quoted: string, byte: number): string {
+  return (
+    `resource "${resourceName}" field "${path}": value: contains the control character ${quoted} at byte ${byte}; ` +
+    "newlines, carriage returns, tabs and other non-printable runes are not allowed " +
+    "because the emitter writes this value as a single-line YAML scalar -- " +
+    "a line break escapes it and silently changes the generated document's structure"
+  )
+}
 
 // Coordinator fix round 1: four Important findings on setField/commitField
 // and the checkScalar mirror, all reviewer-verified empirically.
@@ -133,6 +160,12 @@ describe("inspector (fix round 1)", () => {
     const cases: Array<[string, number, string]> = [
       ["BEL (0x07)", 0x07, "'\\a'"],
       ["backspace (0x08)", 0x08, "'\\b'"],
+      // The three named escapes a user is LIKELIEST to actually paste in —
+      // tab, LF, CR — were untested before the fix wave (F5), leaving the
+      // most common branch of the %q mirror unguarded.
+      ["tab (0x09)", 0x09, "'\\t'"],
+      ["line feed (0x0a)", 0x0a, "'\\n'"],
+      ["carriage return (0x0d)", 0x0d, "'\\r'"],
       ["vertical tab (0x0b)", 0x0b, "'\\v'"],
       ["form feed (0x0c)", 0x0c, "'\\f'"],
       ["an unnamed C0 control (0x01)", 0x01, "'\\x01'"],
@@ -146,7 +179,25 @@ describe("inspector (fix round 1)", () => {
       const ch = String.fromCodePoint(codePoint)
       const message = checkScalar("queue", "region", ch)
       expect(message).not.toBeNull()
-      expect(message).toContain(`contains the control character ${expectedQuoted}`)
+      // The FULL message, exactly — including "at byte 0" for a rune in
+      // first position (fix wave F5: the offset text was never asserted).
+      expect(message).toBe(expectedScalarError("queue", "region", expectedQuoted, 0))
+    })
+
+    it("reports the offset in UTF-8 BYTES, not JS string index — mirroring Go's range-over-string (fix wave F5)", () => {
+      // ASCII prefix: 2 chars = 2 bytes.
+      expect(checkScalar("queue", "region", "ab\tc")).toBe(
+        expectedScalarError("queue", "region", "'\\t'", 2),
+      )
+      // Multi-byte prefix: 'é' is ONE JS char but TWO UTF-8 bytes — Go
+      // counts bytes, so the mirror must say byte 2, not 1.
+      expect(checkScalar("queue", "region", "é\n")).toBe(
+        expectedScalarError("queue", "region", "'\\n'", 2),
+      )
+      // And an astral-plane prefix: '😀' is 4 UTF-8 bytes (2 JS code units).
+      expect(checkScalar("queue", "region", "😀\r")).toBe(
+        expectedScalarError("queue", "region", "'\\r'", 4),
+      )
     })
   })
 })

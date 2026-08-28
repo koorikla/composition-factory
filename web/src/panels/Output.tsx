@@ -26,7 +26,7 @@
 // the previous CodeMirror mount enforced explicitly, for free. Deliberately
 // no syntax-highlighting library: this is a straight, unmodified rendering
 // of exactly the bytes the server sent, not a reinterpretation of them.
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { api, ApiError } from "../api/contract"
 import type { GenerateResult } from "../api/contract"
 import { useBlueprint } from "../store/blueprint"
@@ -95,17 +95,30 @@ export function Output() {
   const [result, setResult] = useState<GenerateResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Refresh-cycle versioning (fix wave F9): every refresh claims the next
+  // sequence number the moment it actually starts (after the debounce), and
+  // every response — success or failure, PUT or generate — checks that it
+  // is still the NEWEST refresh before touching state. A stale generate
+  // response landing after a newer one has painted must never overwrite it:
+  // that is yesterday's YAML presented as current, the exact silent-
+  // wrongness class this pane exists to avoid. A ref, not effect-local
+  // state, so the guard holds across effect instances — including any
+  // future refresh trigger that never passes through this effect's
+  // teardown at all.
+  const refreshSeq = useRef(0)
+
   // Debounced on `doc` — the store's current document is the trigger for
   // every regenerate, exactly as an addNode/connect/setField edit makes it.
   useEffect(() => {
-    let cancelled = false
     const timer = setTimeout(() => {
+      const seq = ++refreshSeq.current
+      const stale = () => refreshSeq.current !== seq
       async function refresh() {
         if (doc) {
           try {
             await api.putBlueprint(doc)
           } catch (e) {
-            if (cancelled) return
+            if (stale()) return
             // A failed PUT never reaches /api/generate at all — surfaced
             // exactly like a generate failure: an alert, and the previous
             // successful output (if any) is hidden, never left showing.
@@ -116,11 +129,11 @@ export function Output() {
         }
         try {
           const generated = await api.generate(false)
-          if (cancelled) return
+          if (stale()) return
           setResult(generated)
           setError(null)
         } catch (e) {
-          if (cancelled) return
+          if (stale()) return
           setError(messageOf(e, "generation failed"))
           setResult(null)
         }
@@ -128,7 +141,10 @@ export function Output() {
       refresh()
     }, REGENERATE_DEBOUNCE_MS)
     return () => {
-      cancelled = true
+      // Invalidate any refresh this effect instance started: a doc change
+      // must not let the old cycle's response land during the new cycle's
+      // debounce gap, and an unmounted pane must not set state at all.
+      refreshSeq.current++
       clearTimeout(timer)
     }
   }, [doc])

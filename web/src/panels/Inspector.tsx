@@ -33,19 +33,18 @@ import { useBlueprint } from "../store/blueprint"
 // (Doc.Line writes `indent + text + "\n"` verbatim, and a single-quoted
 // scalar is still a one-line construct), so an embedded newline, carriage
 // return, tab or other control rune either breaks the document outright or
-// — worse — silently grows it a bogus top-level key. There is no dedicated
-// "validate this field" or "save this field" HTTP route in the frozen M3
-// contract (see docs/superpowers/plans/2026-08-28-m3-canvas.md's "frozen
-// contract" table): resource field edits are local-only, unlike XRD
-// parameter edits, which do round-trip through
-// POST/PUT/DELETE /api/blueprint/parameters. POST /api/generate is the only
-// route that ever surfaces blueprint.Validate() errors, and it takes
-// `{"write":bool}` only — it re-reads the document from disk, exactly like
-// the real Go handler does, and never carries the client's in-progress
-// edit. So this check runs the identical rule, with the identical message
-// shape, client-side — "server validation, mirrored" rather than a literal
-// round trip that the current contract has no vehicle for. See the task
-// report for why this was not routed through MSW instead.
+// — worse — silently grows it a bogus top-level key. There is still no
+// dedicated PER-FIELD "validate this" or "save this" HTTP route, but
+// resource field edits are NOT local-only any more: since PUT
+// /api/blueprint (the full-document replace) landed on main, the Output
+// pane PUTs the store's entire document — in-progress field values
+// included — before every POST /api/generate, and either leg surfaces
+// blueprint.Validate()'s error for a bad value. That round trip is
+// debounced and asynchronous, though: its verdict arrives AFTER the
+// keystroke, in the output pane. This mirror exists for the keystroke
+// itself — the identical rule, with the identical message shape, inline at
+// the field the moment the character is typed — as immediate feedback in
+// front of the server's own validation, never a substitute for it.
 //
 // THIS IS A SECOND COPY OF A RULE THAT LIVES IN GO. If
 // internal/blueprint/load.go's checkScalar ever changes — which runes it
