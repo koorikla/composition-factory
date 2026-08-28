@@ -302,6 +302,40 @@ func (b *Blueprint) Validate() error {
 		}
 	}
 
+	// internal/emit/composition.go emits, for every composed resource in a
+	// Namespaced blueprint:
+	//
+	//	providerConfigRef:
+	//	  kind: ClusterProviderConfig
+	//	  name: {{ $spec.providerName }}
+	//
+	// That dereference is hard-coded there and unconditional, but nothing
+	// used to require the blueprint to declare the parameter it reads. A
+	// blueprint without it validated, generated, and produced a Composition
+	// that can never render: under options: ["missingkey=error"] the
+	// dereference is a hard render failure, and without that option it would
+	// be worse -- the literal string "<no value>" as a ProviderConfig name.
+	// Required (not merely declared) because the guard the Composition gives
+	// optional parameters (hasKey) is not applied to this one; the XRD gate
+	// is what makes the bare dereference safe.
+	if x.Scope == "Namespaced" {
+		p, ok := x.Parameters["providerName"]
+		switch {
+		case !ok:
+			return fmt.Errorf("spec.xrd.parameters.providerName is required for a Namespaced XRD: " +
+				"the Composition emits providerConfigRef.name as {{ $spec.providerName }} for every " +
+				"composed resource, so a blueprint without this parameter generates a Composition " +
+				"that can never render. Add: providerName: {type: string, required: true}")
+		case p.Type != "string":
+			return fmt.Errorf("spec.xrd.parameters.providerName: type must be string, got %q -- "+
+				"it is rendered into providerConfigRef.name, which is a Kubernetes object name", p.Type)
+		case !p.Required:
+			return fmt.Errorf("spec.xrd.parameters.providerName: must be required: true -- " +
+				"the Composition dereferences it unguarded for every composed resource, and only " +
+				"the XRD's required gate makes that dereference safe")
+		}
+	}
+
 	for i, r := range b.Spec.Resources {
 		if r.Name == "" || r.Kind == "" {
 			switch {

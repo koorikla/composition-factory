@@ -189,6 +189,9 @@ spec:
     scope: Namespaced
     parameters:
       location: {type: string, required: true, enum: [EU, US]}
+      # Mandatory for a Namespaced XRD: the Composition dereferences
+      # $spec.providerName unguarded for every composed resource.
+      providerName: {type: string, required: true}
   resources:
     - name: main-queue
       kind: Queue
@@ -254,13 +257,22 @@ func TestValidateResourceErrorIdentifiesOffendingEntry(t *testing.T) {
 // "does my YAML fixture parse" with "does Validate() reject this
 // identifier." Constructing the Blueprint directly isolates the function
 // actually under test.
+// providerName is present in both fixtures below because a Namespaced XRD
+// now requires it (the Composition dereferences $spec.providerName unguarded
+// for every composed resource). It is written after the parameter under
+// test, with an explicit assignment rather than a second map-literal entry,
+// so that a test naming "providerName" as the parameter under test still
+// ends up with the valid declaration and is not silently testing a
+// different rule.
 func validParamBlueprint(paramName string) *Blueprint {
+	params := map[string]Parameter{paramName: {Type: "string"}}
+	params["providerName"] = Parameter{Type: "string", Required: true}
 	return &Blueprint{
 		Spec: Spec{
 			XRD: XRD{
 				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
 				Version: "v1alpha1", Scope: "Namespaced",
-				Parameters: map[string]Parameter{paramName: {Type: "string"}},
+				Parameters: params,
 			},
 		},
 	}
@@ -475,7 +487,10 @@ func blueprintWithParam(p Parameter) *Blueprint {
 			XRD: XRD{
 				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
 				Version: "v1alpha1", Scope: "Namespaced",
-				Parameters: map[string]Parameter{"value": p},
+				Parameters: map[string]Parameter{
+					"value":        p,
+					"providerName": {Type: "string", Required: true},
+				},
 			},
 		},
 	}
@@ -723,6 +738,38 @@ func TestValidateAcceptsFromOnScalarParameter(t *testing.T) {
 			})
 			if err := b.Validate(); err != nil {
 				t.Fatalf("Validate() = %v, want from: onto a %s parameter to be accepted", err, typ)
+			}
+		})
+	}
+}
+
+// --- Final review, I1: providerName is not optional for a Namespaced XRD ---
+
+func TestValidateRequiresProviderNameForNamespacedScope(t *testing.T) {
+	tests := []struct {
+		name  string
+		param *Parameter // nil means: remove it entirely
+	}{
+		{"absent entirely", nil},
+		{"declared but not required", &Parameter{Type: "string"}},
+		{"declared with the wrong type", &Parameter{Type: "integer", Required: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := scalarBlueprint(func(b *Blueprint) {
+				if tt.param == nil {
+					delete(b.Spec.XRD.Parameters, "providerName")
+					return
+				}
+				b.Spec.XRD.Parameters["providerName"] = *tt.param
+			})
+			err := b.Validate()
+			if err == nil {
+				t.Fatal("Validate() = nil, want providerName to be required for a Namespaced XRD: " +
+					"the Composition dereferences $spec.providerName unguarded for every composed resource")
+			}
+			if !strings.Contains(err.Error(), "providerName") {
+				t.Errorf("err = %v, want it to name providerName", err)
 			}
 		})
 	}

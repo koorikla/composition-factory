@@ -554,3 +554,35 @@ func TestGenerateValidatesTheBlueprintItWasHanded(t *testing.T) {
 	t.Fatal("Generate accepted a Blueprint with no scope; it must validate what it is handed, " +
 		"because the HTTP and MCP front doors never go through blueprint.Load")
 }
+
+// --- Final review, I1: providerName ---
+//
+// composition.go dereferences $spec.providerName unguarded for every
+// composed resource. This proves the consequence rather than the rule: if a
+// blueprint without the parameter is ever accepted, the Composition it
+// produces cannot render, because under options: ["missingkey=error"] the
+// dereference is a hard failure on any XR the XRD would actually admit.
+func TestBlueprintWithoutProviderNameCannotProduceARenderableComposition(t *testing.T) {
+	b := testBlueprint()
+	delete(b.Spec.XRD.Parameters, "providerName")
+
+	outs, err := Generate(b, testCRDs(t), "out")
+	if err != nil {
+		if !strings.Contains(err.Error(), "providerName") {
+			t.Errorf("err = %v, want it to name providerName", err)
+		}
+		return
+	}
+	for _, o := range outs {
+		if !strings.Contains(filepath.ToSlash(o.Path), "/compositions/") {
+			continue
+		}
+		// An XR that satisfies the emitted XRD exactly: no providerName,
+		// because the XRD no longer declares it.
+		if _, err := renderTemplate(t, extractTemplate(t, o.Body), map[string]any{}); err != nil {
+			t.Fatalf("the emitted Composition can never render: %v -- a blueprint with no "+
+				"providerName parameter must be refused, not generated", err)
+		}
+	}
+	t.Fatal("Generate accepted a Namespaced blueprint with no providerName parameter")
+}
