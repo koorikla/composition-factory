@@ -70,6 +70,10 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 		return 0, nil
 	}
 
+	// Writes are not atomic across outputs: a failure partway through this
+	// loop can leave a partially-written tree. Accepted for M1 — output is
+	// fully regenerable from the blueprint, and the next --check reports
+	// exactly this as drift rather than silently trusting a stale file.
 	for _, o := range outputs {
 		if err := os.MkdirAll(filepath.Dir(o.Path), 0o755); err != nil {
 			return 1, err

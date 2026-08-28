@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/cache"
@@ -108,5 +109,83 @@ func TestGenCheckExitCodes(t *testing.T) {
 	code, _ = (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir, Check: true}).run(&buf)
 	if code != 2 {
 		t.Errorf("drift check: code=%d, want 2 (distinct from 1, which means the tool failed)", code)
+	}
+}
+
+// TestGenCheckWithNoPriorRunIsDrift covers the primary real-world --check
+// scenario, not just the hand-tampered-file one above: a contributor edits
+// or adds a blueprint and forgets to run `cf gen` at all, so the output
+// directory never existed. CI depends on this reporting drift (exit code
+// 2), not a tool error (1) and not a false "in sync" (0). Asserts on the
+// exit code run() actually returns, not on a wrapper's err or a shell
+// pipeline's status -- the trap a plain `cf ... | sed ...; echo $?` falls
+// into by reporting sed's exit code instead of cf's.
+func TestGenCheckWithNoPriorRunIsDrift(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	out := filepath.Join(dir, "out") // deliberately never created
+
+	var buf bytes.Buffer
+	code, err := (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir, Check: true}).run(&buf)
+	if err != nil {
+		t.Fatalf("run: %v, want nil -- a never-generated tree is drift, not a tool error", err)
+	}
+	if code != 2 {
+		t.Fatalf("code = %d, want 2 (drift) when the output directory was never generated", code)
+	}
+
+	msg := buf.String()
+	for _, want := range []string{
+		filepath.Join(out, "xrds", "xqueues.platform.hooli.tech.yaml"),
+		filepath.Join(out, "compositions", "xqueues.platform.hooli.tech.yaml"),
+		filepath.Join(out, "functions.yaml"),
+	} {
+		if !strings.Contains(msg, "drift: "+want) {
+			t.Errorf("check output = %q, want it to name missing file %q", msg, want)
+		}
+	}
+}
+
+// TestGenCheckMissingOneFileNamesOnlyThatFile covers a generated file going
+// missing after a real, successful `cf gen` (an accidental delete, a
+// partial checkout -- anything short of a full hand-edit). It must still
+// report drift (2) and must name the specific missing file, while
+// continuing to report the other two, untouched outputs as in sync --
+// precision matters here: reporting everything as drifted just because one
+// file vanished would make the message useless for tracking down what
+// actually happened.
+func TestGenCheckMissingOneFileNamesOnlyThatFile(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	out := filepath.Join(dir, "out")
+
+	var genBuf bytes.Buffer
+	if err := (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir}).Run(&genBuf); err != nil {
+		t.Fatal(err)
+	}
+
+	missing := filepath.Join(out, "functions.yaml")
+	if err := os.Remove(missing); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	code, err := (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir, Check: true}).run(&buf)
+	if err != nil {
+		t.Fatalf("run: %v, want nil", err)
+	}
+	if code != 2 {
+		t.Fatalf("code = %d, want 2 (drift) when a generated file is missing", code)
+	}
+
+	msg := buf.String()
+	if !strings.Contains(msg, "drift: "+missing) {
+		t.Errorf("check output = %q, want it to name the missing file %q", msg, missing)
+	}
+	for _, stillInSync := range []string{
+		filepath.Join(out, "xrds", "xqueues.platform.hooli.tech.yaml"),
+		filepath.Join(out, "compositions", "xqueues.platform.hooli.tech.yaml"),
+	} {
+		if strings.Contains(msg, "drift: "+stillInSync) {
+			t.Errorf("check output = %q, want %q reported in sync, not drifted -- only functions.yaml was removed", msg, stillInSync)
+		}
 	}
 }
