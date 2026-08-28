@@ -49,10 +49,12 @@ type Index struct {
 // from being indexed. Build returns an error only when every managed CRD
 // across every provider failed this way — compositionfactory has no logging
 // framework, so a total failure has to surface as an error rather than
-// silently producing an empty index.
+// silently producing an empty index. That error wraps the last underlying
+// Preferred/APIVersion failure, so it is actionable rather than just a count.
 func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 	// Provider keys come from a map, whose iteration order is randomized; sort
-	// them so that Build (and therefore All) is byte-stable across rebuilds.
+	// them so that Build (and therefore All, and which CRD wins a Lookup
+	// collision — see Lookup) is byte-stable across rebuilds.
 	providers := make([]string, 0, len(byProvider))
 	for p := range byProvider {
 		providers = append(providers, p)
@@ -62,6 +64,7 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 	var kinds []Kind
 	crds := make(map[string]schema.CRD)
 	var attempted, failed int
+	var lastErr error
 
 	for _, provider := range providers {
 		for _, c := range byProvider[provider] {
@@ -73,11 +76,13 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 			v, err := c.Preferred()
 			if err != nil {
 				failed++
+				lastErr = err
 				continue
 			}
 			apiVersion, err := c.APIVersion()
 			if err != nil {
 				failed++
+				lastErr = err
 				continue
 			}
 
@@ -110,12 +115,16 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 				Required:   required,
 				Fields:     len(leaves),
 			})
+			// Last write wins: if two providers ship a CRD under the same
+			// apiVersion+kind (see Lookup), the one from the
+			// lexicographically greatest provider ref — processed last,
+			// since providers is sorted above — ends up here.
 			crds[apiVersion+"/"+c.Kind] = c
 		}
 	}
 
 	if attempted > 0 && failed == attempted {
-		return nil, fmt.Errorf("index: all %d managed CRD(s) failed to index (no usable version)", attempted)
+		return nil, fmt.Errorf("index: all %d managed CRD(s) failed to index: %w", attempted, lastErr)
 	}
 
 	sort.SliceStable(kinds, func(i, j int) bool {
@@ -160,6 +169,14 @@ func (i *Index) Search(q string, limit int) []Kind {
 // Lookup returns the CRD indexed under the given apiVersion (group/version)
 // and kind, so a caller holding a Kind from All or Search can resolve its
 // full schema without re-reading the cache.
+//
+// Duplicate-key note: the normal case of two entries sharing a Kind but not
+// an apiVersion (the cluster/namespaced ".m." pairing every upjet provider
+// ships) is unambiguous — each has its own key. The rare case of two
+// different providers shipping the exact same apiVersion+kind is a genuine
+// collision, and Lookup can only return one CRD for that key: it returns
+// the one from the lexicographically greatest provider ref, since Build
+// processes providers in sorted order and the last one processed wins.
 func (i *Index) Lookup(apiVersion, kind string) (schema.CRD, bool) {
 	c, ok := i.crds[apiVersion+"/"+kind]
 	return c, ok
