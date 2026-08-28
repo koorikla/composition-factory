@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"sigs.k8s.io/yaml"
 )
@@ -64,6 +65,52 @@ var yamlKeywords = map[string]bool{
 	"on": true, "off": true, "null": true, "y": true, "n": true,
 }
 
+// checkScalar rejects control characters in a user-controlled scalar.
+//
+// Every emitter in internal/emit builds its document with Doc.Line, which
+// writes `indent + text + "\n"` verbatim. quoteYAML wraps a user scalar in
+// single quotes, which handles ": ", " #" and keyword-shaped values -- but a
+// single-quoted YAML scalar is still a ONE-LINE construct here, because
+// nothing re-indents its continuation. An embedded "\n" therefore lands the
+// rest of the value at column 0 of the emitted file, outside the quotes,
+// outside the block scalar, outside every indentation context the emitter
+// established. Two things follow, and the second is worse:
+//
+//	Field.Value = "eu-north-1\nbogus: injected"
+//	  -> a Composition whose `template: |` block scalar is terminated early;
+//	     sigs.k8s.io/yaml refuses the document outright. Loud.
+//	Parameter.Description = "line one\nline two: injected"
+//	  -> an XRD that still PARSES, having silently grown a bogus top-level
+//	     key. `cf gen --check` then reports "in sync". Silent.
+//
+// The second is this project's central defect class: legal YAML, every gate
+// green, exit 0, wrong artifact. Quoting cannot close it -- the break
+// happens before the quote can matter -- so it is closed here, at the layer
+// that already owns identifier validation, for every emitter at once rather
+// than once per call site.
+//
+// The check is deliberately total over control runes rather than just \n and
+// \r. A carriage return is a YAML line break in its own right; \t is trimmed
+// away by Doc.Line's TrimRight when it lands at end of line, which silently
+// changes the value the user wrote; NEL (U+0085) is a line break under YAML
+// 1.1; and the remaining C0/C1/DEL runes have no legitimate use in a CRD
+// description, an enum value or a resource field and are not worth
+// individually reasoning about. U+2028 and U+2029 are added explicitly:
+// unicode.IsControl does not classify them (they are Zl/Zp), but YAML 1.1
+// treats both as line breaks.
+func checkScalar(fieldPath, s string) error {
+	for i, r := range s {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return fmt.Errorf("%s: contains the control character %q at byte %d; "+
+				"newlines, carriage returns, tabs and other non-printable runes are not allowed "+
+				"because the emitter writes this value as a single-line YAML scalar -- "+
+				"a line break escapes it and silently changes the generated document's structure",
+				fieldPath, r, i)
+		}
+	}
+	return nil
+}
+
 // groupIsBareKeyword reports whether group -- split on '.' -- is a single
 // label that is itself a YAML keyword (e.g. a bare "no"). group is emitted
 // as one unquoted YAML scalar (`group: %s`): a single-label group whose one
@@ -95,6 +142,14 @@ func Load(path string) (*Blueprint, error) {
 
 // Validate reports the first structural problem, naming the offending field.
 func (b *Blueprint) Validate() error {
+	// metadata.name reaches every generated file's provenance header
+	// (emit.header writes "# Source: blueprints/<name>.cf.yaml"). A newline
+	// there ends the comment and puts whatever follows at column 0 of a
+	// document that otherwise parses fine.
+	if err := checkScalar("metadata.name", b.Metadata.Name); err != nil {
+		return err
+	}
+
 	x := b.Spec.XRD
 	required := []struct{ name, val string }{
 		{"group", x.Group}, {"kind", x.Kind}, {"plural", x.Plural}, {"version", x.Version},
@@ -151,6 +206,21 @@ func (b *Blueprint) Validate() error {
 		p := x.Parameters[n]
 		if !validTypes[p.Type] {
 			return fmt.Errorf("spec.xrd.parameters.%s: unknown type %q", n, p.Type)
+		}
+		// Description, default and every enum entry are user-authored free
+		// text that internal/emit/xrd.go writes straight into the XRD. See
+		// checkScalar: a newline in any of them grows the XRD a bogus
+		// top-level key while leaving it parseable.
+		if err := checkScalar("spec.xrd.parameters."+n+".description", p.Description); err != nil {
+			return err
+		}
+		if err := checkScalar("spec.xrd.parameters."+n+".default", p.Default); err != nil {
+			return err
+		}
+		for i, e := range p.Enum {
+			if err := checkScalar(fmt.Sprintf("spec.xrd.parameters.%s.enum[%d]", n, i), e); err != nil {
+				return err
+			}
 		}
 		// The XRD emitter honours Default, emitting it quoted for type:
 		// string and unquoted for integer/number/boolean. It has no
@@ -212,13 +282,39 @@ func (b *Blueprint) Validate() error {
 				return fmt.Errorf("resource %q field %q: set exactly one of from, value or raw (got %d)",
 					r.Name, p, set)
 			}
+			// value is written into the rendered inner document as a
+			// single-quoted scalar; raw is written verbatim. Both are
+			// single-line constructs (see checkScalar), and both sit inside
+			// the Composition's `template: |` block scalar, so a newline in
+			// either terminates that block scalar and turns the rest of the
+			// value into top-level keys of the Composition document.
+			//
+			// raw is NOT exempt, though it is the raw-YAML escape hatch and a
+			// multi-line template body is a plausible thing to want. The
+			// emitter writes it with a single `d.Line(indent, "%s: %s", ...)`
+			// and has no machinery to re-indent continuation lines to the
+			// block scalar's column; exempting raw would therefore hand the
+			// user a documented way to corrupt the document structure, which
+			// is precisely the class this check exists to close. A multi-line
+			// raw form needs an emitter that indents each line -- that is the
+			// feature to build, not a hole to leave open.
+			// A slice, not a map: Validate reports the FIRST problem, so the
+			// order it inspects these in is part of its contract.
+			for _, src := range []struct{ label, val string }{
+				{"from", f.From}, {"raw", f.Raw}, {"value", f.Value},
+			} {
+				if err := checkScalar(fmt.Sprintf("resource %q field %q: %s", r.Name, p, src.label), src.val); err != nil {
+					return err
+				}
+			}
 			if f.From != "" {
 				param, ok := strings.CutPrefix(f.From, "params.")
 				if !ok {
 					return fmt.Errorf("resource %q field %q: from must start with params. (got %q)",
 						r.Name, p, f.From)
 				}
-				if _, exists := x.Parameters[param]; !exists {
+				_, exists := x.Parameters[param]
+				if !exists {
 					return fmt.Errorf("resource %q field %q: references unknown parameter %q",
 						r.Name, p, param)
 				}

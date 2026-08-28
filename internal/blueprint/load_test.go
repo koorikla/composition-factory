@@ -559,3 +559,123 @@ func TestValidateIntegerDefaultRejectsFraction(t *testing.T) {
 		t.Fatalf("err = %v, want a complaint naming spec.xrd.parameters.value", err)
 	}
 }
+
+// --- Final review, C1: control characters in user-controlled scalars ---
+//
+// quoteYAML wraps a user scalar in single quotes, which handles ": ", " #"
+// and keyword-shaped values. It does nothing about a line break, because
+// internal/emit's Doc.Line writes `indent + text + "\n"` verbatim and
+// nothing re-indents a continuation line: the rest of the value lands at
+// column 0, outside the quotes and outside every indentation context the
+// emitter established. The reviewer reproduced both halves:
+//
+//	Field.Value       = "eu-north-1\nbogus: injected"   -> unparseable Composition
+//	Parameter.Description = "line one\nline two: bad"   -> an XRD that PARSES,
+//	                                                       with a bogus top-level
+//	                                                       key, and `cf gen --check`
+//	                                                       reporting "in sync"
+//
+// internal/emit/composition_test.go proves the artifact-level consequence by
+// parsing emitted YAML. This file proves the rule: every reachable scalar is
+// checked, and the error names the exact field path.
+
+// scalarBlueprint returns a valid Namespaced blueprint with one resource,
+// which mutate then poisons in exactly one place.
+func scalarBlueprint(mutate func(*Blueprint)) *Blueprint {
+	b := &Blueprint{
+		Metadata: Metadata{Name: "xqueue"},
+		Spec: Spec{
+			XRD: XRD{
+				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]Parameter{
+					"providerName": {Type: "string", Required: true},
+					"location":     {Type: "string", Required: true},
+				},
+			},
+			Resources: []Resource{{
+				Name: "main-queue", Kind: "Queue",
+				Fields: map[string]Field{"region": {Value: "eu-north-1"}},
+			}},
+		},
+	}
+	mutate(b)
+	return b
+}
+
+func TestValidateRejectsControlCharactersInUserScalars(t *testing.T) {
+	// Every distinct reachable scalar, each poisoned on its own. The
+	// injected text is the reviewer's own reproduction where one exists.
+	fields := []struct {
+		name      string
+		poison    func(*Blueprint, string)
+		wantField string
+	}{
+		{"metadata.name", func(b *Blueprint, bad string) {
+			b.Metadata.Name = "xqueue" + bad
+		}, "metadata.name"},
+		{"parameter description", func(b *Blueprint, bad string) {
+			p := b.Spec.XRD.Parameters["location"]
+			p.Description = "line one" + bad + "line two: injected"
+			b.Spec.XRD.Parameters["location"] = p
+		}, "spec.xrd.parameters.location.description"},
+		{"parameter default", func(b *Blueprint, bad string) {
+			p := b.Spec.XRD.Parameters["location"]
+			p.Default = "EU" + bad + "injected: true"
+			b.Spec.XRD.Parameters["location"] = p
+		}, "spec.xrd.parameters.location.default"},
+		{"enum entry", func(b *Blueprint, bad string) {
+			p := b.Spec.XRD.Parameters["location"]
+			p.Enum = []string{"EU", "US" + bad + "injected: true"}
+			b.Spec.XRD.Parameters["location"] = p
+		}, "spec.xrd.parameters.location.enum[1]"},
+		{"field value", func(b *Blueprint, bad string) {
+			b.Spec.Resources[0].Fields["region"] = Field{Value: "eu-north-1" + bad + "bogus: injected"}
+		}, `field "region": value`},
+		{"field raw", func(b *Blueprint, bad string) {
+			b.Spec.Resources[0].Fields["region"] = Field{Raw: "eu-north-1" + bad + "bogus: injected"}
+		}, `field "region": raw`},
+		{"field from", func(b *Blueprint, bad string) {
+			b.Spec.Resources[0].Fields["region"] = Field{From: "params.location" + bad + "x"}
+		}, `field "region": from`},
+	}
+	// \n and \r are YAML line breaks. \t is not, but Doc.Line's TrimRight
+	// silently eats it at end of line, so the emitted value stops matching
+	// the value the user wrote. \x00 stands in for the rest of C0.
+	poisons := map[string]string{
+		"newline":         "\n",
+		"carriage return": "\r",
+		"tab":             "\t",
+		"NUL":             "\x00",
+	}
+	for _, f := range fields {
+		for pname, bad := range poisons {
+			t.Run(f.name+"/"+pname, func(t *testing.T) {
+				b := scalarBlueprint(func(b *Blueprint) { f.poison(b, bad) })
+				err := b.Validate()
+				if err == nil {
+					t.Fatalf("Validate() = nil, want %s with a %s to be rejected", f.name, pname)
+				}
+				if !strings.Contains(err.Error(), f.wantField) {
+					t.Errorf("err = %v, want it to name the field path %q", err, f.wantField)
+				}
+			})
+		}
+	}
+}
+
+// TestValidateAcceptsOrdinaryPunctuationInScalars is the other half: the
+// rule must reject control characters, not free text. A description with
+// colons, hashes and quotes is ordinary and quoteYAML already handles it.
+func TestValidateAcceptsOrdinaryPunctuationInScalars(t *testing.T) {
+	b := scalarBlueprint(func(b *Blueprint) {
+		p := b.Spec.XRD.Parameters["location"]
+		p.Description = `Region: the "place" # where it lives -- naïve, 100% fine`
+		p.Enum = []string{"EU", "US"}
+		b.Spec.XRD.Parameters["location"] = p
+		b.Spec.Resources[0].Fields["region"] = Field{Value: "eu-north-1: not a key # not a comment"}
+	})
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want ordinary punctuation and non-ASCII text to be accepted", err)
+	}
+}

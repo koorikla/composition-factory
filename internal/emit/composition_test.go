@@ -6,6 +6,7 @@ import (
 	"testing"
 	"text/template"
 
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"sigs.k8s.io/yaml"
 )
@@ -328,6 +329,123 @@ func TestUnknownKindIsAClearError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "Nonexistent") {
 		t.Fatalf("err = %v, want an error naming the unknown kind", err)
 	}
+}
+
+// --- Final review: artifact-level proofs ---
+//
+// The tests below deliberately assert on the ARTIFACT, not on which layer
+// refuses to produce it: "either Generate rejects this blueprint, or the
+// documents it produced are structurally exactly what we meant to write."
+// Both halves are checked by parsing the emitted YAML with sigs.k8s.io/yaml
+// and inspecting the decoded structure -- a string match would prove nothing
+// about YAML semantics, which is the whole point of these defects. Framed
+// this way, the tests keep failing if the fix is ever moved or weakened,
+// without pinning it to blueprint.Validate specifically.
+
+// k8sTopLevelKeys is every top-level key a generated document may have.
+// Anything else means user text escaped its scalar and became structure.
+var k8sTopLevelKeys = map[string]bool{
+	"apiVersion": true, "kind": true, "metadata": true, "spec": true,
+}
+
+// assertNoInjectedStructure decodes every emitted document and fails if any
+// of them grew a top-level key, or stopped parsing at all.
+func assertNoInjectedStructure(t *testing.T, outs []Output, where string) {
+	t.Helper()
+	for _, o := range outs {
+		// functions.yaml is a multi-document stream; split it the way any
+		// YAML consumer would before decoding each document.
+		for i, docBytes := range bytes.Split(o.Body, []byte("\n---\n")) {
+			var doc map[string]any
+			if err := yaml.Unmarshal(docBytes, &doc); err != nil {
+				t.Fatalf("%s: document %d is not parseable YAML after injecting into %s: %v\n---\n%s",
+					o.Path, i, where, err, docBytes)
+			}
+			for k := range doc {
+				if !k8sTopLevelKeys[k] {
+					t.Fatalf("%s: grew top-level key %q out of user text injected into %s -- "+
+						"the document still parses, so every downstream gate passes and "+
+						"`cf gen --check` reports in sync\n---\n%s", o.Path, k, where, docBytes)
+				}
+			}
+		}
+	}
+}
+
+// TestNewlineInUserScalarCannotChangeDocumentStructure is C1. Each case
+// poisons exactly one user-controlled scalar with a newline and an injected
+// mapping key, then requires that no artifact carrying it ever reaches disk.
+func TestNewlineInUserScalarCannotChangeDocumentStructure(t *testing.T) {
+	cases := []struct {
+		name   string
+		poison func(*blueprint.Blueprint)
+	}{
+		{"Parameter.Description", func(b *blueprint.Blueprint) {
+			p := b.Spec.XRD.Parameters["location"]
+			p.Description = "line one\nline two: injected"
+			b.Spec.XRD.Parameters["location"] = p
+		}},
+		// A plain newline in a description does NOT inject a key: quoteYAML
+		// doubles embedded apostrophes, so the scalar cannot be closed early,
+		// and YAML folds the continuation into a space (the emitted
+		// description then silently differs from the blueprint's, which is
+		// its own defect). A "---" at column 0 is the case that does break
+		// structure: it is a document indicator wherever it appears, quoted
+		// scalar or not, and the whole XRD stops parsing.
+		{"Parameter.Description with a document indicator", func(b *blueprint.Blueprint) {
+			p := b.Spec.XRD.Parameters["location"]
+			p.Description = "line one\n---\ninjected: true"
+			b.Spec.XRD.Parameters["location"] = p
+		}},
+		{"Parameter.Enum entry", func(b *blueprint.Blueprint) {
+			p := b.Spec.XRD.Parameters["location"]
+			p.Enum = []string{"EU", "US\ninjected: true"}
+			b.Spec.XRD.Parameters["location"] = p
+		}},
+		{"Parameter.Default", func(b *blueprint.Blueprint) {
+			p := b.Spec.XRD.Parameters["location"]
+			p.Default = "EU\ninjected: true"
+			b.Spec.XRD.Parameters["location"] = p
+		}},
+		{"Field.Value", func(b *blueprint.Blueprint) {
+			b.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-north-1\nbogus: injected"}
+		}},
+		{"Field.Raw", func(b *blueprint.Blueprint) {
+			b.Spec.Resources[0].Fields["region"] = blueprint.Field{Raw: "eu-north-1\nbogus: injected"}
+		}},
+		{"Metadata.Name", func(b *blueprint.Blueprint) {
+			b.Metadata.Name = "xqueue\nbogus: injected"
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := testBlueprint()
+			tc.poison(b)
+			outs, err := Generate(b, testCRDs(t), "out")
+			if err != nil {
+				return // Refused at the source. Nothing reached disk.
+			}
+			assertNoInjectedStructure(t, outs, tc.name)
+			t.Fatalf("Generate accepted a newline in %s and emitted documents that happen to "+
+				"survive this check; a newline in a user scalar must not reach an emitter at all", tc.name)
+		})
+	}
+}
+
+// TestCleanBlueprintStillEmitsExactlyTheExpectedStructure is the other half
+// of the C1 pair: the rule must reject line breaks, not ordinary free text.
+func TestCleanBlueprintStillEmitsExactlyTheExpectedStructure(t *testing.T) {
+	b := testBlueprint()
+	p := b.Spec.XRD.Parameters["location"]
+	p.Description = `Region: the "place" # where it lives`
+	b.Spec.XRD.Parameters["location"] = p
+	b.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-north-1: not a key # not a comment"}
+
+	outs, err := Generate(b, testCRDs(t), "out")
+	if err != nil {
+		t.Fatalf("Generate: %v -- colons and hashes in free text are ordinary and quoteYAML handles them", err)
+	}
+	assertNoInjectedStructure(t, outs, "ordinary punctuation")
 }
 
 // --- Final review, I2: Generate is the one entry point, so it validates ---
