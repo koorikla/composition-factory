@@ -2,6 +2,7 @@ package emit
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 	"text/template"
@@ -446,6 +447,68 @@ func TestCleanBlueprintStillEmitsExactlyTheExpectedStructure(t *testing.T) {
 		t.Fatalf("Generate: %v -- colons and hashes in free text are ordinary and quoteYAML handles them", err)
 	}
 	assertNoInjectedStructure(t, outs, "ordinary punctuation")
+}
+
+// TestCompositeParameterBehindFromCannotRenderGoFmt is C2, proved by
+// executing the emitted template and decoding what it produces. Before the
+// fix, `tags` rendered as the literal string "map[env:prod]" and `zones` as
+// "[a b c]" -- and "[a b c]" is valid YAML that a
+// `type: array, items: {type: string}` schema accepts as a ONE-element list
+// containing "a b c". Legal, applied, wrong.
+func TestCompositeParameterBehindFromCannotRenderGoFmt(t *testing.T) {
+	cases := []struct {
+		name     string
+		typ      string
+		value    any
+		wantKind string // what a correct render would have to produce
+	}{
+		{"object", "object", map[string]any{"env": "prod"}, "a mapping"},
+		{"array", "array", []any{"a", "b", "c"}, "a list"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := testBlueprint()
+			b.Spec.XRD.Parameters["thing"] = blueprint.Parameter{Type: tc.typ, Required: true}
+			b.Spec.Resources[0].Fields = map[string]blueprint.Field{
+				"maxMessageSize": {From: "params.thing"},
+			}
+			outs, err := Generate(b, testCRDs(t), "out")
+			if err != nil {
+				return // Refused at the source.
+			}
+
+			var comp []byte
+			for _, o := range outs {
+				if strings.Contains(filepath.ToSlash(o.Path), "/compositions/") {
+					comp = o.Body
+				}
+			}
+			if comp == nil {
+				t.Fatal("no Composition among the generated outputs")
+			}
+			rendered, err := renderTemplate(t, extractTemplate(t, comp), map[string]any{
+				"providerName": "aws-provider",
+				"thing":        tc.value,
+			})
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			var doc map[string]any
+			if err := yaml.Unmarshal([]byte(rendered), &doc); err != nil {
+				t.Fatalf("rendered output is not valid YAML: %v\n---\n%s", err, rendered)
+			}
+			spec, _ := doc["spec"].(map[string]any)
+			fp, _ := spec["forProvider"].(map[string]any)
+			got := fp["maxMessageSize"]
+			if s, isString := got.(string); isString {
+				t.Fatalf("a %s parameter behind from: rendered as the string %q instead of %s -- "+
+					"Go's template engine formatted the composite with fmt, and the result is valid "+
+					"YAML the API server will accept and store wrong\n---\n%s",
+					tc.typ, s, tc.wantKind, rendered)
+			}
+			t.Fatalf("Generate accepted a from: mapping onto a %s parameter; M1 cannot render one", tc.typ)
+		})
+	}
 }
 
 // --- Final review, I2: Generate is the one entry point, so it validates ---

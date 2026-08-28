@@ -13,10 +13,20 @@ import (
 )
 
 // validTypes are the parameter types M1 accepts.
+//
+// "array" is deliberately absent. See the array branch in Validate for the
+// full reasoning; briefly, both of its exits are broken today: the XRD
+// emitter writes `type: array` with no `items:` (no structural schema
+// accepts that), and a `from:` mapping on an array parameter renders Go's
+// fmt of the slice.
 var validTypes = map[string]bool{
 	"string": true, "integer": true, "number": true,
-	"boolean": true, "object": true, "array": true,
+	"boolean": true, "object": true,
 }
+
+// compositeTypes are the parameter types whose values are not scalars.
+// A `from:` mapping cannot render one correctly in M1 (see Validate).
+var compositeTypes = map[string]bool{"object": true, "array": true}
 
 // Identifier formats, checked because every one of these values reaches
 // emitted output as a raw YAML map key or a structural value (an OpenAPI
@@ -204,6 +214,30 @@ func (b *Blueprint) Validate() error {
 				"(must be camelCase, e.g. maxMessageSize, and not a YAML keyword like yes/no/true/false)", n)
 		}
 		p := x.Parameters[n]
+		// type: array has two exits and M1 gets both wrong, so it is refused
+		// at the source rather than emitted broken.
+		//
+		//  1. internal/emit/xrd.go writes `type: array` with no `items:`.
+		//     A structural schema (which is what an XRD's openAPIV3Schema
+		//     is) requires items on an array; the API server rejects it.
+		//     Loud, but still a generated artifact that cannot be applied.
+		//  2. internal/emit/composition.go renders a `from:` mapping as a
+		//     bare `{{ $spec.zones }}`, and Go's template engine formats a
+		//     []any with fmt: `[a b c]`. That IS valid YAML, and a
+		//     `type: array, items: {type: string}` schema accepts it as a
+		//     ONE-element list whose single member is the string "a b c".
+		//     Silent, which is worse.
+		//
+		// The proper fix for both is M2 work, not a validation rule: render
+		// composite values as `{{ $spec.x | toYaml | nindent N }}` and emit a
+		// real `items:` schema derived from the parameter declaration. Until
+		// that exists, refusing the type is the honest option.
+		if p.Type == "array" {
+			return fmt.Errorf("spec.xrd.parameters.%s: type \"array\" is not supported in M1. "+
+				"The XRD emitter cannot write the required items: schema for it, and a from: "+
+				"mapping would render Go's fmt of the slice (\"[a b c]\") -- valid YAML, silently "+
+				"wrong. Use a scalar parameter, or a raw: field for a literal list", n)
+		}
 		if !validTypes[p.Type] {
 			return fmt.Errorf("spec.xrd.parameters.%s: unknown type %q", n, p.Type)
 		}
@@ -313,10 +347,26 @@ func (b *Blueprint) Validate() error {
 					return fmt.Errorf("resource %q field %q: from must start with params. (got %q)",
 						r.Name, p, f.From)
 				}
-				_, exists := x.Parameters[param]
+				decl, exists := x.Parameters[param]
 				if !exists {
 					return fmt.Errorf("resource %q field %q: references unknown parameter %q",
 						r.Name, p, param)
+				}
+				// A from: mapping becomes a bare `{{ $spec.<param> }}` in the
+				// template body, which Go's template engine renders with fmt.
+				// For a composite value that means `map[env:prod]` or
+				// `[a b c]` -- and `[a b c]` is valid YAML that a
+				// `type: array, items: {type: string}` schema happily accepts
+				// as a one-element list containing "a b c". Legal, applied,
+				// wrong. See the type: array branch above; the M2 fix for
+				// both is `{{ $spec.x | toYaml | nindent N }}`.
+				if compositeTypes[decl.Type] {
+					return fmt.Errorf("resource %q field %q: parameter %q has type %q, and a from: "+
+						"mapping cannot render a composite value in M1 -- it emits a bare "+
+						"{{ $spec.%s }}, which Go's template engine formats with fmt "+
+						"(an object renders as \"map[k:v]\", an array as \"[a b c]\"). Both are valid "+
+						"YAML and silently wrong. Use a scalar parameter, or set the field with raw:",
+						r.Name, p, param, decl.Type, param)
 				}
 			}
 		}

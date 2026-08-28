@@ -679,3 +679,51 @@ func TestValidateAcceptsOrdinaryPunctuationInScalars(t *testing.T) {
 		t.Fatalf("Validate() = %v, want ordinary punctuation and non-ASCII text to be accepted", err)
 	}
 }
+
+// --- Final review, C2: composite values behind from: ---
+
+func TestValidateRejectsArrayParameterType(t *testing.T) {
+	b := scalarBlueprint(func(b *Blueprint) {
+		b.Spec.XRD.Parameters["zones"] = Parameter{Type: "array"}
+	})
+	err := b.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want type: array to be refused in M1")
+	}
+	if !strings.Contains(err.Error(), "spec.xrd.parameters.zones") {
+		t.Errorf("err = %v, want it to name spec.xrd.parameters.zones", err)
+	}
+	if !strings.Contains(err.Error(), "array") {
+		t.Errorf("err = %v, want it to name the array type", err)
+	}
+}
+
+func TestValidateRejectsFromOnCompositeParameter(t *testing.T) {
+	b := scalarBlueprint(func(b *Blueprint) {
+		b.Spec.XRD.Parameters["tags"] = Parameter{Type: "object"}
+		b.Spec.Resources[0].Fields["tags"] = Field{From: "params.tags"}
+	})
+	err := b.Validate()
+	if err == nil {
+		t.Fatal(`Validate() = nil, want a from: mapping onto an object parameter to be refused: ` +
+			`it renders Go's fmt of the map ("map[env:prod]"), which is valid YAML and silently wrong`)
+	}
+	if !strings.Contains(err.Error(), "tags") || !strings.Contains(err.Error(), "object") {
+		t.Errorf("err = %v, want it to name the field, the parameter and its type", err)
+	}
+}
+
+// A scalar parameter behind from: is the supported case and must still work.
+func TestValidateAcceptsFromOnScalarParameter(t *testing.T) {
+	for _, typ := range []string{"string", "integer", "number", "boolean"} {
+		t.Run(typ, func(t *testing.T) {
+			b := scalarBlueprint(func(b *Blueprint) {
+				b.Spec.XRD.Parameters["thing"] = Parameter{Type: typ}
+				b.Spec.Resources[0].Fields["thing"] = Field{From: "params.thing"}
+			})
+			if err := b.Validate(); err != nil {
+				t.Fatalf("Validate() = %v, want from: onto a %s parameter to be accepted", err, typ)
+			}
+		})
+	}
+}

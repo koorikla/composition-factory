@@ -138,6 +138,16 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint) ([]forProviderFiel
 			if !ok {
 				return nil, fmt.Errorf("resource %q field %q: unknown parameter %q", r.Name, p, param)
 			}
+			// A bare dereference, correct only because the value is a
+			// scalar. Go's template engine formats whatever it finds with
+			// fmt, so an object would render as "map[env:prod]" and an
+			// array as "[a b c]" -- and "[a b c]" is valid YAML that an
+			// items:{type:string} schema accepts as a ONE-element list.
+			// blueprint.Validate refuses composite-typed parameters behind
+			// a from: for exactly that reason. The M2 fix that lifts the
+			// restriction is `{{ $spec.x | toYaml | nindent N }}`, which
+			// needs the emitter to know N -- the field's own indent inside
+			// the template body -- so it is a change here, not there.
 			rhs := fmt.Sprintf("{{ $spec.%s }}", param)
 			if decl.Required {
 				plan = append(plan, forProviderField{path: p, rhs: rhs})
