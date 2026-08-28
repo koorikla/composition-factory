@@ -22,3 +22,10 @@ spec:
       fields:
         region:         {value: "eu-north-1"}
         maxMessageSize: {from: params.maxMessageSize}
+    - name: queue-policy
+      kind: QueuePolicy
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region:   {value: "eu-north-1"}
+        policy:   {value: '{"Version": "2012-10-17", "Statement": []}'}
+        queueUrl: {from: resources.main-queue.status.atProvider.url}

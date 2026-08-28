@@ -125,7 +125,12 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 		t.Fatalf("cf gen --check right after gen should exit 0: %v\n%s", err, out)
 	}
 
-	// Step 4: render what we generated.
+	// Step 4: render what we generated — first WITHOUT observed state. The
+	// status wire's source (main-queue's status.atProvider.url) does not
+	// exist yet, exactly like a first reconcile, so the wired field must be
+	// CLEANLY ABSENT: the QueuePolicy still renders, queueUrl is omitted, no
+	// "<no value>", no render error. Crossplane fills it on a later
+	// reconcile once the Queue is observed.
 	comp := filepath.Join(outDir, "compositions", "xqueues.platform.hooli.tech.yaml")
 	xrd := filepath.Join(outDir, "xrds", "xqueues.platform.hooli.tech.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
@@ -144,10 +149,15 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 		"region: eu-north-1",
 		"kind: ClusterProviderConfig",
 		"name: localstack",
+		"kind: QueuePolicy",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered output missing %q\n---\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "queueUrl") {
+		t.Errorf("queueUrl must be absent while main-queue is unobserved — the status wire's "+
+			"guard failed open\n---\n%s", got)
 	}
 
 	// The defect class that passes every other gate: a legal string that is
@@ -158,6 +168,28 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 	for _, bad := range []string{"<no value>", "<nil>"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+		}
+	}
+
+	// Step 5: render again WITH observed state for main-queue. Now the wire
+	// has a source, and the observed URL must flow into the QueuePolicy's
+	// forProvider.queueUrl — the fixture's value, verbatim.
+	renderObserved := exec.Command("crossplane", "composition", "render",
+		"testdata/xr.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m",
+		"--observed-resources", "testdata/observed-queue.yaml")
+	renderedObserved, err := renderObserved.CombinedOutput()
+	if err != nil {
+		t.Fatalf("crossplane composition render --observed-resources: %v\n%s", err, renderedObserved)
+	}
+	gotObserved := string(renderedObserved)
+	const wiredURL = "queueUrl: https://sqs.eu-north-1.amazonaws.com/000000000000/demo-main-queue"
+	if !strings.Contains(gotObserved, wiredURL) {
+		t.Errorf("rendered output missing %q — the observed status value did not flow across "+
+			"the wire\n---\n%s", wiredURL, gotObserved)
+	}
+	for _, bad := range []string{"<no value>", "<nil>"} {
+		if strings.Contains(gotObserved, bad) {
+			t.Errorf("observed render contains %q\n---\n%s", bad, gotObserved)
 		}
 	}
 
