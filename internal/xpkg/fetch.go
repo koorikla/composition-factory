@@ -33,6 +33,19 @@ type Package struct {
 	Docs [][]byte
 }
 
+// ValidateRef reports whether ref parses as an OCI image reference, without
+// touching the network. POST /api/providers calls this before its fetch seam
+// runs, so "the ref is not even a reference" (a 400, the caller's fault) is
+// decided by exactly the same parser — and reported with exactly the same
+// "parse reference" wording — as Fetch's own first step, rather than by a
+// second, independently-drifting notion of what a valid ref looks like.
+func ValidateRef(ref string) error {
+	if _, err := name.ParseReference(ref); err != nil {
+		return fmt.Errorf("parse reference %q: %w", ref, err)
+	}
+	return nil
+}
+
 // Fetch resolves ref, downloads only its package layer, and splits the stream
 // into YAML documents. It requires no Docker daemon and no cluster.
 func Fetch(ctx context.Context, ref string) (*Package, error) {

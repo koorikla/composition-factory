@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"net/url"
@@ -200,5 +201,41 @@ func TestFetchErrorsOnMultipleBaseLabels(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), base1Digest.String()) || !strings.Contains(err.Error(), base2Digest.String()) {
 		t.Errorf("error %q does not mention both digests (%s, %s)", err.Error(), base1Digest, base2Digest)
+	}
+}
+
+// TestValidateRef pins the network-free reference check POST /api/providers
+// uses to answer 400 before its fetch seam ever runs: a ref name.ParseReference
+// accepts passes, and one it rejects fails with the same "parse reference"
+// wording Fetch itself uses — so the API's 400 body and a real Fetch's parse
+// failure can never disagree about what an invalid ref looks like.
+func TestValidateRef(t *testing.T) {
+	valid := []string{
+		"xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0",
+		"ghcr.io/org/provider-name:v1.2.3",
+		"registry:5000/repo@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}
+	for _, ref := range valid {
+		if err := ValidateRef(ref); err != nil {
+			t.Errorf("ValidateRef(%q) = %v, want nil", ref, err)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"has spaces/provider:v1",
+		"ghcr.io/org/provider:",
+		"ghcr.io/org/provider@sha256:notahexdigest",
+	}
+	for _, ref := range invalid {
+		err := ValidateRef(ref)
+		if err == nil {
+			t.Errorf("ValidateRef(%q) = nil, want an error", ref)
+			continue
+		}
+		if !strings.Contains(err.Error(), fmt.Sprintf("parse reference %q", ref)) {
+			t.Errorf("ValidateRef(%q) error = %q, want it to carry the same "+
+				"'parse reference' wording Fetch uses", ref, err.Error())
+		}
 	}
 }
