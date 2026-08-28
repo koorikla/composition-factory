@@ -16,6 +16,7 @@
 //    Ctrl+Z rewinds one pixel at a time.
 import { create } from "zustand"
 import { immer } from "zustand/middleware/immer"
+import type { WritableDraft } from "immer"
 import dagre from "@dagrejs/dagre"
 import { api } from "../api/contract"
 import type { Blueprint, Kind } from "../api/contract"
@@ -266,6 +267,34 @@ export const useBlueprint = create<BlueprintStore>()(
     // reset creates.
     let trackedDoc: Blueprint | null = null
 
+    // Gesture-start ordering for the two lazily-captured baselines. When a
+    // history-touching action runs while a gesture is still pending (its
+    // commitMove/commitField never came), the baseline is FOLDED into
+    // history first — in the order the gestures started, which these
+    // sequence numbers record at capture time. Without the fold, the
+    // eventual late commit would append the older baseline AFTER newer
+    // entries, and one undo would then rewind two gestures at once (the
+    // double-revert the fix-wave brief's A2 names).
+    let gestureSeq = 0
+    let dragSeq = 0
+    let editSeq = 0
+
+    /** Folds any pending drag/edit baseline into `history` (oldest gesture
+     * first) and clears both. Runs inside an immer producer. */
+    function foldPendingBaselines(draft: WritableDraft<BlueprintStore>) {
+      const pending: Array<{ snap: Snapshot; seq: number }> = []
+      if (draft.dragBaseline !== null) pending.push({ snap: draft.dragBaseline, seq: dragSeq })
+      if (draft.editBaseline !== null) pending.push({ snap: draft.editBaseline, seq: editSeq })
+      pending.sort((a, b) => a.seq - b.seq)
+      for (const p of pending) {
+        draft.history.push(p.snap)
+        if (draft.history.length > HISTORY_CAP) draft.history.shift()
+      }
+      draft.dragBaseline = null
+      draft.editBaseline = null
+      draft.editingField = null
+    }
+
     function reconcile() {
       if (get().doc !== trackedDoc) {
         set(draft => {
@@ -286,6 +315,13 @@ export const useBlueprint = create<BlueprintStore>()(
       reconcile()
       const snap = snapshotOf(get())
       set(draft => {
+        // A still-pending gesture (a drag or edit whose commit never came)
+        // started BEFORE the mutation calling us — fold its baseline in
+        // first so history stays in gesture-start order. Folding here (not
+        // waiting for the late commitMove/commitField) is what stops that
+        // late commit from appending the older baseline after this newer
+        // entry and making one undo rewind two gestures at once.
+        foldPendingBaselines(draft)
         draft.history.push(snap)
         if (draft.history.length > HISTORY_CAP) draft.history.shift()
       })
@@ -383,9 +419,15 @@ export const useBlueprint = create<BlueprintStore>()(
         // longer exists and must not be resurrected by this drag.
         reconcile()
         const s = get()
+        // A move for a node that does not exist mutates nothing, so it must
+        // not capture a baseline either — a baseline captured here would be
+        // folded by the next commitMove() into a history entry that undoes
+        // nothing (a phantom undo step).
+        if (!s.nodes.some(n => n.id === id)) return
         // Capture the pre-drag snapshot on the *first* move of a gesture
         // only; never pushed to `history` here (see the file header).
         const baseline = s.dragBaseline === null ? snapshotOf(s) : null
+        if (baseline) dragSeq = ++gestureSeq
         set(draft => {
           if (baseline) draft.dragBaseline = baseline
           const node = draft.nodes.find(n => n.id === id)
@@ -459,9 +501,25 @@ export const useBlueprint = create<BlueprintStore>()(
         // pattern) — never pushed straight to `history` here, so a run of
         // keystrokes still costs zero history entries until commitField()
         // folds them into one.
-        const startingNewEdit = s.editBaseline === null
+        //
+        // A pending baseline for a DIFFERENT field means that field's
+        // commitField never came (a blur the UI missed, or a non-Inspector
+        // caller): auto-commit it — fold it into history now, in gesture
+        // order — and start a fresh gesture for THIS field. Without this,
+        // the second field's edits silently ride on the first field's
+        // baseline and a single undo reverts both edits at once.
+        const sameField = s.editingField?.nodeId === nodeId && s.editingField?.path === path
+        const priorPending = s.editBaseline !== null && !sameField
+        const startingNewEdit = s.editBaseline === null || priorPending
         const baseline = startingNewEdit ? snapshotOf(s) : null
+        if (startingNewEdit) editSeq = ++gestureSeq
         set(draft => {
+          if (priorPending && draft.editBaseline !== null) {
+            draft.history.push(draft.editBaseline)
+            if (draft.history.length > HISTORY_CAP) draft.history.shift()
+            draft.editBaseline = null
+            draft.editingField = null
+          }
           if (startingNewEdit) {
             draft.editBaseline = baseline
             draft.editingField = { nodeId, path }
@@ -481,6 +539,12 @@ export const useBlueprint = create<BlueprintStore>()(
             // like connect() does for a wire.
             dres.fields[path] = { value }
           }
+          // Always recomputed, exactly like connect/disconnect: an
+          // overwriteWire call just replaced a `{ from: ... }` assignment
+          // (and an empty value can delete one), so `wires` must be
+          // re-derived from the document or it keeps drawing an edge whose
+          // assignment no longer exists.
+          draft.wires = computeWires(draft.doc, draft.nodes)
         })
         // setField DOES touch `doc`, unlike moveNode, so trackedDoc must
         // stay current or the next history-touching action's reconcile()
@@ -528,21 +592,19 @@ export const useBlueprint = create<BlueprintStore>()(
       undo() {
         reconcile()
         set(draft => {
+          // An in-progress gesture (uncommitted drag or edit) is the newest
+          // thing on the timeline: fold its baseline in first so THIS undo
+          // reverts it — not the older committed entry underneath, which
+          // would silently discard the in-progress gesture AND rewind one
+          // step too far in a single keypress. Folding also clears both
+          // baselines, preserving the old rule that no pre-undo baseline
+          // survives into the restored state.
+          foldPendingBaselines(draft)
           const prev = draft.history.pop()
           if (!prev) return
           draft.doc = prev.doc
           draft.nodes = prev.nodes
           draft.wires = prev.wires
-          draft.dragBaseline = null
-          // Same reasoning as dragBaseline: an in-progress field edit's
-          // baseline was captured against the pre-undo doc. Once undo()
-          // has replaced doc/nodes/wires wholesale, that baseline (and
-          // whatever it was mid-typing into) no longer corresponds to
-          // anything live — carrying it forward would let a later
-          // commitField() fold a snapshot of a document state that no
-          // longer exists on this timeline.
-          draft.editBaseline = null
-          draft.editingField = null
         })
         noteOwnMutation()
       },

@@ -226,6 +226,13 @@ describe("blueprint store", () => {
       expect(overwrote).toBe(true)
       res = useBlueprint.getState().doc!.spec.resources.find(r => r.name === name)!
       expect(res.fields["maxMessageSize"]).toEqual({ value: "12345" })
+      // Fix wave A1: the overwrite replaced the `{ from: ... }` assignment,
+      // so the derived wire list must no longer contain the wire — leaving
+      // it stale would keep drawing an edge whose assignment is gone.
+      expect(
+        useBlueprint.getState().wires.some(w => w.toNode === id && w.toPath === "maxMessageSize"),
+      ).toBe(false)
+      expect(useBlueprint.getState().wires).toHaveLength(0)
     })
 
     it("Finding 2: committing a field edit folds it into exactly one undo step that restores the pre-edit field (the commitMove test pattern)", () => {
@@ -278,6 +285,87 @@ describe("blueprint store", () => {
       // The real commit still works afterward.
       s.commitField(id, "region")
       expect(useBlueprint.getState().history.length).toBe(historyLenBefore + 1)
+    })
+  })
+
+  // Final-review fix wave, group A: pending gesture baselines must fold into
+  // history in gesture-start order, never after later entries.
+  describe("pending-baseline folding (fix wave A2-A4)", () => {
+    it("A2: a structural push folds a pending drag first, so undo unwinds in reverse gesture-start order with no double-revert", () => {
+      const s = useBlueprint.getState()
+      s.addNode(queueKind, 0, 0)
+      const id = useBlueprint.getState().nodes[0].id
+
+      // Gesture 1 starts (drag, never committed before the next gesture)...
+      s.moveNode(id, 100, 100)
+      // ...gesture 2 (a structural add) lands while the drag is pending...
+      s.addNode(queueKind, 50, 50)
+      // ...and the drag's commit arrives late. It must have nothing left to
+      // fold — pushHistory already folded the baseline, in order.
+      s.commitMove()
+      expect(useBlueprint.getState().nodes).toHaveLength(2)
+
+      // Undo 1 reverts gesture 2 alone: the added node goes, the drag stays.
+      useBlueprint.getState().undo()
+      expect(useBlueprint.getState().nodes).toHaveLength(1)
+      expect(useBlueprint.getState().nodes[0].x).toBe(100)
+
+      // Undo 2 reverts gesture 1 alone: the drag, not the node's existence.
+      useBlueprint.getState().undo()
+      expect(useBlueprint.getState().nodes).toHaveLength(1)
+      expect(useBlueprint.getState().nodes[0].x).toBe(0)
+
+      // Undo 3 reverts the original add; nothing further remains.
+      useBlueprint.getState().undo()
+      expect(useBlueprint.getState().nodes).toHaveLength(0)
+      expect(useBlueprint.getState().canUndo()).toBe(false)
+    })
+
+    it("A2: undo during an uncommitted drag reverts the drag first, not the entry beneath it", () => {
+      const s = useBlueprint.getState()
+      s.addNode(queueKind, 0, 0)
+      const id = useBlueprint.getState().nodes[0].id
+      s.moveNode(id, 30, 30)
+
+      useBlueprint.getState().undo()
+      expect(useBlueprint.getState().nodes).toHaveLength(1)
+      expect(useBlueprint.getState().nodes[0].x).toBe(0)
+
+      useBlueprint.getState().undo()
+      expect(useBlueprint.getState().nodes).toHaveLength(0)
+    })
+
+    it("A3: editing a second field auto-commits the first field's pending gesture, and undo reverts them separately", () => {
+      const s = useBlueprint.getState()
+      s.addNode(queueKind, 0, 0)
+      const id = useBlueprint.getState().nodes[0].id
+      const name = useBlueprint.getState().nodes[0].name
+      const res = () => useBlueprint.getState().doc!.spec.resources.find(r => r.name === name)!
+
+      // Edit A, never committed; edit B starts on a different field.
+      s.setField(id, "region", "eu-north-1")
+      s.setField(id, "delaySeconds", "30")
+      expect(res().fields["region"]).toEqual({ value: "eu-north-1" })
+      expect(res().fields["delaySeconds"]).toEqual({ value: "30" })
+
+      // Undo 1: B alone reverts (its own baseline folded on undo).
+      useBlueprint.getState().undo()
+      expect(res().fields["delaySeconds"]).toBeUndefined()
+      expect(res().fields["region"]).toEqual({ value: "eu-north-1" })
+
+      // Undo 2: A alone reverts (auto-committed when B's gesture started).
+      useBlueprint.getState().undo()
+      expect(res().fields["region"]).toBeUndefined()
+      expect(useBlueprint.getState().nodes).toHaveLength(1)
+    })
+
+    it("A4: moveNode for a nonexistent node captures no baseline and creates no phantom history entry", () => {
+      const s = useBlueprint.getState()
+      s.moveNode("no-such-node", 10, 10)
+      expect(useBlueprint.getState().dragBaseline).toBeNull()
+      s.commitMove()
+      expect(useBlueprint.getState().history).toHaveLength(0)
+      expect(useBlueprint.getState().canUndo()).toBe(false)
     })
   })
 })

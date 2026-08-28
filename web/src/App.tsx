@@ -29,6 +29,30 @@ export default function App() {
       .catch(() => {})
   }, [])
 
+  // Cmd/Ctrl+Z → store undo. Window-level so it works wherever focus sits
+  // on the canvas — EXCEPT inside a text control (input/textarea/
+  // contenteditable), where the browser's own text-level undo owns the
+  // shortcut and hijacking it would make typing mistakes unrecoverable.
+  // No redo binding: the store has no redo to wire (undo() is one-way).
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey)) return
+      if (event.shiftKey || event.altKey) return
+      if (event.key !== "z" && event.key !== "Z") return
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      ) {
+        return
+      }
+      event.preventDefault()
+      useBlueprint.getState().undo()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
+
   // A selected node can disappear out from under the Inspector (Delete on
   // the canvas, or an undo that removes it) without the canvas ever sending
   // a matching deselection — guard against showing an inspector for a node
