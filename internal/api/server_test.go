@@ -261,25 +261,33 @@ func testHandlerWithPath(t *testing.T) (http.Handler, string) {
 // than a second, independently-drifting copy of it.
 func testServerParts(t *testing.T) (h http.Handler, blueprintPath string, store *cache.Store, outDir string) {
 	t.Helper()
-	store = cache.New(t.TempDir())
-	if err := store.Save(&xpkg.Package{Ref: testProviderRef, Digest: "sha256:test"}, testGenerateFixtureCRDs(t)); err != nil {
-		t.Fatalf("seed provider cache: %v", err)
-	}
-
-	blueprintPath = testBlueprintPath(t)
-	outDir = t.TempDir()
-	h, err := New(Options{
-		Index:     testIndex(t),
-		Store:     store,
-		Blueprint: blueprintPath,
-		OutDir:    outDir,
-		Lock:      filepath.Join(t.TempDir(), ".cf.lock"),
-		Providers: []string{testProviderRef},
-	})
+	o := testServerOptions(t)
+	h, err := New(o)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return h, blueprintPath, store, outDir
+	return h, o.Blueprint, o.Store, o.OutDir
+}
+
+// testServerOptions is the one place the shared test server's Options are
+// assembled — testServerParts and providers_test.go's fetch-seam variant
+// both build from it, so there is still exactly ONE construction path (per
+// the comment above) even though the providers tests need to set the
+// unexported fetch field before calling New.
+func testServerOptions(t *testing.T) Options {
+	t.Helper()
+	store := cache.New(t.TempDir())
+	if err := store.Save(&xpkg.Package{Ref: testProviderRef, Digest: "sha256:test"}, testGenerateFixtureCRDs(t)); err != nil {
+		t.Fatalf("seed provider cache: %v", err)
+	}
+	return Options{
+		Index:     testIndex(t),
+		Store:     store,
+		Blueprint: testBlueprintPath(t),
+		OutDir:    t.TempDir(),
+		Lock:      filepath.Join(t.TempDir(), ".cf.lock"),
+		Providers: []string{testProviderRef},
+	}
 }
 
 // testHandler is testHandlerWithPath without the blueprint path, for the

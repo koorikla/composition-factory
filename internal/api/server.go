@@ -157,6 +157,7 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("POST /api/blueprint/parameters/{name}/rename", srv.handleRenameParameter)
 	mux.HandleFunc("DELETE /api/blueprint/parameters/{name}", srv.handleDeleteParameter)
 	mux.HandleFunc("GET /api/providers", srv.handleListProviders)
+	mux.HandleFunc("POST /api/providers", srv.handleAddProvider)
 	mux.HandleFunc("POST /api/generate", srv.handleGenerate)
 
 	return wrap(mux), nil
