@@ -16,7 +16,7 @@ import { FieldsCacheContext } from "./fieldsCache"
 // silently truncating or growing without bound.
 const MAX_VISIBLE_PORTS = 6
 
-export function ResourceNode({ id }: NodeProps) {
+export function ResourceNode({ id, selected }: NodeProps) {
   const node = useBlueprint(s => s.nodes.find(n => n.id === id))
   const resource = useBlueprint(s =>
     node ? s.doc?.spec.resources.find(r => r.name === node.name) : undefined,
@@ -74,22 +74,42 @@ export function ResourceNode({ id }: NodeProps) {
 
   if (!node || !resource) return null
 
-  const visible = fields.slice(0, MAX_VISIBLE_PORTS)
+  // A wired field ({from: ...}) ALWAYS ranks into the visible set — its
+  // edge terminates on this port's <Handle>, and a hidden handle means the
+  // wire silently doesn't render even though the document still carries the
+  // assignment. Wired fields therefore claim their slots first (all of
+  // them, even past MAX_VISIBLE_PORTS); unwired fields fill whatever budget
+  // remains, in the fetched order, so the cap still bounds the UNWIRED tail
+  // rather than truncating blindly.
+  const isWired = (path: string) => Boolean(resource.fields[path]?.from)
+  const wiredCount = fields.reduce((n, f) => n + (isWired(f.path) ? 1 : 0), 0)
+  let unwiredBudget = Math.max(MAX_VISIBLE_PORTS - wiredCount, 0)
+  const visible = fields.filter(f => {
+    if (isWired(f.path)) return true
+    if (unwiredBudget > 0) {
+      unwiredBudget--
+      return true
+    }
+    return false
+  })
   const overflow = fields.length - visible.length
 
   return (
     <div
       data-testid={`resource-${id}`}
+      data-selected={selected || undefined}
       tabIndex={0}
       className="cf-node cf-resource-node"
       style={{
         background: "var(--surface)",
-        border: "1px solid var(--rule)",
+        // Selection is a real state, not a hover nicety: border and shadow
+        // both shift (tokens only) so the selected node reads at a glance.
+        border: `1px solid ${selected ? "var(--wire-xrd)" : "var(--rule)"}`,
         borderRadius: 4,
         minWidth: 200,
         fontFamily: "var(--sans)",
         color: "var(--ink)",
-        boxShadow: "var(--shadow)",
+        boxShadow: selected ? "var(--shadow-lg)" : "var(--shadow)",
       }}
     >
       <div

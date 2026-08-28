@@ -1,14 +1,17 @@
-import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vitest"
+import { describe, it, expect, beforeEach, beforeAll, afterEach, afterAll } from "vitest"
 import { render, screen, within, waitFor, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { setupServer } from "msw/node"
+import { http, HttpResponse } from "msw"
 import { handlers } from "../api/mocks"
 import { useBlueprint } from "../store/blueprint"
 import { Canvas } from "./Canvas"
 import blueprintFixture from "../api/fixtures/blueprint.json"
+import kindsFixture from "../api/fixtures/kinds.json"
 
 const server = setupServer(...handlers)
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
+afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
 
 const queueKind = {
@@ -54,8 +57,46 @@ describe("canvas", () => {
   it("is keyboard reachable — nodes are focusable", async () => {
     useBlueprint.getState().addNode(queueKind, 40, 40)
     render(<Canvas />)
-    const node = await screen.findByTestId(/^node-/)
-    expect(node.getAttribute("tabindex")).not.toBeNull()
+    // BOTH node types, not just the XR node: /^node-/ used to match only
+    // "node-xr", so a resource node losing its tabindex passed unnoticed
+    // (fix wave B3).
+    const nodes = await screen.findAllByTestId(/^(node-xr|resource-)/)
+    expect(nodes.length).toBe(2)
+    for (const node of nodes) {
+      expect(node.getAttribute("tabindex")).not.toBeNull()
+    }
+  })
+
+  it("renders selection visibly on the selected node's body, tokens only (fix wave B3)", async () => {
+    const user = userEvent.setup()
+    useBlueprint.getState().addNode(queueKind, 40, 40)
+    render(<Canvas />)
+    const node = await screen.findByTestId(/^resource-/)
+    expect(node.getAttribute("data-selected")).toBeNull()
+
+    await user.click(node)
+    await waitFor(() => expect(node.getAttribute("data-selected")).toBe("true"))
+    // The selected border/shadow come from tokens, never literals.
+    expect(node.getAttribute("style")).toContain("var(--wire-xrd)")
+    expect(node.getAttribute("style")).toContain("var(--shadow-lg)")
+  })
+
+  it("colours the grid from the --grid token in both themes (fix wave B2)", async () => {
+    render(<Canvas />)
+    await screen.findByTestId("node-xr")
+    const background = document.querySelector('[data-testid="rf__background"]') as SVGElement
+    expect(background).not.toBeNull()
+    expect(background.style.getPropertyValue("--xy-background-pattern-color-props")).toBe(
+      "var(--grid)",
+    )
+  })
+
+  it("overrides xyflow's vendor handle colours with theme tokens (fix wave B4)", async () => {
+    const { container } = render(<Canvas />)
+    await screen.findByTestId("node-xr")
+    const styleTag = container.querySelector("style")!
+    expect(styleTag.textContent).toContain("--xy-handle-background-color: var(--rule-2);")
+    expect(styleTag.textContent).toContain("--xy-handle-border-color: var(--surface);")
   })
 
   describe("drop-to-create", () => {
@@ -210,5 +251,82 @@ describe("fix round 1, Finding 2 — incompatible drops are refused visibly, not
     await waitFor(() => expect(status.textContent).toBe("providerName → maxMessageSize: incompatible"))
     // the incompatible connection must not actually have been made
     expect(useBlueprint.getState().wires).toHaveLength(0)
+  })
+})
+
+describe("fix wave B1 — hydration keyed on loadEpoch alone", () => {
+  it("a doc-identity change while kinds() is in flight does not abandon hydration for that epoch", async () => {
+    // Gate the kinds response with a deferred promise (no fake timers, per
+    // repo convention) so the hydration fetch is verifiably in flight when
+    // the document changes identity underneath it.
+    let releaseKinds!: () => void
+    const gate = new Promise<void>(resolve => {
+      releaseKinds = resolve
+    })
+    server.use(
+      http.get("/api/kinds", async () => {
+        await gate
+        return HttpResponse.json(kindsFixture)
+      }),
+    )
+
+    // The fixture doc has one resource ("main-queue") and zero nodes, so the
+    // mount-time hydration effect starts a kinds() fetch — now held open.
+    render(<Canvas />)
+
+    // An ordinary edit gives `doc` a brand-new identity via immer while the
+    // fetch is pending. Keyed on doc identity, this used to re-run the
+    // effect: the cleanup cancelled the in-flight fetch and the re-entry saw
+    // the epoch already marked, permanently abandoning hydration.
+    useBlueprint.getState().addNode(queueKind, 1, 1)
+    expect(useBlueprint.getState().nodes).toHaveLength(1)
+
+    releaseKinds()
+    await waitFor(() =>
+      expect(useBlueprint.getState().nodes.some(n => n.name === "main-queue")).toBe(true),
+    )
+  })
+})
+
+describe("fix wave B5 — a wired field always ranks into the visible port set", () => {
+  it("renders the port handle and the edge for a wired field ranked past MAX_VISIBLE_PORTS", async () => {
+    // The fixture's main-queue already carries one wired field
+    // (maxMessageSize). Wire seven more non-required fields so the wired
+    // count alone exceeds the six-port cap — under plain slice(0, 6)
+    // truncation the later wired fields lose their <Handle> and their edges
+    // silently stop rendering.
+    useBlueprint.setState({
+      nodes: [
+        { id: "n1", kind: "Queue", apiVersion: "sqs.aws.m.upbound.io/v1beta1", name: "main-queue", x: 400, y: 40 },
+      ],
+    })
+    const extraPaths = [
+      "contentBasedDeduplication",
+      "deduplicationScope",
+      "delaySeconds",
+      "fifoQueue",
+      "fifoThroughputLimit",
+      "kmsDataKeyReusePeriodSeconds",
+      "kmsMasterKeyId",
+    ]
+    for (const path of extraPaths) {
+      useBlueprint.getState().connect("maxMessageSize", "n1", path)
+    }
+    expect(useBlueprint.getState().wires).toHaveLength(8)
+
+    render(<Canvas />)
+    const resourceNode = await screen.findByTestId("resource-n1")
+
+    // Every wired field's handle is present — including the last-ranked one.
+    await waitFor(() => {
+      for (const path of ["maxMessageSize", ...extraPaths]) {
+        expect(resourceNode.querySelector(`[data-handleid="${path}"]`)).not.toBeNull()
+      }
+    })
+
+    // And the edge itself renders for the wired field ranked past the cap.
+    await waitFor(() => {
+      expect(document.querySelector('.react-flow__edge[data-id="n1:kmsMasterKeyId"]')).not.toBeNull()
+    })
   })
 })

@@ -7,7 +7,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { useBlueprint } from "../store/blueprint"
 
-export function XRNode(_props: NodeProps) {
+export function XRNode({ selected }: NodeProps) {
   const xrd = useBlueprint(s => s.doc?.spec.xrd)
   if (!xrd) return null
   const entries = Object.entries(xrd.parameters)
@@ -15,16 +15,19 @@ export function XRNode(_props: NodeProps) {
   return (
     <div
       data-testid="node-xr"
+      data-selected={selected || undefined}
       tabIndex={0}
       className="cf-node cf-xr-node"
       style={{
         background: "var(--surface-2)",
-        border: "1px solid var(--rule-2)",
+        // Same visible-selection treatment as ResourceNode: border and
+        // shadow shift together, tokens only.
+        border: `1px solid ${selected ? "var(--wire-xrd)" : "var(--rule-2)"}`,
         borderRadius: 4,
         minWidth: 200,
         fontFamily: "var(--sans)",
         color: "var(--ink)",
-        boxShadow: "var(--shadow)",
+        boxShadow: selected ? "var(--shadow-lg)" : "var(--shadow)",
       }}
     >
       <div

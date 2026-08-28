@@ -40,9 +40,21 @@ const nodeTypes = { resource: ResourceNode, xr: XRNode }
  * `valid` only when that handle would accept the drop (see @xyflow/system's
  * Handle component) — colour alone, so `--err` vs. `--wire-xrd` is a hint,
  * never the only signal; the aria-live region rendered below carries the
- * same information as text. */
+ * same information as text.
+ *
+ * The `.react-flow` block re-points xyflow's own handle theme variables
+ * (--xy-handle-background-color / --xy-handle-border-color) at this app's
+ * tokens: the vendor defaults are literal #1a192b/#fff, which ignore
+ * tokens.css entirely and leave port dots near-invisible in the dark theme.
+ * `.cf-node:focus-visible` restates tokens.css's global focus ring with a
+ * wider offset so keyboard focus stays visible over a node's own border. */
 const canvasStyle = `
   .cf-node { transition: box-shadow 120ms ease, border-color 120ms ease; }
+  .cf-node:focus-visible { outline: 2px solid var(--wire-xrd); outline-offset: 2px; }
+  .react-flow {
+    --xy-handle-background-color: var(--rule-2);
+    --xy-handle-border-color: var(--surface);
+  }
   .react-flow__handle { transition: outline-color 100ms ease, outline-offset 100ms ease; }
   .react-flow__handle.connectingto.valid {
     outline: 2px solid var(--wire-xrd);
@@ -129,25 +141,25 @@ function CanvasInner({ onSelectionChange }: CanvasProps) {
 
   // A freshly loaded document has resources but no nodes yet (positions
   // have no home in the Blueprint schema — see store/blueprint.ts's load()).
-  // Hydrate once per load(), keyed on `loadEpoch` (bumped by load() alone —
-  // see the store) rather than on `doc`'s identity or on `nodes.length`:
-  // ordinary mutations (addNode, removeNode, connect, ...) also give `doc`
-  // a brand-new object identity via immer's structural sharing, and
-  // `nodes.length` legitimately passes back through zero whenever the user
-  // deletes their last node — keying on either previously caused a real
-  // bug where a post-delete mutation was misread as "a fresh, unhydrated
-  // load" and silently resurrected the node the user just removed.
-  // `lastHydratedEpoch` records the most recently processed epoch: it
-  // re-arms exactly when load() runs again (e.g. opening a different
-  // blueprint without remounting Canvas), and never on an ordinary edit
-  // that leaves the epoch unchanged.
-  const lastHydratedEpoch = useRef<number | null>(null)
+  // Hydrate once per load(), keyed on `loadEpoch` ALONE (bumped by load()
+  // alone — see the store), with `doc` read via getState() inside rather
+  // than subscribed: ordinary mutations (addNode, removeNode, connect,
+  // setField, ...) give `doc` a brand-new object identity via immer's
+  // structural sharing, so keying this effect on `doc` too made every edit
+  // re-run it — and an edit landing while the kinds() fetch was still in
+  // flight ran this effect's cleanup, cancelled the fetch, and then
+  // re-entered with the epoch already marked as processed, permanently
+  // abandoning hydration for that load. Keyed on the epoch alone, an edit
+  // neither cancels nor re-triggers the in-flight hydration; the cleanup's
+  // `cancelled` flag now means exactly "a new load started, or Canvas
+  // unmounted." (`nodes.length` stays out of the deps for the same reason
+  // it always has: it legitimately passes back through zero on an ordinary
+  // delete, which previously resurrected the deleted node.)
   useEffect(() => {
-    if (!doc || lastHydratedEpoch.current === loadEpoch) return
-    lastHydratedEpoch.current = loadEpoch
     const state = useBlueprint.getState()
+    if (!state.doc) return
     if (state.nodes.length > 0) return
-    if (doc.spec.resources.length === 0) return
+    if (state.doc.spec.resources.length === 0) return
     let cancelled = false
     api
       .kinds()
@@ -161,7 +173,7 @@ function CanvasInner({ onSelectionChange }: CanvasProps) {
     return () => {
       cancelled = true
     }
-  }, [doc, loadEpoch])
+  }, [loadEpoch])
 
   // Rebuild xyflow's node list from the store whenever it changes,
   // preserving each node's `selected` flag — selection is UI state the
@@ -365,7 +377,11 @@ function CanvasInner({ onSelectionChange }: CanvasProps) {
           deleteKeyCode={["Backspace", "Delete"]}
           proOptions={{ hideAttribution: true }}
         >
-          <Background />
+          {/* The dot grid takes its colour from the --grid token (the one
+              place tokens.css defines a canvas-grid colour, per theme) —
+              without this, Background falls back to xyflow's own vendor
+              default, an off-token grey that ignores the dark theme. */}
+          <Background color="var(--grid)" />
         </ReactFlow>
       </FieldsCacheContext.Provider>
     </div>
