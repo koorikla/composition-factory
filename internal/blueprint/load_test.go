@@ -321,3 +321,141 @@ func TestValidateResourceErrorIdentifiesOffendingEntry(t *testing.T) {
 		}
 	})
 }
+
+// --- Task 7b: identifier-format validation (closes the gap the Task 8
+// review surfaced: Validate() never format-checked identifiers, and they
+// reach emitted output as raw YAML map keys and structural values) ---
+
+// validParamBlueprint returns a minimally-valid Blueprint (built directly as
+// a Go value, not through YAML) with exactly one parameter, named paramName,
+// of type string. Building the struct directly -- rather than round-tripping
+// through a YAML fixture, as the rest of this file does -- is deliberate:
+// several of the pathological names under test (a colon-space, a leading
+// '#', the empty string) either cannot appear as an unquoted YAML mapping
+// key at all, or can only appear via a quoted key, which would conflate
+// "does my YAML fixture parse" with "does Validate() reject this
+// identifier." Constructing the Blueprint directly isolates the function
+// actually under test, the same approach TestDereferencedParams already
+// uses in this file.
+func validParamBlueprint(paramName string) *Blueprint {
+	return &Blueprint{
+		Spec: Spec{
+			XRD: XRD{
+				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]Parameter{paramName: {Type: "string"}},
+			},
+		},
+	}
+}
+
+// TestValidateRejectsInvalidParameterNames covers every pathological
+// parameter name the Task 8 review found reaches emitted output unchecked:
+// a colon-space (breaks YAML as an unquoted key: "mapping values are not
+// allowed in this context"), a leading '#' (the rest of the line is read as
+// a comment, silently eating the key), the empty string (invalid YAML key),
+// and "yes"/"1.0" (parse fine but the KEY silently becomes a bool/number
+// under YAML 1.1 keyword rules, not the literal string the user wrote).
+//
+// (b) "a b" (a name containing an internal space) is deliberately included
+// here as a REJECTED case, not an accepted one. It does not break YAML the
+// way the others do, but it is not camelCase either -- and camelCase is the
+// shape of every real CRD spec property (forProvider, maxMessageSize), so
+// rejecting it keeps parameter names consistent with the properties they
+// sit beside once emitted. This is a deliberate policy choice, not a parser
+// limitation.
+func TestValidateRejectsInvalidParameterNames(t *testing.T) {
+	tests := []struct {
+		name      string // subtest name
+		paramName string
+	}{
+		{"colon-space breaks YAML as an unquoted key", "foo: bar"},
+		{"leading hash is read as a comment", "#lead"},
+		{"empty string is not valid YAML key content", ""},
+		{"yes is a YAML 1.1 boolean keyword", "yes"},
+		{"1.0 is a YAML number, not a string key", "1.0"},
+		{"internal space -- rejected by policy, see (b) above", "a b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validParamBlueprint(tt.paramName).Validate()
+			if err == nil {
+				t.Fatalf("Validate() = nil, want a complaint about parameter name %q", tt.paramName)
+			}
+			if !strings.Contains(err.Error(), "invalid parameter name") {
+				t.Errorf("err = %v, want it to say \"invalid parameter name\"", err)
+			}
+			if !strings.Contains(err.Error(), "spec.xrd.parameters.") {
+				t.Errorf("err = %v, want it to name the field path spec.xrd.parameters.*", err)
+			}
+		})
+	}
+}
+
+// TestValidateAcceptsLegitimateParameterNames covers (c): realistic
+// camelCase parameter names, including one with digits directly after the
+// leading letter (x509Mode), must not be rejected by the new format check.
+func TestValidateAcceptsLegitimateParameterNames(t *testing.T) {
+	for _, n := range []string{"location", "maxMessageSize", "providerName", "x509Mode"} {
+		t.Run(n, func(t *testing.T) {
+			if err := validParamBlueprint(n).Validate(); err != nil {
+				t.Errorf("Validate() = %v, want %q to be accepted", err, n)
+			}
+		})
+	}
+}
+
+// TestValidateRejectsInvalidXRDIdentifiers covers (d): group, kind, plural
+// and version are each individually format-checked, and the error names the
+// specific field. The fixture's existing valid forms (exercised by
+// TestLoadValidBlueprint, unaffected by these changes) establish that a
+// well-formed blueprint is still accepted -- this test only adds the
+// rejection side.
+func TestValidateRejectsInvalidXRDIdentifiers(t *testing.T) {
+	tests := []struct {
+		name       string
+		old, new   string
+		wantSubstr string
+	}{
+		{"bad group: uppercase is not a valid DNS subdomain", "group: platform.hooli.tech", "group: Platform.Hooli.Tech", "spec.xrd.group"},
+		{"bad kind: must start uppercase", "kind: XQueue", "kind: xQueue", "spec.xrd.kind"},
+		{"bad plural: must be all lowercase", "plural: xqueues", "plural: XQueues", "spec.xrd.plural"},
+		{"bad version: missing v prefix", "version: v1alpha1", "version: version1", "spec.xrd.version"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := strings.Replace(valid, tt.old, tt.new, 1)
+			if body == valid {
+				t.Fatalf("replacement %q did not match anything in the fixture", tt.old)
+			}
+			_, err := Load(write(t, body))
+			if err == nil || !strings.Contains(err.Error(), tt.wantSubstr) {
+				t.Fatalf("err = %v, want substring %q", err, tt.wantSubstr)
+			}
+		})
+	}
+}
+
+// TestValidateRejectsInvalidResourceName covers the resource-name format
+// check: a resource's name becomes a composition-resource-name annotation
+// value, so it must be a DNS label like the rest of Kubernetes' naming
+// rules, not merely non-empty.
+func TestValidateRejectsInvalidResourceName(t *testing.T) {
+	body := strings.Replace(valid, "name: main-queue", "name: Main_Queue", 1)
+	_, err := Load(write(t, body))
+	if err == nil || !strings.Contains(err.Error(), "spec.resources[0]") || !strings.Contains(err.Error(), "invalid resource name") {
+		t.Fatalf("err = %v, want it to name spec.resources[0] as an invalid resource name", err)
+	}
+}
+
+// TestValidateStillAcceptsTheValidFixture is (e): the existing valid
+// blueprint fixture -- whose group, kind, plural, version, parameter names
+// and resource name all now pass through the new format checks -- must
+// still load cleanly. TestLoadValidBlueprint already covers this and
+// continues to pass unmodified; this test exists to make the "no
+// regression" requirement an explicit, separately-named assertion.
+func TestValidateStillAcceptsTheValidFixture(t *testing.T) {
+	if _, err := Load(write(t, valid)); err != nil {
+		t.Fatalf("Load(valid) = %v, want no error", err)
+	}
+}

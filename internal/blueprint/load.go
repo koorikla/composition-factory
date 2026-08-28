@@ -3,6 +3,7 @@ package blueprint
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -13,6 +14,50 @@ import (
 var validTypes = map[string]bool{
 	"string": true, "integer": true, "number": true,
 	"boolean": true, "object": true, "array": true,
+}
+
+// Identifier formats, checked because every one of these values reaches
+// emitted output as a raw YAML map key or a structural value (an OpenAPI
+// property name, a CRD names.kind/plural/... field, or a
+// composition-resource-name annotation). A value that is syntactically legal
+// in the blueprint file (e.g. a quoted YAML mapping key) but not a legal
+// identifier either breaks the emitted YAML outright (a colon or a leading
+// '#' in a parameter name), parses but is silently reinterpreted (a
+// parameter named "yes" becomes the boolean key true), or is rejected later,
+// more confusingly, by the API server at apply time (an illegal OpenAPI
+// property name). Validating at the source closes the class for every
+// emitter that reads these fields, not just the XRD emitter. Compiled once
+// at package init, not per call.
+var (
+	// paramNameRE matches camelCase identifiers, the shape of real CRD spec
+	// properties (forProvider, writeConnectionSecretToRef, maxMessageSize).
+	paramNameRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
+	// groupRE matches a DNS subdomain, per Kubernetes' own rule for API groups.
+	groupRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+	// kindRE matches a Kubernetes Kind: starts uppercase, alphanumeric.
+	kindRE = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
+	// pluralRE matches a Kubernetes plural resource name: all lowercase.
+	pluralRE = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
+	// versionRE matches a Kubernetes API version: v1, v1beta1, v1alpha1, ...
+	versionRE = regexp.MustCompile(`^v[0-9]+((alpha|beta)[0-9]+)?$`)
+	// resourceNameRE matches a Kubernetes-style DNS label, since a resource's
+	// name becomes a composition-resource-name annotation value.
+	resourceNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+)
+
+// yamlKeywords are scalars that go-yaml (used transitively by
+// sigs.k8s.io/yaml, and by whatever parses the emitted output) resolves to a
+// non-string value when written unquoted, per YAML 1.1's keyword rules --
+// regardless of surrounding context. paramNameRE alone does not exclude
+// these: "yes" and "no" are both plain letter sequences and satisfy
+// `^[a-zA-Z][a-zA-Z0-9]*$` on their own. But a parameter name becomes a raw,
+// unquoted YAML map key in emitted output (see internal/emit/xrd.go's
+// `d.Line(7, "%s:", n)`), so a name shaped like "yes" would silently become
+// the boolean key true, not the string key "yes" the user wrote. Checked
+// case-insensitively, matching YAML 1.1 resolution.
+var yamlKeywords = map[string]bool{
+	"true": true, "false": true, "yes": true, "no": true,
+	"on": true, "off": true, "null": true, "y": true, "n": true,
 }
 
 // Load reads and validates a blueprint file.
@@ -49,6 +94,20 @@ func (b *Blueprint) Validate() error {
 	if len(missing) > 1 {
 		return fmt.Errorf("spec.xrd needs %s", strings.Join(missing, ", "))
 	}
+
+	if !groupRE.MatchString(x.Group) {
+		return fmt.Errorf("spec.xrd.group: %q is not a valid DNS subdomain (e.g. platform.example.com)", x.Group)
+	}
+	if !kindRE.MatchString(x.Kind) {
+		return fmt.Errorf("spec.xrd.kind: %q is not a valid Kind (must start with an uppercase letter, e.g. XQueue)", x.Kind)
+	}
+	if !pluralRE.MatchString(x.Plural) {
+		return fmt.Errorf("spec.xrd.plural: %q is not a valid plural name (must be all lowercase, e.g. xqueues)", x.Plural)
+	}
+	if !versionRE.MatchString(x.Version) {
+		return fmt.Errorf("spec.xrd.version: %q is not a valid API version (e.g. v1, v1beta1, v1alpha1)", x.Version)
+	}
+
 	switch x.Scope {
 	case "Namespaced", "Cluster":
 	case "LegacyCluster":
@@ -66,6 +125,10 @@ func (b *Blueprint) Validate() error {
 	}
 	sort.Strings(names)
 	for _, n := range names {
+		if !paramNameRE.MatchString(n) || yamlKeywords[strings.ToLower(n)] {
+			return fmt.Errorf("spec.xrd.parameters.%s: invalid parameter name "+
+				"(must be camelCase, e.g. maxMessageSize, and not a YAML keyword like yes/no/true/false)", n)
+		}
 		if t := x.Parameters[n].Type; !validTypes[t] {
 			return fmt.Errorf("spec.xrd.parameters.%s: unknown type %q", n, t)
 		}
@@ -81,6 +144,9 @@ func (b *Blueprint) Validate() error {
 			default:
 				return fmt.Errorf("spec.resources[%d] %q: needs a kind", i, r.Name)
 			}
+		}
+		if !resourceNameRE.MatchString(r.Name) {
+			return fmt.Errorf("spec.resources[%d] %q: invalid resource name (must be a DNS label, e.g. main-queue)", i, r.Name)
 		}
 		paths := make([]string, 0, len(r.Fields))
 		for p := range r.Fields {
