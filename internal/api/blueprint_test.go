@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/emit"
@@ -533,5 +534,386 @@ func TestRenameToSelfIsNoOpSuccess(t *testing.T) {
 	}
 	if _, ok := reloaded.Spec.XRD.Parameters["maxMessageSize"]; !ok {
 		t.Error("maxMessageSize no longer declared after a rename-to-self")
+	}
+}
+
+// --- PUT /api/blueprint: full-document replace ---
+//
+// The canvas keeps its whole document client-side and has no per-field edit
+// to make against the narrower parameter routes above; it PUTs its entire
+// document and follows up with POST /api/generate. Unlike every handler
+// above, there is no load step (see handlePutBlueprint's doc comment), so
+// these tests pin decode -> validate -> persist directly rather than
+// load -> edit -> persist.
+
+// mustLoadBlueprint is a small t.Helper wrapper so the tests below can load
+// the fixture currently on disk without repeating the same three-line error
+// check at every call site.
+func mustLoadBlueprint(t *testing.T, path string) *blueprint.Blueprint {
+	t.Helper()
+	b, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("load %s: %v", path, err)
+	}
+	return b
+}
+
+// TestPutBlueprintReplacesTheWholeDocument is the happy path: a full,
+// modified document PUT to the server comes back 200 with the persisted
+// document, lands on disk, and GET afterwards agrees with what PUT reported.
+func TestPutBlueprintReplacesTheWholeDocument(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	current := mustLoadBlueprint(t, path)
+	updated := *current
+	updated.Metadata.Name = "xqueue-v2"
+	updated.Spec.XRD.Parameters = make(map[string]blueprint.Parameter, len(current.Spec.XRD.Parameters)+1)
+	for k, v := range current.Spec.XRD.Parameters {
+		updated.Spec.XRD.Parameters[k] = v
+	}
+	updated.Spec.XRD.Parameters["location"] = blueprint.Parameter{
+		Type: "string", Required: true, Enum: []string{"EU", "US"},
+	}
+	body, err := json.Marshal(updated)
+	if err != nil {
+		t.Fatalf("marshal PUT body: %v", err)
+	}
+
+	rec := do(t, h, "PUT", "/api/blueprint", string(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+
+	var got blueprint.Blueprint
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	if got.Metadata.Name != "xqueue-v2" {
+		t.Errorf("response metadata.name = %q, want xqueue-v2", got.Metadata.Name)
+	}
+	if _, ok := got.Spec.XRD.Parameters["location"]; !ok {
+		t.Error("response does not carry the new parameter")
+	}
+
+	reloaded := mustLoadBlueprint(t, path)
+	if reloaded.Metadata.Name != "xqueue-v2" {
+		t.Errorf("persisted metadata.name = %q, want xqueue-v2", reloaded.Metadata.Name)
+	}
+	if _, ok := reloaded.Spec.XRD.Parameters["location"]; !ok {
+		t.Error("new parameter was not persisted to disk")
+	}
+
+	// GET must agree with what PUT just persisted -- a round trip, not just
+	// "the file changed somehow".
+	getRec := do(t, h, "GET", "/api/blueprint", "")
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET status %d: %s", getRec.Code, getRec.Body)
+	}
+	var fromGet blueprint.Blueprint
+	if err := json.Unmarshal(getRec.Body.Bytes(), &fromGet); err != nil {
+		t.Fatalf("GET response not JSON: %v", err)
+	}
+	if diff := cmp.Diff(got, fromGet); diff != "" {
+		t.Errorf("GET disagrees with what PUT persisted (-PUT +GET):\n%s", diff)
+	}
+}
+
+// TestPutBlueprintInvalidDocumentIs400VerbatimAndFileUntouched sends a
+// document that decodes fine but fails Blueprint.Validate (scope: Cluster,
+// unsupported in M1 -- see internal/blueprint/load.go). It must come back
+// 400 carrying Validate's own error text VERBATIM (not paraphrased, not
+// wrapped), and the file on disk must be byte-identical to before the
+// request -- reject-without-write, the same guarantee every other edit
+// route in this file gives.
+func TestPutBlueprintInvalidDocumentIs400VerbatimAndFileUntouched(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	current := mustLoadBlueprint(t, path)
+	invalid := *current
+	invalid.Spec.XRD.Scope = "Cluster"
+	wantErr := invalid.Validate()
+	if wantErr == nil {
+		t.Fatal("test setup: a Cluster-scoped document was expected to fail Validate")
+	}
+	body, err := json.Marshal(invalid)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	rec := do(t, h, "PUT", "/api/blueprint", string(body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+
+	var errBody errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("error response not JSON: %v (%s)", err, rec.Body)
+	}
+	if errBody.Error != wantErr.Error() {
+		t.Errorf("error body = %q, want the engine's Validate error verbatim: %q", errBody.Error, wantErr.Error())
+	}
+	if !strings.Contains(errBody.Error, "Cluster") {
+		t.Errorf("error does not name the offending scope: %s", errBody.Error)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file after rejected PUT: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("the blueprint file changed despite a rejected PUT")
+	}
+}
+
+// TestPutBlueprintMalformedJSONIs400 is the malformed-body counterpart: a
+// body that does not even parse as JSON must be a 400, and must not touch
+// the file (there is nothing to validate yet, so no write is even attempted).
+func TestPutBlueprintMalformedJSONIs400(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	rec := do(t, h, "PUT", "/api/blueprint", `{"apiVersion":`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file after malformed PUT: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("the blueprint file changed despite a malformed PUT body")
+	}
+}
+
+// TestPutBlueprintRejectsUnknownTopLevelKeys pins the choice noted in
+// handlePutBlueprint's doc comment: this route reuses decodeJSON, the same
+// DisallowUnknownFields helper every other handler in this file uses for its
+// request body, so an unrecognized top-level key is a 400 here exactly as it
+// would be for a typo'd key in any parameter route's body -- not a stricter,
+// bespoke rule invented for this one route.
+func TestPutBlueprintRejectsUnknownTopLevelKeys(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	current := mustLoadBlueprint(t, path)
+	body, err := json.Marshal(current)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	raw["notAField"] = json.RawMessage(`true`)
+	withExtra, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal with extra key: %v", err)
+	}
+
+	rec := do(t, h, "PUT", "/api/blueprint", string(withExtra))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for an unknown top-level key: %s", rec.Code, rec.Body)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file after rejected PUT: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("the blueprint file changed despite a rejected PUT")
+	}
+}
+
+// TestPutBlueprintIsByteStableAcrossRepeatedPuts is the brief's
+// byte-stability requirement, direct: PUTting the identical document twice
+// in a row must leave byte-for-byte identical files, not just
+// semantically-equal YAML that happens to format differently between the two
+// writes. (TestConsecutiveIdenticalEditsProduceIdenticalBytes above pins the
+// analogous property across two independent servers for the parameter
+// routes; this is the same property for PUT, on one server, across two
+// successive requests, which is what the brief asks for.)
+func TestPutBlueprintIsByteStableAcrossRepeatedPuts(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	current := mustLoadBlueprint(t, path)
+	body, err := json.Marshal(current)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	if rec := do(t, h, "PUT", "/api/blueprint", string(body)); rec.Code != http.StatusOK {
+		t.Fatalf("first PUT: status %d: %s", rec.Code, rec.Body)
+	}
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after first PUT: %v", err)
+	}
+
+	if rec := do(t, h, "PUT", "/api/blueprint", string(body)); rec.Code != http.StatusOK {
+		t.Fatalf("second PUT: status %d: %s", rec.Code, rec.Body)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after second PUT: %v", err)
+	}
+
+	if !bytes.Equal(first, second) {
+		t.Errorf("PUTting the identical document twice produced different bytes:\n"+
+			"--- first ---\n%s\n--- second ---\n%s", first, second)
+	}
+}
+
+// TestPutBlueprintIsNeverAnsweredWith304 pins the brief's conditional-request
+// requirement directly, rather than trusting wrap's method/status gate in
+// server.go (GET/HEAD + 200 only) by inspection alone: a PUT sent with
+// If-None-Match set to the resource's own current ETag must still come back
+// a normal 200 carrying the persisted body, never a bodyless 304 -- a 304
+// for a PUT would be a lie (it would tell the caller "nothing changed, use
+// your cached copy" for a request that just wrote the document).
+func TestPutBlueprintIsNeverAnsweredWith304(t *testing.T) {
+	h := testHandler(t)
+
+	getRec := do(t, h, "GET", "/api/blueprint", "")
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET status %d: %s", getRec.Code, getRec.Body)
+	}
+	etag := getRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("GET did not return an ETag")
+	}
+
+	req := httptest.NewRequest("PUT", "/api/blueprint", bytes.NewBufferString(getRec.Body.String()))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-None-Match", etag)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 -- PUT must never be answered with a 304 even when "+
+			"If-None-Match matches the current ETag: %s", rec.Code, rec.Body)
+	}
+	if rec.Body.Len() == 0 {
+		t.Error("PUT response body is empty -- looks like it was answered as a 304")
+	}
+}
+
+// TestConcurrentPutAndParameterPostSerializes is the brief's concurrency
+// requirement, adapted from TestConcurrentAddsDoNotLoseEdits above.
+//
+// That test proves the mutex closes the lost-update race between N
+// concurrent partial edits (all load -> edit -> persist). PUT does not fit
+// the same shape directly -- it has no load step, and it is designed to
+// unconditionally discard whatever it doesn't itself carry, so "every
+// concurrent change survives" is not the right invariant here (a full
+// replace legitimately superseding an earlier concurrent edit is ordinary
+// last-write-wins REST semantics, not a bug).
+//
+// The invariant that IS a bug if it fails: PUT's own write must never
+// silently vanish without any later full replace explicitly superseding it.
+// Only one thing in this test ever discards content wholesale -- the single
+// PUT -- so under a correctly held srv.mu, PUT's distinguishing marker
+// parameter (putOnly, added to a document built from the file's own current,
+// valid content) must appear in the file after the race REGARDLESS of how
+// the PUT and the eight concurrent parameter POSTs interleave:
+//
+//   - if PUT is the last operation to run, the file is exactly PUT's
+//     document -- putOnly present.
+//   - if some POSTs run after PUT, each of them loads whatever is then on
+//     disk before adding its own parameter; under the mutex that load can
+//     only ever see PUT's already-persisted document (never a pre-PUT one),
+//     so putOnly survives every such edit stacked on top of it.
+//
+// The lost-update bug this guards against is exactly the case where a POST's
+// load races ahead of PUT's write but its persist lands after PUT's --
+// silently overwriting PUT's document with an edit of the stale copy that
+// POST actually read, discarding putOnly (and everything else PUT set)
+// without any operation's response ever admitting it. That is precisely the
+// shape of bug fix round 2 already found and fixed for N-vs-N parameter
+// edits (see server.mu's own doc comment in server.go); this test is the
+// same probe, aimed at PUT instead.
+func TestConcurrentPutAndParameterPostSerializes(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	current := mustLoadBlueprint(t, path)
+	putDoc := *current
+	putDoc.Spec.XRD.Parameters = make(map[string]blueprint.Parameter, len(current.Spec.XRD.Parameters)+1)
+	for k, v := range current.Spec.XRD.Parameters {
+		putDoc.Spec.XRD.Parameters[k] = v
+	}
+	putDoc.Spec.XRD.Parameters["putOnly"] = blueprint.Parameter{Type: "string"}
+	putBody, err := json.Marshal(putDoc)
+	if err != nil {
+		t.Fatalf("marshal PUT body: %v", err)
+	}
+
+	const n = 8
+	postName := func(i int) string { return fmt.Sprintf("postOnly%d", i) }
+
+	type result struct {
+		code int
+		body string
+	}
+	var putResult result
+	postResults := make([]result, n)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		req := httptest.NewRequest("PUT", "/api/blueprint", bytes.NewReader(putBody))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		<-start
+		h.ServeHTTP(rec, req)
+		putResult = result{rec.Code, rec.Body.String()}
+	}()
+
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			req := httptest.NewRequest("POST", "/api/blueprint/parameters",
+				strings.NewReader(fmt.Sprintf(`{"name":%q,"parameter":{"type":"string"}}`, postName(i))))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			<-start
+			h.ServeHTTP(rec, req)
+			postResults[i] = result{rec.Code, rec.Body.String()}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	if putResult.code != http.StatusOK {
+		t.Errorf("PUT: status %d: %s", putResult.code, putResult.body)
+	}
+	for i, r := range postResults {
+		if r.code != http.StatusOK {
+			t.Errorf("POST %s: status %d: %s", postName(i), r.code, r.body)
+		}
+	}
+
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("blueprint on disk no longer loads after the race: %v", err)
+	}
+	if _, ok := reloaded.Spec.XRD.Parameters["putOnly"]; !ok {
+		t.Error("the PUT's own parameter is missing from the final file: a concurrent parameter POST " +
+			"persisted an edit of a stale, pre-PUT document over the top of it -- srv.mu did not " +
+			"serialize PUT against the parameter handlers, reproducing the lost-update race fix round 2 " +
+			"already closed for N concurrent parameter edits")
 	}
 }

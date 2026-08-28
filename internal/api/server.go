@@ -117,6 +117,7 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}", srv.handleKind)
 	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}/fields", srv.handleKindFields)
 	mux.HandleFunc("GET /api/blueprint", srv.handleGetBlueprint)
+	mux.HandleFunc("PUT /api/blueprint", srv.handlePutBlueprint)
 	mux.HandleFunc("POST /api/blueprint/parameters", srv.handleAddParameter)
 	mux.HandleFunc("PUT /api/blueprint/parameters/{name}", srv.handleSetParameter)
 	mux.HandleFunc("POST /api/blueprint/parameters/{name}/rename", srv.handleRenameParameter)

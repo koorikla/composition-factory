@@ -77,6 +77,78 @@ func (srv *server) handleGetBlueprint(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, b)
 }
 
+// handlePutBlueprint serves PUT /api/blueprint: replace the whole document —
+// the same shape GET returns, sent back whole. This is the canvas's route:
+// it keeps the document client-side (nodes, wires, field values) and has no
+// per-field edit to make against this API's narrower parameter routes, so it
+// PUTs its entire in-memory document and follows up with POST /api/generate.
+//
+// Unlike every other mutating handler in this file, there is no load step:
+// a full replace does not need the document currently on disk for anything
+// (not even to answer 500 vs 400 — see below), so this handler's sequence is
+// decode -> validate -> persist rather than load -> edit -> persist. It is
+// still, deliberately, held to that same discipline everywhere it applies:
+//
+//   - decodeJSON, like every other handler here, uses DisallowUnknownFields.
+//     A typo or a stray field the frontend's document does not actually have
+//     fails loudly as a 400 rather than being silently dropped on the next
+//     persist — the same "unknown top-level keys" behaviour the parameter
+//     routes give a request body, extended to the document itself since PUT
+//     /api/blueprint's body IS the document.
+//   - The decoded document is validated with the same Blueprint.Validate the
+//     edit layer calls internally (AddParameter/SetParameter/... in
+//     internal/blueprint/edit.go all validate their candidate before
+//     committing it) before anything is written, and its error is surfaced
+//     verbatim — no wrapping — matching the edit routes' rule that a
+//     validation failure's message names the offending field path precisely
+//     and paraphrasing it would throw that away.
+//   - srv.mu is held across the whole operation, not just the write. PUT does
+//     not read-modify-write against the file the way the parameter handlers
+//     do, but a concurrent parameter POST does: it loads the current file,
+//     edits its own copy, and persists that copy back. Without the lock, a
+//     PUT landing in the gap between that load and that persist would be
+//     silently overwritten by the parameter POST's edit of the
+//     now-stale document it read before the PUT ran — this PUT's caller gets
+//     a 200, and the change is gone a moment later. Serializing against the
+//     same mutex the other handlers use closes that the same way it already
+//     closes it for two concurrent parameter edits.
+//   - persistBlueprint is the same marshal-then-atomic-rename path every
+//     other mutating handler uses (see marshalBlueprint, atomicWriteFile):
+//     deterministic YAML, refuse-if-it-would-not-load-back, never a partial
+//     write visible to a concurrent reader.
+//
+// Status codes: 400 for malformed JSON or a validation failure (the file is
+// left untouched in both cases — nothing above persistBlueprint mutates
+// anything on disk), 500 for an I/O failure persisting the result (the same
+// split loadBlueprint/persistBlueprint use elsewhere: an unreadable/
+// unwritable fixed server path is this server's own fault, not the
+// caller's), 200 with the persisted document on success.
+func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
+	var b blueprint.Blueprint
+	if err := decodeJSON(r, &b); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// load -> edit -> persist (here, decode -> validate -> persist) has to be
+	// atomic against the other mutating handlers, or a concurrent edit reads
+	// the document this PUT is about to replace and silently overwrites this
+	// PUT's write with its own edit of that now-stale copy. See srv.mu and
+	// this handler's doc comment above.
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	if err := b.Validate(); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if !srv.persistBlueprint(w, &b) {
+		return
+	}
+	writeJSON(w, http.StatusOK, &b)
+}
+
 // addParameterRequest is the POST /api/blueprint/parameters body.
 type addParameterRequest struct {
 	Name      string              `json:"name"`
