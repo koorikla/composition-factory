@@ -82,7 +82,10 @@ func TestCompositionSelectsNamespacedVariant(t *testing.T) {
 
 // The single most important assertion in this package.
 func TestOptionsIsTopLevelNotNestedUnderInline(t *testing.T) {
-	got, _ := Composition(testBlueprint(), testCRDs(t))
+	got, err := Composition(testBlueprint(), testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
 	lines := strings.Split(string(got), "\n")
 	var optIndent, inlineIndent int = -1, -1
 	for _, l := range lines {
@@ -111,7 +114,10 @@ func TestOptionsIsTopLevelNotNestedUnderInline(t *testing.T) {
 }
 
 func TestOptionalFieldIsGuarded(t *testing.T) {
-	got, _ := Composition(testBlueprint(), testCRDs(t))
+	got, err := Composition(testBlueprint(), testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
 	s := string(got)
 	// NOT a `{{- with $spec.maxMessageSize }}` guard: under
 	// options: ["missingkey=error"], `with` evaluates the pipeline (indexing
@@ -282,22 +288,34 @@ func TestForProviderIsEmptyMapNotNullWhenAllOptionalFieldsAbsent(t *testing.T) {
 }
 
 func TestProviderConfigRefCarriesKindAndName(t *testing.T) {
-	got, _ := Composition(testBlueprint(), testCRDs(t))
+	got, err := Composition(testBlueprint(), testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
 	s := string(got)
 	if !strings.Contains(s, "kind: ClusterProviderConfig") || !strings.Contains(s, "name: {{ $spec.providerName }}") {
 		t.Errorf("providerConfigRef must carry both kind and name in the v2 namespaced envelope\n---\n%s", s)
 	}
 }
 
+// The error is asserted, not discarded: a failed Composition returns nil,
+// and "does nil contain deletionPolicy" is trivially false, so this test
+// passed for the wrong reason the moment Composition started erroring.
 func TestNoDeletionPolicyForNamespacedMR(t *testing.T) {
-	got, _ := Composition(testBlueprint(), testCRDs(t))
+	got, err := Composition(testBlueprint(), testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
 	if strings.Contains(string(got), "deletionPolicy") {
 		t.Error("deletionPolicy is absent from the v2 namespaced envelope and would be pruned")
 	}
 }
 
 func TestResourceNameAnnotationPresent(t *testing.T) {
-	got, _ := Composition(testBlueprint(), testCRDs(t))
+	got, err := Composition(testBlueprint(), testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
 	if !strings.Contains(string(got), `setResourceNameAnnotation "main-queue"`) {
 		t.Error("every composed resource needs a stable composition-resource-name annotation")
 	}

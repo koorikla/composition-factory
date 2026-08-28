@@ -48,8 +48,21 @@ func TestGenerateProducesThreeFilesAtStablePaths(t *testing.T) {
 }
 
 func TestGenerateIsDeterministic(t *testing.T) {
-	a, _ := Generate(testBlueprint(), testCRDs(t), "out")
-	b, _ := Generate(testBlueprint(), testCRDs(t), "out")
+	// Both errors are asserted, not discarded. With `a, _ := ...` twice, a
+	// Generate that failed for any reason returned nil from both calls and
+	// this test compared nothing to nothing and passed -- which is exactly
+	// what would have happened the moment Generate started validating.
+	a, err := Generate(testBlueprint(), testCRDs(t), "out")
+	if err != nil {
+		t.Fatalf("Generate (first run): %v", err)
+	}
+	b, err := Generate(testBlueprint(), testCRDs(t), "out")
+	if err != nil {
+		t.Fatalf("Generate (second run): %v", err)
+	}
+	if len(a) == 0 {
+		t.Fatal("Generate produced no output; there is nothing to compare")
+	}
 	if len(a) != len(b) {
 		t.Fatalf("different file counts: %d vs %d", len(a), len(b))
 	}

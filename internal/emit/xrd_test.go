@@ -99,8 +99,14 @@ func TestRequiredAndDereferencedAppearsOnce(t *testing.T) {
 }
 
 func TestOutputIsDeterministicAndClean(t *testing.T) {
-	a, _ := XRD(testBlueprint())
-	b, _ := XRD(testBlueprint())
+	a, err := XRD(testBlueprint())
+	if err != nil {
+		t.Fatalf("XRD (first run): %v", err)
+	}
+	b, err := XRD(testBlueprint())
+	if err != nil {
+		t.Fatalf("XRD (second run): %v", err)
+	}
 	if !bytes.Equal(a, b) {
 		t.Error("two runs produced different bytes; output must be deterministic")
 	}
