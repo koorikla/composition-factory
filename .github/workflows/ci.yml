@@ -10,3 +10,16 @@ jobs:
         with: { go-version: '1.25' }
       - run: make lint
       - run: make test
+
+  # Lane B needs a Docker daemon; crossplane render runs the engine in containers.
+  acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version: '1.25' }
+      - name: Install crossplane CLI
+        run: |
+          curl -sL https://raw.githubusercontent.com/crossplane/crossplane/main/install.sh | sh
+          sudo mv crossplane /usr/local/bin/
+      - run: make test-docker
