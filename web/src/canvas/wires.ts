@@ -64,3 +64,28 @@ export function wireStyle(k: WireKind): { stroke: string; strokeDasharray?: stri
       return { stroke: "var(--wire-ref)", strokeDasharray: "var(--wire-ref-dash)" }
   }
 }
+
+/** Whether an XRD parameter's type and a resource field's type are close
+ * enough to wire together. Same type always matches; "integer" and "number"
+ * are also treated as the same family, since the API contract's
+ * Parameter.type and Field.type vocabularies don't always agree on which of
+ * the two spells "a number" — refusing that particular pairing would be a
+ * false-positive rejection, not a real type error. Used by Canvas's global
+ * `isValidConnection` (xyflow evaluates that check against the handle a
+ * drag STARTS from — in this app, always an XR parameter — not the handle
+ * under the pointer, so this lives here rather than on a target Handle). */
+export function typesCompatible(paramType: string, fieldType: string): boolean {
+  if (paramType === fieldType) return true
+  const numeric = new Set(["integer", "number"])
+  return numeric.has(paramType) && numeric.has(fieldType)
+}
+
+/** The message announced (via an aria-live region — see Canvas.tsx) when a
+ * dragged wire is dropped on an incompatible port. This is the
+ * colour-independent half of "refused visibly, not silently ignored": the
+ * canvas also rings the handle in `--err` during the drag itself, but that
+ * ring is a hover/pointer-state CSS effect a screen reader (and jsdom) can't
+ * observe, so the refusal has to be perceivable through text too. */
+export function rejectionMessage(fromParam: string, toPath: string): string {
+  return `${fromParam} → ${toPath}: incompatible`
+}

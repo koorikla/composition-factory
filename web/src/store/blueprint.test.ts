@@ -1,6 +1,15 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vitest"
+import { setupServer } from "msw/node"
+import { handlers } from "../api/mocks"
 import { useBlueprint } from "./blueprint"
 import blueprintFixture from "../api/fixtures/blueprint.json"
+
+// Only load()'s own tests (the "loadEpoch" describe block below) need a
+// network — everything else in this file drives the store directly via
+// setState/actions, as before.
+const server = setupServer(...handlers)
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
+afterAll(() => server.close())
 
 const queueKind = {
   kind: "Queue", group: "sqs.aws.m.upbound.io", version: "v1beta1",
@@ -151,6 +160,34 @@ describe("blueprint store", () => {
     it("never grows undo history — loading a document is not a user edit", () => {
       useBlueprint.getState().hydrateNodes([namespacedQueueKind])
       expect(useBlueprint.getState().canUndo()).toBe(false)
+    })
+  })
+
+  describe("loadEpoch (fix round 1, Finding 1)", () => {
+    it("increments by exactly one per load(), and is untouched by every other action", async () => {
+      const before = useBlueprint.getState().loadEpoch
+      await useBlueprint.getState().load()
+      expect(useBlueprint.getState().loadEpoch).toBe(before + 1)
+
+      const afterFirstLoad = useBlueprint.getState().loadEpoch
+      const s = useBlueprint.getState()
+      s.addNode(queueKind, 0, 0)
+      const id = useBlueprint.getState().nodes[0].id
+      s.connect("maxMessageSize", id, "maxMessageSize")
+      s.moveNode(id, 5, 5)
+      s.commitMove()
+      s.removeNode(id)
+      s.hydrateNodes([queueKind])
+      s.undo()
+      // none of addNode/connect/moveNode/commitMove/removeNode/hydrateNodes/
+      // undo are load() -- ordinary mutations must never bump the epoch,
+      // even though several of them (like removeNode) give `doc` a brand
+      // new object identity via immer.
+      expect(useBlueprint.getState().loadEpoch).toBe(afterFirstLoad)
+
+      // A second load() -- e.g. opening a different blueprint -- re-arms.
+      await useBlueprint.getState().load()
+      expect(useBlueprint.getState().loadEpoch).toBe(afterFirstLoad + 1)
     })
   })
 })

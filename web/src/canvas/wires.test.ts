@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { wireKind, wireStyle } from "./wires"
+import { wireKind, wireStyle, rejectionMessage, typesCompatible } from "./wires"
 
 const doc = {
   spec: {
@@ -29,5 +29,27 @@ describe("wire semantics", () => {
     for (const k of ["xrd", "shared", "status", "ref"] as const) {
       expect(wireStyle(k).stroke).toMatch(/^var\(--/)
     }
+  })
+})
+
+describe("rejection message (fix round 1, Finding 2)", () => {
+  it("names both the source parameter and the target field, colour-independently", () => {
+    expect(rejectionMessage("providerName", "region")).toBe("providerName → region: incompatible")
+  })
+})
+
+describe("type compatibility (fix round 1, Finding 2)", () => {
+  it("matches identical types", () => {
+    expect(typesCompatible("string", "string")).toBe(true)
+  })
+
+  it("treats integer and number as the same family", () => {
+    expect(typesCompatible("integer", "number")).toBe(true)
+    expect(typesCompatible("number", "integer")).toBe(true)
+  })
+
+  it("refuses genuinely different types", () => {
+    expect(typesCompatible("string", "number")).toBe(false)
+    expect(typesCompatible("boolean", "object")).toBe(false)
   })
 })

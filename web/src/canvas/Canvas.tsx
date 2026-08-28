@@ -2,7 +2,7 @@
 // them, all real DOM (see the brief on why @xyflow/react over a <canvas>-
 // drawing library — node bodies need to be selectable, focusable text and
 // form controls, which a <canvas> tag cannot give us).
-import { useCallback, useEffect, useRef, useState, type JSX } from "react"
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type JSX } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -12,13 +12,16 @@ import {
   type Edge as RFEdge,
   type NodeChange,
   type Connection,
+  type FinalConnectionState,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { useBlueprint } from "../store/blueprint"
 import { api } from "../api/contract"
+import type { Field } from "../api/contract"
 import { ResourceNode } from "./ResourceNode"
 import { XRNode } from "./XRNode"
-import { wireKind, wireStyle } from "./wires"
+import { wireKind, wireStyle, rejectionMessage, typesCompatible } from "./wires"
+import { FieldsCacheContext } from "./fieldsCache"
 
 const XR_ID = "xr"
 
@@ -27,19 +30,54 @@ const XR_ID = "xr"
 const nodeTypes = { resource: ResourceNode, xr: XRNode }
 
 /** prefers-reduced-motion: none of the canvas's own transitions run for a
- * user who has asked the OS to cut motion down. Scoped to this component's
- * own classes only — it must not reach into @xyflow/react's own styling. */
-const reducedMotionStyle = `
+ * user who has asked the OS to cut motion down.
+ *
+ * The `.react-flow__handle` rules are the visible half of "an incompatible
+ * drop is refused visibly, not silently ignored" (see the global
+ * `isValidConnection` below): while a wire is being dragged, xyflow itself
+ * toggles `connectingto` on the handle currently under the pointer, and
+ * `valid` only when that handle would accept the drop (see @xyflow/system's
+ * Handle component) — colour alone, so `--err` vs. `--wire-xrd` is a hint,
+ * never the only signal; the aria-live region rendered below carries the
+ * same information as text. */
+const canvasStyle = `
   .cf-node { transition: box-shadow 120ms ease, border-color 120ms ease; }
+  .react-flow__handle { transition: outline-color 100ms ease, outline-offset 100ms ease; }
+  .react-flow__handle.connectingto.valid {
+    outline: 2px solid var(--wire-xrd);
+    outline-offset: 2px;
+  }
+  .react-flow__handle.connectingto:not(.valid) {
+    outline: 2px solid var(--err);
+    outline-offset: 2px;
+  }
   @media (prefers-reduced-motion: reduce) {
-    .cf-node { transition: none; }
+    .cf-node, .react-flow__handle { transition: none; }
   }
 `
+
+const visuallyHiddenStyle: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0, 0, 0, 0)",
+  whiteSpace: "nowrap",
+  border: 0,
+}
+
+/** How long a rejection announcement stays in the aria-live region before
+ * clearing itself — "transient", not a permanent status. Not an animation
+ * (nothing to guard behind prefers-reduced-motion), just a timeout. */
+const REJECTION_MESSAGE_MS = 4000
 
 function CanvasInner() {
   const doc = useBlueprint(s => s.doc)
   const storeNodes = useBlueprint(s => s.nodes)
   const wires = useBlueprint(s => s.wires)
+  const loadEpoch = useBlueprint(s => s.loadEpoch)
   const moveNode = useBlueprint(s => s.moveNode)
   const commitMove = useBlueprint(s => s.commitMove)
   const removeNode = useBlueprint(s => s.removeNode)
@@ -52,20 +90,22 @@ function CanvasInner() {
 
   // A freshly loaded document has resources but no nodes yet (positions
   // have no home in the Blueprint schema — see store/blueprint.ts's load()).
-  // Hydrate at most once per Canvas mount, guarded by a ref rather than
-  // keyed on live store values: every store mutation (addNode, removeNode,
-  // connect, ...) touches `doc` and — via immer's structural sharing —
-  // gives it a brand-new object identity, and `nodes.length` legitimately
-  // passes back through zero whenever the user deletes their last node.
-  // An effect re-armed by either would misread "user just deleted
-  // everything" as "a fresh, unhydrated load" and silently resurrect a
-  // node the user just removed. `hydrationAttempted` fires the check
-  // exactly once, as soon as a `doc` first shows up (handling the case
-  // where Canvas mounts before load() resolves), and never again.
-  const hydrationAttempted = useRef(false)
+  // Hydrate once per load(), keyed on `loadEpoch` (bumped by load() alone —
+  // see the store) rather than on `doc`'s identity or on `nodes.length`:
+  // ordinary mutations (addNode, removeNode, connect, ...) also give `doc`
+  // a brand-new object identity via immer's structural sharing, and
+  // `nodes.length` legitimately passes back through zero whenever the user
+  // deletes their last node — keying on either previously caused a real
+  // bug where a post-delete mutation was misread as "a fresh, unhydrated
+  // load" and silently resurrected the node the user just removed.
+  // `lastHydratedEpoch` records the most recently processed epoch: it
+  // re-arms exactly when load() runs again (e.g. opening a different
+  // blueprint without remounting Canvas), and never on an ordinary edit
+  // that leaves the epoch unchanged.
+  const lastHydratedEpoch = useRef<number | null>(null)
   useEffect(() => {
-    if (!doc || hydrationAttempted.current) return
-    hydrationAttempted.current = true
+    if (!doc || lastHydratedEpoch.current === loadEpoch) return
+    lastHydratedEpoch.current = loadEpoch
     const state = useBlueprint.getState()
     if (state.nodes.length > 0) return
     if (doc.spec.resources.length === 0) return
@@ -82,7 +122,7 @@ function CanvasInner() {
     return () => {
       cancelled = true
     }
-  }, [doc])
+  }, [doc, loadEpoch])
 
   // Rebuild xyflow's node list from the store whenever it changes,
   // preserving each node's `selected` flag — selection is UI state the
@@ -157,20 +197,100 @@ function CanvasInner() {
     [connect],
   )
 
+  // Every field list a ResourceNode has fetched, keyed by node id — see
+  // fieldsCache.ts. A ref, not state: it's read imperatively inside
+  // isValidConnection during a pointer drag, and writing to it must not
+  // itself trigger a Canvas re-render every time any node's fields load.
+  const fieldsByNode = useRef(new Map<string, Field[]>())
+  const reportFields = useCallback<(nodeId: string, fields: Field[]) => void>((nodeId, fields) => {
+    fieldsByNode.current.set(nodeId, fields)
+  }, [])
+
+  // xyflow evaluates isValidConnection against the handle a drag STARTS
+  // from (see @xyflow/system's XYHandle.onPointerDown, which threads the
+  // STARTING handle's own isValidConnection prop through, falling back to
+  // this store-level one only when the starting handle doesn't define its
+  // own) — every drag in this app starts from an XR parameter's source
+  // handle, and XRNode's handles don't set a per-handle isValidConnection,
+  // so this is the one place that check actually runs. Putting it on a
+  // target Handle instead (an earlier draft did) is never consulted: the
+  // target handle's own isValidConnection is only relevant when a drag
+  // STARTS from a target handle, which nothing in this app does.
+  const isValidConnection = useCallback(
+    (connection: {
+      source?: string | null
+      sourceHandle?: string | null
+      target?: string | null
+      targetHandle?: string | null
+    }) => {
+      if (
+        connection.source !== XR_ID ||
+        !connection.sourceHandle ||
+        !connection.target ||
+        !connection.targetHandle
+      ) {
+        return false
+      }
+      const param = useBlueprint.getState().doc?.spec.xrd.parameters[connection.sourceHandle]
+      if (!param) return false
+      const targetFields = fieldsByNode.current.get(connection.target)
+      const field = targetFields?.find(f => f.path === connection.targetHandle)
+      if (!field) return false
+      return typesCompatible(param.type, field.type)
+    },
+    [],
+  )
+
+  // The colour-independent half of "refused visibly": onConnect only ever
+  // fires for a connection isValidConnection already accepted (xyflow never
+  // calls it otherwise), so a rejection can only be observed at the END of
+  // the drag gesture, via onConnectEnd's FinalConnectionState — isValid is
+  // `false` (not `null`) precisely when the pointer was released over a
+  // real handle that refused the drop, as opposed to empty canvas (which
+  // xyflow reports as `null`, not a rejection at all).
+  const [rejection, setRejection] = useState<string | null>(null)
+  const rejectionTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const onConnectEnd = useCallback((_event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+    if (state.isValid !== false) return
+    if (!state.fromHandle?.id || !state.toHandle?.id) return
+    if (rejectionTimeout.current) clearTimeout(rejectionTimeout.current)
+    setRejection(rejectionMessage(state.fromHandle.id, state.toHandle.id))
+    rejectionTimeout.current = setTimeout(() => setRejection(null), REJECTION_MESSAGE_MS)
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (rejectionTimeout.current) clearTimeout(rejectionTimeout.current)
+    },
+    [],
+  )
+
   return (
     <div style={{ width: "100%", height: "100%" }}>
-      <style>{reducedMotionStyle}</style>
-      <ReactFlow
-        nodes={rfNodes}
-        edges={rfEdges}
-        nodeTypes={nodeTypes}
-        onNodesChange={onNodesChange}
-        onConnect={onConnect}
-        deleteKeyCode={["Backspace", "Delete"]}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background />
-      </ReactFlow>
+      <style>{canvasStyle}</style>
+      {/* Screen-reader-only: the same refusal xyflow expresses visually
+          (the --err ring in canvasStyle above) as text, since a hover/
+          pointer-state CSS ring has no accessible-name equivalent on its
+          own. role="status" + aria-live="polite" means assistive tech
+          announces this without moving focus. */}
+      <div role="status" aria-live="polite" style={visuallyHiddenStyle}>
+        {rejection ?? ""}
+      </div>
+      <FieldsCacheContext.Provider value={reportFields}>
+        <ReactFlow
+          nodes={rfNodes}
+          edges={rfEdges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onConnect={onConnect}
+          onConnectEnd={onConnectEnd}
+          isValidConnection={isValidConnection}
+          deleteKeyCode={["Backspace", "Delete"]}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background />
+        </ReactFlow>
+      </FieldsCacheContext.Provider>
     </div>
   )
 }

@@ -52,6 +52,18 @@ interface BlueprintStore {
   nodes: Node[]
   wires: Wire[]
 
+  /** Bumped by exactly one place: load(). Ordinary mutations (addNode,
+   * removeNode, connect, disconnect, hydrateNodes) give `doc` a brand-new
+   * object identity too — immer's structural sharing does that on every
+   * change — so identity alone can't tell "a new document was loaded"
+   * apart from "the existing document was edited." loadEpoch is the
+   * unambiguous signal for the former: the canvas keys its one-time-per-
+   * load hydration check on this, not on doc's identity or on nodes.length
+   * (both of which legitimately change on an ordinary delete too — keying
+   * on either previously caused a real bug where deleting a node raced
+   * with a stray re-hydration and silently resurrected it). */
+  loadEpoch: number
+
   /** Bounded undo stack of pre-mutation snapshots; see HISTORY_CAP. */
   history: Snapshot[]
   /** The state as it stood before the current drag gesture's first
@@ -223,6 +235,7 @@ export const useBlueprint = create<BlueprintStore>()(
       doc: null,
       nodes: [],
       wires: [],
+      loadEpoch: 0,
       history: [],
       dragBaseline: null,
 
@@ -237,6 +250,7 @@ export const useBlueprint = create<BlueprintStore>()(
           draft.doc = doc
           draft.nodes = []
           draft.wires = []
+          draft.loadEpoch += 1
           draft.history = []
           draft.dragBaseline = null
         })

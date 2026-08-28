@@ -3,11 +3,12 @@
 // required by the provider — never all of a resource's fields (a Queue
 // alone carries 18; showing every one on the canvas at once would drown the
 // two or three that actually matter for a given composition).
-import { useEffect, useState } from "react"
+import { useContext, useEffect, useState } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { useBlueprint } from "../store/blueprint"
 import { api } from "../api/contract"
-import type { Field, Parameter } from "../api/contract"
+import type { Field } from "../api/contract"
+import { FieldsCacheContext } from "./fieldsCache"
 
 // Deliberately small: the whole point of "bound-or-required, not all 18" is
 // that a resource's port list stays scannable. A node that genuinely has
@@ -15,29 +16,24 @@ import type { Field, Parameter } from "../api/contract"
 // silently truncating or growing without bound.
 const MAX_VISIBLE_PORTS = 6
 
-/** A drop is refused (see the Handle's isValidConnection below) when the
- * XRD parameter's type and the field's type are not in the same family.
- * "integer" and "number" are treated as the same family — the API
- * contract's Parameter.type and Field.type vocabularies don't always agree
- * on which of the two spells "a number", and refusing that pairing would be
- * a false-positive rejection, not a real type error. */
-function typesCompatible(paramType: string, fieldType: string): boolean {
-  if (paramType === fieldType) return true
-  const numeric = new Set(["integer", "number"])
-  return numeric.has(paramType) && numeric.has(fieldType)
-}
-
 export function ResourceNode({ id }: NodeProps) {
   const node = useBlueprint(s => s.nodes.find(n => n.id === id))
   const resource = useBlueprint(s =>
     node ? s.doc?.spec.resources.find(r => r.name === node.name) : undefined,
   )
-  const parameters = useBlueprint(s => s.doc?.spec.xrd.parameters ?? {})
 
   const boundPaths = resource ? Object.keys(resource.fields) : []
   const boundKey = boundPaths.slice().sort().join(",")
 
   const [fields, setFields] = useState<Field[]>([])
+  // Reports this node's fetched fields to Canvas's shared cache, keyed by
+  // node id — Canvas's global `isValidConnection` (see Canvas.tsx) needs a
+  // target field's `type` to judge compatibility, but that field list is
+  // fetched here, lazily, per node; the cache is how that reaches Canvas
+  // without lifting the fetch itself up (every node still owns its own
+  // fetch — the cache is read-only from Canvas's side, write-only from
+  // here).
+  const reportFields = useContext(FieldsCacheContext)
 
   useEffect(() => {
     if (!node) return
@@ -59,7 +55,10 @@ export function ResourceNode({ id }: NodeProps) {
         )
         all = [...all, ...extras.flatMap(e => e.fields)]
       }
-      if (!cancelled) setFields(all)
+      if (!cancelled) {
+        setFields(all)
+        reportFields(id, all)
+      }
     }
     run().catch(() => {
       // A field-fetch failure leaves the node showing zero ports rather
@@ -71,7 +70,7 @@ export function ResourceNode({ id }: NodeProps) {
     }
     // boundKey (not boundPaths, a fresh array every render) is the real
     // dependency: re-fetch only when which paths are bound actually changes.
-  }, [node?.apiVersion, node?.kind, boundKey])
+  }, [node?.apiVersion, node?.kind, boundKey, id, reportFields])
 
   if (!node || !resource) return null
 
@@ -117,17 +116,13 @@ export function ResourceNode({ id }: NodeProps) {
               className="cf-port-row"
               style={{ position: "relative", padding: "4px 10px 4px 16px" }}
             >
-              <Handle
-                type="target"
-                position={Position.Left}
-                id={f.path}
-                isValidConnection={connection => {
-                  if (connection.source !== "xr" || !connection.sourceHandle) return false
-                  const p: Parameter | undefined = parameters[connection.sourceHandle]
-                  if (!p) return false
-                  return typesCompatible(p.type, f.type)
-                }}
-              />
+              {/* No isValidConnection here: xyflow evaluates that check
+                  against the handle a drag STARTS from, not the one under
+                  the pointer — every drag in this app starts from an XR
+                  parameter handle, so the compatibility check lives on
+                  Canvas's global isValidConnection instead (see
+                  Canvas.tsx and wires.ts's typesCompatible). */}
+              <Handle type="target" position={Position.Left} id={f.path} />
               <span className="mono">{f.path}</span>
               {f.required && (
                 <span
