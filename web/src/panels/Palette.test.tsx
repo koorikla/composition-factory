@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest"
+import { describe, it, expect, beforeAll, afterEach, afterAll } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { setupServer } from "msw/node"
+import { http, HttpResponse } from "msw"
 import { handlers } from "../api/mocks"
 import { Palette } from "./Palette"
 
@@ -40,6 +41,7 @@ expect.extend({
 
 const server = setupServer(...handlers)
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
+afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
 
 describe("palette", () => {
@@ -90,5 +92,20 @@ describe("palette", () => {
     await user.keyboard("{Enter}")
     // Enter adds at a default position; drag-and-drop is not the only path
     expect(item).toHaveAttribute("tabindex")
+  })
+
+  it("renders a kinds() failure as role=\"alert\", never the empty-search copy (fix wave E6)", async () => {
+    server.use(
+      http.get("/api/kinds", () =>
+        HttpResponse.json({ error: "index unavailable: cache directory missing" }, { status: 500 }),
+      ),
+    )
+    render(<Palette />)
+    const alert = await screen.findByRole("alert")
+    // The server's own message, verbatim — not a paraphrase.
+    expect(alert.textContent).toBe("index unavailable: cache directory missing")
+    // And NOT the `no kinds match ""` copy, which claims the user's search
+    // (empty or not) matched nothing when the index never answered at all.
+    expect(screen.queryByText(/no kinds match/)).toBeNull()
   })
 })

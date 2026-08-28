@@ -47,9 +47,12 @@ export function XRNode({ selected }: NodeProps) {
             style={{ position: "relative", padding: "4px 16px 4px 10px" }}
           >
             <span className="mono">{name}</span>
+            {/* role="img" for the same reason as ResourceNode's markers:
+                aria-label on a bare <span> is inert ARIA. */}
             {param.required && (
               <span
                 data-testid="required-marker"
+                role="img"
                 aria-label="required"
                 title="required"
                 style={{ marginLeft: 4, color: "var(--warn)" }}

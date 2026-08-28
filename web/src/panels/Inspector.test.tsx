@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest"
+import { describe, it, expect, beforeAll, afterEach, afterAll, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { setupServer } from "msw/node"
+import { http, HttpResponse } from "msw"
 import { handlers } from "../api/mocks"
 import { useBlueprint } from "../store/blueprint"
 import { Inspector, checkScalar } from "./Inspector"
@@ -9,6 +10,7 @@ import blueprintFixture from "../api/fixtures/blueprint.json"
 
 const server = setupServer(...handlers)
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
+afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
 
 const queueKind = {
@@ -27,6 +29,27 @@ describe("inspector", () => {
     render(<Inspector nodeId={useBlueprint.getState().nodes[0].id} />)
     expect(await screen.findByText("region")).toBeInTheDocument()
     expect(screen.queryByText("delaySeconds")).not.toBeInTheDocument()
+    // The required marker announces itself through real ARIA — role="img"
+    // is what makes the aria-label live on a <span> (fix wave E5).
+    expect(screen.getByRole("img", { name: "required" })).toBeInTheDocument()
+  })
+
+  it("fails closed when fields() fails: role=\"alert\" with the server's message, no editable inputs (fix wave E6)", async () => {
+    server.use(
+      http.get("/api/kinds/:apiVersion/:kind/fields", () =>
+        HttpResponse.json({ error: "schema cache unreadable" }, { status: 500 }),
+      ),
+    )
+    render(<Inspector nodeId={useBlueprint.getState().nodes[0].id} />)
+    const alert = await screen.findByTestId("fields-error")
+    expect(alert.getAttribute("role")).toBe("alert")
+    // Verbatim server message, not a paraphrase.
+    expect(alert.textContent).toBe("schema cache unreadable")
+    // Fail-closed: no field list was fetched, so no editable input may
+    // render — typing into a field this panel never saw the schema for is
+    // exactly what "closed" forbids.
+    expect(screen.queryByTestId("value-region")).toBeNull()
+    expect(document.querySelector("textarea")).toBeNull()
   })
 
   it("shows all fields when the filter is switched, fetching them lazily", async () => {

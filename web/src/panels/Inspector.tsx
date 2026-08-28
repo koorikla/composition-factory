@@ -21,7 +21,7 @@
 // field's value, only the ephemeral, presentation-only "is this field's
 // current text invalid, and why" state, which is not product data.
 import { useEffect, useState, type CSSProperties } from "react"
-import { api } from "../api/contract"
+import { api, ApiError } from "../api/contract"
 import type { Field } from "../api/contract"
 import { useBlueprint } from "../store/blueprint"
 
@@ -175,6 +175,11 @@ export function Inspector({ nodeId }: InspectorProps) {
   const [filter, setFilter] = useState<Filter>("required")
   const [fields, setFields] = useState<Field[]>([])
   const [errors, setErrors] = useState<Record<string, string>>({})
+  // A failed fields() fetch fails CLOSED — no field list, so no editable
+  // inputs to type into against a schema this panel never saw — and says
+  // so out loud as role="alert" rather than silently rendering the same
+  // empty panel a fieldless kind would.
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   const boundPaths = resource ? Object.keys(resource.fields) : []
   const boundKey = boundPaths.slice().sort().join(",")
@@ -184,10 +189,16 @@ export function Inspector({ nodeId }: InspectorProps) {
     let cancelled = false
     fetchFields(node.apiVersion, node.kind, filter === "required", boundPaths)
       .then(all => {
-        if (!cancelled) setFields(all)
+        if (!cancelled) {
+          setFields(all)
+          setFetchError(null)
+        }
       })
-      .catch(() => {
-        if (!cancelled) setFields([])
+      .catch(e => {
+        if (!cancelled) {
+          setFields([])
+          setFetchError(e instanceof ApiError ? e.message : "failed to load fields")
+        }
       })
     return () => {
       cancelled = true
@@ -259,6 +270,17 @@ export function Inspector({ nodeId }: InspectorProps) {
         </button>
       </div>
 
+      {fetchError !== null && (
+        <div
+          data-testid="fields-error"
+          role="alert"
+          className="mono"
+          style={{ fontSize: 12, color: "var(--err)" }}
+        >
+          {fetchError}
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {sorted.map(f => {
           const assignment = resource.fields[f.path]
@@ -280,8 +302,11 @@ export function Inspector({ nodeId }: InspectorProps) {
                 <span className="mono" style={{ fontWeight: 600 }}>
                   {f.path}
                 </span>
+                {/* role="img" makes the aria-label real — on a bare <span>
+                    it is inert ARIA no screen reader announces. */}
                 {f.required && (
                   <span
+                    role="img"
                     aria-label="required"
                     title="required"
                     style={{ color: "var(--warn)" }}

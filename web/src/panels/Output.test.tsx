@@ -34,10 +34,14 @@ describe("output pane", () => {
     expect(screen.getByText("functions.yaml")).toBeInTheDocument()
   })
 
-  it("is read-only — generated output is never hand-edited", async () => {
+  it("is read-only — generated output is never hand-edited, and says so through real ARIA", async () => {
     render(<Output />)
-    const editor = await screen.findByTestId("yaml-view")
-    expect(editor.getAttribute("aria-readonly")).toBe("true")
+    // aria-readonly on a role-less div is inert ARIA (fix wave E4): the
+    // pane is a labelled region instead, which assistive tech actually
+    // announces, and its content is <pre> — read-only by construction.
+    const editor = await screen.findByRole("region", { name: "Generated YAML (read-only)" })
+    expect(editor.getAttribute("data-testid")).toBe("yaml-view")
+    expect(editor.getAttribute("aria-readonly")).toBeNull()
   })
 
   it("surfaces a generation failure instead of showing stale YAML", async () => {

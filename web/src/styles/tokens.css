@@ -5,7 +5,12 @@
  * docs/design/canvas-prototype.html, whose :root block was tuned against
  * real contrast measurements after a review found the light theme unreadable.
  * Do not re-tune these here; if a value needs to change, it changes in the
- * prototype first and gets re-copied.
+ * prototype first and gets re-copied. Two deliberate divergences, from the
+ * final-review fix wave (measured, and pinned by tokens.test.ts):
+ *   - light --warn: #877200 -> #836E00 (was 4.40:1 on --surface-2; AA
+ *     small-text needs 4.5:1)
+ *   - dark --faint: #6A747F -> #828C98 (was 3.4-4.0:1 on the dark
+ *     surfaces at its 10-12px uses)
  *
  * Three-state theming, enforced by src/styles/tokens.test.ts:
  *   1. The complete light palette lives on bare :root.
@@ -19,6 +24,12 @@
  */
 
 :root {
+  /* Native UI (scrollbars, form controls, the UA's canvas) follows the
+   * page's theme instead of the OS's alone: "light dark" here means "this
+   * page supports both, pick by prefers-color-scheme"; the guarded blocks
+   * below then pin it to the side the token palette actually renders. */
+  color-scheme: light dark;
+
   --ground: #E2E8F0;
   --surface: #FFFFFF;
   --surface-2: #F4F7FA;
@@ -47,7 +58,7 @@
   --wire-ref-dash: 5 3;
 
   --ok: #0D6D4B;
-  --warn: #877200;
+  --warn: #836E00;
   --err: #B12A32;
 
   --shadow: 0 1px 2px rgba(11, 15, 20, .10), 0 4px 14px rgba(11, 15, 20, .09);
@@ -55,12 +66,12 @@
   --grid: #C3CEDD;
 
   --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --cond: "IBM Plex Sans Condensed", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --ground: #0C1015;
     --surface: #161B22;
     --surface-2: #1C222B;
@@ -68,7 +79,7 @@
     --ink: #E8ECF2;
     --ink-2: #B4BDC9;
     --muted: #8A94A2;
-    --faint: #6A747F;
+    --faint: #828C98;
     --rule: #272E39;
     --rule-2: #3B4450;
 
@@ -92,6 +103,7 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --ground: #0C1015;
   --surface: #161B22;
   --surface-2: #1C222B;
@@ -99,7 +111,7 @@
   --ink: #E8ECF2;
   --ink-2: #B4BDC9;
   --muted: #8A94A2;
-  --faint: #6A747F;
+  --faint: #828C98;
   --rule: #272E39;
   --rule-2: #3B4450;
 
@@ -119,6 +131,13 @@
   --shadow: 0 1px 2px rgba(0, 0, 0, .45), 0 4px 14px rgba(0, 0, 0, .4);
   --shadow-lg: 0 2px 6px rgba(0, 0, 0, .55), 0 18px 40px rgba(0, 0, 0, .55);
   --grid: #1C222B;
+}
+
+/* An explicit light choice needs no token overrides (bare :root already IS
+ * the light palette) but does need color-scheme pinned, or a dark OS would
+ * still paint dark native scrollbars/controls over light surfaces. */
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 *, *::before, *::after {

@@ -46,9 +46,15 @@ interface YamlViewProps {
  * byte for byte. */
 function YamlView({ result }: YamlViewProps) {
   return (
+    // role="region" + aria-label, NOT aria-readonly: aria-readonly is only
+    // meaningful on roles that support it (textbox, grid, ...) — on a plain
+    // div it is inert ARIA that no assistive tech announces. A labelled
+    // region is what this actually is: a named landmark of read-only
+    // content a screen-reader user can jump to.
     <div
       data-testid="yaml-view"
-      aria-readonly="true"
+      role="region"
+      aria-label="Generated YAML (read-only)"
       style={{ display: "flex", flexDirection: "column", gap: 12, overflow: "auto" }}
     >
       {result.outputs.map(o => (

@@ -144,9 +144,13 @@ export function ResourceNode({ id, selected }: NodeProps) {
                   Canvas.tsx and wires.ts's typesCompatible). */}
               <Handle type="target" position={Position.Left} id={f.path} />
               <span className="mono">{f.path}</span>
+              {/* role="img" makes the aria-label real: on a plain <span>,
+                  aria-label is ignored (no role supports naming there) and
+                  a screen reader would announce the bare glyph or nothing. */}
               {f.required && (
                 <span
                   data-testid="required-marker"
+                  role="img"
                   aria-label="required"
                   title="required"
                   style={{ marginLeft: 4, color: "var(--warn)" }}
@@ -156,6 +160,7 @@ export function ResourceNode({ id, selected }: NodeProps) {
               )}
               {bound && (
                 <span
+                  role="img"
                   aria-label="bound"
                   title="bound"
                   style={{ marginLeft: 4, color: "var(--wire-xrd)" }}

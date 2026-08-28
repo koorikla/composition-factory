@@ -7,7 +7,7 @@
 // so the scope distinction is rendered as its own element, never folded
 // into the kind name.
 import { useEffect, useRef, useState } from "react"
-import { api } from "../api/contract"
+import { api, ApiError } from "../api/contract"
 import type { Kind } from "../api/contract"
 import { useBlueprint } from "../store/blueprint"
 
@@ -95,6 +95,12 @@ export function Palette() {
   const [query, setQuery] = useState("")
   const [kinds, setKinds] = useState<Kind[]>([])
   const [loaded, setLoaded] = useState(false)
+  // A FAILED kinds() fetch is a different state from "the search matched
+  // nothing": rendering the `no kinds match ""` empty-search copy for a
+  // server error tells the user their query is wrong when the truth is the
+  // index never answered. The error renders as role="alert" instead, with
+  // the server's own message.
+  const [error, setError] = useState<string | null>(null)
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -107,12 +113,14 @@ export function Palette() {
           if (!cancelled) {
             setKinds(result)
             setLoaded(true)
+            setError(null)
           }
         })
-        .catch(() => {
+        .catch(e => {
           if (!cancelled) {
             setKinds([])
             setLoaded(true)
+            setError(e instanceof ApiError ? e.message : "failed to load kinds")
           }
         })
     }, SEARCH_DEBOUNCE_MS)
@@ -160,7 +168,12 @@ export function Palette() {
           fontFamily: "var(--sans)",
         }}
       />
-      {loaded && kinds.length === 0 && (
+      {error !== null && (
+        <div role="alert" className="mono" style={{ color: "var(--err)", fontSize: 12, padding: "4px 2px" }}>
+          {error}
+        </div>
+      )}
+      {error === null && loaded && kinds.length === 0 && (
         <div className="mono" style={{ color: "var(--faint)", fontSize: 12, padding: "4px 2px" }}>
           no kinds match “{query}”
         </div>

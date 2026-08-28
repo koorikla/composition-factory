@@ -41,8 +41,10 @@ describe("canvas", () => {
     render(<Canvas />)
     const xr = await screen.findByTestId("node-xr")
     // an asterisk, a 'req' badge or aria — something a screen reader and a
-    // colour-blind user both get
-    expect(within(xr).getByTestId("required-marker")).toBeInTheDocument()
+    // colour-blind user both get. role="img" is what makes the aria-label
+    // real: on a bare <span> it is inert ARIA (fix wave E5).
+    const marker = within(xr).getByRole("img", { name: "required" })
+    expect(marker.getAttribute("data-testid")).toBe("required-marker")
   })
 
   it("deletes the selected node on Delete, removing its resource", async () => {
@@ -323,6 +325,10 @@ describe("fix wave B5 — a wired field always ranks into the visible port set",
         expect(resourceNode.querySelector(`[data-handleid="${path}"]`)).not.toBeNull()
       }
     })
+
+    // The bound markers announce themselves through real ARIA (fix wave
+    // E5): role="img" + aria-label, one per wired port row.
+    expect(within(resourceNode).getAllByRole("img", { name: "bound" })).toHaveLength(8)
 
     // And the edge itself renders for the wired field ranked past the cap.
     await waitFor(() => {
