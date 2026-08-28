@@ -58,17 +58,29 @@ type kindResponse struct {
 	Envelope []index.Field `json:"envelope"`
 }
 
+// kindsResponse and kindFieldsResponse mirror the map[string]any envelopes
+// the handlers marshal; the fixtures encode those envelopes, so the round-trip
+// must decode into the same shape.
+type kindsResponse struct {
+	Kinds []index.Kind `json:"kinds"`
+}
+
+type kindFieldsResponse struct {
+	Fields []index.Field `json:"fields"`
+	Total  int           `json:"total"`
+}
+
 type generateResponse struct {
 	Outputs []generateOutput `json:"outputs"`
 	Written bool             `json:"written"`
 }
 
 func TestContractFixtureKindsRoundTripsKeySet(t *testing.T) {
-	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "kinds.json"), &[]index.Kind{})
+	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "kinds.json"), &kindsResponse{})
 }
 
 func TestContractFixtureQueueFieldsRoundTripsKeySet(t *testing.T) {
-	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "queue.fields.json"), &[]index.Field{})
+	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "queue.fields.json"), &kindFieldsResponse{})
 }
 
 func TestContractFixtureQueueKindRoundTripsKeySet(t *testing.T) {
