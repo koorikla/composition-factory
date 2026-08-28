@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -493,6 +494,7 @@ func TestBlueprintReadFailureIs500(t *testing.T) {
 		Store:     cache.New(t.TempDir()),
 		Blueprint: dir,
 		OutDir:    t.TempDir(),
+		Lock:      filepath.Join(t.TempDir(), ".cf.lock"),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

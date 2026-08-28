@@ -34,6 +34,21 @@ func TestServeDefaultsToLoopback(t *testing.T) {
 // true }` into isLoopbackHost left the whole suite green while opening an
 // unauthenticated, file-writing API to the network. With ":8080" here, that
 // injection fails this test.
+// TestServeDefaultsLockfilePath pins --lock's default to the same ".cf.lock"
+// ProviderAddCmd uses: POST /api/providers and `cf provider add` pin into
+// the same lockfile unless the operator says otherwise, so a provider added
+// from the canvas and one added from the CLI can never end up pinned in two
+// different files by default.
+func TestServeDefaultsLockfilePath(t *testing.T) {
+	var c ServeCmd
+	if err := defaults(&c); err != nil {
+		t.Fatalf("defaults: %v", err)
+	}
+	if c.Lock != ".cf.lock" {
+		t.Errorf("default Lock = %q, want .cf.lock (ProviderAddCmd's default)", c.Lock)
+	}
+}
+
 func TestServeRefusesNonLoopbackWithoutTheExplicitFlag(t *testing.T) {
 	for _, addr := range []string{"0.0.0.0:8080", ":8080", "[::]:8080"} {
 		c := ServeCmd{Addr: addr}
@@ -120,7 +135,8 @@ func TestServeMissingProviderNamesAddCommand(t *testing.T) {
 // exactly the composition this test's server is actually running.
 func TestServeIntegration(t *testing.T) {
 	dir, bp, cacheDir := seed(t)
-	c := &ServeCmd{Addr: "127.0.0.1:0", Blueprint: bp, Out: filepath.Join(dir, "out"), CacheDir: cacheDir}
+	c := &ServeCmd{Addr: "127.0.0.1:0", Blueprint: bp, Out: filepath.Join(dir, "out"),
+		CacheDir: cacheDir, Lock: filepath.Join(dir, ".cf.lock")}
 	ready := make(chan string, 1)
 	c.ready = ready
 

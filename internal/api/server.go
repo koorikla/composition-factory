@@ -26,14 +26,28 @@ import (
 
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/index"
+	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
 
 // Options configures the server New builds.
+//
+// Index, Store and Providers are three views of one fact and MUST agree:
+// Providers names exactly the refs whose cached CRDs Index was built over,
+// and Store is the cache those CRDs were loaded from (see cmd/cf/serve.go's
+// single-load invariant). POST /api/providers preserves that agreement at
+// runtime — it swaps Index and appends to Providers together, under srv.mu.
 type Options struct {
 	Index     *index.Index
 	Store     *cache.Store
-	Blueprint string // path to the blueprint file on disk
-	OutDir    string // where generate writes
+	Blueprint string   // path to the blueprint file on disk
+	OutDir    string   // where generate writes
+	Lock      string   // path to the lockfile POST /api/providers pins digests into
+	Providers []string // xpkg refs Index was built over, in blueprint-source order
+
+	// fetch is swapped in tests so POST /api/providers never hits the
+	// network — the same unexported seam ProviderAddCmd carries in
+	// cmd/cf/provider.go. nil means the real xpkg.Fetch.
+	fetch func(ref string) (*xpkg.Package, error)
 }
 
 // validate reports the first incomplete field in o. New calls this so a
@@ -49,6 +63,8 @@ func (o Options) validate() error {
 		return fmt.Errorf("api: Options.Blueprint (path to the blueprint file) is required")
 	case o.OutDir == "":
 		return fmt.Errorf("api: Options.OutDir (output directory) is required")
+	case o.Lock == "":
+		return fmt.Errorf("api: Options.Lock (path to the lockfile) is required")
 	}
 	return nil
 }
@@ -87,7 +103,21 @@ type server struct {
 	// against a concurrent `cf gen`, a hand edit, or a second `cf serve`
 	// pointed at the same blueprint; that would need file locking, which
 	// this single-user local dev tool does not have and does not need.
+	// Since POST /api/providers exists, mu also guards the two fields that
+	// route mutates: srv.Index (swapped whole on a successful add) and
+	// srv.Providers (appended to). Handlers that read either take mu for the
+	// snapshot — see server.index and handleListProviders.
 	mu sync.Mutex
+}
+
+// index returns the server's current index. It is a snapshot: POST
+// /api/providers may swap in a rebuilt index at any moment, so a handler
+// takes the pointer once under mu and serves its whole response from that
+// one consistent index, rather than re-reading srv.Index mid-request.
+func (srv *server) index() *index.Index {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	return srv.Index
 }
 
 // New builds the compositionfactory HTTP API. Every response — success or
@@ -102,6 +132,10 @@ func New(o Options) (http.Handler, error) {
 	}
 
 	srv := &server{Options: o}
+	// srv.Providers is mutable state (POST /api/providers appends to it), so
+	// it must not share a backing array with the caller's slice — an append
+	// with spare capacity would write into memory the caller still holds.
+	srv.Providers = append([]string(nil), o.Providers...)
 	mux := http.NewServeMux()
 
 	// Deliberately no catch-all "/" pattern: registering one would make
@@ -122,6 +156,7 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("PUT /api/blueprint/parameters/{name}", srv.handleSetParameter)
 	mux.HandleFunc("POST /api/blueprint/parameters/{name}/rename", srv.handleRenameParameter)
 	mux.HandleFunc("DELETE /api/blueprint/parameters/{name}", srv.handleDeleteParameter)
+	mux.HandleFunc("GET /api/providers", srv.handleListProviders)
 	mux.HandleFunc("POST /api/generate", srv.handleGenerate)
 
 	return wrap(mux), nil

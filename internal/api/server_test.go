@@ -273,6 +273,8 @@ func testServerParts(t *testing.T) (h http.Handler, blueprintPath string, store 
 		Store:     store,
 		Blueprint: blueprintPath,
 		OutDir:    outDir,
+		Lock:      filepath.Join(t.TempDir(), ".cf.lock"),
+		Providers: []string{testProviderRef},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -393,6 +395,7 @@ func TestNewRejectsIncompleteOptions(t *testing.T) {
 			Store:     cache.New(t.TempDir()),
 			Blueprint: testBlueprintPath(t),
 			OutDir:    t.TempDir(),
+			Lock:      filepath.Join(t.TempDir(), ".cf.lock"),
 		}
 	}
 
@@ -404,6 +407,7 @@ func TestNewRejectsIncompleteOptions(t *testing.T) {
 		{"nil Store", func(o *Options) { o.Store = nil }},
 		{"empty Blueprint path", func(o *Options) { o.Blueprint = "" }},
 		{"empty OutDir", func(o *Options) { o.OutDir = "" }},
+		{"empty Lock", func(o *Options) { o.Lock = "" }},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

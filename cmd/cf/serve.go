@@ -46,6 +46,7 @@ type ServeCmd struct {
 	Blueprint                  string `help:"Path to the blueprint file to serve." required:""`
 	Out                        string `short:"o" help:"Output directory that POST /api/generate writes into." default:"."`
 	CacheDir                   string `help:"Schema cache directory." default:"${cachedir}"`
+	Lock                       string `help:"Lockfile path that POST /api/providers pins newly added providers into." default:".cf.lock"`
 	IKnowThisIsUnauthenticated bool   `help:"Allow binding a non-loopback address. This server has no authentication and writes files to disk on your behalf -- only set this if you understand and accept that a non-loopback bind exposes both to your network."`
 
 	// ready, when non-nil, receives the actual listening address (host:port)
@@ -164,8 +165,16 @@ func (c *ServeCmd) run(ctx context.Context, out io.Writer) error {
 	// build the index from that same map, and hand api.New that same store
 	// instance -- never a second, independently-loaded map or store for
 	// either side.
+	// refs doubles as Options.Providers: the exact provider set the index is
+	// built over, in blueprint-source order, deduplicated the same way the
+	// byProvider map inherently is -- so GET /api/providers lists precisely
+	// what /api/kinds serves from, never a second, independently-derived set.
 	byProvider := make(map[string][]schema.CRD, len(b.Spec.Sources))
+	refs := make([]string, 0, len(b.Spec.Sources))
 	for _, s := range b.Spec.Sources {
+		if _, ok := byProvider[s.Provider]; ok {
+			continue // a duplicate source entry names the same load
+		}
 		crds, err := store.Load(s.Provider)
 		if err != nil {
 			// cache.Store.Load's own error already names the exact command
@@ -175,6 +184,7 @@ func (c *ServeCmd) run(ctx context.Context, out io.Writer) error {
 			return err
 		}
 		byProvider[s.Provider] = crds
+		refs = append(refs, s.Provider)
 	}
 
 	idx, err := index.Build(byProvider)
@@ -187,6 +197,8 @@ func (c *ServeCmd) run(ctx context.Context, out io.Writer) error {
 		Store:     store,
 		Blueprint: c.Blueprint,
 		OutDir:    c.Out,
+		Lock:      c.Lock,
+		Providers: refs,
 	})
 	if err != nil {
 		return err

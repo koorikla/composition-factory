@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/cache"
@@ -259,6 +260,7 @@ spec:
 		Store:     cache.New(t.TempDir()),
 		Blueprint: testBlueprintPath(t),
 		OutDir:    t.TempDir(),
+		Lock:      filepath.Join(t.TempDir(), ".cf.lock"),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

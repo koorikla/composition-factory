@@ -35,7 +35,8 @@ func (srv *server) handleKinds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	kinds := srv.Index.Search(q.Get("q"), limit)
+	// One snapshot of the index for the whole response — see server.index.
+	kinds := srv.index().Search(q.Get("q"), limit)
 	if kinds == nil {
 		kinds = []index.Kind{}
 	}
@@ -68,7 +69,7 @@ func (srv *server) handleKind(w http.ResponseWriter, r *http.Request) {
 	// response must describe the same provider's resource, which only
 	// holds if they are resolved as one consistent choice — see
 	// index.LookupKind's doc comment for the collision this avoids.
-	kind, crd, ok := srv.Index.LookupKind(apiVersion, kindName)
+	kind, crd, ok := srv.index().LookupKind(apiVersion, kindName)
 	if !ok {
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("kind not found: %s %s", apiVersion, kindName))
 		return
@@ -104,7 +105,7 @@ func (srv *server) handleKindFields(w http.ResponseWriter, r *http.Request) {
 	}
 	kindName := r.PathValue("kind")
 
-	crd, ok := srv.Index.Lookup(apiVersion, kindName)
+	crd, ok := srv.index().Lookup(apiVersion, kindName)
 	if !ok {
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("kind not found: %s %s", apiVersion, kindName))
 		return
