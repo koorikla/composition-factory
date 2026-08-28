@@ -32,7 +32,7 @@
 **`/Users/kaurkallas/compositionfactory/docs/research/raw/schema-sourcing.md` does not exist.** [V-me] The `raw/` directory contains exactly seven files; there is no journal, log, or partial output anywhere in the repository (`find` over the whole project tree returns only the seven briefs). **No content has been invented to fill the gap.**
 
 What *did* survive is a set of **executable scratch artifacts** in the workflow's shared scratchpad at
-`/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/`, including a complete, compiling Go xpkg extractor at `xpkgget/main.go`. I verified that program myself: it builds clean, and its output is **byte-identical (MD5 `6023a8c7e51284baa6c9186abb791357`)** to the package stream the `crossplane` CLI extracts. [V-me] It is reproduced in full in §3.6 and is the single most load-bearing recovery from the lost brief.
+`<scratch>/`, including a complete, compiling Go xpkg extractor at `xpkgget/main.go`. I verified that program myself: it builds clean, and its output is **byte-identical (MD5 `6023a8c7e51284baa6c9186abb791357`)** to the package stream the `crossplane` CLI extracts. [V-me] It is reproduced in full in §3.6 and is the single most load-bearing recovery from the lost brief.
 
 **What remains genuinely unknown because the brief is missing** (do not assume these are answered):
 
