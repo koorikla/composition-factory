@@ -5,6 +5,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -147,8 +148,36 @@ func (b *Blueprint) Validate() error {
 			return fmt.Errorf("spec.xrd.parameters.%s: invalid parameter name "+
 				"(must be camelCase, e.g. maxMessageSize, and not a YAML keyword like yes/no/true/false)", n)
 		}
-		if t := x.Parameters[n].Type; !validTypes[t] {
-			return fmt.Errorf("spec.xrd.parameters.%s: unknown type %q", n, t)
+		p := x.Parameters[n]
+		if !validTypes[p.Type] {
+			return fmt.Errorf("spec.xrd.parameters.%s: unknown type %q", n, p.Type)
+		}
+		// The XRD emitter honours Default, emitting it quoted for type:
+		// string and unquoted for integer/number/boolean. It has no
+		// sensible handling for a default on type: object or array, and
+		// there is nothing to stop it from writing an unparseable
+		// integer/number token or a non-boolean boolean unvalidated -- both
+		// would produce an invalid CRD schema. Catch it here, at the
+		// source, rather than in the emitter guessing.
+		if p.Default != "" {
+			switch p.Type {
+			case "object", "array":
+				return fmt.Errorf("spec.xrd.parameters.%s: default is not valid for type %q "+
+					"(only string, integer, number and boolean defaults are supported)", n, p.Type)
+			case "boolean":
+				if p.Default != "true" && p.Default != "false" {
+					return fmt.Errorf("spec.xrd.parameters.%s: default %q is not a valid boolean "+
+						`(must be "true" or "false")`, n, p.Default)
+				}
+			case "integer":
+				if _, err := strconv.ParseInt(p.Default, 10, 64); err != nil {
+					return fmt.Errorf("spec.xrd.parameters.%s: default %q is not a valid integer", n, p.Default)
+				}
+			case "number":
+				if _, err := strconv.ParseFloat(p.Default, 64); err != nil {
+					return fmt.Errorf("spec.xrd.parameters.%s: default %q is not a valid number", n, p.Default)
+				}
+			}
 		}
 	}
 
@@ -197,24 +226,4 @@ func (b *Blueprint) Validate() error {
 		}
 	}
 	return nil
-}
-
-// DereferencedParams returns the parameter names any template actually reads,
-// sorted. Every one must be required in the emitted XRD so a missing value
-// fails at the XR gate rather than rendering the literal string "<no value>".
-func (b *Blueprint) DereferencedParams() []string {
-	seen := map[string]bool{}
-	for _, r := range b.Spec.Resources {
-		for _, f := range r.Fields {
-			if param, ok := strings.CutPrefix(f.From, "params."); ok && f.From != "" {
-				seen[param] = true
-			}
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for p := range seen {
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out
 }

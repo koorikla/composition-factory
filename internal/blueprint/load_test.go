@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/google/go-cmp/cmp"
 )
 
 const valid = `
@@ -103,86 +101,6 @@ func TestValidateRejectsUnknownParameterReference(t *testing.T) {
 }
 
 // --- Fix round 1 additions ---
-
-// TestDereferencedParams is a table-driven test for the function that guards
-// the project's central defect class: every parameter it reports gets marked
-// required in the generated XRD, so a missing value fails at the XR
-// admission gate instead of rendering the literal string "<no value>" into a
-// live managed resource. If this function silently regresses, that mitigation
-// silently stops working, so every branch is covered here directly against
-// Blueprint values (bypassing YAML/Validate, since DereferencedParams does
-// not depend on either).
-func TestDereferencedParams(t *testing.T) {
-	tests := []struct {
-		name      string
-		resources []Resource
-		// want is asserted exactly with cmp.Diff. DereferencedParams never
-		// returns a nil slice -- even with zero results it returns a non-nil,
-		// empty []string{} (make(..., 0, 0) in Go yields a non-nil slice), so
-		// every "nothing collected" case below asserts []string{}, not nil.
-		want []string
-	}{
-		{
-			name: "same parameter referenced by two resources dedupes to one entry",
-			resources: []Resource{
-				{Name: "a", Kind: "A", Fields: map[string]Field{"x": {From: "params.foo"}}},
-				{Name: "b", Kind: "B", Fields: map[string]Field{"y": {From: "params.foo"}}},
-			},
-			want: []string{"foo"},
-		},
-		{
-			name: "several parameters across several resources come back sorted",
-			resources: []Resource{
-				{Name: "a", Kind: "A", Fields: map[string]Field{
-					"x": {From: "params.zebra"},
-					"y": {From: "params.apple"},
-				}},
-				{Name: "b", Kind: "B", Fields: map[string]Field{
-					"z": {From: "params.mango"},
-				}},
-			},
-			want: []string{"apple", "mango", "zebra"},
-		},
-		{
-			name: "field with empty From contributes nothing",
-			resources: []Resource{
-				{Name: "a", Kind: "A", Fields: map[string]Field{"x": {}}},
-			},
-			want: []string{},
-		},
-		{
-			name: "From lacking the params. prefix contributes nothing",
-			resources: []Resource{
-				{Name: "a", Kind: "A", Fields: map[string]Field{"x": {From: "context.foo"}}},
-			},
-			want: []string{},
-		},
-		{
-			name:      "no resources returns empty, not nil",
-			resources: nil,
-			want:      []string{},
-		},
-		{
-			name: "fields set via value or raw contribute nothing",
-			resources: []Resource{
-				{Name: "a", Kind: "A", Fields: map[string]Field{
-					"x": {Value: "1024"},
-					"y": {Raw: "some: yaml"},
-				}},
-			},
-			want: []string{},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := &Blueprint{Spec: Spec{Resources: tt.resources}}
-			got := b.DereferencedParams()
-			if diff := cmp.Diff(tt.want, got); diff != "" {
-				t.Errorf("DereferencedParams() mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
 
 // TestValidateRejectsMissingRequiredXRDFields covers each of group, kind,
 // plural and version being absent individually, asserting on the substring
@@ -335,8 +253,7 @@ func TestValidateResourceErrorIdentifiesOffendingEntry(t *testing.T) {
 // key at all, or can only appear via a quoted key, which would conflate
 // "does my YAML fixture parse" with "does Validate() reject this
 // identifier." Constructing the Blueprint directly isolates the function
-// actually under test, the same approach TestDereferencedParams already
-// uses in this file.
+// actually under test.
 func validParamBlueprint(paramName string) *Blueprint {
 	return &Blueprint{
 		Spec: Spec{
@@ -535,5 +452,110 @@ func TestValidateGroupAndPluralKeywordCheck(t *testing.T) {
 				t.Fatalf("err = %v, want no error", err)
 			}
 		})
+	}
+}
+
+// --- Cleanup task, item 2: default validated against parameter type ---
+//
+// The XRD emitter honours Parameter.Default, emitting it quoted for
+// type: string and unquoted for integer/number/boolean. It has no sensible
+// handling for a default on type: object or array, and there is nothing
+// stopping a boolean default of "notabool" or an integer default of "abc"
+// from being written out unquoted and unvalidated either -- any of these
+// would produce an invalid CRD schema. Validate() is the right place to
+// stop that, not the emitter guessing.
+
+// blueprintWithParam returns a minimally-valid Blueprint with exactly one
+// parameter, named "value", set to p. Used by the default-vs-type tests
+// below, which need control over both Type and Default together -- unlike
+// validParamBlueprint above, which only varies the parameter's name.
+func blueprintWithParam(p Parameter) *Blueprint {
+	return &Blueprint{
+		Spec: Spec{
+			XRD: XRD{
+				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]Parameter{"value": p},
+			},
+		},
+	}
+}
+
+func TestValidateDefaultAgainstType(t *testing.T) {
+	tests := []struct {
+		name       string
+		param      Parameter
+		wantReject bool
+		wantSubstr string // checked only when wantReject
+	}{
+		{
+			name:       "(a) default on an object parameter is rejected, naming the parameter",
+			param:      Parameter{Type: "object", Default: "{}"},
+			wantReject: true, wantSubstr: "spec.xrd.parameters.value",
+		},
+		{
+			name:       "(b) default on an array parameter is rejected",
+			param:      Parameter{Type: "array", Default: "[]"},
+			wantReject: true, wantSubstr: "spec.xrd.parameters.value",
+		},
+		{
+			name:       `(c) default "notabool" on a boolean parameter is rejected`,
+			param:      Parameter{Type: "boolean", Default: "notabool"},
+			wantReject: true, wantSubstr: "spec.xrd.parameters.value",
+		},
+		{
+			name:       `(d) default "abc" on an integer parameter is rejected`,
+			param:      Parameter{Type: "integer", Default: "abc"},
+			wantReject: true, wantSubstr: "spec.xrd.parameters.value",
+		},
+		{
+			name:  `(e) valid string default "sm" is accepted`,
+			param: Parameter{Type: "string", Default: "sm"},
+		},
+		{
+			name:  `(e) valid integer default "1024" is accepted`,
+			param: Parameter{Type: "integer", Default: "1024"},
+		},
+		{
+			name:  `(e) valid number default "1.5" is accepted`,
+			param: Parameter{Type: "number", Default: "1.5"},
+		},
+		{
+			name:  `(e) valid boolean default "true" is accepted`,
+			param: Parameter{Type: "boolean", Default: "true"},
+		},
+		{
+			name:  "(f) no default at all is accepted -- no regression, including on object/array types",
+			param: Parameter{Type: "object"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := blueprintWithParam(tt.param).Validate()
+			if tt.wantReject {
+				if err == nil || !strings.Contains(err.Error(), tt.wantSubstr) {
+					t.Fatalf("err = %v, want substring %q", err, tt.wantSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err = %v, want no error", err)
+			}
+		})
+	}
+}
+
+// TestValidateIntegerDefaultRejectsFraction pins a stricter behavior than
+// the brief's letter required: "integer" defaults are parsed with
+// strconv.ParseInt, not strconv.ParseFloat, so a fractional string like
+// "1.5" -- syntactically "a number" but not a whole one -- is rejected on an
+// integer parameter. A type: integer OpenAPI/CRD schema field with a
+// non-whole default is itself an invalid schema; parsing leniently enough to
+// accept "1.5" here would just move that defect one step downstream, past
+// the one place equipped to catch it precisely.
+func TestValidateIntegerDefaultRejectsFraction(t *testing.T) {
+	err := blueprintWithParam(Parameter{Type: "integer", Default: "1.5"}).Validate()
+	if err == nil || !strings.Contains(err.Error(), "spec.xrd.parameters.value") {
+		t.Fatalf("err = %v, want a complaint naming spec.xrd.parameters.value", err)
 	}
 }
