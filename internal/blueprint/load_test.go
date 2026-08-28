@@ -459,3 +459,81 @@ func TestValidateStillAcceptsTheValidFixture(t *testing.T) {
 		t.Fatalf("Load(valid) = %v, want no error", err)
 	}
 }
+
+// --- Follow-up: yamlKeywords applied to plural and group ---
+//
+// The class TestValidateRejectsInvalidParameterNames closed for parameter
+// names was only half-closed: pluralRE (^[a-z][a-z0-9]*$) and groupRE both
+// admit bare keyword strings too ("yes"/"no" are plain lowercase letters),
+// and plural/group both reach emitted output as unquoted YAML scalar
+// VALUES (internal/emit/xrd.go's `d.Line(2, "plural: %s", ...)` and
+// `d.Line(1, "group: %s", ...)`), the same failure mode as a parameter name
+// reaching it as an unquoted map KEY. kind and version need no such check:
+// kindRE requires an uppercase initial letter and versionRE requires a `v`
+// followed by digits, so no string satisfying either can also be a YAML 1.1
+// keyword (yes/no/true/false/on/off/null/y/n are all lowercase-initial).
+//
+// A wrinkle surfaced while writing these tests: sigs.k8s.io/yaml coerces an
+// *unquoted* keyword-shaped scalar during parsing of the blueprint source
+// file itself, before Validate() ever runs -- `plural: yes` unmarshals to
+// the Go string "true", and `plural: no` to "false" (verified with a throwaway
+// script against this exact dependency; not asserted here since it is
+// YAML-library behavior, not this package's logic). That's a related but
+// distinct layer of the same defect class: even a user who never intended a
+// boolean has their source file's plain-looking "yes" quietly turned into
+// a different string during parsing. It doesn't change what needs testing
+// here, but it does mean the fixtures below use an explicitly quoted
+// "yes"/"no" ("plural: \"yes\"", "group: \"no\"") to land the literal
+// string in x.Plural/x.Group, exercising Validate()'s check specifically --
+// an unquoted `plural: yes` would test yamlKeywords indirectly, by way of
+// coercing to "true", which is also a keyword and would pass for the wrong
+// reason.
+func TestValidateGroupAndPluralKeywordCheck(t *testing.T) {
+	tests := []struct {
+		name       string
+		old, new   string
+		wantReject bool
+		wantSubstr string // checked only when wantReject
+	}{
+		{
+			name: `plural "yes" is a YAML keyword, rejected`,
+			old:  "plural: xqueues", new: `plural: "yes"`,
+			wantReject: true, wantSubstr: "spec.xrd.plural",
+		},
+		{
+			name: `plural "xqueues" is still accepted`,
+			old:  "plural: xqueues", new: "plural: xqueues",
+			wantReject: false,
+		},
+		{
+			name: `bare group "no" is a YAML keyword, rejected`,
+			old:  "group: platform.hooli.tech", new: `group: "no"`,
+			wantReject: true, wantSubstr: "spec.xrd.group",
+		},
+		{
+			name: `group "platform.hooli.tech" is still accepted`,
+			old:  "group: platform.hooli.tech", new: "group: platform.hooli.tech",
+			wantReject: false,
+		},
+		{
+			name: `group "no.example.com" is accepted: a legitimate multi-label group whose first label reads as a keyword must not be over-rejected`,
+			old:  "group: platform.hooli.tech", new: "group: no.example.com",
+			wantReject: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := strings.Replace(valid, tt.old, tt.new, 1)
+			_, err := Load(write(t, body))
+			if tt.wantReject {
+				if err == nil || !strings.Contains(err.Error(), tt.wantSubstr) {
+					t.Fatalf("err = %v, want substring %q", err, tt.wantSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err = %v, want no error", err)
+			}
+		})
+	}
+}

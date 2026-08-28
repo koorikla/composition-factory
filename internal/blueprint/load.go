@@ -48,16 +48,32 @@ var (
 // yamlKeywords are scalars that go-yaml (used transitively by
 // sigs.k8s.io/yaml, and by whatever parses the emitted output) resolves to a
 // non-string value when written unquoted, per YAML 1.1's keyword rules --
-// regardless of surrounding context. paramNameRE alone does not exclude
+// regardless of surrounding context. Format regexes alone do not exclude
 // these: "yes" and "no" are both plain letter sequences and satisfy
-// `^[a-zA-Z][a-zA-Z0-9]*$` on their own. But a parameter name becomes a raw,
-// unquoted YAML map key in emitted output (see internal/emit/xrd.go's
-// `d.Line(7, "%s:", n)`), so a name shaped like "yes" would silently become
-// the boolean key true, not the string key "yes" the user wrote. Checked
-// case-insensitively, matching YAML 1.1 resolution.
+// paramNameRE and pluralRE on their own, and a bare (dot-free) "no" also
+// satisfies groupRE. But all three reach emitted output as a raw, unquoted
+// YAML scalar -- a parameter name as a map key (internal/emit/xrd.go's
+// `d.Line(7, "%s:", n)`), plural and group as values (`d.Line(2, "plural:
+// %s", ...)`, `d.Line(1, "group: %s", ...)`) -- so a value shaped like "yes"
+// would silently become the boolean true, not the string "yes" the user
+// wrote. Checked case-insensitively, matching YAML 1.1 resolution, and
+// shared by every field below rather than duplicated per field.
 var yamlKeywords = map[string]bool{
 	"true": true, "false": true, "yes": true, "no": true,
 	"on": true, "off": true, "null": true, "y": true, "n": true,
+}
+
+// groupIsBareKeyword reports whether group -- split on '.' -- is a single
+// label that is itself a YAML keyword (e.g. a bare "no"). group is emitted
+// as one unquoted YAML scalar (`group: %s`): a single-label group whose one
+// segment is a keyword resolves as a boolean/null, not the string the user
+// wrote. A multi-label group is never at risk this way -- "no.example.com"
+// is unambiguously a string once it contains a dot, YAML 1.1's keyword
+// grammar matches whole scalars, not substrings of one -- so a legitimate
+// group whose first label happens to read as a keyword must not be rejected.
+func groupIsBareKeyword(group string) bool {
+	segments := strings.Split(group, ".")
+	return len(segments) == 1 && yamlKeywords[strings.ToLower(segments[0])]
 }
 
 // Load reads and validates a blueprint file.
@@ -95,14 +111,16 @@ func (b *Blueprint) Validate() error {
 		return fmt.Errorf("spec.xrd needs %s", strings.Join(missing, ", "))
 	}
 
-	if !groupRE.MatchString(x.Group) {
-		return fmt.Errorf("spec.xrd.group: %q is not a valid DNS subdomain (e.g. platform.example.com)", x.Group)
+	if !groupRE.MatchString(x.Group) || groupIsBareKeyword(x.Group) {
+		return fmt.Errorf("spec.xrd.group: %q is not a valid DNS subdomain "+
+			"(e.g. platform.example.com), or is a bare YAML keyword like yes/no/true/false", x.Group)
 	}
 	if !kindRE.MatchString(x.Kind) {
 		return fmt.Errorf("spec.xrd.kind: %q is not a valid Kind (must start with an uppercase letter, e.g. XQueue)", x.Kind)
 	}
-	if !pluralRE.MatchString(x.Plural) {
-		return fmt.Errorf("spec.xrd.plural: %q is not a valid plural name (must be all lowercase, e.g. xqueues)", x.Plural)
+	if !pluralRE.MatchString(x.Plural) || yamlKeywords[strings.ToLower(x.Plural)] {
+		return fmt.Errorf("spec.xrd.plural: %q is not a valid plural name "+
+			"(must be all lowercase, e.g. xqueues, and not a YAML keyword like yes/no/true/false)", x.Plural)
 	}
 	if !versionRE.MatchString(x.Version) {
 		return fmt.Errorf("spec.xrd.version: %q is not a valid API version (e.g. v1, v1beta1, v1alpha1)", x.Version)
