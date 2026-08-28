@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Composition Factory Canvas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;450;500;600;700&display=swap">
+<link rel="stylesheet" href="css/proto.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ================= REGION: TOPBAR (root: #region-topbar) ================= -->
+  <div class="bar" id="region-topbar">
+    <span class="brand"><span class="dot"></span>compositionfactory<span class="v" id="ver"></span></span>
+    <span class="crumb" id="crumb"></span>
+    <span class="sp"></span>
+    <span class="chip-ok" id="valid"></span>
+    <button class="btn" id="themeBtn">Theme</button>
+    <button class="btn" id="validateBtn">Validate</button>
+    <button class="btn pri" id="generateBtn">Generate</button>
+  </div>
+  <!-- =============== END REGION: TOPBAR =============== -->
+
+  <div class="cols">
+
+    <!-- ================= REGION: PALETTE (root: #region-palette) ================= -->
+    <div class="pane l" id="region-palette">
+      <div class="pane-h" style="padding-bottom:7px">
+        <div class="rtabs" id="rtabs">
+          <button data-r="kinds" aria-pressed="true">Kinds</button>
+          <button data-r="shared" aria-pressed="false">Shared</button>
+          <button data-r="src" aria-pressed="false">Sources</button>
+        </div>
+      </div>
+      <div id="lsearch" class="pane-h"><input class="search" id="psearch" placeholder="Search kinds…" aria-label="Search kinds"></div>
+      <div class="pane-b" id="lrail"></div>
+      <div class="hint" id="lhint"></div>
+    </div>
+    <!-- =============== END REGION: PALETTE =============== -->
+
+    <!-- ================= REGION: CANVAS (root: #cw) ================= -->
+    <div class="canvas-wrap" id="cw">
+      <svg class="wires" id="wires"></svg>
+      <div class="canvas" id="canvas"></div>
+      <div class="legend">
+        <span class="i"><span class="ln" style="background:var(--wire-xrd)"></span>XRD spec</span>
+        <span class="i"><span class="ln" style="background:var(--shared)"></span>shared</span>
+        <span class="i"><span class="ln" style="background:var(--wire-status)"></span>status</span>
+        <span class="i"><span class="ln" style="background:var(--wire-ref)"></span>native ref</span>
+      </div>
+    </div>
+    <!-- =============== END REGION: CANVAS =============== -->
+
+    <!-- ================= REGION: INSPECTOR (root: #region-inspector) ================= -->
+    <div class="pane r" id="region-inspector">
+      <div class="pane-h">
+        <span class="lbl">Inspector</span><span class="sp"></span>
+        <div class="seg" id="fseg">
+          <button data-f="req" aria-pressed="true">Required</button>
+          <button data-f="set" aria-pressed="false">Set</button>
+          <button data-f="all" aria-pressed="false">All</button>
+        </div>
+      </div>
+      <div class="pane-b" id="insp"></div>
+    </div>
+    <!-- =============== END REGION: INSPECTOR =============== -->
+
+  </div>
+
+  <!-- ================= REGION: OUTPUT (root: #region-output) ================= -->
+  <div class="drawer" id="region-output" style="height:212px">
+    <div class="drawer-h">
+      <span class="lbl">Generated</span>
+      <div class="tabs" id="tabs"></div>
+      <span class="sp"></span>
+      <span class="mono" style="font-size:10px;color:var(--faint)" id="meta"></span>
+    </div>
+    <div class="warnbar" id="warn" hidden></div>
+    <pre class="code" id="code"></pre>
+  </div>
+  <!-- =============== END REGION: OUTPUT =============== -->
+
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
