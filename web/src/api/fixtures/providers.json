@@ -1,0 +1,14 @@
+{
+  "providers": [
+    {
+      "ref": "xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0",
+      "digest": "sha256:9c1e2f4b7a8d3e5f6c0b1a2d4e6f8a0c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d1f",
+      "kinds": 1
+    },
+    {
+      "ref": "xpkg.upbound.io/upbound/provider-aws-sqs:v1.21.0",
+      "digest": "sha256:2d4f6a8c0e1b3d5f7a9c1e3b5d7f9a1c3e5b7d9f1a3c5e7b9d1f3a5c7e9b1d3f",
+      "kinds": 1
+    }
+  ]
+}

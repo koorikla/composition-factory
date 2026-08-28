@@ -75,6 +75,14 @@ type generateResponse struct {
 	Written bool             `json:"written"`
 }
 
+// providersResponse mirrors GET /api/providers' body. Like every other
+// entry here it decodes the response ENVELOPE, not a bare slice — decoding
+// []providerEntry against a fixture wrapped in {"providers":[...]} is
+// exactly the bug class commit 57a8273 fixed for kinds/fields.
+type providersResponse struct {
+	Providers []providerEntry `json:"providers"`
+}
+
 func TestContractFixtureKindsRoundTripsKeySet(t *testing.T) {
 	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "kinds.json"), &kindsResponse{})
 }
@@ -93,6 +101,10 @@ func TestContractFixtureBlueprintRoundTripsKeySet(t *testing.T) {
 
 func TestContractFixtureGenerateRoundTripsKeySet(t *testing.T) {
 	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "generate.json"), &generateResponse{})
+}
+
+func TestContractFixtureProvidersRoundTripsKeySet(t *testing.T) {
+	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "providers.json"), &providersResponse{})
 }
 
 // checkFixtureKeySetRoundTrips reads the JSON at path, decodes it into into
