@@ -37,7 +37,18 @@ spec:
         maxMessageSize: {from: params.maxMessageSize}
 `
 
-const genCRDs = `[{"Group":"sqs.aws.m.upbound.io","Kind":"Queue","Plural":"queues","Scope":"Namespaced","Categories":["managed"],"Versions":[{"Name":"v1beta1","Served":true,"Storage":true,"Properties":null}]}]`
+// genCRDs is the cached provider schema these tests generate against.
+//
+// Properties is populated (it used to be null) because the Composition
+// emitter now resolves every blueprint field path against the CRD's
+// spec.forProvider schema, so that a typo'd field name is an error here
+// rather than a field the API server silently prunes on apply. A CRD with no
+// schema at all can no longer back a generated Composition, and a fixture
+// that pretended otherwise was testing a shape `cf provider add` never
+// produces.
+const genCRDs = `[{"Group":"sqs.aws.m.upbound.io","Kind":"Queue","Plural":"queues","Scope":"Namespaced","Categories":["managed"],` +
+	`"Versions":[{"Name":"v1beta1","Served":true,"Storage":true,"Properties":{"spec":{"properties":{"forProvider":{` +
+	`"required":["region"],"properties":{"region":{"type":"string"},"maxMessageSize":{"type":"integer"}}}}}}}]}]`
 
 // seed writes a blueprint and a pre-populated schema cache.
 //

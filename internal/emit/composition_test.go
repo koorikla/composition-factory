@@ -586,3 +586,99 @@ func TestBlueprintWithoutProviderNameCannotProduceARenderableComposition(t *test
 	}
 	t.Fatal("Generate accepted a Namespaced blueprint with no providerName parameter")
 }
+
+// --- Final review, I5(a): field paths are checked against the CRD schema ---
+//
+// A typo'd field name used to be emitted verbatim. The Composition is valid
+// YAML, `crossplane composition render` renders it (it does not schema-check
+// composed resources), every gate exits 0 -- and the API server then
+// silently PRUNES the unknown field on apply. Nothing anywhere says why the
+// queue came up with a default. internal/schema's Leaves is what makes this
+// checkable, and this is its first production caller.
+func TestUnknownForProviderFieldIsRejectedWithASuggestion(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Resources[0].Fields = map[string]blueprint.Field{
+		"maxMessageSiz": {From: "params.maxMessageSize"}, // one character short
+	}
+	_, err := Composition(b, testCRDs(t))
+	if err == nil {
+		t.Fatal("Composition accepted a field name absent from the CRD's spec.forProvider; " +
+			"the API server prunes it silently on apply, so this is the only layer that can catch it")
+	}
+	if !strings.Contains(err.Error(), "maxMessageSiz") {
+		t.Errorf("err = %v, want it to name the offending path", err)
+	}
+	if !strings.Contains(err.Error(), `"maxMessageSize"`) {
+		t.Errorf("err = %v, want it to suggest the closest valid path, maxMessageSize", err)
+	}
+}
+
+// A field far from anything real gets an error with no misleading guess.
+func TestWildlyUnknownFieldGetsNoBogusSuggestion(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Resources[0].Fields = map[string]blueprint.Field{
+		"totallyUnrelatedThing": {Value: "x"},
+	}
+	_, err := Composition(b, testCRDs(t))
+	if err == nil {
+		t.Fatal("Composition accepted an unknown field")
+	}
+	if strings.Contains(err.Error(), "did you mean") {
+		t.Errorf("err = %v, want no suggestion: a wrong guess invites a second blind edit", err)
+	}
+}
+
+// Known fields, including the required one, must still pass.
+func TestKnownForProviderFieldsAreAccepted(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Resources[0].Fields = map[string]blueprint.Field{
+		"region":         {Value: "eu-north-1"},
+		"maxMessageSize": {From: "params.maxMessageSize"},
+	}
+	if _, err := Composition(b, testCRDs(t)); err != nil {
+		t.Fatalf("Composition: %v -- region and maxMessageSize are both in the fixture CRD", err)
+	}
+}
+
+// --- Final review, I5(b): no forProvider is an error, not an empty map ---
+//
+// provider-kubernetes' ObservedObjectCollection genuinely has no
+// forProvider. M1 assumes a forProvider-shaped envelope (Global Constraint 8
+// is deferred to M2), so it must say so rather than emit
+// `spec: {forProvider: {}}` against a schema with no such key -- which the
+// API server prunes without a word.
+func TestCRDWithoutForProviderIsALoudError(t *testing.T) {
+	docs := [][]byte{[]byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              providerConfigRef:
+                type: object
+                properties: {kind: {type: string}, name: {type: string}}
+`)}
+	crds, err := schema.ParseCRDs(docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Composition(testBlueprint(), crds)
+	if err == nil {
+		t.Fatal("Composition emitted against a CRD with no spec.forProvider; it must refuse " +
+			"rather than write a forProvider the schema has no key for")
+	}
+	if !strings.Contains(err.Error(), "forProvider") {
+		t.Errorf("err = %v, want it to name forProvider", err)
+	}
+}

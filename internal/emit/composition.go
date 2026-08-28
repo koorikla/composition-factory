@@ -56,6 +56,9 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
 		}
+		if err := checkFieldPaths(r, crd); err != nil {
+			return nil, err
+		}
 		d.Line(ti, "---")
 		d.Line(ti, "apiVersion: %s", apiVersion)
 		d.Line(ti, "kind: %s", crd.Kind)
@@ -67,6 +70,27 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 			return nil, err
 		}
 		d.Line(ti, "spec:")
+		// M1 assumes a forProvider-shaped spec envelope, and this is the one
+		// place that assumption is written down as code.
+		//
+		// Global Constraint 8 says never hard-code the managed-resource spec
+		// envelope: compute `envelope = spec.properties - {forProvider,
+		// initProvider}` and render what remains from its own schema. That is
+		// deliberately DEFERRED TO M2. internal/schema already computes it
+		// (CRD.Envelope), but rendering an arbitrary envelope subtree means
+		// deciding, per node, what a blueprint may set and what the generator
+		// must supply, which is a design problem M1 does not need to solve to
+		// generate a single upjet managed resource.
+		//
+		// What M1 does instead is refuse to guess. checkFieldPaths above
+		// errors when the resolved CRD has no forProvider at all (a real
+		// case: provider-kubernetes' ObservedObjectCollection), rather than
+		// emitting a `forProvider: {}` this resource has no such field for
+		// and letting the API server prune the lot. The only other envelope
+		// key emitted below, providerConfigRef, is likewise hard-coded to the
+		// v2 namespaced shape -- which is why blueprint.Validate refuses
+		// scope: Cluster outright rather than letting a cluster-scoped
+		// blueprint through this function.
 		writeMapField(d, ti, "forProvider", ti+2, plan)
 		// The v2 namespaced envelope requires both kind and name here; the
 		// cluster-scoped variant instead takes {name, policy}. deletionPolicy
@@ -84,6 +108,132 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 	d.Line(2, "functionRef:")
 	d.Line(3, "name: function-auto-ready")
 	return d.Bytes(), nil
+}
+
+// checkFieldPaths resolves every blueprint field path for r against the
+// resolved CRD's spec.forProvider schema, erroring on any path the schema
+// does not define.
+//
+// This closes a silent-wrongness path of exactly the kind this project
+// treats as its central defect class. A typo'd `visibiltyTimeout` used to be
+// emitted verbatim: the Composition is valid YAML, `crossplane composition
+// render` renders it happily (it does not schema-check composed resources),
+// every gate exits 0 -- and then the API server silently PRUNES the unknown
+// field on apply. The queue comes up with a default visibility timeout and
+// nothing anywhere says why. Checking here, against the provider's own
+// schema, is the only layer that can catch it: blueprint.Validate does not
+// have the CRDs, and the API server does not report what it pruned.
+//
+// It is also what makes internal/schema/tree.go's Leaves a live code path
+// rather than a tested-but-uncalled package.
+//
+// Branch paths are accepted, not just leaves. A leaf set alone would reject
+// `redrivePolicy: {raw: ...}` -- setting a whole subtree with the raw escape
+// hatch is legitimate -- so every dotted ancestor of every leaf is admitted
+// too. What is rejected is a path that matches nothing in the schema at any
+// depth, which is the typo case.
+func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
+	nodes, err := crd.ForProvider()
+	if err != nil {
+		return fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
+	}
+	if len(nodes) == 0 {
+		// Not an internal error: provider-kubernetes' ObservedObjectCollection
+		// genuinely has no forProvider. M1 cannot compose such a resource
+		// (see the envelope comment in Composition), and saying so is far
+		// better than emitting `spec: {forProvider: {}}` against a schema
+		// with no such key, which the API server prunes without a word.
+		return fmt.Errorf("resource %q: kind %q has no spec.forProvider properties in its CRD; "+
+			"M1 can only compose forProvider-shaped managed resources "+
+			"(computing the full spec envelope is M2 work)", r.Name, r.Kind)
+	}
+
+	leaves := schema.Leaves(nodes, "")
+	known := make(map[string]bool, len(leaves)*2)
+	suggestions := make([]string, 0, len(leaves))
+	for _, l := range leaves {
+		known[l.Path] = true
+		suggestions = append(suggestions, l.Path)
+		for _, ancestor := range ancestorPaths(l.Path) {
+			known[ancestor] = true
+		}
+	}
+
+	paths := make([]string, 0, len(r.Fields))
+	for p := range r.Fields {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths) // deterministic: the same blueprint names the same field first
+	for _, p := range paths {
+		if known[p] {
+			continue
+		}
+		if s := closestPath(p, suggestions); s != "" {
+			return fmt.Errorf("resource %q: field %q is not in %s spec.forProvider; did you mean %q? "+
+				"(an unknown field is silently pruned by the API server on apply, so it must be "+
+				"caught here)", r.Name, p, crd.Kind, s)
+		}
+		return fmt.Errorf("resource %q: field %q is not in %s spec.forProvider "+
+			"(an unknown field is silently pruned by the API server on apply, so it must be "+
+			"caught here)", r.Name, p, crd.Kind)
+	}
+	return nil
+}
+
+// ancestorPaths returns every proper dotted prefix of a leaf path, with any
+// "[0]" array index both kept and stripped, so that "containers[0].image"
+// admits both "containers[0]" and "containers".
+func ancestorPaths(path string) []string {
+	var out []string
+	segments := strings.Split(path, ".")
+	for i := 1; i < len(segments); i++ {
+		prefix := strings.Join(segments[:i], ".")
+		out = append(out, prefix)
+		if trimmed, found := strings.CutSuffix(prefix, "[0]"); found {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// closestPath returns the candidate nearest to path by edit distance, or ""
+// when nothing is close enough to be worth suggesting. The threshold is
+// deliberately tight: a wrong suggestion on a typo is worse than none,
+// because it invites a second blind edit.
+func closestPath(path string, candidates []string) string {
+	best, bestDist := "", 0
+	for _, c := range candidates {
+		d := editDistance(path, c)
+		if best == "" || d < bestDist {
+			best, bestDist = c, d
+		}
+	}
+	if best == "" || bestDist > 3 || bestDist*2 >= len(path) {
+		return ""
+	}
+	return best
+}
+
+// editDistance is Levenshtein distance over runes, two rows at a time.
+func editDistance(a, b string) int {
+	ar, br := []rune(a), []rune(b)
+	prev := make([]int, len(br)+1)
+	curr := make([]int, len(br)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ar); i++ {
+		curr[0] = i
+		for j := 1; j <= len(br); j++ {
+			cost := 1
+			if ar[i-1] == br[j-1] {
+				cost = 0
+			}
+			curr[j] = min(prev[j]+1, curr[j-1]+1, prev[j-1]+cost)
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(br)]
 }
 
 // forProviderField is one blueprint field resolved to a template line,
