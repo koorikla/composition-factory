@@ -38,22 +38,25 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 
 	dir := t.TempDir()
 
-	// The compiled binary deliberately does NOT go in t.TempDir(): on at
-	// least one dev sandbox, outbound network is gated on the executable's
-	// own path, not on which process launched it — a binary built under a
-	// temp dir times out reaching ghcr.io while the identical binary built
-	// under the repo's bin/ (as `make build` already does) reaches it fine.
-	// bin/ is gitignored, so this leaves the tree clean, and rebuilding a
-	// ~14MB binary on every run is cheap. If you're tempted to "tidy" this
-	// back into t.TempDir(): don't — that's what makes this test start
-	// timing out on network fetches for no visible reason. The name
-	// cf-acceptance (not cf) avoids colliding with a developer's own
-	// `make build` output sitting in the same directory.
+	// Build to the repo's bin/cf — the Makefile's own build target — rather
+	// than a bespoke name or t.TempDir(). The honest reason: the acceptance
+	// gate should exercise the artifact we actually ship, built the way we
+	// actually build it ("test what you ship"), not a throwaway copy under a
+	// name and location no developer or CI job ever produces. This may
+	// overwrite a developer's local `make build` output; that's fine, it's
+	// the same program from the same source, and bin/ is gitignored either
+	// way. (It also happens to route around a network quirk specific to one
+	// dev sandbox, where outbound access is allowlisted per exact executable
+	// path rather than by directory or process — bin/cf is the one path
+	// that's ever been approved there, because it's what `make build`
+	// produces. That is not the reason for this shape; it's just what
+	// surfaced the value of testing the real build output instead of an
+	// ad-hoc one.)
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	bin := filepath.Join(repoRoot, "bin", "cf-acceptance")
+	bin := filepath.Join(repoRoot, "bin", "cf")
 	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
 		t.Fatalf("build cf: %v\n%s", err, out)
 	}
