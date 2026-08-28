@@ -1,6 +1,7 @@
 package main_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,23 +16,64 @@ import (
 // project's stated preference.
 const providerRef = "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
 
+// requireEnv, when set to "1", turns every prerequisite skip in this file
+// into a failure.
+//
+// A skip reads as a pass. `go test` prints ok for a package whose only test
+// skipped, CI goes green, and the one gate that proves the generated YAML
+// actually renders can quietly stop running -- on a runner where the
+// crossplane CLI install step silently failed, or where the Docker daemon is
+// unavailable, or after a refactor moves the binary. That is a vacuous gate:
+// the acceptance test's whole job is to be the thing that would have caught
+// what the unit tests cannot, and a green build that never ran it is worse
+// than no gate at all, because it is believed.
+//
+// Lane A (`make test`, -short) still needs to skip on a laptop with no
+// Docker, so the behaviour is opt-in rather than default. Lane B in
+// .github/workflows/ci.yml sets CF_REQUIRE_ACCEPTANCE=1, which is the
+// assertion that the test RAN.
+const requireEnv = "CF_REQUIRE_ACCEPTANCE"
+
+// reporter is the slice of *testing.T this file's skip/fail decision needs.
+// It exists so that decision is testable without running the acceptance test
+// itself -- see TestUnavailableFailsWhenAcceptanceIsRequired.
+type reporter interface {
+	Helper()
+	Skipf(format string, args ...any)
+	Fatalf(format string, args ...any)
+}
+
+// unavailable reports a missing prerequisite: a skip normally, a hard
+// failure when CF_REQUIRE_ACCEPTANCE=1 says this run must not be vacuous.
+func unavailable(t reporter, format string, args ...any) {
+	t.Helper()
+	if os.Getenv(requireEnv) == "1" {
+		t.Fatalf(requireEnv+"=1 but a prerequisite is missing: "+format, args...)
+		// testing.T.Fatalf never returns (it calls runtime.Goexit), but the
+		// explicit return keeps this correct for any reporter that does --
+		// without it, a fatal would fall through and also skip.
+		return
+	}
+	t.Skipf(format, args...)
+}
+
 // requireTool skips the test when a binary or daemon is unavailable, so Lane A
-// stays green on runners without Docker.
+// stays green on runners without Docker -- unless CF_REQUIRE_ACCEPTANCE=1.
 func requireTool(t *testing.T, name string, args ...string) {
 	t.Helper()
 	if _, err := exec.LookPath(name); err != nil {
-		t.Skipf("%s not installed", name)
+		unavailable(t, "%s not installed", name)
 	}
 	if len(args) > 0 {
 		if err := exec.Command(name, args...).Run(); err != nil {
-			t.Skipf("%s %v failed: %v", name, args, err)
+			unavailable(t, "%s %v failed: %v", name, args, err)
 		}
 	}
 }
 
 func TestAcceptanceXQueueRenders(t *testing.T) {
 	if testing.Short() {
-		t.Skip("acceptance test needs Docker; skipped under -short")
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
 	}
 	requireTool(t, "crossplane")
 	requireTool(t, "docker", "info")
@@ -124,5 +166,50 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Log("golden updated")
+	}
+}
+
+// fakeReporter records which of Skipf/Fatalf unavailable chose, so the
+// decision can be tested without a Docker daemon or a crossplane CLI.
+type fakeReporter struct {
+	skipped, failed bool
+	msg             string
+}
+
+func (f *fakeReporter) Helper() {}
+func (f *fakeReporter) Skipf(format string, args ...any) {
+	f.skipped, f.msg = true, fmt.Sprintf(format, args...)
+}
+func (f *fakeReporter) Fatalf(format string, args ...any) {
+	f.failed, f.msg = true, fmt.Sprintf(format, args...)
+}
+
+// TestUnavailableFailsWhenAcceptanceIsRequired pins the gate itself. Without
+// this behaviour, .github/workflows/ci.yml's Lane B goes green whether or
+// not the acceptance test ever ran, because a skip is reported as a pass and
+// nothing downstream distinguishes the two.
+func TestUnavailableFailsWhenAcceptanceIsRequired(t *testing.T) {
+	tests := []struct {
+		name      string
+		env       string
+		wantFatal bool
+	}{
+		{"unset: a missing tool is a skip, so Lane A stays green without Docker", "", false},
+		{"0: still a skip", "0", false},
+		{"1: a missing tool is a failure, so a vacuous Lane B cannot pass", "1", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(requireEnv, tt.env)
+			var f fakeReporter
+			unavailable(&f, "crossplane not installed")
+			if f.failed != tt.wantFatal || f.skipped == tt.wantFatal {
+				t.Fatalf("with %s=%q: failed=%v skipped=%v, want failed=%v",
+					requireEnv, tt.env, f.failed, f.skipped, tt.wantFatal)
+			}
+			if !strings.Contains(f.msg, "crossplane not installed") {
+				t.Errorf("message = %q, want it to name the missing prerequisite", f.msg)
+			}
+		})
 	}
 }

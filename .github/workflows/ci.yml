@@ -22,4 +22,13 @@ jobs:
         run: |
           curl -sL https://raw.githubusercontent.com/crossplane/crossplane/main/install.sh | sh
           sudo mv crossplane /usr/local/bin/
+      # CF_REQUIRE_ACCEPTANCE=1 turns every prerequisite skip in
+      # acceptance_test.go into a hard failure. Without it this job goes
+      # green whether or not the acceptance test actually ran: a skip is
+      # reported as a pass, so a silently-failed crossplane CLI install or an
+      # unavailable Docker daemon would leave the one gate that proves the
+      # generated YAML renders quietly doing nothing. This is Lane B's
+      # assertion that it RAN, not merely that it did not fail.
       - run: make test-docker
+        env:
+          CF_REQUIRE_ACCEPTANCE: '1'
