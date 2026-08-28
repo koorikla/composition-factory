@@ -1,6 +1,9 @@
 package blueprint
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // deepCopy returns a copy of the blueprint that shares no mutable state with
 // the receiver. Parameters is a map, and Resources is a slice of structs
@@ -10,6 +13,13 @@ import "fmt"
 // the receiver once Validate() has accepted it -- a rejected edit therefore
 // cannot leave the receiver half-changed, because the receiver was never
 // touched.
+//
+// Maintenance note: if Parameter or Resource ever grows another slice- or
+// map-typed field, it must be deep-copied here too. Missing one does not
+// fail to compile and does not fail a test until someone writes a mutating
+// test against that specific field -- until then, a "rejected" edit would
+// silently mutate the receiver through the aliased backing store, exactly
+// the failure mode this function exists to close.
 func (b *Blueprint) deepCopy() *Blueprint {
 	cp := *b
 
@@ -70,12 +80,22 @@ func (b *Blueprint) AddParameter(name string, p Parameter) error {
 // RenameParameter renames an XRD parameter and rewrites every resource
 // field's From reference (params.<from>) to point at the new name. Field
 // keys are untouched -- only the reference value changes. It fails if from
-// is not declared, if to is already declared, or if the resulting blueprint
-// does not validate; in every failure case the receiver is left unchanged.
+// is not declared, if to is already declared (unless to == from -- see
+// below), or if the resulting blueprint does not validate; in every failure
+// case the receiver is left unchanged.
+//
+// from == to is a no-op success, not a collision error: a blur-submit UI
+// routinely resubmits an unchanged name, and requiring every caller to
+// special-case "did the name actually change" before calling this is a
+// burden the API should absorb instead. An unknown from still errors even
+// when from == to, since there is nothing to rename.
 func (b *Blueprint) RenameParameter(from, to string) error {
 	p, exists := b.Spec.XRD.Parameters[from]
 	if !exists {
 		return fmt.Errorf("rename parameter: %q is not declared", from)
+	}
+	if from == to {
+		return nil
 	}
 	if _, collides := b.Spec.XRD.Parameters[to]; collides {
 		return fmt.Errorf("rename parameter: %q is already declared", to)
@@ -122,17 +142,22 @@ func (b *Blueprint) SetParameter(name string, p Parameter) error {
 }
 
 // DeleteParameter removes an XRD parameter declaration. It refuses when any
-// resource field still references the parameter (naming one such resource,
-// rather than cascading the delete into those fields), when the parameter is
-// not declared, or when the resulting blueprint does not validate (e.g.
-// deleting providerName from a Namespaced XRD). In every failure case the
-// receiver is left unchanged.
+// resource field still references the parameter (naming every referencing
+// resource, rather than cascading the delete into those fields, so a user
+// can fix every reference in one round-trip instead of discovering them one
+// at a time), when the parameter is not declared, or when the resulting
+// blueprint does not validate (e.g. deleting providerName from a Namespaced
+// XRD). In every failure case the receiver is left unchanged.
 func (b *Blueprint) DeleteParameter(name string) error {
 	if _, exists := b.Spec.XRD.Parameters[name]; !exists {
 		return fmt.Errorf("delete parameter: %q is not declared", name)
 	}
 	if refs := b.referencingResources(name); len(refs) > 0 {
-		return fmt.Errorf("delete parameter %q: still referenced by resource %q", name, refs[0])
+		quoted := make([]string, len(refs))
+		for i, r := range refs {
+			quoted[i] = fmt.Sprintf("%q", r)
+		}
+		return fmt.Errorf("delete parameter %q: still referenced by resources %s", name, strings.Join(quoted, ", "))
 	}
 
 	cp := b.deepCopy()

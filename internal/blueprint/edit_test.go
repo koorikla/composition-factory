@@ -111,6 +111,30 @@ func TestRenameUnknownParameterErrors(t *testing.T) {
 	}
 }
 
+// A blur-submit UI routinely resubmits an unchanged name; renaming a
+// parameter onto its own current name must succeed as a no-op rather than
+// erroring as a collision, or every caller would have to special-case
+// "did the name actually change" before calling this.
+func TestRenameParameterToSameNameIsANoOp(t *testing.T) {
+	b := editable()
+	want := editable()
+	if err := b.RenameParameter("maxMessageSize", "maxMessageSize"); err != nil {
+		t.Fatalf("RenameParameter(x, x): %v", err)
+	}
+	if diff := cmp.Diff(want, b); diff != "" {
+		t.Errorf("blueprint changed by a no-op self-rename (-want +got):\n%s", diff)
+	}
+}
+
+// The from == to short-circuit must not bypass the from-must-exist check:
+// there is nothing to rename when from is unknown, even if to == from.
+func TestRenameUnknownParameterToSameNameStillErrors(t *testing.T) {
+	b := editable()
+	if err := b.RenameParameter("nope", "nope"); err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("err = %v, want an error naming the unknown parameter even when from == to", err)
+	}
+}
+
 func TestSetParameterReplacesInPlace(t *testing.T) {
 	b := editable()
 	if err := b.SetParameter("maxMessageSize", Parameter{Type: "integer", Default: "2048", Description: "Max size."}); err != nil {
@@ -136,15 +160,39 @@ func TestSetParameterRejectsInvalidAndChangesNothing(t *testing.T) {
 	}
 }
 
+// SetParameter is replace-only, not upsert: Task 6 maps it to PUT with
+// 404-for-unknown, since POST already owns creation (AddParameter). The
+// unknown-name path is what that 404 depends on.
+func TestSetParameterRejectsUnknownParameter(t *testing.T) {
+	b := editable()
+	want := editable()
+	err := b.SetParameter("neverDeclared", Parameter{Type: "string"})
+	if err == nil || !strings.Contains(err.Error(), "neverDeclared") {
+		t.Fatalf("err = %v, want an error naming the unknown parameter", err)
+	}
+	if diff := cmp.Diff(want, b); diff != "" {
+		t.Errorf("blueprint changed by a failed set on an unknown name (-want +got):\n%s", diff)
+	}
+}
+
 // Deleting a parameter something references must be refused, not cascade.
+// Two resources reference maxMessageSize here so the error is verified to
+// name every referencing resource, not just the first one found.
 func TestDeleteParameterRefusesWhenReferenced(t *testing.T) {
 	b := editable()
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name: "second-queue", Kind: "Queue",
+		Fields: map[string]Field{"maxMessageSize": {From: "params.maxMessageSize"}},
+	})
 	err := b.DeleteParameter("maxMessageSize")
 	if err == nil {
 		t.Fatal("want an error deleting a referenced parameter")
 	}
 	if !strings.Contains(err.Error(), "main-queue") {
 		t.Errorf("err = %v, want it to name the resource still referencing the parameter", err)
+	}
+	if !strings.Contains(err.Error(), "second-queue") {
+		t.Errorf("err = %v, want it to name EVERY resource still referencing the parameter, not just the first", err)
 	}
 	if _, ok := b.Spec.XRD.Parameters["maxMessageSize"]; !ok {
 		t.Error("parameter was deleted despite the error")
