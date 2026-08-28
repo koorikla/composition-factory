@@ -230,19 +230,24 @@ export const api = {
     return request("/blueprint", jsonInit("PUT", doc))
   },
 
-  addParameter(name: string, p: Parameter): Promise<void> {
+  /** Every parameter mutation resolves with the FULL persisted blueprint —
+   * the same shape GET /api/blueprint returns. That is the server's actual
+   * success contract for all four routes (internal/api/blueprint.go answers
+   * each with writeJSON(w, http.StatusOK, b)); DELETE in particular is a
+   * 200 with the document, never an empty 204. */
+  addParameter(name: string, p: Parameter): Promise<Blueprint> {
     return request("/blueprint/parameters", jsonInit("POST", { name, parameter: p }))
   },
 
-  renameParameter(from: string, to: string): Promise<void> {
+  renameParameter(from: string, to: string): Promise<Blueprint> {
     return request(`/blueprint/parameters/${encodeURIComponent(from)}/rename`, jsonInit("POST", { to }))
   },
 
-  setParameter(name: string, p: Parameter): Promise<void> {
+  setParameter(name: string, p: Parameter): Promise<Blueprint> {
     return request(`/blueprint/parameters/${encodeURIComponent(name)}`, jsonInit("PUT", { parameter: p }))
   },
 
-  deleteParameter(name: string): Promise<void> {
+  deleteParameter(name: string): Promise<Blueprint> {
     return request(`/blueprint/parameters/${encodeURIComponent(name)}`, { method: "DELETE" })
   },
 

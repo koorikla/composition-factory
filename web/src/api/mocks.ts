@@ -39,21 +39,79 @@ function errorJSON(status: number, message: string) {
 
 let blueprintState: Blueprint = structuredClone(blueprintFixture) as unknown as Blueprint
 
-/** Exposed for tests that need a clean blueprint between cases; contract.test.ts
- * doesn't need it today because every mutation it exercises is rejected
- * (400/409) before anything changes, but a later task's success-path tests
- * will want it. */
+/** Exposed for tests that need a clean blueprint between cases —
+ * contract.test.ts's success-path mutation tests (add/set/rename/delete)
+ * persist into this module-level state and reset it in afterEach. */
 export function resetBlueprintFixture(): void {
   blueprintState = structuredClone(blueprintFixture) as unknown as Blueprint
 }
 
-const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+// ---------------------------------------------------------------------------
+// Parameter validation — mirrors internal/blueprint/load.go's Validate()
+// exactly for the parameter checks the parameter routes can trip. The server
+// is the contract authority here: paramNameRE is `^[a-zA-Z][a-zA-Z0-9]*$`
+// (camelCase — NO underscores, unlike a JS identifier), YAML keywords are
+// rejected case-insensitively as names, the valid type set is exactly
+// {string, integer, number, boolean, object}, and "array" gets its own
+// refusal message. Message text is copied verbatim from load.go so the
+// frontend surfaces what the real server would say.
+// ---------------------------------------------------------------------------
+
+const PARAM_NAME_RE = /^[a-zA-Z][a-zA-Z0-9]*$/
+const YAML_KEYWORDS = new Set(["true", "false", "yes", "no", "on", "off", "null", "y", "n"])
+const VALID_PARAM_TYPES = new Set(["string", "integer", "number", "boolean", "object"])
+
+/** The first Validate() failure for one parameter declaration, in load.go's
+ * own order (name, then type), phrased verbatim — or null when it passes the
+ * checks this mock mirrors. */
+function parameterValidationError(name: string, p: Parameter | undefined): string | null {
+  if (!PARAM_NAME_RE.test(name) || YAML_KEYWORDS.has(name.toLowerCase())) {
+    return (
+      `spec.xrd.parameters.${name}: invalid parameter name ` +
+      `(must be camelCase, e.g. maxMessageSize, and not a YAML keyword like yes/no/true/false)`
+    )
+  }
+  const type = p?.type ?? ""
+  if (type === "array") {
+    return (
+      `spec.xrd.parameters.${name}: type "array" is not supported in M1. ` +
+      `The XRD emitter cannot write the required items: schema for it, and a from: ` +
+      `mapping would render Go's fmt of the slice ("[a b c]") -- valid YAML, silently ` +
+      `wrong. Use a scalar parameter, or a raw: field for a literal list`
+    )
+  }
+  if (!VALID_PARAM_TYPES.has(type)) {
+    return `spec.xrd.parameters.${name}: unknown type ${JSON.stringify(type)}`
+  }
+  return null
+}
+
+/** Mirrors internal/api/blueprint.go's parameterKeys: every parameter key in
+ * declaration order, paired with "does the current declaration hold a value
+ * here" — the anti-silent-destruction rule's notion of a value worth
+ * refusing to drop (server commit d975531). */
+const PARAMETER_KEYS: Array<{ name: string; set: (p: Parameter) => boolean }> = [
+  { name: "type", set: p => p.type !== "" },
+  { name: "required", set: p => p.required === true },
+  { name: "enum", set: p => (p.enum?.length ?? 0) > 0 },
+  { name: "default", set: p => (p.default ?? "") !== "" },
+  { name: "description", set: p => (p.description ?? "") !== "" },
+]
+
+/** Mirrors silentlyDropped: the keys absent from a PUT body that currently
+ * hold a value on the existing declaration, in PARAMETER_KEYS order. */
+function silentlyDropped(existing: Parameter, present: Set<string>): string[] {
+  return PARAMETER_KEYS.filter(k => !present.has(k.name) && k.set(existing)).map(k => k.name)
+}
 
 function referencingResources(name: string): string[] {
   const refs: string[] = []
   for (const r of blueprintState.spec.resources) {
     for (const f of Object.values(r.fields)) {
-      if (f.from === `params.${name}`) refs.push(r.name)
+      if (f.from === `params.${name}`) {
+        refs.push(r.name)
+        break
+      }
     }
   }
   return refs
@@ -63,36 +121,45 @@ function referencingResources(name: string): string[] {
 // /fields query filtering
 // ---------------------------------------------------------------------------
 
-function filterFields(all: Field[], url: URL): Field[] | { error: string } {
-  const requiredOnlyRaw = url.searchParams.get("required_only")
-  const maxDepthRaw = url.searchParams.get("max_depth")
-  const limitRaw = url.searchParams.get("limit")
+// Mirrors internal/api/kinds.go's parseIntParam: strconv.Atoi accepts an
+// optional sign, so a NEGATIVE (or zero) integer parses fine and simply
+// means "unlimited" downstream — only a value that is not an integer at all
+// is a 400, with the server's own `invalid <name>: "<raw>"` wording. The
+// mock used to 400 negative values too; the server does not.
+const GO_ATOI_RE = /^[+-]?\d+$/
+
+function parseIntParam(raw: string | null, name: string): { value: number } | { error: string } {
+  if (raw === null || raw === "") return { value: 0 }
+  if (!GO_ATOI_RE.test(raw)) {
+    return { error: `invalid ${name}: "${raw}"` }
+  }
+  return { value: Number(raw) }
+}
+
+// Mirrors parseBoolParam / strconv.ParseBool: exactly these spellings.
+const GO_PARSEBOOL: Record<string, boolean> = {
+  "1": true, t: true, T: true, TRUE: true, true: true, True: true,
+  "0": false, f: false, F: false, FALSE: false, false: false, False: false,
+}
+
+function parseBoolParam(raw: string | null, name: string): { value: boolean } | { error: string } {
+  if (raw === null || raw === "") return { value: false }
+  if (!(raw in GO_PARSEBOOL)) {
+    return { error: `invalid ${name}: "${raw}"` }
+  }
+  return { value: GO_PARSEBOOL[raw] }
+}
+
+function filterFields(all: Field[], url: URL): { fields: Field[]; total: number } | { error: string } {
   const prefix = url.searchParams.get("prefix") ?? ""
   const search = (url.searchParams.get("q") ?? "").toLowerCase()
 
-  let requiredOnly = false
-  if (requiredOnlyRaw !== null) {
-    if (requiredOnlyRaw !== "true" && requiredOnlyRaw !== "false") {
-      return { error: `required_only: invalid boolean "${requiredOnlyRaw}"` }
-    }
-    requiredOnly = requiredOnlyRaw === "true"
-  }
-
-  let maxDepth = 0
-  if (maxDepthRaw !== null) {
-    if (!/^\d+$/.test(maxDepthRaw)) {
-      return { error: `max_depth: invalid integer "${maxDepthRaw}"` }
-    }
-    maxDepth = Number(maxDepthRaw)
-  }
-
-  let limit = 0
-  if (limitRaw !== null) {
-    if (!/^\d+$/.test(limitRaw)) {
-      return { error: `limit: invalid integer "${limitRaw}"` }
-    }
-    limit = Number(limitRaw)
-  }
+  const requiredOnly = parseBoolParam(url.searchParams.get("required_only"), "required_only")
+  if ("error" in requiredOnly) return requiredOnly
+  const maxDepth = parseIntParam(url.searchParams.get("max_depth"), "max_depth")
+  if ("error" in maxDepth) return maxDepth
+  const limit = parseIntParam(url.searchParams.get("limit"), "limit")
+  if ("error" in limit) return limit
 
   // Fixed order, matching internal/index.Fields: Prefix, MaxDepth,
   // RequiredOnly, Search, Limit.
@@ -100,10 +167,10 @@ function filterFields(all: Field[], url: URL): Field[] | { error: string } {
   if (prefix) {
     out = out.filter(f => f.path === prefix || f.path.startsWith(`${prefix}.`))
   }
-  if (maxDepth > 0) {
-    out = out.filter(f => f.depth <= maxDepth)
+  if (maxDepth.value > 0) {
+    out = out.filter(f => f.depth <= maxDepth.value)
   }
-  if (requiredOnly) {
+  if (requiredOnly.value) {
     out = out.filter(f => f.required)
   }
   if (search) {
@@ -111,27 +178,38 @@ function filterFields(all: Field[], url: URL): Field[] | { error: string } {
       f => f.path.toLowerCase().includes(search) || f.description.toLowerCase().includes(search),
     )
   }
-  if (limit > 0) {
-    out = out.slice(0, limit)
+  // `total` counts the filtered set BEFORE limit truncation — the server
+  // (internal/api/kinds.go's handleKindFields) runs the query with Limit
+  // zeroed and slices afterwards, precisely so a caller can tell the limit
+  // cut the response short (total > len(fields)). total == len(fields) here
+  // would make that signal tautologically useless.
+  const total = out.length
+  if (limit.value > 0 && out.length > limit.value) {
+    out = out.slice(0, limit.value)
   }
-  return out
+  return { fields: out, total }
 }
 
 export const handlers = [
   http.get("/api/kinds", ({ request }) => {
     const url = new URL(request.url)
     const q = (url.searchParams.get("q") ?? "").toLowerCase()
-    const limitRaw = url.searchParams.get("limit")
+
+    // The server 400s a limit that is not an integer (`invalid limit:
+    // "abc"`, verbatim from parseIntParam) instead of silently ignoring it
+    // and returning every kind; a negative or zero integer is accepted and
+    // means unlimited (index.Search documents limit <= 0 exactly that way).
+    const limit = parseIntParam(url.searchParams.get("limit"), "limit")
+    if ("error" in limit) {
+      return errorJSON(400, limit.error)
+    }
 
     let kinds = KINDS
     if (q) {
       kinds = kinds.filter(k => k.kind.toLowerCase().includes(q) || k.group.toLowerCase().includes(q))
     }
-    if (limitRaw !== null) {
-      const limit = Number(limitRaw)
-      if (Number.isFinite(limit) && limit > 0) {
-        kinds = kinds.slice(0, limit)
-      }
+    if (limit.value > 0) {
+      kinds = kinds.slice(0, limit.value)
     }
     return HttpResponse.json({ kinds })
   }),
@@ -163,10 +241,10 @@ export const handlers = [
       return errorJSON(404, `kind not found: ${apiVersion}/${kind}`)
     }
     const result = filterFields(QUEUE_FIELDS, new URL(request.url))
-    if (!Array.isArray(result)) {
+    if ("error" in result) {
       return errorJSON(400, result.error)
     }
-    return HttpResponse.json({ fields: result, total: result.length })
+    return HttpResponse.json({ fields: result.fields, total: result.total })
   }),
 
   http.get("/api/blueprint", () => HttpResponse.json(blueprintState)),
@@ -194,6 +272,13 @@ export const handlers = [
     return HttpResponse.json(blueprintState)
   }),
 
+  // Every parameter mutation below mirrors internal/api/blueprint.go's
+  // handlers: check order, status classification, error text (verbatim from
+  // internal/blueprint/edit.go and load.go), and — on success — a 200
+  // carrying the FULL persisted blueprint, the same shape GET returns
+  // (never a bare {parameter}, {} or an empty 204; the server responds
+  // writeJSON(w, http.StatusOK, b) on every one of these routes).
+
   http.post("/api/blueprint/parameters", async ({ request }) => {
     let body: { name?: string; parameter?: Parameter }
     try {
@@ -202,39 +287,59 @@ export const handlers = [
       return errorJSON(400, "malformed JSON body")
     }
     const name = body.name ?? ""
-    const parameter = body.parameter
-    if (!NAME_RE.test(name)) {
-      return errorJSON(400, `invalid parameter name: "${name}"`)
-    }
-    if (!parameter || typeof parameter.type !== "string" || parameter.type === "") {
-      return errorJSON(400, "parameter.type is required")
-    }
-    if (parameter.type === "array") {
-      return errorJSON(400, `array parameters are unsupported: ${name}`)
-    }
+    const parameter: Parameter = body.parameter ?? { type: "" }
+
+    // AddParameter's own FIRST action is the duplicate check, before any
+    // validation — and a duplicate is a conflict with current state: 409,
+    // not 400 (the HTTP layer classifies on "existed going in").
     if (blueprintState.spec.xrd.parameters[name]) {
-      return errorJSON(400, `duplicate parameter: ${name}`)
+      return errorJSON(409, `add parameter: ${JSON.stringify(name)} is already declared`)
+    }
+    const invalid = parameterValidationError(name, parameter)
+    if (invalid !== null) {
+      return errorJSON(400, `add parameter ${JSON.stringify(name)}: ${invalid}`)
     }
     blueprintState.spec.xrd.parameters[name] = parameter
-    return HttpResponse.json({ parameter })
+    return HttpResponse.json(blueprintState)
   }),
 
   http.put("/api/blueprint/parameters/:name", async ({ params, request }) => {
     const name = params.name as string
-    let body: { parameter?: Parameter }
+    let body: { parameter?: Record<string, unknown> }
     try {
       body = (await request.json()) as typeof body
     } catch {
       return errorJSON(400, "malformed JSON body")
     }
-    if (!body.parameter || typeof body.parameter.type !== "string" || body.parameter.type === "") {
-      return errorJSON(400, "parameter.type is required")
+    const present = new Set(Object.keys(body.parameter ?? {}))
+    const parameter = (body.parameter ?? { type: "" }) as unknown as Parameter
+
+    // The anti-silent-destruction rule (server commit d975531): PUT is a
+    // whole-parameter replace, so a body that OMITS a key which currently
+    // holds a value is refused — clearing a value must be said out loud
+    // ("required": false, "enum": null), never implied by omission. Runs
+    // before the existence 404 the way the server's handler does (only
+    // meaningful when the parameter exists).
+    const existing = blueprintState.spec.xrd.parameters[name]
+    if (existing) {
+      const dropped = silentlyDropped(existing, present)
+      if (dropped.length > 0) {
+        return errorJSON(
+          400,
+          `refusing a partial update of parameter ${JSON.stringify(name)}: PUT replaces the whole parameter, so omitting ` +
+            `${dropped.join(", ")} would silently discard the value each of them currently holds. Send those keys ` +
+            `explicitly — their zero values (false, null, "") are how you clear one.`,
+        )
+      }
+    } else {
+      return errorJSON(404, `set parameter: ${JSON.stringify(name)} is not declared`)
     }
-    if (!blueprintState.spec.xrd.parameters[name]) {
-      return errorJSON(404, `unknown parameter: ${name}`)
+    const invalid = parameterValidationError(name, parameter)
+    if (invalid !== null) {
+      return errorJSON(400, `set parameter ${JSON.stringify(name)}: ${invalid}`)
     }
-    blueprintState.spec.xrd.parameters[name] = body.parameter
-    return HttpResponse.json({ parameter: body.parameter })
+    blueprintState.spec.xrd.parameters[name] = parameter
+    return HttpResponse.json(blueprintState)
   }),
 
   http.post("/api/blueprint/parameters/:name/rename", async ({ params, request }) => {
@@ -246,15 +351,24 @@ export const handlers = [
       return errorJSON(400, "malformed JSON body")
     }
     const to = body.to ?? ""
-    if (!NAME_RE.test(to)) {
-      return errorJSON(400, `invalid parameter name: "${to}"`)
-    }
+
+    // RenameParameter's fixed check order: from declared, then to == from
+    // (a no-op SUCCESS — a blur-submit UI resubmits an unchanged name),
+    // then to collides (409, a conflict with current state), then the
+    // validation of the new name (400).
     const existing = blueprintState.spec.xrd.parameters[from]
     if (!existing) {
-      return errorJSON(404, `unknown parameter: ${from}`)
+      return errorJSON(404, `rename parameter: ${JSON.stringify(from)} is not declared`)
+    }
+    if (to === from) {
+      return HttpResponse.json(blueprintState)
     }
     if (blueprintState.spec.xrd.parameters[to]) {
-      return errorJSON(400, `parameter already exists: ${to}`)
+      return errorJSON(409, `rename parameter: ${JSON.stringify(to)} is already declared`)
+    }
+    const invalid = parameterValidationError(to, existing)
+    if (invalid !== null) {
+      return errorJSON(400, `rename parameter ${JSON.stringify(from)} to ${JSON.stringify(to)}: ${invalid}`)
     }
     delete blueprintState.spec.xrd.parameters[from]
     blueprintState.spec.xrd.parameters[to] = existing
@@ -263,20 +377,37 @@ export const handlers = [
         if (f.from === `params.${from}`) f.from = `params.${to}`
       }
     }
-    return HttpResponse.json({})
+    return HttpResponse.json(blueprintState)
   }),
 
   http.delete("/api/blueprint/parameters/:name", ({ params }) => {
     const name = params.name as string
     if (!blueprintState.spec.xrd.parameters[name]) {
-      return errorJSON(404, `unknown parameter: ${name}`)
+      return errorJSON(404, `delete parameter: ${JSON.stringify(name)} is not declared`)
     }
     const refs = referencingResources(name)
     if (refs.length > 0) {
-      return errorJSON(409, `parameter ${name} is still referenced by ${refs.join(", ")}`)
+      const quoted = refs.map(r => JSON.stringify(r)).join(", ")
+      return errorJSON(409, `delete parameter ${JSON.stringify(name)}: still referenced by resources ${quoted}`)
+    }
+    // Existed, unreferenced — but the delete can STILL fail validation:
+    // blueprint.Validate() requires providerName on a Namespaced XRD (the
+    // Composition dereferences {{ $spec.providerName }} unguarded for every
+    // composed resource), so deleting it is a 400, never a 204. Verbatim
+    // from DeleteParameter's wrapped Validate() error.
+    if (name === "providerName" && blueprintState.spec.xrd.scope === "Namespaced") {
+      return errorJSON(
+        400,
+        `delete parameter "providerName": spec.xrd.parameters.providerName is required for a Namespaced XRD: ` +
+          `the Composition emits providerConfigRef.name as {{ $spec.providerName }} for every ` +
+          `composed resource, so a blueprint without this parameter generates a Composition ` +
+          `that can never render. Add: providerName: {type: string, required: true}`,
+      )
     }
     delete blueprintState.spec.xrd.parameters[name]
-    return new HttpResponse(null, { status: 204 })
+    // 200 with the full persisted blueprint — the server never answers this
+    // route with an empty 204.
+    return HttpResponse.json(blueprintState)
   }),
 
   http.post("/api/generate", async ({ request }) => {
