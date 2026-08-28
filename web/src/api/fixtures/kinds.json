@@ -1,0 +1,28 @@
+{
+  "kinds": [
+    {
+      "kind": "Queue",
+      "group": "sqs.aws.m.upbound.io",
+      "version": "v1beta1",
+      "apiVersion": "sqs.aws.m.upbound.io/v1beta1",
+      "plural": "queues",
+      "scope": "Namespaced",
+      "provider": "xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0",
+      "namespaced": true,
+      "required": 1,
+      "fields": 18
+    },
+    {
+      "kind": "Queue",
+      "group": "sqs.aws.upbound.io",
+      "version": "v1beta1",
+      "apiVersion": "sqs.aws.upbound.io/v1beta1",
+      "plural": "queues",
+      "scope": "Cluster",
+      "provider": "xpkg.upbound.io/upbound/provider-aws-sqs:v1.21.0",
+      "namespaced": false,
+      "required": 1,
+      "fields": 18
+    }
+  ]
+}

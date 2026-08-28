@@ -1,0 +1,44 @@
+{
+  "kind": {
+    "kind": "Queue",
+    "group": "sqs.aws.m.upbound.io",
+    "version": "v1beta1",
+    "apiVersion": "sqs.aws.m.upbound.io/v1beta1",
+    "plural": "queues",
+    "scope": "Namespaced",
+    "provider": "xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0",
+    "namespaced": true,
+    "required": 1,
+    "fields": 18
+  },
+  "envelope": [
+    {
+      "path": "managementPolicies",
+      "type": "array",
+      "description": "Actions the provider may take. Defaults to [\"*\"].",
+      "required": false,
+      "depth": 0
+    },
+    {
+      "path": "providerConfigRef.kind",
+      "type": "string",
+      "description": "ProviderConfig or ClusterProviderConfig.",
+      "required": true,
+      "depth": 1
+    },
+    {
+      "path": "providerConfigRef.name",
+      "type": "string",
+      "description": "Name of the provider config.",
+      "required": true,
+      "depth": 1
+    },
+    {
+      "path": "writeConnectionSecretToRef.name",
+      "type": "string",
+      "description": "Name of the secret.",
+      "required": true,
+      "depth": 1
+    }
+  ]
+}
