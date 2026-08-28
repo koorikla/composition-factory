@@ -55,6 +55,9 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 			// sequence silently truncates the rest of the string as a comment.
 			d.Line(8, "description: %s", quoteYAML(p.Description))
 		}
+		if p.Default != "" {
+			d.Line(8, "default: %s", defaultYAML(p.Type, p.Default))
+		}
 		if len(p.Enum) > 0 {
 			d.Line(8, "enum:")
 			for _, e := range p.Enum {
@@ -70,32 +73,68 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 			d.Line(9, "type: string")
 		}
 	}
-	if req := requiredParams(b); len(req) > 0 {
+	if req := requiredParams(x); len(req) > 0 {
 		d.Line(6, "required: [%s]", strings.Join(req, ", "))
 	}
-	d.Comment("Every parameter the template dereferences is required above, so a")
-	d.Comment("missing value fails at the XR gate instead of rendering \"<no value>\".")
+	d.Comment("required lists only the parameters the blueprint marks Required.")
+	d.Comment("A merely-dereferenced parameter is safe unforced: the Composition")
+	d.Comment("guards every optional access with hasKey, never a bare dereference.")
 	return d.Bytes(), nil
 }
 
-// requiredParams unions the explicitly-required parameters with every parameter
-// the templates actually read.
-func requiredParams(b *blueprint.Blueprint) []string {
-	seen := map[string]bool{}
-	for n, p := range b.Spec.XRD.Parameters {
+// requiredParams returns the explicitly-required parameters, sorted.
+//
+// This deliberately does NOT also include every parameter some template
+// dereferences (contrast blueprint.Blueprint.DereferencedParams). An earlier
+// version of this emitter unioned the two: the idea was that a Go template
+// dereferencing a missing XR field renders the literal string "<no value>"
+// into a live managed resource, and since that string is legal YAML the
+// whole validate -> render -> validate pipeline still exits 0 -- so forcing
+// every dereferenced parameter to be required looked like the mitigation.
+//
+// That union is now both unnecessary and actively harmful. The Composition
+// emitter (internal/emit/composition.go) no longer takes a bare dereference
+// on trust: it gives a required parameter direct, unguarded template access
+// (safe, because the XRD gate makes its presence unconditional on any valid
+// XR) and gates every access to a non-required parameter behind hasKey
+// (safe, because the guarded branch only renders when the key provably
+// exists). Both paths are independently immune to "<no value>" -- the
+// mitigation this field's Required-only-ness now needs to protect is nothing.
+// Unioning in the dereferenced set here would not close any remaining gap;
+// it would only strip optionality from every parameter a template happens to
+// read, which is precisely what "required" is supposed to let a blueprint
+// author NOT do. If you're reading this because you're tempted to restore
+// the union believing it closes a hole: it doesn't, not anymore -- read
+// composition.go's hasKey handling first.
+func requiredParams(x blueprint.XRD) []string {
+	out := make([]string, 0, len(x.Parameters))
+	for n, p := range x.Parameters {
 		if p.Required {
-			seen[n] = true
+			out = append(out, n)
 		}
-	}
-	for _, n := range b.DereferencedParams() {
-		if _, ok := b.Spec.XRD.Parameters[n]; ok {
-			seen[n] = true
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for n := range seen {
-		out = append(out, n)
 	}
 	sort.Strings(out)
 	return out
+}
+
+// defaultYAML renders p.Default for a parameter of the given declared type.
+// A string default is user-controlled free text exactly like description, so
+// it is quoted the same way, for the same reasons (an unquoted ": '" breaks
+// the document, an unquoted "yes"/"1.0"-shaped value is silently
+// reinterpreted). Every other type this project accepts (integer, number,
+// boolean) must instead be unquoted: a quoted "512" or "true" in an
+// OpenAPIV3Schema default is a string, which is a type mismatch against the
+// property's declared `type: integer`/`number`/`boolean` and gets the whole
+// XRD rejected by the API server at apply time.
+//
+// object and array are deliberately not special-cased: this function treats
+// them the same as the numeric/boolean types (emitted unquoted, verbatim).
+// See task-8b-report.md for why that is a known, intentionally-unclosed gap
+// here rather than a guess at a data format this package does not otherwise
+// parse or validate.
+func defaultYAML(paramType, value string) string {
+	if paramType == "string" {
+		return quoteYAML(value)
+	}
+	return value
 }

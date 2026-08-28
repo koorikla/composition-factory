@@ -57,13 +57,44 @@ func TestXRDShape(t *testing.T) {
 	}
 }
 
-// A parameter the template dereferences must be required even if the blueprint
-// did not mark it so — otherwise a missing value renders "<no value>".
-func TestXRDMarksDereferencedParamsRequired(t *testing.T) {
-	got, _ := XRD(testBlueprint())
+// required must list only the parameters the blueprint explicitly marks
+// Required, not every parameter some template happens to dereference. The
+// Composition emitter guards every access to a non-required parameter with
+// hasKey (see composition.go), so a merely-dereferenced parameter is already
+// safe from "<no value>" without also being forced into required here —
+// forcing it would only strip its optionality for no safety benefit.
+// maxMessageSize is dereferenced by the main-queue resource but was never
+// marked Required in the blueprint, so it must be absent from this list.
+func TestXRDRequiredIsExplicitOnly(t *testing.T) {
+	got, err := XRD(testBlueprint())
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
 	s := string(got)
-	if !strings.Contains(s, "required: [location, maxMessageSize, providerName]") {
-		t.Errorf("required list wrong; maxMessageSize is dereferenced so it must be required\n---\n%s", s)
+	if !strings.Contains(s, "required: [location, providerName]") {
+		t.Errorf("required list wrong; want exactly [location, providerName] "+
+			"(maxMessageSize is dereferenced but not explicitly required, so it must not appear)\n---\n%s", s)
+	}
+}
+
+// A parameter that is BOTH explicitly required AND dereferenced by a template
+// must still appear exactly once in required — not duplicated, and not
+// dropped because it's also dereferenced.
+func TestRequiredAndDereferencedAppearsOnce(t *testing.T) {
+	b := testBlueprint()
+	// providerName is already Required: true in testBlueprint(); also
+	// dereference it from the same resource that already dereferences
+	// maxMessageSize, so it is both explicitly required and dereferenced.
+	b.Spec.Resources[0].Fields["providerName"] = blueprint.Field{From: "params.providerName"}
+
+	got, err := XRD(b)
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
+	s := string(got)
+	if !strings.Contains(s, "required: [location, providerName]") {
+		t.Errorf("required list wrong; providerName is both explicitly required and "+
+			"dereferenced, so it must appear exactly once, not zero or two times\n---\n%s", s)
 	}
 }
 
@@ -223,5 +254,69 @@ func TestEnumValuesRoundTripAsStrings(t *testing.T) {
 		if got != want {
 			t.Errorf("enum[%d] = %q, want %q", i, got, want)
 		}
+	}
+}
+
+// A string parameter's default is user-controlled free text, so it must be
+// quoted the same way description is. "true" is a deliberately risky value:
+// unquoted, it would be silently reinterpreted as the boolean true instead
+// of the string the blueprint author wrote.
+func TestStringDefaultIsQuoted(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.XRD.Parameters["region"] = blueprint.Parameter{Type: "string", Default: "true"}
+
+	got, err := XRD(b)
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
+	props := paramProps(t, got)
+	def := dig(t, props, "region", "default")
+	s, ok := def.(string)
+	if !ok {
+		t.Fatalf("default = %#v (%T), want the string %q", def, def, "true")
+	}
+	if s != "true" {
+		t.Errorf("default = %q, want %q", s, "true")
+	}
+}
+
+// An integer parameter's default must be emitted unquoted: a quoted "512"
+// would be a string, a type mismatch against type: integer that gets the
+// whole XRD rejected by the API server.
+func TestIntegerDefaultIsUnquoted(t *testing.T) {
+	b := testBlueprint()
+	p := b.Spec.XRD.Parameters["maxMessageSize"]
+	p.Default = "512"
+	b.Spec.XRD.Parameters["maxMessageSize"] = p
+
+	got, err := XRD(b)
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
+	props := paramProps(t, got)
+	def := dig(t, props, "maxMessageSize", "default")
+	n, ok := def.(float64)
+	if !ok {
+		t.Fatalf("default = %#v (%T), want the number 512", def, def)
+	}
+	if n != 512 {
+		t.Errorf("default = %v, want 512", n)
+	}
+}
+
+// A parameter with no Default set must emit no default key at all — not an
+// empty string, not a null.
+func TestNoDefaultEmitsNoDefaultKey(t *testing.T) {
+	got, err := XRD(testBlueprint())
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
+	props := paramProps(t, got)
+	loc, ok := props["location"].(map[string]any)
+	if !ok {
+		t.Fatalf("location schema: expected a map, got %T (%v)", props["location"], props["location"])
+	}
+	if v, present := loc["default"]; present {
+		t.Errorf("location has a default key (%#v), but Parameter.Default was never set", v)
 	}
 }
