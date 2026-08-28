@@ -163,6 +163,7 @@ func TestGenerateProducesTheSameBytesAsTheEngine(t *testing.T) {
 	type outputSummary struct {
 		Path  string `json:"path"`
 		Bytes int    `json:"bytes"`
+		Body  string `json:"body"`
 	}
 	generate := func(body string) ([]outputSummary, bool) {
 		t.Helper()
@@ -183,7 +184,9 @@ func TestGenerateProducesTheSameBytesAsTheEngine(t *testing.T) {
 		return got.Outputs, got.Written
 	}
 
-	// write:false — a preview: same paths, same sizes, nothing on disk.
+	// write:false — a preview: same paths, same sizes, nothing on disk, and
+	// (additive contract change) the response now carries each output's full
+	// rendered body so the canvas can render it without a write.
 	outputs, written := generate(`{"write":false}`)
 	if written {
 		t.Error("write:false still reported Written")
@@ -199,9 +202,25 @@ func TestGenerateProducesTheSameBytesAsTheEngine(t *testing.T) {
 			t.Errorf("write:false put %s on disk (stat err = %v); a preview must not touch the output tree",
 				out.Path, err)
 		}
+		if out.Body == "" {
+			t.Errorf("%s: body is empty — write:false must still return the rendered content", out.Path)
+		}
+		if out.Bytes != len(out.Body) {
+			t.Errorf("%s: bytes = %d, but len(body) = %d", out.Path, out.Bytes, len(out.Body))
+		}
+		// The load-bearing assertion: the body is byte-for-byte what
+		// emit.Generate itself produced for this output, not a
+		// re-derivation the handler computed on its own.
+		if !bytes.Equal([]byte(out.Body), want[i].Body) {
+			t.Errorf("%s: body does NOT match emit.Generate's own output byte-for-byte\n"+
+				"--- emit.Generate ---\n%s\n--- response body ---\n%s",
+				out.Path, want[i].Body, out.Body)
+		}
 	}
 
-	// write:true — the bytes on disk must be the engine's, exactly.
+	// write:true — the bytes on disk must be the engine's, exactly, and the
+	// response body must match too (a write does not change what a preview
+	// would have shown).
 	outputs, written = generate(`{"write":true}`)
 	if !written {
 		t.Error("write:true did not report Written")
@@ -222,6 +241,17 @@ func TestGenerateProducesTheSameBytesAsTheEngine(t *testing.T) {
 		}
 		if out.Bytes != len(onDisk) {
 			t.Errorf("%s: reported %d bytes, wrote %d", out.Path, out.Bytes, len(onDisk))
+		}
+		if out.Body == "" {
+			t.Errorf("%s: body is empty — write:true must return the rendered content too", out.Path)
+		}
+		if out.Bytes != len(out.Body) {
+			t.Errorf("%s: bytes = %d, but len(body) = %d", out.Path, out.Bytes, len(out.Body))
+		}
+		if !bytes.Equal([]byte(out.Body), want[i].Body) {
+			t.Errorf("%s: body does NOT match emit.Generate's own output byte-for-byte\n"+
+				"--- emit.Generate ---\n%s\n--- response body ---\n%s",
+				out.Path, want[i].Body, out.Body)
 		}
 	}
 }

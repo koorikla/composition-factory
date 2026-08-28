@@ -25,23 +25,34 @@ type generateRequest struct {
 	Write bool `json:"write"`
 }
 
-// generateOutput is one rendered file, summarized for the JSON response —
-// path and size, not the body: the canvas asks for a preview or triggers a
-// write, it does not need megabytes of generated YAML echoed back to it.
+// generateOutput is one rendered file, summarized for the JSON response:
+// path, size, and the full rendered content. Body is the file's exact bytes
+// as a UTF-8 string (the engine only ever emits YAML, so this never needs
+// base64) — the canvas renders it directly in the output pane. It is
+// included on both write modes: write:false is a preview that must show the
+// content without touching disk, and write:true includes it too since the
+// canvas still wants to render what it just wrote, and the total payload
+// for three small YAML files is a few KB — the gzip middleware already
+// handles the size. Bytes remains a separate field (not derived from Body
+// by every caller) for backward compatibility with anything that only reads
+// the summary.
 type generateOutput struct {
 	Path  string `json:"path"`
 	Bytes int    `json:"bytes"`
+	Body  string `json:"body"`
 }
 
 // handleGenerate serves POST /api/generate: {"write":bool} ->
-// {"outputs":[{"path":...,"bytes":N}],"written":bool}.
+// {"outputs":[{"path":...,"bytes":N,"body":"..."}],"written":bool}.
 //
 // write:false reports what emit.Generate would produce without touching
-// disk — a dry-run preview for the canvas. write:true additionally writes
-// every output through the exact same os.MkdirAll+os.WriteFile sequence
-// cmd/cf/gen.go's run uses for a non-check `cf gen`, so a generation
-// triggered from the canvas leaves the output tree in the identical state a
-// CLI run would have.
+// disk — a dry-run preview for the canvas, body included so the canvas can
+// render the output pane straight from the preview. write:true additionally
+// writes every output through the exact same os.MkdirAll+os.WriteFile
+// sequence cmd/cf/gen.go's run uses for a non-check `cf gen`, so a
+// generation triggered from the canvas leaves the output tree in the
+// identical state a CLI run would have; its response carries the same
+// bodies as write:false, since a write does not change what was rendered.
 //
 // Every failure here — a blueprint that no longer validates, a provider not
 // yet in the cache, a field that does not exist on its resolved CRD — is
@@ -105,7 +116,7 @@ func (srv *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 
 	summaries := make([]generateOutput, len(outputs))
 	for i, out := range outputs {
-		summaries[i] = generateOutput{Path: out.Path, Bytes: len(out.Body)}
+		summaries[i] = generateOutput{Path: out.Path, Bytes: len(out.Body), Body: string(out.Body)}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"outputs": summaries,
