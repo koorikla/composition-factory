@@ -62,24 +62,27 @@ func layerWithStream(t *testing.T) v1.Layer {
 }
 
 func TestFetchExtractsOnlyTheBaseLayer(t *testing.T) {
-	// A registry that serves a two-layer image: one junk runtime layer, one base layer.
+	// A registry that serves a two-layer image: the base layer FIRST and a junk
+	// runtime layer LAST. This ordering matters: it makes the test fail for an
+	// implementation that picks a layer by position (e.g. "last layer wins")
+	// instead of by its io.crossplane.xpkg label, which is the actual contract.
 	srv := httptest.NewServer(registry.New())
 	defer srv.Close()
 	u, _ := url.Parse(srv.URL)
 
+	base := layerWithStream(t)
+	baseDigest, err := base.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	junk, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("not a package")), nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := layerWithStream(t)
-	baseDigest, err := base.Digest()
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	img, err := mutate.AppendLayers(empty.Image, junk, base)
+	img, err := mutate.AppendLayers(empty.Image, base, junk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,5 +138,67 @@ func TestFetchErrorsWhenNoBaseLabel(t *testing.T) {
 	}
 	if _, err := Fetch(context.Background(), ref.String()); err == nil {
 		t.Fatal("want an error when the image has no io.crossplane.xpkg base label, got nil")
+	}
+}
+
+func TestFetchErrorsOnMultipleBaseLabels(t *testing.T) {
+	// Layer selection must be deterministic: an image that labels more than one
+	// layer "base" is malformed, and Fetch must reject it with an error naming
+	// every matching digest rather than silently picking one (which, since
+	// image config labels are read into a Go map, would otherwise depend on
+	// map iteration order).
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+	u, _ := url.Parse(srv.URL)
+
+	base1 := layerWithStream(t)
+	base1Digest, err := base1.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base2, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader("also not a package, but also labelled base")), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base2Digest, err := base2.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	img, err := mutate.AppendLayers(empty.Image, base1, base2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := img.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg = cfg.DeepCopy()
+	if cfg.Config.Labels == nil {
+		cfg.Config.Labels = map[string]string{}
+	}
+	cfg.Config.Labels["io.crossplane.xpkg:"+base1Digest.String()] = "base"
+	cfg.Config.Labels["io.crossplane.xpkg:"+base2Digest.String()] = "base"
+	img, err = mutate.ConfigFile(img, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref, err := name.ParseReference(u.Host + "/multibase:v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Write(ref, img); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Fetch(context.Background(), ref.String())
+	if err == nil {
+		t.Fatal("want an error when the image has more than one io.crossplane.xpkg base label, got nil")
+	}
+	if !strings.Contains(err.Error(), base1Digest.String()) || !strings.Contains(err.Error(), base2Digest.String()) {
+		t.Errorf("error %q does not mention both digests (%s, %s)", err.Error(), base1Digest, base2Digest)
 	}
 }

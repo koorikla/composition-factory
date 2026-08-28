@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -66,22 +67,37 @@ func Fetch(ctx context.Context, ref string) (*Package, error) {
 }
 
 // baseLayer finds the layer the image config labels as the package base.
+//
+// cfg.Config.Labels is a Go map, so iterating it directly has randomized
+// order: silently returning "the first match" would make layer selection
+// nondeterministic whenever an image carried more than one matching label.
+// Byte-determinism is a hard requirement of this project's schema-ingest
+// path, so instead we collect every matching label and require exactly one.
 func baseLayer(img v1.Image) (v1.Layer, error) {
 	cfg, err := img.ConfigFile()
 	if err != nil {
 		return nil, fmt.Errorf("read image config: %w", err)
 	}
+	var digests []string
 	for k, v := range cfg.Config.Labels {
 		if v != "base" || !strings.HasPrefix(k, labelPrefix) {
 			continue
 		}
-		h, err := v1.NewHash(strings.TrimPrefix(k, labelPrefix))
+		digests = append(digests, strings.TrimPrefix(k, labelPrefix))
+	}
+	sort.Strings(digests)
+	switch len(digests) {
+	case 0:
+		return nil, fmt.Errorf("no %s...=base label found; this does not look like a Crossplane package", labelPrefix)
+	case 1:
+		h, err := v1.NewHash(digests[0])
 		if err != nil {
-			return nil, fmt.Errorf("bad layer digest in label %q: %w", k, err)
+			return nil, fmt.Errorf("bad layer digest in label %q: %w", labelPrefix+digests[0], err)
 		}
 		return img.LayerByDigest(h)
+	default:
+		return nil, fmt.Errorf("%d layers labelled %s...=base, want exactly 1: %s", len(digests), labelPrefix, strings.Join(digests, ", "))
 	}
-	return nil, fmt.Errorf("no %s...=base label found; this does not look like a Crossplane package", labelPrefix)
 }
 
 // readSingleFileLayer returns the contents of the first regular file in the layer.
