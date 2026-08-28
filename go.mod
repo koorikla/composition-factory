@@ -2,7 +2,12 @@ module github.com/koorikla/compositionfactory
 
 go 1.25.0
 
-require github.com/alecthomas/kong v1.16.1
+require (
+	github.com/alecthomas/kong v1.16.1
+	sigs.k8s.io/yaml v1.6.0
+)
+
+require go.yaml.in/yaml/v2 v2.4.2 // indirect
 
 require (
 	github.com/docker/cli v29.7.2+incompatible // indirect
