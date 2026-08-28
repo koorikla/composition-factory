@@ -34,8 +34,20 @@ func Load(path string) (*Blueprint, error) {
 // Validate reports the first structural problem, naming the offending field.
 func (b *Blueprint) Validate() error {
 	x := b.Spec.XRD
-	if x.Group == "" || x.Kind == "" || x.Plural == "" || x.Version == "" {
-		return fmt.Errorf("spec.xrd needs group, kind, plural and version")
+	required := []struct{ name, val string }{
+		{"group", x.Group}, {"kind", x.Kind}, {"plural", x.Plural}, {"version", x.Version},
+	}
+	var missing []string
+	for _, f := range required {
+		if f.val == "" {
+			missing = append(missing, f.name)
+		}
+	}
+	if len(missing) == 1 {
+		return fmt.Errorf("spec.xrd.%s is required", missing[0])
+	}
+	if len(missing) > 1 {
+		return fmt.Errorf("spec.xrd needs %s", strings.Join(missing, ", "))
 	}
 	switch x.Scope {
 	case "Namespaced", "Cluster":
@@ -59,9 +71,16 @@ func (b *Blueprint) Validate() error {
 		}
 	}
 
-	for _, r := range b.Spec.Resources {
+	for i, r := range b.Spec.Resources {
 		if r.Name == "" || r.Kind == "" {
-			return fmt.Errorf("every resource needs a name and a kind")
+			switch {
+			case r.Name == "" && r.Kind == "":
+				return fmt.Errorf("spec.resources[%d]: needs a name and a kind", i)
+			case r.Name == "":
+				return fmt.Errorf("spec.resources[%d] (kind %q): needs a name", i, r.Kind)
+			default:
+				return fmt.Errorf("spec.resources[%d] %q: needs a kind", i, r.Name)
+			}
 		}
 		paths := make([]string, 0, len(r.Fields))
 		for p := range r.Fields {
