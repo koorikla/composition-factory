@@ -59,6 +59,108 @@ func (b *Blueprint) referencingResources(name string) []string {
 	return refs
 }
 
+// statusReferencingResources returns the names of every resource with a
+// field whose From wires from resources.<name>'s status, in resource order.
+// It is the resources.<name>.status.* counterpart of referencingResources,
+// and matches by parsing each From with the same grammar the validator uses
+// rather than by substring, so a params reference (a different namespace)
+// or a name that merely shares a prefix can never match.
+func (b *Blueprint) statusReferencingResources(name string) []string {
+	var refs []string
+	for _, r := range b.Spec.Resources {
+		for _, f := range r.Fields {
+			if f.From == "" {
+				continue
+			}
+			if ref, err := ParseFrom(f.From); err == nil && ref.Resource == name {
+				refs = append(refs, r.Name)
+				break
+			}
+		}
+	}
+	return refs
+}
+
+// resourceIndex returns the position of the resource named name, or -1.
+func (b *Blueprint) resourceIndex(name string) int {
+	for i, r := range b.Spec.Resources {
+		if r.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// RenameResource renames a composed resource and rewrites every status wire
+// (resources.<from>.status.<path>) to point at the new name — the same
+// contract RenameParameter has for params.<name> references. Params
+// references are a different namespace and are never touched. It fails if
+// from is not declared, if to is already declared (unless to == from — the
+// same blur-submit no-op RenameParameter absorbs), or if the resulting
+// blueprint does not validate (e.g. to is not a DNS label); in every failure
+// case the receiver is left unchanged.
+func (b *Blueprint) RenameResource(from, to string) error {
+	idx := b.resourceIndex(from)
+	if idx < 0 {
+		return fmt.Errorf("rename resource: %q is not declared", from)
+	}
+	if from == to {
+		return nil
+	}
+	if b.resourceIndex(to) >= 0 {
+		return fmt.Errorf("rename resource: %q is already declared", to)
+	}
+
+	cp := b.deepCopy()
+	cp.Spec.Resources[idx].Name = to
+	oldPrefix := "resources." + from + ".status."
+	newPrefix := "resources." + to + ".status."
+	for i, r := range cp.Spec.Resources {
+		for path, f := range r.Fields {
+			if rest, ok := strings.CutPrefix(f.From, oldPrefix); ok {
+				f.From = newPrefix + rest
+				cp.Spec.Resources[i].Fields[path] = f
+			}
+		}
+	}
+
+	if err := cp.Validate(); err != nil {
+		return fmt.Errorf("rename resource %q to %q: %w", from, to, err)
+	}
+
+	*b = *cp
+	return nil
+}
+
+// DeleteResource removes a composed resource. It refuses while any other
+// resource still wires from the deleted resource's status (naming every
+// referencing resource, the same one-round-trip contract DeleteParameter
+// has), when the resource is not declared, or when the resulting blueprint
+// does not validate. In every failure case the receiver is left unchanged.
+func (b *Blueprint) DeleteResource(name string) error {
+	idx := b.resourceIndex(name)
+	if idx < 0 {
+		return fmt.Errorf("delete resource: %q is not declared", name)
+	}
+	if refs := b.statusReferencingResources(name); len(refs) > 0 {
+		quoted := make([]string, len(refs))
+		for i, r := range refs {
+			quoted[i] = fmt.Sprintf("%q", r)
+		}
+		return fmt.Errorf("delete resource %q: its status is still wired into resources %s",
+			name, strings.Join(quoted, ", "))
+	}
+
+	cp := b.deepCopy()
+	cp.Spec.Resources = append(cp.Spec.Resources[:idx], cp.Spec.Resources[idx+1:]...)
+	if err := cp.Validate(); err != nil {
+		return fmt.Errorf("delete resource %q: %w", name, err)
+	}
+
+	*b = *cp
+	return nil
+}
+
 // AddParameter declares a new XRD parameter. It fails if name is already
 // declared, or if the resulting blueprint does not validate; in either case
 // the receiver is left unchanged.
