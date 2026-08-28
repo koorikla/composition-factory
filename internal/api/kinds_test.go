@@ -131,6 +131,22 @@ func TestFieldsRejectsBadQueryParamsLoudly(t *testing.T) {
 	}
 }
 
+// TestListKindsRejectsBadLimitLoudly is the /api/kinds half of the test
+// above. Both routes parse limit through the same parseIntParam, but only
+// /fields' use of it was covered — so a change that made /api/kinds swallow a
+// malformed limit (silently returning every kind for limit=abc, when the
+// caller asked for a bounded list) would have kept the suite green. Fix round
+// 2, minor finding.
+func TestListKindsRejectsBadLimitLoudly(t *testing.T) {
+	h := testHandler(t)
+	for _, q := range []string{"?limit=abc", "?limit=-x", "?q=queue&limit=1.5"} {
+		if code := getJSON(t, h, "/api/kinds"+q, nil); code != http.StatusBadRequest {
+			t.Errorf("/api/kinds%s -> status %d, want 400; a malformed limit that is silently ignored "+
+				"returns a different result set than the caller asked for, with no signal", q, code)
+		}
+	}
+}
+
 // --- Fix round 1: coverage for review findings 1 and 2 ---
 //
 // Neither of these was in the brief's given test list; both close gaps the

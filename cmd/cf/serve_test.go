@@ -23,15 +23,30 @@ func TestServeDefaultsToLoopback(t *testing.T) {
 	}
 }
 
+// Every spelling of "bind everything" must be refused, not just the obvious
+// one.
+//
+// Fix round 2 (Important): this test covered 0.0.0.0:8080 alone, and the two
+// spellings it left out are the two that do not look like an address at all
+// — ":8080" leaves the host empty, and "[::]:8080" is the IPv6 unspecified
+// address. Both bind every interface on the machine. The behaviour was
+// already correct, but nothing pinned it: injecting `if host == "" { return
+// true }` into isLoopbackHost left the whole suite green while opening an
+// unauthenticated, file-writing API to the network. With ":8080" here, that
+// injection fails this test.
 func TestServeRefusesNonLoopbackWithoutTheExplicitFlag(t *testing.T) {
-	c := ServeCmd{Addr: "0.0.0.0:8080"}
-	err := c.check()
-	if err == nil {
-		t.Fatal("want an error binding 0.0.0.0 without --i-know-this-is-unauthenticated")
-	}
-	for _, want := range []string{"0.0.0.0", "authentication"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not mention %q", err.Error(), want)
+	for _, addr := range []string{"0.0.0.0:8080", ":8080", "[::]:8080"} {
+		c := ServeCmd{Addr: addr}
+		err := c.check()
+		if err == nil {
+			t.Errorf("--addr %s was accepted without --i-know-this-is-unauthenticated: it binds every "+
+				"interface, which exposes this unauthenticated, file-writing server to the network", addr)
+			continue
+		}
+		for _, want := range []string{addr, "authentication"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("--addr %s: error %q does not mention %q", addr, err.Error(), want)
+			}
 		}
 	}
 }
