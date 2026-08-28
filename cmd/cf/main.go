@@ -19,6 +19,7 @@ type CLI struct {
 	Version  VersionCmd  `cmd:"" help:"Print the cf version."`
 	Provider ProviderCmd `cmd:"" help:"Manage provider schema sources."`
 	Gen      GenCmd      `cmd:"" help:"Generate XRD, Composition and functions.yaml from a blueprint."`
+	Serve    ServeCmd    `cmd:"" help:"Serve the compositionfactory HTTP API, loopback-only by default."`
 }
 
 type VersionCmd struct{}
