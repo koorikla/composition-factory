@@ -39,13 +39,13 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// loadBlueprint reads and validates the blueprint at o.Blueprint. On failure
+// loadBlueprint reads and validates the blueprint at srv.Blueprint. On failure
 // it writes the response itself and returns ok=false, so every caller can
 // just `if !ok { return }`.
 //
 // Fix round 1 (Finding 1): the failure is classified before it is reported.
 // blueprint.Load can fail two structurally different ways — it could not
-// even read o.Blueprint (missing file, a directory in its place, a
+// even read srv.Blueprint (missing file, a directory in its place, a
 // permissions problem: the server's own fixed path or environment is wrong,
 // nothing about the current HTTP request caused it), or it read the file
 // fine and then the content failed to parse as YAML or failed Validate() (a
@@ -53,8 +53,8 @@ import (
 // is). blueprint.ReadError marks the first case; errors.As unwraps through
 // Load's %w wrapping to find it. Everything else — parse and Validate()
 // failures — keeps the previous 400 treatment.
-func (o Options) loadBlueprint(w http.ResponseWriter) (*blueprint.Blueprint, bool) {
-	b, err := blueprint.Load(o.Blueprint)
+func (srv *server) loadBlueprint(w http.ResponseWriter) (*blueprint.Blueprint, bool) {
+	b, err := blueprint.Load(srv.Blueprint)
 	if err != nil {
 		var readErr *blueprint.ReadError
 		status := http.StatusBadRequest
@@ -68,8 +68,8 @@ func (o Options) loadBlueprint(w http.ResponseWriter) (*blueprint.Blueprint, boo
 }
 
 // handleGetBlueprint serves GET /api/blueprint: the whole document as JSON.
-func (o Options) handleGetBlueprint(w http.ResponseWriter, _ *http.Request) {
-	b, ok := o.loadBlueprint(w)
+func (srv *server) handleGetBlueprint(w http.ResponseWriter, _ *http.Request) {
+	b, ok := srv.loadBlueprint(w)
 	if !ok {
 		return
 	}
@@ -92,14 +92,20 @@ type addParameterRequest struct {
 // unchanged on any failure, so "the name existed going in" and "AddParameter
 // failed because it was a duplicate" are one and the same fact, checkable
 // from outside the edit layer without depending on the wording of its error.
-func (o Options) handleAddParameter(w http.ResponseWriter, r *http.Request) {
+func (srv *server) handleAddParameter(w http.ResponseWriter, r *http.Request) {
 	var req addParameterRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	b, ok := o.loadBlueprint(w)
+	// load -> edit -> persist has to be atomic against the other mutating
+	// handlers, or two concurrent edits both start from the same document
+	// and the second write silently discards the first. See server.mu.
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	b, ok := srv.loadBlueprint(w)
 	if !ok {
 		return
 	}
@@ -114,7 +120,7 @@ func (o Options) handleAddParameter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !o.persistBlueprint(w, b) {
+	if !srv.persistBlueprint(w, b) {
 		return
 	}
 	writeJSON(w, http.StatusOK, b)
@@ -129,7 +135,7 @@ type setParameterRequest struct {
 // existing parameter's declaration in full (SetParameter is replace-only,
 // not a merge/patch). Unknown name -> 404, matching this API's general
 // unknown-name convention.
-func (o Options) handleSetParameter(w http.ResponseWriter, r *http.Request) {
+func (srv *server) handleSetParameter(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
 	var req setParameterRequest
@@ -138,7 +144,13 @@ func (o Options) handleSetParameter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b, ok := o.loadBlueprint(w)
+	// load -> edit -> persist has to be atomic against the other mutating
+	// handlers, or two concurrent edits both start from the same document
+	// and the second write silently discards the first. See server.mu.
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	b, ok := srv.loadBlueprint(w)
 	if !ok {
 		return
 	}
@@ -153,7 +165,7 @@ func (o Options) handleSetParameter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !o.persistBlueprint(w, b) {
+	if !srv.persistBlueprint(w, b) {
 		return
 	}
 	writeJSON(w, http.StatusOK, b)
@@ -181,7 +193,7 @@ type renameParameterRequest struct {
 // failure, so fromExists and toCollides (captured before the call, since a
 // failed call leaves the receiver untouched) reproduce the same branch the
 // edit layer took.
-func (o Options) handleRenameParameter(w http.ResponseWriter, r *http.Request) {
+func (srv *server) handleRenameParameter(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
 	var req renameParameterRequest
@@ -190,7 +202,13 @@ func (o Options) handleRenameParameter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b, ok := o.loadBlueprint(w)
+	// load -> edit -> persist has to be atomic against the other mutating
+	// handlers, or two concurrent edits both start from the same document
+	// and the second write silently discards the first. See server.mu.
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	b, ok := srv.loadBlueprint(w)
 	if !ok {
 		return
 	}
@@ -210,7 +228,7 @@ func (o Options) handleRenameParameter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !o.persistBlueprint(w, b) {
+	if !srv.persistBlueprint(w, b) {
 		return
 	}
 	writeJSON(w, http.StatusOK, b)
@@ -232,10 +250,16 @@ func (o Options) handleRenameParameter(w http.ResponseWriter, r *http.Request) {
 // fails, via Validate rejecting the XRD afterwards — a genuine 400, not a
 // 409 — so "still referenced" has to be established independently of
 // "existed" and independently of "the delete failed".
-func (o Options) handleDeleteParameter(w http.ResponseWriter, r *http.Request) {
+func (srv *server) handleDeleteParameter(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
-	b, ok := o.loadBlueprint(w)
+	// load -> edit -> persist has to be atomic against the other mutating
+	// handlers, or two concurrent edits both start from the same document
+	// and the second write silently discards the first. See server.mu.
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	b, ok := srv.loadBlueprint(w)
 	if !ok {
 		return
 	}
@@ -255,7 +279,7 @@ func (o Options) handleDeleteParameter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !o.persistBlueprint(w, b) {
+	if !srv.persistBlueprint(w, b) {
 		return
 	}
 	writeJSON(w, http.StatusOK, b)
@@ -281,13 +305,13 @@ func referencingResources(b *blueprint.Blueprint, name string) []string {
 	return refs
 }
 
-// persistBlueprint writes b to o.Blueprint, deterministically and only if
+// persistBlueprint writes b to srv.Blueprint, deterministically and only if
 // the result would itself load back. On failure it writes the 500 response
-// itself and returns false, so callers can just `if !o.persistBlueprint(w,
+// itself and returns false, so callers can just `if !srv.persistBlueprint(w,
 // b) { return }`; a failure here means the write was refused, not attempted
 // half-done, so the file on disk is left exactly as it was before the call.
-func (o Options) persistBlueprint(w http.ResponseWriter, b *blueprint.Blueprint) bool {
-	if err := writeBlueprintFile(o.Blueprint, b); err != nil {
+func (srv *server) persistBlueprint(w http.ResponseWriter, b *blueprint.Blueprint) bool {
+	if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return false
 	}

@@ -17,7 +17,7 @@ import (
 // every s, so an empty query matches every Kind and this collapses to "all
 // kinds, optionally capped at limit" without a separate branch for the
 // no-query case.
-func (o Options) handleKinds(w http.ResponseWriter, r *http.Request) {
+func (srv *server) handleKinds(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
 	limit, err := parseIntParam(q, "limit")
@@ -26,7 +26,7 @@ func (o Options) handleKinds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	kinds := o.Index.Search(q.Get("q"), limit)
+	kinds := srv.Index.Search(q.Get("q"), limit)
 	if kinds == nil {
 		kinds = []index.Kind{}
 	}
@@ -47,7 +47,7 @@ func (o Options) handleKinds(w http.ResponseWriter, r *http.Request) {
 // the API server silently prunes on v2 namespaced resources. Envelope()
 // reads the real CRD, so a namespaced Queue and a cluster-scoped Queue each
 // get the envelope their own schema actually has.
-func (o Options) handleKind(w http.ResponseWriter, r *http.Request) {
+func (srv *server) handleKind(w http.ResponseWriter, r *http.Request) {
 	apiVersion, err := pathAPIVersion(r)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -59,7 +59,7 @@ func (o Options) handleKind(w http.ResponseWriter, r *http.Request) {
 	// response must describe the same provider's resource, which only
 	// holds if they are resolved as one consistent choice — see
 	// index.LookupKind's doc comment for the collision this avoids.
-	kind, crd, ok := o.Index.LookupKind(apiVersion, kindName)
+	kind, crd, ok := srv.Index.LookupKind(apiVersion, kindName)
 	if !ok {
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("kind not found: %s %s", apiVersion, kindName))
 		return
@@ -87,7 +87,7 @@ func (o Options) handleKind(w http.ResponseWriter, r *http.Request) {
 // handleKindFields serves GET
 // /api/kinds/{apiVersion}/{kind}/fields?required_only=&max_depth=&prefix=&q=&limit=:
 // the forProvider fields for one kind, filtered by index.FieldQuery.
-func (o Options) handleKindFields(w http.ResponseWriter, r *http.Request) {
+func (srv *server) handleKindFields(w http.ResponseWriter, r *http.Request) {
 	apiVersion, err := pathAPIVersion(r)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -95,7 +95,7 @@ func (o Options) handleKindFields(w http.ResponseWriter, r *http.Request) {
 	}
 	kindName := r.PathValue("kind")
 
-	crd, ok := o.Index.Lookup(apiVersion, kindName)
+	crd, ok := srv.Index.Lookup(apiVersion, kindName)
 	if !ok {
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("kind not found: %s %s", apiVersion, kindName))
 		return

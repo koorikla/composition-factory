@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/index"
@@ -52,6 +53,43 @@ func (o Options) validate() error {
 	return nil
 }
 
+// server is the resolved Options plus the one piece of mutable state this
+// package has: the lock that serializes blueprint mutations. New builds
+// exactly one of these and every route handler is a method on it, so all
+// handlers necessarily share that one lock.
+//
+// Fix round 2 (Important): the handlers used to hang off Options directly.
+// Options is a value type, so each mux registration captured its own copy and
+// no lock stored in it could ever have been shared — the struct exists so
+// there is one place for per-server state to live.
+type server struct {
+	Options
+
+	// mu serializes the blueprint handlers that mutate. Each of them does a
+	// load -> edit -> persist against the file on disk, with nothing in
+	// between holding anyone else off: two concurrent POSTs both read the
+	// same starting document, each applied its own edit to its own copy, and
+	// the second write silently replaced the first. Both callers got a 200;
+	// one of the two edits was simply gone. (Probed exactly that way — two
+	// concurrent parameter adds, two 200s, one parameter missing from the
+	// file afterwards.)
+	//
+	// It is held across the whole load/edit/persist sequence rather than
+	// just the write, because the lost update happens in the gap between the
+	// load and the write, not during either of them.
+	//
+	// GET /api/blueprint deliberately does not take it: a read is a single
+	// os.ReadFile of a file that is only ever replaced by an atomic rename
+	// (see atomicWriteFile), so a reader always observes one complete
+	// document — the old one or the new one, never a mix of the two.
+	//
+	// This is a within-process lock only. It cannot order this server
+	// against a concurrent `cf gen`, a hand edit, or a second `cf serve`
+	// pointed at the same blueprint; that would need file locking, which
+	// this single-user local dev tool does not have and does not need.
+	mu sync.Mutex
+}
+
 // New builds the compositionfactory HTTP API. Every response — success or
 // error — passes through the same middleware: a plain-text ServeMux error
 // is normalized into the project's one JSON error shape, an ETag is computed
@@ -63,6 +101,7 @@ func New(o Options) (http.Handler, error) {
 		return nil, err
 	}
 
+	srv := &server{Options: o}
 	mux := http.NewServeMux()
 
 	// Deliberately no catch-all "/" pattern: registering one would make
@@ -74,15 +113,15 @@ func New(o Options) (http.Handler, error) {
 	// ServeMux's own default 404/405 handling (normalized to JSON below)
 	// is what actually gives 405-vs-404 "for free", per this task's brief.
 	mux.HandleFunc("GET /healthz", handleHealthz)
-	mux.HandleFunc("GET /api/kinds", o.handleKinds)
-	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}", o.handleKind)
-	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}/fields", o.handleKindFields)
-	mux.HandleFunc("GET /api/blueprint", o.handleGetBlueprint)
-	mux.HandleFunc("POST /api/blueprint/parameters", o.handleAddParameter)
-	mux.HandleFunc("PUT /api/blueprint/parameters/{name}", o.handleSetParameter)
-	mux.HandleFunc("POST /api/blueprint/parameters/{name}/rename", o.handleRenameParameter)
-	mux.HandleFunc("DELETE /api/blueprint/parameters/{name}", o.handleDeleteParameter)
-	mux.HandleFunc("POST /api/generate", o.handleGenerate)
+	mux.HandleFunc("GET /api/kinds", srv.handleKinds)
+	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}", srv.handleKind)
+	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}/fields", srv.handleKindFields)
+	mux.HandleFunc("GET /api/blueprint", srv.handleGetBlueprint)
+	mux.HandleFunc("POST /api/blueprint/parameters", srv.handleAddParameter)
+	mux.HandleFunc("PUT /api/blueprint/parameters/{name}", srv.handleSetParameter)
+	mux.HandleFunc("POST /api/blueprint/parameters/{name}/rename", srv.handleRenameParameter)
+	mux.HandleFunc("DELETE /api/blueprint/parameters/{name}", srv.handleDeleteParameter)
+	mux.HandleFunc("POST /api/generate", srv.handleGenerate)
 
 	return wrap(mux), nil
 }

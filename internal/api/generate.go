@@ -5,7 +5,7 @@
 // blueprint, which only holds if they share one rendering path. This
 // handler therefore loads the blueprint and its provider schemas — the same
 // two inputs cmd/cf/gen.go's run loads them from — and calls
-// emit.Generate(b, crds, o.OutDir). Nothing in this file computes, renders
+// emit.Generate(b, crds, srv.OutDir). Nothing in this file computes, renders
 // or otherwise touches a single byte of an XRD, Composition or functions.yaml;
 // any code here that did would be a defect, not an optimisation.
 package api
@@ -51,29 +51,40 @@ type generateOutput struct {
 // blueprint/cache state failing to produce valid output — but they are
 // reported the same way malformed-request errors are (400), matching this
 // task's own given test rather than introducing a finer-grained code this
-// task's tests do not ask for. The one exception is o.loadBlueprint's own
-// 500 case (Fix round 1, Finding 1): if o.Blueprint itself cannot be read at
+// task's tests do not ask for. The one exception is srv.loadBlueprint's own
+// 500 case (Fix round 1, Finding 1): if srv.Blueprint itself cannot be read at
 // all, that is the server's fixed path being wrong, not the blueprint's
 // content, and is reported as 500 there — see blueprint.go's loadBlueprint.
-func (o Options) handleGenerate(w http.ResponseWriter, r *http.Request) {
+func (srv *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	var req generateRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	b, ok := o.loadBlueprint(w)
+	// Held for the whole handler, not just the write half. Two concurrent
+	// write:true generations render from whatever the blueprint said when
+	// each of them loaded it and then write the same output paths with
+	// os.WriteFile, which is not atomic — interleaved, they can leave a file
+	// that is neither run's output. Serializing with the blueprint's own
+	// mutating handlers additionally means a generation renders a document
+	// that actually existed as a whole, rather than one an edit was midway
+	// through replacing. See server.mu.
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	b, ok := srv.loadBlueprint(w)
 	if !ok {
 		return
 	}
 
-	crds, err := o.loadSourceCRDs(b)
+	crds, err := srv.loadSourceCRDs(b)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	outputs, err := emit.Generate(b, crds, o.OutDir)
+	outputs, err := emit.Generate(b, crds, srv.OutDir)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -103,13 +114,13 @@ func (o Options) handleGenerate(w http.ResponseWriter, r *http.Request) {
 }
 
 // loadSourceCRDs loads every provider schema b.Spec.Sources names, from
-// o.Store — the identical loop cmd/cf/gen.go's run uses, so this route reads
+// srv.Store — the identical loop cmd/cf/gen.go's run uses, so this route reads
 // the provider cache exactly the way `cf gen` does rather than inventing its
 // own lookup order or error handling for it.
-func (o Options) loadSourceCRDs(b *blueprint.Blueprint) ([]schema.CRD, error) {
+func (srv *server) loadSourceCRDs(b *blueprint.Blueprint) ([]schema.CRD, error) {
 	var crds []schema.CRD
 	for _, s := range b.Spec.Sources {
-		got, err := o.Store.Load(s.Provider)
+		got, err := srv.Store.Load(s.Provider)
 		if err != nil {
 			return nil, err
 		}

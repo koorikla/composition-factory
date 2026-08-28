@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
@@ -220,6 +222,70 @@ func TestGenerateProducesTheSameBytesAsTheEngine(t *testing.T) {
 		if out.Bytes != len(onDisk) {
 			t.Errorf("%s: reported %d bytes, wrote %d", out.Path, out.Bytes, len(onDisk))
 		}
+	}
+}
+
+// TestConcurrentAddsDoNotLoseEdits is fix round 2's lost-update regression.
+//
+// Every mutating handler does load -> edit -> persist against the file on
+// disk. With nothing serializing that sequence, two concurrent requests both
+// read the same starting document, each applied its own edit to its own copy,
+// and whichever wrote second silently replaced the first: both callers were
+// told 200, and one of the two edits simply did not exist afterwards. That is
+// the worst shape a bug can take here — the API reports success for work it
+// threw away.
+//
+// Eight concurrent adds of distinct names, released together so they overlap
+// rather than queue: every one must report 200 AND be on disk at the end.
+// Checking the responses alone would not catch this at all — the pre-fix
+// server answered 200 to all eight while dropping most of them.
+func TestConcurrentAddsDoNotLoseEdits(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	const n = 8
+	name := func(i int) string { return fmt.Sprintf("param%d", i) }
+
+	codes := make([]int, n)
+	bodies := make([]string, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			req := httptest.NewRequest("POST", "/api/blueprint/parameters",
+				strings.NewReader(fmt.Sprintf(`{"name":%q,"parameter":{"type":"string"}}`, name(i))))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			<-start // release all eight at once
+			h.ServeHTTP(rec, req)
+			codes[i] = rec.Code
+			bodies[i] = rec.Body.String()
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, code := range codes {
+		if code != http.StatusOK {
+			t.Errorf("add %s: status %d: %s", name(i), code, bodies[i])
+		}
+	}
+
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("blueprint on disk no longer loads after %d concurrent edits: %v", n, err)
+	}
+	var missing []string
+	for i := range n {
+		if _, ok := reloaded.Spec.XRD.Parameters[name(i)]; !ok {
+			missing = append(missing, name(i))
+		}
+	}
+	if len(missing) > 0 {
+		t.Errorf("%d of %d concurrent edits were reported as successful but are not on disk: %v — "+
+			"load/edit/persist is not atomic, so a later write is overwriting an earlier one",
+			len(missing), n, missing)
 	}
 }
 
