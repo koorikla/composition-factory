@@ -144,9 +144,50 @@ func (c CRD) ForProvider() ([]*Node, error) {
 	return BuildTree(inner, stringSlice(fp["required"])), nil
 }
 
+// FieldTree returns the settable field tree for composing this kind — the
+// one tree blueprint field paths are checked against and /api/fields serves.
+//
+// For a managed resource that is the spec.forProvider subtree, paths rooted
+// there (region, redrivePolicy.deadLetterTargetArn). For a native Kubernetes
+// kind there is no forProvider — the composed object IS the object — so the
+// tree is the object's own top-level properties minus what a composition
+// author never sets by path: apiVersion and kind (the generator emits them),
+// metadata (the generator owns the composition-resource-name annotation; the
+// nested pod-template metadata under spec.template stays fully addressable),
+// and status (server-owned). Paths therefore read exactly the way they do in
+// a manifest: spec.template.spec.containers[0].image, or data on a ConfigMap.
+func (c CRD) FieldTree() ([]*Node, error) {
+	if !c.Native {
+		return c.ForProvider()
+	}
+	v, err := c.Preferred()
+	if err != nil {
+		return nil, err
+	}
+	rest := make(map[string]any, len(v.Properties))
+	for k, val := range v.Properties {
+		switch k {
+		case "apiVersion", "kind", "metadata", "status":
+			continue
+		}
+		rest[k] = val
+	}
+	// No required list: Kubernetes object schemas mark nothing required at
+	// the top level (required lives inside spec's own subtrees, which
+	// BuildTree reads from each node's schema as usual).
+	return BuildTree(rest, nil), nil
+}
+
 // Envelope returns spec.properties minus forProvider and initProvider. It is
 // computed rather than hard-coded: the envelope is not universal across providers.
+//
+// A native kind has no envelope at all — there is no Crossplane wrapper
+// around the object, so the honest answer is an empty tree, not the object's
+// own spec (which is FieldTree's job to serve as settable fields).
 func (c CRD) Envelope() ([]*Node, error) {
+	if c.Native {
+		return nil, nil
+	}
 	props, required, err := c.specProperties()
 	if err != nil {
 		return nil, err

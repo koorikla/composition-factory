@@ -23,6 +23,18 @@
       "namespaced": false,
       "required": 1,
       "fields": 18
+    },
+    {
+      "kind": "Deployment",
+      "group": "apps",
+      "version": "v1",
+      "apiVersion": "apps/v1",
+      "plural": "deployments",
+      "scope": "Namespaced",
+      "provider": "k8s",
+      "namespaced": true,
+      "required": 250,
+      "fields": 842
     }
   ]
 }

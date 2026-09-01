@@ -954,3 +954,34 @@ func TestValidateStillAcceptsTheOnDiskFixtureWithSourcesAndProvider(t *testing.T
 		t.Fatalf("Spec.Resources = %+v, want one resource with a provider", b.Spec.Resources)
 	}
 }
+
+// "k8s" is a resource-level label (compose this native kind), never a source
+// package: a source entry named "k8s" would reach cache.Store.Load and fail
+// with a misleading "run: cf provider add k8s", so Validate refuses it with
+// the real explanation instead.
+func TestValidateRefusesK8sAsASource(t *testing.T) {
+	doc := strings.Replace(valid,
+		"- provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2\n", "- provider: k8s\n", 1)
+	_, err := Load(write(t, doc))
+	if err == nil {
+		t.Fatal("Validate accepted spec.sources[0].provider: k8s; native kinds are vendored, not a source package")
+	}
+	if !strings.Contains(err.Error(), "vendored") {
+		t.Errorf("err = %v, want it to explain that native kinds are vendored and always available", err)
+	}
+}
+
+// A resource composing a native kind carries provider: k8s — that spelling
+// must validate.
+func TestValidateAcceptsK8sAsAResourceProvider(t *testing.T) {
+	b := validParamBlueprint("providerName")
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name:     "web",
+		Kind:     "Deployment",
+		Provider: NativeProvider,
+		Fields:   map[string]Field{"spec.replicas": {Raw: "2"}},
+	})
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate refused a native resource with provider: k8s: %v", err)
+	}
+}

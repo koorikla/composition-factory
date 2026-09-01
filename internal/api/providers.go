@@ -14,9 +14,11 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
 
@@ -172,7 +174,7 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	// enforces: the index and the store must describe the same bytes, so the
 	// existing refs are re-read from the store they were saved to, and the
 	// new ref uses the exact CRDs Save just persisted.
-	byProvider := make(map[string][]schema.CRD, len(srv.Providers)+1)
+	byProvider := make(map[string][]schema.CRD, len(srv.Providers)+2)
 	for _, ref := range srv.Providers {
 		existing, err := srv.Store.Load(ref)
 		if err != nil {
@@ -182,6 +184,18 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		byProvider[ref] = existing
 	}
 	byProvider[req.Ref] = crds
+	// The vendored native kinds are indexed under their own label, exactly
+	// as cmd/cf/serve.go's startup build does — without this line the first
+	// provider add would rebuild an index with every native kind silently
+	// gone from /api/kinds. They are not part of srv.Providers (that list is
+	// xpkg refs with digests to pin and cache entries to count; native kinds
+	// have neither — their pin is the vendored Kubernetes version).
+	native, err := k8s.Kinds()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	byProvider[blueprint.NativeProvider] = native
 
 	idx, err := index.Build(byProvider)
 	if err != nil {

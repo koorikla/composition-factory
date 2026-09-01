@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
+
+	"github.com/koorikla/compositionfactory/internal/rendertest"
 )
 
 // providerRef is the OSS provider used for the end-to-end acceptance run. It
@@ -125,13 +129,17 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 		t.Fatalf("cf gen --check right after gen should exit 0: %v\n%s", err, out)
 	}
 
-	// Step 4: render what we generated.
+	// Step 4: render what we generated. The lock serializes real renders
+	// across concurrently running test packages — they all reuse the same
+	// runtime-docker-name containers (see internal/rendertest).
 	comp := filepath.Join(outDir, "compositions", "xqueues.platform.hooli.tech.yaml")
 	xrd := filepath.Join(outDir, "xrds", "xqueues.platform.hooli.tech.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
+	release := rendertest.Lock(t)
 	render := exec.Command("crossplane", "composition", "render",
 		"testdata/xr.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
 	rendered, err := render.CombinedOutput()
+	release()
 	if err != nil {
 		t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
 	}
@@ -167,6 +175,165 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 		}
 		t.Log("golden updated")
 	}
+}
+
+// TestAcceptanceNativeCompositionRenders is the native-kinds acceptance
+// gate: a blueprint composing a managed Queue, a native Deployment and a
+// native Service, rendered through the real `crossplane composition render`.
+// It proves structurally — by decoding the rendered documents, not by
+// substring luck — that the Deployment lands as the Kubernetes object
+// itself: the parameter's image at spec.template.spec.containers[0].image,
+// and NO forProvider envelope, NO providerConfigRef, on either native
+// resource, while the Queue beside them keeps its full managed envelope.
+func TestAcceptanceNativeCompositionRenders(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	bin := filepath.Join(repoRoot, "bin", "cf")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
+		t.Fatalf("build cf: %v\n%s", err, out)
+	}
+
+	cacheDir := filepath.Join(dir, "cache")
+	lock := filepath.Join(dir, ".cf.lock")
+
+	// Step 1: fetch the managed provider. The native kinds need no fetch at
+	// all — they are vendored into the binary, pinned to one Kubernetes
+	// version, which is half of what this test exists to prove.
+	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("cf provider add: %v\n%s", err, out)
+	}
+
+	// Step 2: generate, then prove --check sees the fresh tree as in sync.
+	outDir := filepath.Join(dir, "out")
+	gen := exec.Command(bin, "gen", "testdata/xwebapp.cf.yaml", "-o", outDir, "--cache-dir", cacheDir)
+	if out, err := gen.CombinedOutput(); err != nil {
+		t.Fatalf("cf gen: %v\n%s", err, out)
+	}
+	chk := exec.Command(bin, "gen", "testdata/xwebapp.cf.yaml", "-o", outDir, "--cache-dir", cacheDir, "--check")
+	if out, err := chk.CombinedOutput(); err != nil {
+		t.Fatalf("cf gen --check right after gen should exit 0: %v\n%s", err, out)
+	}
+
+	// Step 3: render what we generated with the real crossplane CLI,
+	// serialized against other packages' real renders (see internal/rendertest).
+	comp := filepath.Join(outDir, "compositions", "xwebapps.platform.hooli.tech.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xwebapps.platform.hooli.tech.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+	release := rendertest.Lock(t)
+	render := exec.Command("crossplane", "composition", "render",
+		"testdata/xr-webapp.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
+	rendered, err := render.CombinedOutput()
+	release()
+	if err != nil {
+		t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+	}
+
+	docs := decodeRenderedDocs(t, rendered)
+
+	dep, ok := docs["Deployment"]
+	if !ok {
+		t.Fatalf("no Deployment among rendered documents\n---\n%s", rendered)
+	}
+	if av := dep["apiVersion"]; av != "apps/v1" {
+		t.Errorf("Deployment apiVersion = %v, want apps/v1", av)
+	}
+	if got := digAny(dep, "spec", "template", "spec", "containers", 0, "image"); got != "nginx:1.29.1" {
+		t.Errorf("Deployment containers[0].image = %v, want the XR's parameter value nginx:1.29.1\n---\n%s", got, rendered)
+	}
+	svc, ok := docs["Service"]
+	if !ok {
+		t.Fatalf("no Service among rendered documents\n---\n%s", rendered)
+	}
+	if av := svc["apiVersion"]; av != "v1" {
+		t.Errorf("Service apiVersion = %v, want bare v1", av)
+	}
+	for kind, doc := range map[string]map[string]any{"Deployment": dep, "Service": svc} {
+		spec, _ := doc["spec"].(map[string]any)
+		if spec == nil {
+			t.Errorf("%s rendered without a spec", kind)
+			continue
+		}
+		for _, forbidden := range []string{"forProvider", "providerConfigRef", "managementPolicies", "deletionPolicy"} {
+			if _, present := spec[forbidden]; present {
+				t.Errorf("%s spec carries %q — a native object must land WITHOUT any Crossplane envelope\n---\n%s",
+					kind, forbidden, rendered)
+			}
+		}
+	}
+
+	// The managed Queue beside them must keep its envelope — the fork must
+	// branch, not leak.
+	queue, ok := docs["Queue"]
+	if !ok {
+		t.Fatalf("no Queue among rendered documents\n---\n%s", rendered)
+	}
+	if got := digAny(queue, "spec", "forProvider", "region"); got != "eu-north-1" {
+		t.Errorf("Queue spec.forProvider.region = %v, want eu-north-1", got)
+	}
+	if got := digAny(queue, "spec", "providerConfigRef", "name"); got != "localstack" {
+		t.Errorf("Queue providerConfigRef.name = %v, want localstack", got)
+	}
+
+	for _, bad := range []string{"<no value>", "<nil>"} {
+		if strings.Contains(string(rendered), bad) {
+			t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+		}
+	}
+}
+
+// decodeRenderedDocs splits `crossplane composition render`'s multi-document
+// stream and decodes each document, keyed by kind (each kind appears once in
+// this fixture).
+func decodeRenderedDocs(t *testing.T, rendered []byte) map[string]map[string]any {
+	t.Helper()
+	docs := map[string]map[string]any{}
+	for _, chunk := range strings.Split(string(rendered), "\n---\n") {
+		chunk = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(chunk), "---"))
+		if chunk == "" {
+			continue
+		}
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(chunk), &doc); err != nil {
+			t.Fatalf("rendered document is not valid YAML: %v\n---\n%s", err, chunk)
+		}
+		if kind, _ := doc["kind"].(string); kind != "" {
+			docs[kind] = doc
+		}
+	}
+	return docs
+}
+
+// digAny walks nested maps/slices by string key or int index, returning nil
+// the moment a step does not resolve — assertions then fail on the value.
+func digAny(v any, path ...any) any {
+	for _, step := range path {
+		switch s := step.(type) {
+		case string:
+			m, ok := v.(map[string]any)
+			if !ok {
+				return nil
+			}
+			v = m[s]
+		case int:
+			l, ok := v.([]any)
+			if !ok || s >= len(l) {
+				return nil
+			}
+			v = l[s]
+		}
+	}
+	return v
 }
 
 // fakeReporter records which of Skipf/Fatalf unavailable chose, so the

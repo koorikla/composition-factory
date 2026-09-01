@@ -197,3 +197,64 @@ func TestEnvelopeExcludesForProviderAndInitProvider(t *testing.T) {
 		t.Errorf("Envelope (-want +got):\n%s", diff)
 	}
 }
+
+// FieldTree is the one "settable fields" entry point: for a managed
+// resource it must be exactly ForProvider (so nothing downstream changes
+// behavior for providers), and for a native kind it is the object's own
+// top-level properties minus the generator- and server-owned quartet.
+func TestFieldTreeMatchesForProviderForManagedCRDs(t *testing.T) {
+	c := parseOne(t, nestedCRD)
+	fromFieldTree, err := c.FieldTree()
+	if err != nil {
+		t.Fatalf("FieldTree: %v", err)
+	}
+	fromForProvider, err := c.ForProvider()
+	if err != nil {
+		t.Fatalf("ForProvider: %v", err)
+	}
+	var a, b []string
+	for _, l := range Leaves(fromFieldTree, "") {
+		a = append(a, l.Path)
+	}
+	for _, l := range Leaves(fromForProvider, "") {
+		b = append(b, l.Path)
+	}
+	if diff := cmp.Diff(b, a); diff != "" {
+		t.Errorf("FieldTree and ForProvider disagree for a managed CRD (-forProvider +fieldTree):\n%s", diff)
+	}
+}
+
+func TestFieldTreeOfNativeKindExcludesGeneratorOwnedKeys(t *testing.T) {
+	c := CRD{
+		Kind: "ConfigMap", Native: true,
+		Versions: []Version{{Name: "v1", Served: true, Storage: true, Properties: map[string]any{
+			"apiVersion": map[string]any{"type": "string"},
+			"kind":       map[string]any{"type": "string"},
+			"metadata":   map[string]any{"type": "object"},
+			"status":     map[string]any{"type": "object"},
+			"data":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+		}}},
+	}
+	nodes, err := c.FieldTree()
+	if err != nil {
+		t.Fatalf("FieldTree: %v", err)
+	}
+	leaves := Leaves(nodes, "")
+	if len(leaves) != 1 || leaves[0].Path != "data" {
+		t.Errorf("native FieldTree leaves = %+v, want exactly [data]", leaves)
+	}
+}
+
+func TestEnvelopeOfNativeKindIsEmpty(t *testing.T) {
+	c := CRD{Kind: "Deployment", Native: true,
+		Versions: []Version{{Name: "v1", Served: true, Storage: true, Properties: map[string]any{
+			"spec": map[string]any{"type": "object", "properties": map[string]any{"replicas": map[string]any{"type": "integer"}}},
+		}}}}
+	nodes, err := c.Envelope()
+	if err != nil {
+		t.Fatalf("Envelope: %v", err)
+	}
+	if len(nodes) != 0 {
+		t.Errorf("native Envelope = %v, want empty: the composed object has no Crossplane wrapper", nodes)
+	}
+}

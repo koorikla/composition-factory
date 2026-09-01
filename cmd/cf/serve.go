@@ -20,6 +20,7 @@ import (
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
 // shutdownTimeout bounds how long a SIGINT/SIGTERM's graceful shutdown waits
@@ -186,6 +187,19 @@ func (c *ServeCmd) run(ctx context.Context, out io.Writer) error {
 		byProvider[s.Provider] = crds
 		refs = append(refs, s.Provider)
 	}
+
+	// The vendored native Kubernetes kinds are always in the index, under
+	// their own provider label — no source entry names them (they are
+	// compiled into the binary, pinned to one Kubernetes version) and no
+	// blueprint opts into them. They deliberately do NOT join refs:
+	// GET /api/providers lists xpkg packages with digests and cache entries,
+	// and native kinds have neither — /api/kinds is where they surface,
+	// wearing provider "k8s".
+	native, err := k8s.Kinds()
+	if err != nil {
+		return err
+	}
+	byProvider[blueprint.NativeProvider] = native
 
 	idx, err := index.Build(byProvider)
 	if err != nil {

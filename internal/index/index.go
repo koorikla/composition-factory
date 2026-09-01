@@ -25,10 +25,10 @@ type Kind struct {
 	APIVersion string `json:"apiVersion"` // group/version
 	Plural     string `json:"plural"`
 	Scope      string `json:"scope"`    // Namespaced | Cluster
-	Provider   string `json:"provider"` // the xpkg ref it came from
+	Provider   string `json:"provider"` // the xpkg ref it came from, or "k8s" for a vendored native kind
 	Namespaced bool   `json:"namespaced"`
-	Required   int    `json:"required"` // count of required forProvider leaves
-	Fields     int    `json:"fields"`   // count of forProvider leaves
+	Required   int    `json:"required"` // count of required settable leaves (schema.CRD.FieldTree)
+	Fields     int    `json:"fields"`   // count of settable leaves (schema.CRD.FieldTree)
 }
 
 // Index is a searchable, sorted index of Kinds, along with the CRDs they
@@ -70,7 +70,12 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 
 	for _, provider := range providers {
 		for _, c := range byProvider[provider] {
-			if !c.IsManaged() {
+			// Two families of composable kinds: a provider's managed
+			// resources, and the vendored native Kubernetes kinds (indexed
+			// under blueprint.NativeProvider by the callers that load them).
+			// Everything else a package ships — ProviderConfigs and friends —
+			// stays out of the index.
+			if !c.IsManaged() && !c.Native {
 				continue
 			}
 			attempted++
@@ -88,15 +93,17 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 				continue
 			}
 
-			// ForProvider legitimately returns (nil, nil) when a CRD has no
-			// forProvider block at all (e.g. provider-kubernetes's
-			// ObservedObjectCollection). An error here — for example a
-			// version with no schema block whatsoever, as upjet ships for
-			// some non-storage versions — also yields a nil node slice, so
-			// it collapses to the same outcome: zero fields. The kind
-			// itself is still real (its Preferred/APIVersion resolved
-			// fine) and belongs in the index either way.
-			nodes, _ := c.ForProvider()
+			// FieldTree is ForProvider for a managed resource and the
+			// object's own settable tree for a native kind. It legitimately
+			// returns (nil, nil) when a CRD has no forProvider block at all
+			// (e.g. provider-kubernetes's ObservedObjectCollection). An
+			// error here — for example a version with no schema block
+			// whatsoever, as upjet ships for some non-storage versions —
+			// also yields a nil node slice, so it collapses to the same
+			// outcome: zero fields. The kind itself is still real (its
+			// Preferred/APIVersion resolved fine) and belongs in the index
+			// either way.
+			nodes, _ := c.FieldTree()
 			leaves := schema.Leaves(nodes, "")
 			required := 0
 			for _, l := range leaves {

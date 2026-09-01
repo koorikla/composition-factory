@@ -274,3 +274,60 @@ spec:
 		t.Errorf("Build error does not wrap the underlying Preferred() failure (want it to contain %q): %v", want, err)
 	}
 }
+
+// A native Kubernetes kind (schema.CRD with Native set, indexed under the
+// "k8s" provider label) is the second composable family: it must be indexed
+// alongside managed resources — with its own provider label, never blurred
+// into "managed" — and its Fields count must come from the object's own
+// settable tree (FieldTree), since it has no forProvider.
+func TestBuildIndexesNativeKindsUnderTheirOwnProviderLabel(t *testing.T) {
+	native := schema.CRD{
+		Kind: "Deployment", Group: "apps", Plural: "deployments", Scope: "Namespaced", Native: true,
+		Versions: []schema.Version{{Name: "v1", Served: true, Storage: true, Properties: map[string]any{
+			"apiVersion": map[string]any{"type": "string"},
+			"kind":       map[string]any{"type": "string"},
+			"metadata":   map[string]any{"type": "object"},
+			"status":     map[string]any{"type": "object"},
+			"spec": map[string]any{"type": "object", "properties": map[string]any{
+				"replicas": map[string]any{"type": "integer"},
+				"paused":   map[string]any{"type": "boolean"},
+			}},
+		}}},
+	}
+	// A non-managed, non-native CRD (a ProviderConfig, say) must still be
+	// excluded — Native is the gate, not "anything that isn't managed".
+	providerConfig := schema.CRD{
+		Kind: "ProviderConfig", Group: "aws.m.upbound.io", Plural: "providerconfigs", Scope: "Namespaced",
+		Versions: []schema.Version{{Name: "v1beta1", Served: true, Storage: true}},
+	}
+
+	idx, err := Build(map[string][]schema.CRD{
+		"k8s":                  {native},
+		"ghcr.io/x/aws:v1.0.0": {providerConfig},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	all := idx.All()
+	if len(all) != 1 {
+		t.Fatalf("indexed %d kinds (%+v), want exactly the native Deployment", len(all), all)
+	}
+	k := all[0]
+	if k.Provider != "k8s" {
+		t.Errorf("Provider = %q, want %q", k.Provider, "k8s")
+	}
+	if k.APIVersion != "apps/v1" {
+		t.Errorf("APIVersion = %q, want apps/v1", k.APIVersion)
+	}
+	if !k.Namespaced {
+		t.Error("native Deployment must index as namespaced")
+	}
+	if k.Fields != 2 {
+		t.Errorf("Fields = %d, want 2 (spec.replicas, spec.paused via FieldTree)", k.Fields)
+	}
+
+	if _, _, ok := idx.LookupKind("apps/v1", "Deployment"); !ok {
+		t.Error("LookupKind(apps/v1, Deployment) did not resolve the native kind")
+	}
+}

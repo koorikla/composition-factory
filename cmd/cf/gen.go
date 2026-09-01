@@ -11,6 +11,7 @@ import (
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
 // GenCmd renders a blueprint to YAML on disk.
@@ -48,6 +49,14 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 		}
 		crds = append(crds, got...)
 	}
+	// Native Kubernetes kinds are always available: vendored into the
+	// binary, pinned to one Kubernetes version, never fetched or cached —
+	// so they join the schema set unconditionally rather than via a source.
+	native, err := k8s.Kinds()
+	if err != nil {
+		return 1, err
+	}
+	crds = append(crds, native...)
 	outputs, err := emit.Generate(b, crds, c.Out)
 	if err != nil {
 		return 1, err
