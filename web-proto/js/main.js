@@ -25,3 +25,65 @@ initInspector(document.getElementById("region-inspector"), deps);
 initOutput(document.getElementById("region-output"), deps);
 
 store.loadDoc();
+
+
+/* ---- resizable side columns: drag handles, clamped, persisted ---- */
+(function () {
+  var cols = document.getElementById("cols");
+  if (!cols) return;
+  var MIN_L = 160, MAX_L = 420, MIN_R = 180, MAX_R = 520, MIN_CANVAS = 300;
+  var widths = { l: 216, r: 330 };
+  try {
+    var saved = JSON.parse(localStorage.getItem("cf-col-widths") || "null");
+    if (saved && saved.l && saved.r) widths = saved;
+  } catch (_) { /* private mode */ }
+
+  function apply() {
+    var total = cols.getBoundingClientRect().width;
+    var l = Math.min(MAX_L, Math.max(MIN_L, widths.l));
+    var r = Math.min(MAX_R, Math.max(MIN_R, widths.r));
+    if (total && total - l - r < MIN_CANVAS) {
+      r = Math.max(MIN_R, total - l - MIN_CANVAS);
+      l = Math.max(MIN_L, Math.min(l, total - r - MIN_CANVAS));
+    }
+    widths.l = l; widths.r = r;
+    cols.style.gridTemplateColumns = l + "px 1fr " + r + "px";
+    try { localStorage.setItem("cf-col-widths", JSON.stringify(widths)); } catch (_) { /* ok */ }
+  }
+
+  function makeHandle(id, side) {
+    var el = document.createElement("div");
+    el.id = id;
+    el.setAttribute("role", "separator");
+    el.setAttribute("aria-orientation", "vertical");
+    el.title = "Drag to resize";
+    el.style.cssText = "position:absolute;top:0;bottom:0;width:7px;cursor:col-resize;z-index:6";
+    el.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      var sx = e.clientX, start = side === "l" ? widths.l : widths.r;
+      function mv(ev) {
+        var d = ev.clientX - sx;
+        if (side === "l") widths.l = start + d; else widths.r = start - d;
+        apply(); place();
+      }
+      function up() {
+        document.removeEventListener("pointermove", mv);
+        document.removeEventListener("pointerup", up);
+      }
+      document.addEventListener("pointermove", mv);
+      document.addEventListener("pointerup", up);
+    });
+    cols.style.position = "relative";
+    cols.appendChild(el);
+    return el;
+  }
+
+  var hl = makeHandle("col-resize-l", "l");
+  var hr = makeHandle("col-resize-r", "r");
+  function place() {
+    hl.style.left = (widths.l - 3) + "px";
+    hr.style.right = (widths.r - 3) + "px";
+  }
+  apply(); place();
+  addEventListener("resize", function () { apply(); place(); });
+})();

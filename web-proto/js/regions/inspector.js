@@ -264,6 +264,31 @@ function renderXRD() {
     '<div class="g">' + esc((xrd.plural || "") + "." + (xrd.group || "")) + " &#183; " + esc(xrd.version) + "</div></div>" +
     '<div style="padding:7px 12px 3px"><span class="lbl">Parameters (' + names.length + ")</span></div>";
 
+  function paramDetailRow(n, p) {
+    // The engine's rules, mirrored: object = free-form string map, no
+    // default/enum; boolean default is strictly true/false; enum is a
+    // string-only affordance; array is refused by Validate entirely.
+    if (p.type === "object") {
+      return '<div class="g" style="padding:2px 0 4px">free-form map (string values) \u2014 bind map fields like tags</div>';
+    }
+    var h = '<div class="frow" style="margin-bottom:0">';
+    if (p.type === "boolean") {
+      h += '<select class="tsel" data-pdef="' + esc(n) + '" aria-label="Default value">' +
+        '<option value=""' + (!p.default ? " selected" : "") + ">no default</option>" +
+        '<option' + (p.default === "true" ? " selected" : "") + ">true</option>" +
+        '<option' + (p.default === "false" ? " selected" : "") + ">false</option></select>";
+    } else {
+      h += '<input class="tin" data-pdef="' + esc(n) + '" value="' + esc(p.default || "") +
+        '" placeholder="default" aria-label="Default value"' +
+        (p.type === "integer" || p.type === "number" ? ' inputmode="numeric"' : "") + ">";
+    }
+    if (p.type === "string") {
+      h += '<input class="tin" data-pe="' + esc(n) + '" value="' + esc((p.enum || []).join(", ")) +
+        '" placeholder="enum values, comma-separated" aria-label="Enum values">';
+    }
+    return h + "</div>";
+  }
+
   names.forEach(function (n) {
     var p = params[n];
     var fo = fanOut(doc, n);
@@ -275,9 +300,7 @@ function renderXRD() {
       }).join("") + "</select>" +
       '<label class="ck"><input type="checkbox" data-pr="' + esc(n) + '"' + (p.required ? " checked" : "") + ">req</label>" +
       '<button class="del" data-pd="' + esc(n) + '" title="Delete parameter">&#215;</button></div>' +
-      '<div class="frow" style="margin-bottom:0">' +
-      '<input class="tin" data-pdef="' + esc(n) + '" value="' + esc(p.default || "") + '" placeholder="default" aria-label="Default value">' +
-      '<input class="tin" data-pe="' + esc(n) + '" value="' + esc((p.enum || []).join(", ")) + '" placeholder="enum values, comma-separated" aria-label="Enum values"></div>' +
+      paramDetailRow(n, p) +
       (fo > 0 ? '<div class="xf">wired into ' + fo + " field" + (fo === 1 ? "" : "s") + "</div>" : "");
     h += "</div>";
   });

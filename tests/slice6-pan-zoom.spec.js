@@ -18,20 +18,20 @@ function transformOf(page) {
   })
 }
 
-test('ctrl+wheel zooms, plain wheel pans, reset restores', async ({ page }) => {
+test('wheel zooms to the cursor, shift+wheel pans, reset restores', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('.node[data-id="work-queue"]')).toBeVisible()
   const cw = page.locator('#cw')
   await cw.hover()
-  await page.mouse.wheel(0, -240)                 // plain wheel: pan up
+  await page.mouse.wheel(0, -240)                 // plain wheel: zoom in
   let t = await transformOf(page)
-  expect(t.scale).toBeCloseTo(1, 2)
-  expect(Math.abs(t.y)).toBeGreaterThan(0)
-  await page.keyboard.down('Control')
-  await page.mouse.wheel(0, -240)                 // ctrl+wheel: zoom in
-  await page.keyboard.up('Control')
-  t = await transformOf(page)
   expect(t.scale).toBeGreaterThan(1.05)
+  await page.keyboard.down('Shift')
+  await page.mouse.wheel(0, 120)                  // shift+wheel: pan
+  await page.keyboard.up('Shift')
+  const t2 = await transformOf(page)
+  expect(t2.scale).toBeCloseTo(t.scale, 2)
+  expect(Math.abs(t2.x - t.x) + Math.abs(t2.y - t.y)).toBeGreaterThan(0)
   await page.click('#zoom-reset')
   t = await transformOf(page)
   expect(t.scale).toBeCloseTo(1, 2)

@@ -144,7 +144,7 @@ export function init(rootEl, deps) {
         '<input id="param-add-name" class="search" placeholder="parameterName" aria-label="Parameter name">' +
         '<div style="display:flex;gap:6px;align-items:center">' +
         '<select id="param-add-type" class="search" style="flex:1" aria-label="Type">' +
-        ["string","integer","number","boolean","object","array"].map(function (t) {
+        ["string","integer","number","boolean","object"].map(function (t) {
           return '<option value="' + t + '">' + t + "</option>";
         }).join("") + "</select>" +
         '<label style="display:flex;gap:4px;align-items:center;font-size:10.5px;color:var(--faint)">' +
@@ -215,7 +215,7 @@ export function init(rootEl, deps) {
       sec("Keyboard",
         kbd(mod + "C") + " / " + kbd(mod + "V") + " copy &amp; paste to duplicate a resource \u00b7 " +
         kbd("Delete") + " remove (confirms when wires would drop) \u00b7 " +
-        "wheel pans, " + kbd(mod + "+wheel") + " zooms to the cursor, " + kbd("\u2302") + " resets.") +
+        "wheel zooms to the cursor, " + kbd("Shift+wheel") + " pans (or drag the empty ground), " + kbd("\u2302") + " resets.") +
       sec("Validate",
         "Runs a real <b>crossplane composition render</b> against a sample XR synthesized " +
         "from your XRD \u2014 the chip reports the composed resource count or the engine's " +

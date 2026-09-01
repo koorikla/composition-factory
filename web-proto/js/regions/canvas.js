@@ -309,12 +309,15 @@ function onWheel(e) {
   if (e.target.closest("#region-output")) return;
   e.preventDefault();
   const rect = cwEl.getBoundingClientRect();
-  if (e.ctrlKey || e.metaKey) {
-    zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.pow(1.0015, -e.deltaY));
-  } else {
-    view.x -= e.deltaX;
-    view.y -= e.deltaY;
+  if (e.shiftKey) {
+    // shift+wheel pans (vertical delta doubles as horizontal when the
+    // device only reports one axis)
+    view.x -= e.deltaX || e.deltaY;
+    view.y -= e.deltaX ? e.deltaY : 0;
     applyView();
+  } else {
+    // wheel zooms to the cursor; ctrl+wheel (trackpad pinch) too
+    zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.pow(1.0015, -e.deltaY));
   }
 }
 

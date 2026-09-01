@@ -17,3 +17,7 @@
 - [ ] Undo/redo: topbar buttons + Cmd/Ctrl+Z / Shift+Cmd/Ctrl+Z. Needs a doc
       history in the proto store (snapshot ring on every successful PUT).
       — user request 2026-09-01
+- [x] Wheel zooms (shift+wheel / ground-drag pans) — user request 2026-09-01
+- [x] Type-aware parameter controls: object = free-form string map (no default/enum,
+      explained inline); boolean true/false default; array (engine-rejected) no longer offered
+- [x] Resizable palette + inspector columns, clamped + persisted
