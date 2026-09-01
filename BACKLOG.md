@@ -11,3 +11,6 @@
 - [ ] Canvas zoom in/out (and pan): scroll-wheel / pinch zoom centered on the
       cursor, +/- controls, wires and drop coordinates tracking the transform.
       — user request 2026-09-01
+- [ ] UX polish: a Guide tab (how the canvas, DSL and generate loop work,
+      keyboard shortcuts), plus richer mouseover texts — field descriptions,
+      wire tooltips, button titles everywhere. — user request 2026-09-01
