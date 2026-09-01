@@ -137,8 +137,28 @@ export function init(rootEl, deps) {
         '<span class="sp"></span><span class="bind">' + fanOut(doc, n) + " bound</span></div>" +
         '<div class="card-b">' + paramLines(params[n]) + "</div></div>";
     });
+    if (!paramFormOpen) {
+      h += '<div style="padding:8px 10px"><button class="btn sm" id="param-add-btn">+ Add parameter</button></div>';
+    } else {
+      h += '<div class="card" id="param-add-form" style="padding:8px 10px;display:flex;flex-direction:column;gap:6px">' +
+        '<input id="param-add-name" class="search" placeholder="parameterName" aria-label="Parameter name">' +
+        '<div style="display:flex;gap:6px;align-items:center">' +
+        '<select id="param-add-type" class="search" style="flex:1" aria-label="Type">' +
+        ["string","integer","number","boolean","object","array"].map(function (t) {
+          return '<option value="' + t + '">' + t + "</option>";
+        }).join("") + "</select>" +
+        '<label style="display:flex;gap:4px;align-items:center;font-size:10.5px;color:var(--faint)">' +
+        '<input type="checkbox" id="param-add-req">required</label></div>' +
+        '<div style="display:flex;gap:6px">' +
+        '<button class="btn sm pri" id="param-add-submit">Add</button>' +
+        '<button class="btn sm" id="param-add-cancel">Cancel</button></div></div>';
+    }
+    if (paramErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(paramErr) + "</div>";
     return h;
   }
+
+  let paramFormOpen = false;
+  let paramErr = null;
 
   let providers = null;        // server-side cached providers, null = not loaded
   let providersErr = null;     // verbatim server error from the last add/list
@@ -185,13 +205,22 @@ export function init(rootEl, deps) {
     else { h = drawSources(); hint = HINT_SRC; }
     // A re-render (e.g. the providers list arriving) must not eat what the
     // user is typing into the add-provider field.
-    var prev = railEl.querySelector("#src-add-ref");
-    var keep = prev ? { v: prev.value, focus: document.activeElement === prev } : null;
+    var keepIds = ["src-add-ref", "param-add-name", "param-add-type", "param-add-req"];
+    var kept = {};
+    keepIds.forEach(function (id) {
+      var el = railEl.querySelector("#" + id);
+      if (el) kept[id] = {
+        v: el.type === "checkbox" ? el.checked : el.value,
+        focus: document.activeElement === el,
+      };
+    });
     railEl.innerHTML = h;
-    if (keep) {
-      var next = railEl.querySelector("#src-add-ref");
-      if (next) { next.value = keep.v; if (keep.focus) next.focus(); }
-    }
+    keepIds.forEach(function (id) {
+      var st = kept[id], el = railEl.querySelector("#" + id);
+      if (!st || !el) return;
+      if (el.type === "checkbox") el.checked = st.v; else el.value = st.v;
+      if (st.focus) el.focus();
+    });
     if (hintEl) hintEl.innerHTML = hint;
   }
 
@@ -213,6 +242,21 @@ export function init(rootEl, deps) {
   });
 
   railEl.addEventListener("click", function (e) {
+    if (e.target.closest("#param-add-btn")) { paramFormOpen = true; paramErr = null; drawRail(); return; }
+    if (e.target.closest("#param-add-cancel")) { paramFormOpen = false; paramErr = null; drawRail(); return; }
+    if (e.target.closest("#param-add-submit")) {
+      const name = (railEl.querySelector("#param-add-name") || {}).value || "";
+      const type = (railEl.querySelector("#param-add-type") || {}).value || "string";
+      const req = !!(railEl.querySelector("#param-add-req") || {}).checked;
+      if (!name.trim()) return;
+      paramErr = null;
+      store.addParameter(name.trim(), { type: type, required: req }).then(function (res) {
+        // the store resolves null on failure and emits the verbatim error;
+        // the error subscription below paints it — keep the form open.
+        if (res) { paramFormOpen = false; paramErr = null; drawRail(); }
+      });
+      return;
+    }
     if (!e.target.closest("#src-add-btn")) return;
     const input = railEl.querySelector("#src-add-ref");
     const ref = input && input.value.trim();
@@ -244,6 +288,10 @@ export function init(rootEl, deps) {
   });
 
   /* ---- store subscriptions --------------------------------------------- */
+  store.subscribe("error", function (e) {
+    if (e && e.source === "addParameter") { paramErr = e.message; drawRail(); }
+  });
+
   store.subscribe("doc", function () {
     // Fan-out counts and sources come from the doc; kinds tab is unaffected.
     if (rail !== "kinds") drawRail();
