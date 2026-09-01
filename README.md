@@ -1,27 +1,25 @@
 # compositionfactory
 
-`cf` generates Crossplane v2 Compositions and CompositeResourceDefinitions
-(XRDs) from a provider's own schemas. `cf provider add` pulls one layer of a
-provider's xpkg OCI image (not the whole multi-hundred-MB image) and extracts
-its CustomResourceDefinitions; every field a blueprint sets is then checked
-against that CRD's real `spec.forProvider` schema at generate time, so a
-typo'd field path fails loudly instead of being silently pruned by the
-Kubernetes API server on apply.
+[![CI](https://github.com/koorikla/compositionfactory/actions/workflows/ci.yml/badge.svg)](https://github.com/koorikla/compositionfactory/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/koorikla/compositionfactory?include_prereleases)](https://github.com/koorikla/compositionfactory/releases)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Container](https://img.shields.io/badge/ghcr.io-compositionfactory-blue?logo=docker)](https://github.com/koorikla/compositionfactory/pkgs/container/compositionfactory)
 
-One engine, `internal/emit`, backs every front door: the `cf gen` CLI, the
-`cf serve` HTTP API, and the canvas GUI in `web-proto/` all call the same
-`emit.Generate` and produce byte-identical output for the same blueprint.
-Output is plain YAML meant to sit in a Git repo an existing GitOps pipeline
-already syncs — there is no database and no cluster requirement; `cf gen`
-touches neither.
+**Schema-aware generator and visual canvas for Crossplane v2 Compositions and CompositeResourceDefinitions (XRDs).**
 
-![Composition Factory Canvas Interface](docs/screenshots/canvas.png)
+`cf` pulls CustomResourceDefinitions directly from provider package OCI layers (fetching only CRD metadata layers, never whole images). Every field in your blueprint is strictly validated against that CRD's real `spec.forProvider` OpenAPI schema at author/generate time — so typo'd field paths fail loudly with nearest-match suggestions instead of being silently pruned by the Kubernetes API server on apply.
+
+![Composition Factory Interactive Canvas](docs/screenshots/demo.gif)
+
+One engine, `internal/emit`, powers all interfaces: the **`cf gen` CLI**, the **`cf serve` visual canvas**, and the **`cf mcp` AI agent server** produce 100% byte-identical, deterministic YAML ready for GitOps.
+
+---
 
 ## Quickstart (Docker)
 
-Get up and running immediately with Docker from GitHub Container Registry — no clone or Go toolchain required:
+Run immediately from GitHub Container Registry — no Go toolchain or repository clone required:
 
-**1. Create a starter blueprint and cache provider schemas.**
+**1. Create a blueprint in your current directory:**
 
 ```sh
 cat <<'EOF' > xqueue.cf.yaml
@@ -52,7 +50,7 @@ spec:
 EOF
 ```
 
-Pulls the provider's CRD schemas and pins them in `.cf.lock`:
+**2. Cache provider CRD schemas:**
 
 ```sh
 docker run --rm \
@@ -61,9 +59,7 @@ docker run --rm \
   ghcr.io/koorikla/compositionfactory:latest provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
 ```
 
-**2. Open the Canvas in your browser.**
-
-Start the visual editor on `http://localhost:8080`:
+**3. Open the visual canvas:**
 
 ```sh
 docker run --rm -p 8080:8080 \
@@ -72,11 +68,9 @@ docker run --rm -p 8080:8080 \
   ghcr.io/koorikla/compositionfactory:latest serve --blueprint xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
 ```
 
-Open <http://localhost:8080> in your browser. The embedded canvas GUI and API are served together from the single container.
+Open <http://localhost:8080> in your browser to interactively design and wire your composition.
 
-![Composition Factory Interactive Demo](docs/screenshots/demo.gif)
-
-**3. Generate YAML from a blueprint file (`cf gen`).**
+**4. Generate production YAML:**
 
 ```sh
 docker run --rm \
@@ -85,64 +79,23 @@ docker run --rm \
   ghcr.io/koorikla/compositionfactory:latest gen xqueue.cf.yaml -o out
 ```
 
-> [!TIP]
-> **Sharing cache with host:** To share cached provider schemas with a local `cf` binary rather than a Docker volume:
-> - **macOS:** `-v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory"`
-> - **Linux:** `-v "$HOME/.cache/compositionfactory:/home/cf/.cache/compositionfactory"` (run `mkdir -p ~/.cache/compositionfactory` first)
-
 ---
 
 ## Quickstart (Local Binary)
 
-**1. Build.**
+**1. Build:**
 
 ```sh
-make build          # -> bin/cf, version stamped from git describe
+make build          # -> bin/cf
 ```
 
-**2. Add a provider.** No cluster, no Docker — this pulls CRDs anonymously
-from the registry and pins the resolved digest into `.cf.lock`.
+**2. Add a provider schema:**
 
 ```sh
 bin/cf provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
 ```
 
-**3. Author a blueprint.** `testdata/xqueue.cf.yaml` is a real one (it backs
-the acceptance test):
-
-```yaml
-apiVersion: factory.crossplane.io/v1alpha1
-kind: Blueprint
-metadata:
-  name: xqueue
-spec:
-  sources:
-    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
-  xrd:
-    group: platform.sparky.ee
-    kind: XQueue
-    plural: xqueues
-    version: v1alpha1
-    scope: Namespaced
-    parameters:
-      location:       {type: string, required: true, enum: [EU, US]}
-      providerName:   {type: string, required: true}
-      maxMessageSize: {type: integer, default: "2048"}
-  resources:
-    - name: main-queue
-      kind: Queue
-      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
-      fields:
-        region:         {value: "eu-north-1"}
-        maxMessageSize: {from: params.maxMessageSize}
-```
-
-A resource `fields` entry is exactly one of `value` (a literal), `from`
-(`params.<name>`, a bare template dereference), or `raw` (literal go-template
-text, written verbatim, unquoted — the escape hatch). See
-[The blueprint DSL](#the-blueprint-dsl) below for all three used together.
-
-**4. Generate.**
+**3. Generate output:**
 
 ```sh
 bin/cf gen testdata/xqueue.cf.yaml -o out
@@ -151,186 +104,125 @@ bin/cf gen testdata/xqueue.cf.yaml -o out
 # wrote out/xrds/xqueues.platform.sparky.ee.yaml
 ```
 
-`cf gen --check` writes nothing and instead exits `0` (in sync), `1` (tool
-error) or `2` (the tree has drifted from the blueprint) — the exit code CI
-distinguishes a broken generator from hand-edited generated YAML with.
-
-**5. Verify with the real render pipeline.**
-
-```sh
-crossplane composition render testdata/xr.yaml \
-  out/compositions/xqueues.platform.sparky.ee.yaml \
-  out/functions.yaml \
-  --xrd out/xrds/xqueues.platform.sparky.ee.yaml --timeout 5m
-```
-
-This needs the `crossplane` CLI and a reachable Docker daemon (the pipeline
-functions run as containers); `functions.yaml` is a required third argument.
-
-**6. Run the canvas.** `cf serve` embeds the GUI directly at `/`, so one command starts the full app on `:8080`:
+**4. Start the Canvas GUI:**
 
 ```sh
 bin/cf serve --blueprint testdata/xqueue.cf.yaml --out out
 ```
 
-Open <http://127.0.0.1:8080>. (For UI development on `web-proto/` with hot reloading, `python3 web-proto/serve.py` is also available on `:5180` and proxies `/api/*` to `:8080`).
+Open <http://localhost:8080>.
 
-## The canvas
+**5. Verify with Crossplane CLI:**
 
-`web-proto/` is plain ES modules and CSS — no framework, no build step. It is
-a thin client: every mutation is a full-document `PUT /api/blueprint`, and
-the palette, inspector and output panes render from what the server returns,
-never from client-side state the server hasn't confirmed.
-
-Built today:
-
-- drag a kind from the palette onto the canvas to add a composed resource;
-  drag cards to reposition (kept client-side for the session, not written
-  into the blueprint)
-- wire a resource field to an XRD parameter, including shared fan-out — one
-  parameter driving several fields, shown with a `×N` badge and its own wire
-  color
-- three field modes per field row — **V**alue (literal), **W**ire
-  (`from: params.X`), **R**aw (verbatim template text) — switchable inline
-- add a provider by reference from the SOURCES rail; each source row shows
-  its pinned digest and cached kind count
-- live generate: edits debounce into a real `POST /api/generate`, and the
-  output drawer shows the regenerated Composition, XRD and blueprint YAML
-- a topbar Validate chip that runs a real `crossplane composition render`
-  against a sample XR synthesized from the blueprint's own XRD
-  (`POST /api/render`) and reports pass/fail/resources-rendered — not just
-  "the YAML parses"
-- undo/redo over a server-backed document history (buttons and Cmd/Ctrl+Z)
-- pan and zoom (wheel, shift-wheel, on-screen zoom controls)
-- duplicate and remove canvas objects
-- a Guide tab covering the canvas, the DSL and the generate loop, plus
-  mouseover text throughout
-- resizable palette and inspector columns
-
-`web/` is a separate, in-progress React rewrite of the same canvas
-(`@xyflow/react`, `@rjsf/core`, CodeMirror); its API fixtures under
-`web/src/api/fixtures/` are cross-checked against the live server's JSON
-shapes by `internal/api/contract_fixtures_test.go`, but it is not the canvas
-this README's quickstart runs.
-
-## The blueprint DSL
-
-`spec.xrd.parameters` is single-source: one declaration produces both the
-XRD's OpenAPI schema and the template's default/required behavior — there is
-no separate place to redeclare a default. Each parameter has:
-
-- `type`: `string`, `integer`, `number`, `boolean`, or `object`.
-  `object` is a free-form string map (`additionalProperties: {type: string}`
-  in the emitted schema, no nested structure). `array` is rejected at
-  validation time — the XRD emitter cannot yet write a structural `items:`
-  schema for it, and a `from:` mapping would render Go's `fmt` of the slice
-  (`[a b c]`), which is valid YAML and silently wrong. Use a scalar, or set
-  the field with `raw:`.
-- `required`: an unrequired parameter is only ever dereferenced behind a
-  `hasKey` guard in the generated template, never bare.
-- `enum` / `default`: `default` is only valid for `string`, `integer`,
-  `number` and `boolean`.
-
-A composed resource's `fields` map sets one field path to exactly one of:
-
-```yaml
-fields:
-  region:         {value: "eu-north-1"}                 # value is ALWAYS emitted quoted — correct for a
-                                                          # string field, wrong for a non-string one
-  maxMessageSize: {from: params.maxMessageSize}          # {{ $spec.maxMessageSize }}; required params dereference
-                                                          # directly, optional ones are hasKey-guarded
-  fifoQueue:      {raw: "true"}                          # written verbatim, unquoted — the only way to emit a
-                                                          # real (non-string) YAML scalar, or the escape hatch
-                                                          # for anything else: a nested map, a template expression
+```sh
+crossplane composition render testdata/xr.yaml \
+  out/compositions/xqueues.platform.sparky.ee.yaml \
+  out/functions.yaml \
+  --xrd out/xrds/xqueues.platform.sparky.ee.yaml
 ```
 
-Every field path is checked against the resolved CRD's own
-`spec.forProvider` schema at generate time (branch paths too, so `raw:` can
-still set a whole subtree); an unknown path fails with a nearest-match
-suggestion rather than reaching the API server to be silently pruned. A
-`from:` referencing a composite-typed (`object`) parameter is rejected for
-the same silent-`fmt`-formatting reason `array` is.
+---
 
-`spec.xrd.scope` must be `Namespaced` — `Cluster` is parsed but not yet
-implemented (the cluster-scoped managed-resource envelope differs and the
-emitter doesn't render it), and `LegacyCluster` is not a valid v2 scope.
-`providerName` is a required `string` parameter on every Namespaced XRD: the
-Composition dereferences it unguarded for `providerConfigRef.name`.
+## Core Capabilities
 
-**`forEach:`** repeats one blueprint resource N times: `forEach: params.<name>`
-where the parameter is a required-or-defaulted `integer`. The Composition
-wraps the resource in a Go template `range` over the count, and each replica
-gets a distinct, indexed composition-resource-name annotation. The canvas
-sets it from the inspector's "for each" control and the Validate check proves
-the fan-out through a real render.
+- **Strict Schema Enforcement:** Checks field paths against the provider's CRDs and vendored Kubernetes OpenAPI schemas.
+- **Interactive Visual Canvas:** Drag-and-drop resources, connect parameters with visual wires, view live diffs, and toggle light/dark themes.
+- **Cross-Resource References:** Status wires (`resources.<name>.status.atProvider.<field>`) and reference wires with automatic conditional rendering.
+- **Native Kubernetes Support:** Compose native `Deployment`, `Service`, `ConfigMap`, `Secret`, and `ServiceAccount` alongside cloud resources.
+- **Deterministic GitOps Output:** Emits normalized YAML (LF line endings, sorted keys, header provenance comments) to prevent Git churn and ArgoCD sync loops.
+- **MCP Server for AI Agents:** Full authoring and schema inspection support for LLMs and coding assistants. See [MCP Server Guide](docs/mcp.md).
 
-**Determinism.** Output is byte-identical for the same blueprint and cache
-state: LF-only line endings, no trailing whitespace, sorted map keys
-(parameters, fields, required lists), and exactly one trailing newline. Every
-generated file opens with a three-line provenance comment (`Generated by
-compositionfactory. Do not edit.` / the source blueprint path / `Regenerate
-with: cf gen`) — comments, never annotations, so nothing here creates an
-ArgoCD sync loop. This is treated as a correctness requirement, not a nicety:
-on a `prune: true` GitOps repo, a churning generated file is a live-cluster
-incident.
+---
+
+## Blueprint DSL
+
+A blueprint combines an XRD definition and composed resources into a single declarative file:
+
+```yaml
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xirsa
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+  xrd:
+    group: platform.sparky.ee
+    kind: XIRSA
+    plural: xirsas
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:    {type: string, required: true}
+      policyArn:       {type: string, required: true}
+      oidcIssuer:      {type: string, required: true}
+      oidcProviderArn: {type: string, required: true}
+  resources:
+    - name: iam-role
+      kind: Role
+      provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+      fields:
+        description:      {value: "IAM Role for Service Account"}
+        assumeRolePolicy: {raw: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ $spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ $spec.oidcIssuer }}:sub":"system:serviceaccount:{{ $xr.metadata.namespace }}:{{ $xr.metadata.name }}"}}}]}'}
+    - name: policy-attachment
+      kind: RolePolicyAttachment
+      provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+      fields:
+        policyArn: {from: params.policyArn}
+        role:      {from: resources.iam-role.status.atProvider.id}
+    - name: sa
+      kind: ServiceAccount
+      provider: k8s
+      fields:
+        automountServiceAccountToken: {raw: "true"}
+```
+
+### Field Modes
+
+- **`value`**: Literal scalar value (emitted quoted for strings).
+- **`from`**: Parameter or cross-resource reference (`params.<name>` or `resources.<name>.status.<field>`). Required parameters dereference directly; optional parameters are automatically wrapped in `hasKey` guards.
+- **`raw`**: Verbatim template expression or complex JSON/YAML block.
+
+### Flow Control
+
+- **`forEach: params.<count>`**: Replicates a resource N times using Go template range with distinct indexed resource names.
+- **`when: params.<bool>`**: Conditionally includes a resource based on a boolean parameter.
+
+---
+
+## CLI Commands
+
+| Command | Description |
+| :--- | :--- |
+| `cf provider add <image>` | Pulls and caches CRD schemas from an OCI provider image into `.cf.lock`. |
+| `cf gen <blueprint> -o <out>` | Generates Compositions, XRDs, and supporting manifests into the output directory. |
+| `cf gen --check <blueprint>` | Checks if output matches blueprint without writing (exits 0 if in sync, 2 if drifted). |
+| `cf serve --blueprint <file>` | Starts HTTP API and embedded canvas visual editor on `:8080`. |
+| `cf mcp --blueprint <file>` | Runs MCP server over stdio for AI agent workflows. |
+
+---
 
 ## Development
 
-Go 1.25+. Node with `npm`/`npx` for the Playwright suite.
+Requires Go 1.25+ and Node.js for Playwright e2e tests.
 
 ```sh
-make build       # bin/cf, version stamped via -ldflags
-make test        # go test ./... -short -count=1 — no Docker, no cluster, runs anywhere
-make test-race   # the same, with -race
-make test-docker # go test ./... -run Acceptance -v — needs Docker + the crossplane CLI
-make test-e2e    # npx playwright test — needs `cf serve` already listening on :8080
-make lint        # gofmt -l . && go vet ./...
-make serve       # build + run `cf serve` over $(BLUEPRINT) (default testdata/xqueue.cf.yaml)
-make dev         # web-proto's dev server (serve.py) on :5180
-make clean       # remove bin/ and the default output directory
+make build          # Build bin/cf
+make test           # Run unit tests (no Docker required)
+make test-docker    # Run acceptance tests with Docker + crossplane CLI
+make test-e2e       # Run Playwright browser tests
+make lint           # Check formatting and vet
 ```
 
-Two test suites:
+---
 
-- **Go.** `make test` is the lane that must pass anywhere: unit tests plus
-  `TestAcceptanceXQueueRenders`, which skips itself (not a failure) when
-  Docker or the `crossplane` CLI aren't on `PATH`. `make test-docker` is the
-  same acceptance test forced to run, for CI's Docker-capable lane
-  (`CF_REQUIRE_ACCEPTANCE=1` there turns a missing prerequisite into a hard
-  failure, so a runner with a broken toolchain can't go green by skipping).
-- **Playwright** (`tests/*.spec.js`, `playwright.config.js`). A behavior
-  suite driving the live canvas against a live `cf serve`: core loop,
-  add-provider, validate, duplicate/remove, content sizing, pan/zoom, shared
-  parameters, guide tooltips, parameter types, column resize, undo/redo.
-  `workers: 1` — the suite shares one live blueprint document and each test
-  restores what it found, so parallel workers would corrupt each other's
-  state. Playwright starts `serve.py` itself; `cf serve` on `:8080` is a
-  precondition each spec checks and skips on if absent, so run `make serve`
-  in another shell first.
+## Documentation
 
-## Roadmap
+- [MCP Server Guide](docs/mcp.md) — Registering and using `cf mcp` with Claude Code and other agent tools.
+- [Provider Catalogue](docs/catalogue.md) — Curated list of popular Crossplane providers.
 
-Not yet built, per
-[`docs/superpowers/specs/2026-08-27-compositionfactory-design.md`](docs/superpowers/specs/2026-08-27-compositionfactory-design.md):
+---
 
-- **Status and ref wires beyond parameters** — drawing an edge from one
-  resource's `status.atProvider` (or its native `<f>Ref`) into another
-  resource's field, and `dependsOn:` compiling to a `function-sequencer`
-  step.
-- **`when:`** (conditional resources) — `forEach:` over an integer count is
-  built; `when:` and range-over-array/map (blocked on `type: array`
-  parameter support) are not.
-- **User-defined template functions** — a named `templates:` block
-  (optionally bound to specific field names) emitted as go-template
-  `define`/`include`, generalizing what would otherwise be a one-off
-  "conventions" feature.
-- **Native Kubernetes kinds** as a second schema source (vendored,
-  per-minor-version OpenAPI; `cf k8s use <version>`), for composing plain
-  Kubernetes objects alongside provider-managed resources.
-- **An MCP server** (`cf mcp`) — full authoring parity over MCP, writes
-  confined to a declared workspace root, `--read-only` for inspection.
+## License
 
-Also not yet built: `cf validate`, `cf adopt`, `cf provider search|list|
-versions|info|pin`, `cf index …`, RBAC/IAM emission (`emit: {rbac: true}`),
-the aggregate connection Secret, and `Cluster`-scoped XRDs (`Namespaced` only
-today).
+This project is licensed under the [Apache 2.0 License](LICENSE).
