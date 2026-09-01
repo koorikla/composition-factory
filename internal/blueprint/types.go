@@ -46,10 +46,20 @@ type Parameter struct {
 }
 
 // Resource is one composed resource.
+//
+// ForEach, when set, repeats the resource's whole rendered document N times,
+// with N read at render time from an integer XRD parameter. The value grammar
+// is exactly "params.<name>" — the same reference shape as Field.From. The
+// referenced parameter must be an integer and must be either required or
+// carry a default (see Validate): the Composition dereferences the loop
+// bound unguarded, and under options: ["missingkey=error"] an absent key is
+// a hard render failure, so only the XRD's required gate or its schema
+// default makes the dereference safe.
 type Resource struct {
 	Name     string           `json:"name"`
 	Kind     string           `json:"kind"`
 	Provider string           `json:"provider"`
+	ForEach  string           `json:"forEach"`
 	Fields   map[string]Field `json:"fields"`
 }
 

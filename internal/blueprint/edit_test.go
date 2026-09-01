@@ -221,3 +221,76 @@ func TestDeleteProviderNameIsRefusedForNamespacedScope(t *testing.T) {
 		t.Fatal("want an error: a Namespaced XRD requires providerName")
 	}
 }
+
+// --- forEach references ---
+
+// editableWithForEach is editable() plus an integer count parameter and a
+// resource repeated over it, for the rename/delete referencer rules below.
+func editableWithForEach() *Blueprint {
+	b := editable()
+	b.Spec.XRD.Parameters["instanceCount"] = Parameter{Type: "integer", Default: "2"}
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name: "replica-queue", Kind: "Queue",
+		ForEach: "params.instanceCount",
+		Fields:  map[string]Field{"region": {Value: "eu-north-1"}},
+	})
+	return b
+}
+
+// A rename must rewrite forEach references with the same discipline as field
+// From references: a dangling forEach emits a Composition whose loop bound
+// dereferences a parameter that no longer exists, which under
+// missingkey=error can never render.
+func TestRenameParameterRewritesForEachReferences(t *testing.T) {
+	b := editableWithForEach()
+	if err := b.RenameParameter("instanceCount", "replicas"); err != nil {
+		t.Fatalf("RenameParameter: %v", err)
+	}
+	if got := b.Spec.Resources[1].ForEach; got != "params.replicas" {
+		t.Errorf("ForEach = %q, want params.replicas", got)
+	}
+	if err := b.Validate(); err != nil {
+		t.Errorf("blueprint invalid after rename: %v", err)
+	}
+}
+
+func TestRenameParameterFailedRenameLeavesForEachUntouched(t *testing.T) {
+	b := editableWithForEach()
+	if err := b.RenameParameter("instanceCount", "providerName"); err == nil {
+		t.Fatal("want an error renaming onto an existing parameter")
+	}
+	if got := b.Spec.Resources[1].ForEach; got != "params.instanceCount" {
+		t.Errorf("ForEach mutated by a failed rename: %q", got)
+	}
+}
+
+// Deleting a parameter a forEach still references must be refused, and the
+// error must name the looping resource — the same one-round-trip discipline
+// DeleteParameter already gives field From references.
+func TestDeleteParameterRefusesWhenForEachReferences(t *testing.T) {
+	b := editableWithForEach()
+	err := b.DeleteParameter("instanceCount")
+	if err == nil {
+		t.Fatal("want an error deleting a forEach-referenced parameter")
+	}
+	if !strings.Contains(err.Error(), "replica-queue") {
+		t.Errorf("err = %v, want it to name the resource whose forEach still references the parameter", err)
+	}
+	if _, ok := b.Spec.XRD.Parameters["instanceCount"]; !ok {
+		t.Error("parameter was deleted despite the error")
+	}
+}
+
+// A resource that references the parameter through BOTH a field's from and
+// its own forEach must appear once in the error, not twice.
+func TestDeleteParameterNamesDualReferencerOnce(t *testing.T) {
+	b := editableWithForEach()
+	b.Spec.Resources[1].Fields["maxMessageSize"] = Field{From: "params.instanceCount"}
+	err := b.DeleteParameter("instanceCount")
+	if err == nil {
+		t.Fatal("want an error deleting a referenced parameter")
+	}
+	if got := strings.Count(err.Error(), "replica-queue"); got != 1 {
+		t.Errorf("err = %v: names replica-queue %d times, want exactly once", err, got)
+	}
+}

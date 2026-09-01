@@ -107,6 +107,36 @@ func TestDeleteReferencedParameterIs409(t *testing.T) {
 	}
 }
 
+// A forEach loop bound is a params.<name> reference exactly like a field's
+// from: deleting its parameter must classify as 409, not fall through to
+// 400. This is the HTTP-layer half of the referencer rule: this package's
+// referencingResources mirrors blueprint's unexported one, and the mirror
+// must track forEach or the two would silently disagree on classification.
+func TestDeleteForEachReferencedParameterIs409(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	withForEach := strings.Replace(testBlueprintYAML,
+		"      maxMessageSize: {type: integer}",
+		"      maxMessageSize: {type: integer}\n      instanceCount: {type: integer, default: \"2\"}", 1)
+	withForEach = strings.Replace(withForEach,
+		"    - name: main-queue",
+		"    - name: replica-queue\n      kind: Queue\n      forEach: params.instanceCount\n"+
+			"      fields:\n        region: {value: eu-north-1}\n    - name: main-queue", 1)
+	if err := os.WriteFile(path, []byte(withForEach), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blueprint.Load(path); err != nil {
+		t.Fatalf("mutated fixture does not itself validate: %v", err)
+	}
+	rec := do(t, h, "DELETE", "/api/blueprint/parameters/instanceCount", "")
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409 — instanceCount is still referenced by a forEach: %s",
+			rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "replica-queue") {
+		t.Errorf("body = %s, want it to name the looping resource", rec.Body)
+	}
+}
+
 func TestMalformedJSONBodyIs400(t *testing.T) {
 	h, _ := testHandlerWithPath(t)
 	if rec := do(t, h, "POST", "/api/blueprint/parameters", `{"name":`); rec.Code != http.StatusBadRequest {

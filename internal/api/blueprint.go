@@ -418,16 +418,20 @@ func (srv *server) handleDeleteParameter(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, b)
 }
 
-// referencingResources returns the names of every resource with a field
-// whose From references params.<name>, in resource order. It mirrors
-// blueprint.Blueprint's unexported referencingResources (see
-// internal/blueprint/edit.go) exactly, over the same exported Resource/Field
-// data — see handleDeleteParameter's doc comment for why this HTTP layer
-// needs its own copy of this one check.
+// referencingResources returns the names of every resource that references
+// params.<name> — through a field's From or through its own ForEach loop
+// bound — in resource order. It mirrors blueprint.Blueprint's unexported
+// referencingResources (see internal/blueprint/edit.go) exactly, over the
+// same exported Resource/Field data — see handleDeleteParameter's doc
+// comment for why this HTTP layer needs its own copy of this one check.
 func referencingResources(b *blueprint.Blueprint, name string) []string {
 	want := "params." + name
 	var refs []string
 	for _, res := range b.Spec.Resources {
+		if res.ForEach == want {
+			refs = append(refs, res.Name)
+			continue
+		}
 		for _, f := range res.Fields {
 			if f.From == want {
 				refs = append(refs, res.Name)

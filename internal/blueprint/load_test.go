@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
+	"sigs.k8s.io/yaml"
 )
 
 const valid = `
@@ -952,5 +955,179 @@ func TestValidateStillAcceptsTheOnDiskFixtureWithSourcesAndProvider(t *testing.T
 	}
 	if len(b.Spec.Resources) != 1 || b.Spec.Resources[0].Provider == "" {
 		t.Fatalf("Spec.Resources = %+v, want one resource with a provider", b.Spec.Resources)
+	}
+}
+
+// --- forEach ---
+
+// forEachBlueprint is a valid blueprint whose only resource is repeated by
+// forEach over an integer parameter with a default. Mutations build every
+// rejection case from this known-good baseline, so each test pins exactly
+// one rule.
+func forEachBlueprint(mutate func(*Blueprint)) *Blueprint {
+	b := &Blueprint{
+		Metadata: Metadata{Name: "xqueue"},
+		Spec: Spec{
+			XRD: XRD{
+				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]Parameter{
+					"providerName":  {Type: "string", Required: true},
+					"instanceCount": {Type: "integer", Default: "2"},
+				},
+			},
+			Resources: []Resource{{
+				Name: "replica-queue", Kind: "Queue",
+				ForEach: "params.instanceCount",
+				Fields:  map[string]Field{"region": {Value: "eu-north-1"}},
+			}},
+		},
+	}
+	mutate(b)
+	return b
+}
+
+const validForEach = `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue
+spec:
+  xrd:
+    group: platform.hooli.tech
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+      instanceCount: {type: integer, default: "2"}
+  resources:
+    - name: replica-queue
+      kind: Queue
+      forEach: params.instanceCount
+      fields:
+        region: {value: eu-north-1}
+`
+
+func TestLoadValidForEachBlueprint(t *testing.T) {
+	b, err := Load(write(t, validForEach))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := b.Spec.Resources[0].ForEach; got != "params.instanceCount" {
+		t.Errorf("ForEach = %q, want params.instanceCount", got)
+	}
+}
+
+// The forEach key must survive a marshal/unmarshal round trip exactly: the
+// HTTP API persists the whole document by re-marshaling the Go struct
+// (internal/api's writeBlueprintFile), so a key the struct dropped or
+// renamed would be silently erased from the file on the first edit anyone
+// makes through the API.
+func TestForEachRoundTripsExactly(t *testing.T) {
+	b, err := Load(write(t, validForEach))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	body, err := yaml.Marshal(b)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var reloaded Blueprint
+	if err := yaml.Unmarshal(body, &reloaded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if diff := cmp.Diff(b, &reloaded); diff != "" {
+		t.Errorf("blueprint changed across a marshal/unmarshal round trip (-loaded +reloaded):\n%s", diff)
+	}
+	if got := reloaded.Spec.Resources[0].ForEach; got != "params.instanceCount" {
+		t.Errorf("ForEach after round trip = %q, want params.instanceCount", got)
+	}
+}
+
+func TestValidateRejectsForEachWithoutParamsPrefix(t *testing.T) {
+	b := forEachBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[0].ForEach = "instanceCount"
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "params.") {
+		t.Fatalf("err = %v, want a complaint that forEach must reference params.<name>", err)
+	}
+	if !strings.Contains(err.Error(), "replica-queue") {
+		t.Errorf("err = %v, want it to name the offending resource", err)
+	}
+}
+
+func TestValidateRejectsForEachUnknownParameter(t *testing.T) {
+	b := forEachBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[0].ForEach = "params.nope"
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), `"nope"`) {
+		t.Fatalf("err = %v, want an error naming the unknown parameter", err)
+	}
+	if !strings.Contains(err.Error(), "replica-queue") {
+		t.Errorf("err = %v, want it to name the offending resource", err)
+	}
+}
+
+func TestValidateRejectsForEachOnNonIntegerParameter(t *testing.T) {
+	for _, typ := range []string{"string", "number", "boolean", "object"} {
+		t.Run(typ, func(t *testing.T) {
+			b := forEachBlueprint(func(b *Blueprint) {
+				// Required with no default, so nothing but the type is wrong:
+				// a default of "2" would trip the default-vs-type rule first
+				// on boolean and object, and this test pins the type rule.
+				b.Spec.XRD.Parameters["instanceCount"] = Parameter{Type: typ, Required: true}
+			})
+			err := b.Validate()
+			if err == nil || !strings.Contains(err.Error(), "integer") {
+				t.Fatalf("err = %v, want a complaint that the forEach parameter must be an integer", err)
+			}
+			if !strings.Contains(err.Error(), "replica-queue") || !strings.Contains(err.Error(), "instanceCount") {
+				t.Errorf("err = %v, want it to name both the resource and the parameter", err)
+			}
+		})
+	}
+}
+
+// An optional forEach parameter with no default can be genuinely absent from
+// the observed composite's spec, and the loop bound is dereferenced
+// unguarded: under options: ["missingkey=error"] that absence hard-fails the
+// whole render. Only the XRD's required gate or its schema default makes the
+// key's presence unconditional.
+func TestValidateRejectsForEachOnOptionalParameterWithoutDefault(t *testing.T) {
+	b := forEachBlueprint(func(b *Blueprint) {
+		b.Spec.XRD.Parameters["instanceCount"] = Parameter{Type: "integer"}
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "required") || !strings.Contains(err.Error(), "default") {
+		t.Fatalf("err = %v, want a complaint that the forEach parameter must be required or carry a default", err)
+	}
+	if !strings.Contains(err.Error(), "replica-queue") || !strings.Contains(err.Error(), "instanceCount") {
+		t.Errorf("err = %v, want it to name both the resource and the parameter", err)
+	}
+}
+
+func TestValidateAcceptsForEachOnRequiredParameterWithoutDefault(t *testing.T) {
+	b := forEachBlueprint(func(b *Blueprint) {
+		b.Spec.XRD.Parameters["instanceCount"] = Parameter{Type: "integer", Required: true}
+	})
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want a required integer parameter to be a valid forEach bound", err)
+	}
+}
+
+func TestValidateRejectsControlCharacterInForEach(t *testing.T) {
+	b := forEachBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[0].ForEach = "params.instanceCount\nbogus: injected"
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "control character") {
+		t.Fatalf("err = %v, want the checkScalar control-character rejection", err)
+	}
+	if !strings.Contains(err.Error(), "forEach") {
+		t.Errorf("err = %v, want it to name the forEach field", err)
 	}
 }

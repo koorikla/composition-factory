@@ -162,6 +162,8 @@ export function init(rootEl, deps) {
 
   let providers = null;        // server-side cached providers, null = not loaded
   let providersErr = null;     // verbatim server error from the last add/list
+  let expandedProvider = null; // ref whose detail row is open
+  let providerKinds = null;    // kinds of the expanded provider, null = loading
 
   function loadProviders() {
     api.getProviders().then(function (r) {
@@ -185,10 +187,24 @@ export function init(rootEl, deps) {
       const ref = s && s.provider || "";
       const fam = /aws/.test(ref) ? "aws" : "k8s";
       const meta = (s.digest ? s.digest.slice(0, 19) : "") + (s.kinds ? " \u00b7 " + s.kinds + " kinds" : "");
-      h += '<div class="src-row">' +
+      h += '<div class="src-row" data-ref="' + esc(ref) + '" style="cursor:pointer" title="Click for details">' +
         '<span class="sw" style="width:5px;height:22px;border-radius:1.5px;background:' + COLORS[fam] + '"></span>' +
         '<span style="min-width:0"><span class="nm" style="display:block">' + esc(ref.split("/").pop()) + "</span>" +
         '<span class="dg">' + esc(meta || ref) + '</span></span><span class="sp"></span></div>';
+      if (expandedProvider === ref) {
+        const host = ref.split("/")[0];
+        const kindsHtml = providerKinds === null
+          ? '<div class="g">loading kinds\u2026</div>'
+          : providerKinds.map(function (k) {
+              return '<div style="display:flex;gap:6px;align-items:baseline">' +
+                '<span style="font-family:var(--mono);font-size:11px">' + esc(k.kind) + "</span>" +
+                '<span class="dg">' + esc(k.scope) + "</span></div>";
+            }).join("");
+        h += '<div class="src-detail" style="padding:4px 12px 10px 22px;display:flex;flex-direction:column;gap:3px">' +
+          '<span class="dg">' + esc(host) + "</span>" +
+          '<span class="dg" style="word-break:break-all">' + esc(s.digest || "") + "</span>" +
+          kindsHtml + "</div>";
+      }
     });
     h += '<div style="padding:8px 10px;display:flex;gap:6px">' +
       '<input id="src-add-ref" class="search" style="flex:1;min-width:0" placeholder="ghcr.io/\u2026/provider-x:vN" aria-label="Provider ref">' +
@@ -271,6 +287,20 @@ export function init(rootEl, deps) {
   });
 
   railEl.addEventListener("click", function (e) {
+    const srcRow = e.target.closest(".src-row[data-ref]");
+    if (srcRow) {
+      const ref = srcRow.getAttribute("data-ref");
+      if (expandedProvider === ref) { expandedProvider = null; providerKinds = null; drawRail(); return; }
+      expandedProvider = ref;
+      providerKinds = null;
+      drawRail();
+      api.getKinds().then(function (r) {
+        if (expandedProvider !== ref) return;
+        providerKinds = (r.kinds || []).filter(function (k) { return k.provider === ref; });
+        drawRail();
+      }).catch(function () { providerKinds = []; if (expandedProvider === ref) drawRail(); });
+      return;
+    }
     if (e.target.closest("#param-add-btn")) { paramFormOpen = true; paramErr = null; drawRail(); return; }
     if (e.target.closest("#param-add-cancel")) { paramFormOpen = false; paramErr = null; drawRail(); return; }
     if (e.target.closest("#param-add-submit")) {

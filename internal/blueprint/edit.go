@@ -43,12 +43,17 @@ func (b *Blueprint) deepCopy() *Blueprint {
 	return &cp
 }
 
-// referencingResources returns the names of every resource with a field
-// whose From references params.<name>, in resource order.
+// referencingResources returns the names of every resource that references
+// params.<name> — through a field's From or through its own ForEach loop
+// bound — in resource order, each resource named at most once.
 func (b *Blueprint) referencingResources(name string) []string {
 	want := "params." + name
 	var refs []string
 	for _, r := range b.Spec.Resources {
+		if r.ForEach == want {
+			refs = append(refs, r.Name)
+			continue
+		}
 		for _, f := range r.Fields {
 			if f.From == want {
 				refs = append(refs, r.Name)
@@ -78,8 +83,9 @@ func (b *Blueprint) AddParameter(name string, p Parameter) error {
 }
 
 // RenameParameter renames an XRD parameter and rewrites every resource
-// field's From reference (params.<from>) to point at the new name. Field
-// keys are untouched -- only the reference value changes. It fails if from
+// reference (params.<from>) to point at the new name — both field From
+// references and forEach loop bounds. Field keys are untouched -- only the
+// reference value changes. It fails if from
 // is not declared, if to is already declared (unless to == from -- see
 // below), or if the resulting blueprint does not validate; in every failure
 // case the receiver is left unchanged.
@@ -107,6 +113,14 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 
 	oldRef, newRef := "params."+from, "params."+to
 	for i, r := range cp.Spec.Resources {
+		// A forEach loop bound is a params.<name> reference exactly like a
+		// field's From, and gets the same rewrite discipline: a dangling
+		// forEach would emit a Composition whose loop bound dereferences a
+		// parameter that no longer exists, which under missingkey=error can
+		// never render.
+		if r.ForEach == oldRef {
+			cp.Spec.Resources[i].ForEach = newRef
+		}
 		for path, f := range r.Fields {
 			if f.From == oldRef {
 				f.From = newRef

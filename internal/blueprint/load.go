@@ -432,6 +432,44 @@ func (b *Blueprint) Validate() error {
 					"(e.g. ghcr.io/org/provider-name:v1.2.3, or ...@sha256:<digest>)", i, r.Provider)
 			}
 		}
+		// forEach repeats the resource's whole rendered document N times, N
+		// read at render time from an integer XRD parameter
+		// (internal/emit/composition.go wraps the document in
+		// `{{- range $i := until (int $spec.<name>) }}`). That is a bare,
+		// unguarded dereference of the loop bound, and under
+		// options: ["missingkey=error"] an absent key is a hard render
+		// failure — so the parameter must be one whose presence in the
+		// observed composite's spec is unconditional. Two XRD gates provide
+		// that, and only those two: a required parameter is present on any
+		// XR the API server admits, and a defaulted parameter is injected
+		// into the XR's spec by schema defaulting before the composition
+		// function ever sees it. A parameter that is neither can be
+		// genuinely absent at render time, so it cannot be a loop bound.
+		if r.ForEach != "" {
+			if err := checkScalar(fmt.Sprintf("spec.resources[%d].forEach", i), r.ForEach); err != nil {
+				return err
+			}
+			param, ok := strings.CutPrefix(r.ForEach, "params.")
+			if !ok {
+				return fmt.Errorf("resource %q: forEach must reference a parameter as params.<name> (got %q)",
+					r.Name, r.ForEach)
+			}
+			decl, exists := x.Parameters[param]
+			if !exists {
+				return fmt.Errorf("resource %q: forEach references unknown parameter %q", r.Name, param)
+			}
+			if decl.Type != "integer" {
+				return fmt.Errorf("resource %q: forEach parameter %q has type %q, want integer -- "+
+					"the loop bound renders as until (int $spec.%s), a repetition count",
+					r.Name, param, decl.Type, param)
+			}
+			if !decl.Required && decl.Default == "" {
+				return fmt.Errorf("resource %q: forEach parameter %q must be required or carry a default -- "+
+					`the loop bound is dereferenced unguarded, and under options: ["missingkey=error"] `+
+					"an absent key hard-fails the whole render; only the XRD's required gate or its "+
+					"schema default makes the key's presence unconditional", r.Name, param)
+			}
+		}
 		paths := make([]string, 0, len(r.Fields))
 		for p := range r.Fields {
 			paths = append(paths, p)
