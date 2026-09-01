@@ -17,15 +17,9 @@ touches neither.
 
 ## Quickstart (Docker)
 
-Get up and running immediately with Docker — no local Go toolchain required:
+Get up and running immediately with Docker from GitHub Container Registry — no clone or Go toolchain required:
 
-**1. Build the image.**
-
-```sh
-docker build -t compositionfactory .
-```
-
-**2. Add the provider schema (one-time download into Docker cache volume).**
+**1. Add the provider schema (one-time download into Docker cache volume).**
 
 Pulls the provider's CRD schemas and pins them in `.cf.lock`:
 
@@ -33,10 +27,10 @@ Pulls the provider's CRD schemas and pins them in `.cf.lock`:
 docker run --rm \
   -v "$(pwd)":/workspace \
   -v cf-cache:/home/cf/.cache/compositionfactory \
-  compositionfactory provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  ghcr.io/koorikla/compositionfactory:latest provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
 ```
 
-**3. Open the Canvas in your browser.**
+**2. Open the Canvas in your browser.**
 
 Start the visual editor on `http://localhost:8080`:
 
@@ -44,18 +38,18 @@ Start the visual editor on `http://localhost:8080`:
 docker run --rm -p 8080:8080 \
   -v "$(pwd)":/workspace \
   -v cf-cache:/home/cf/.cache/compositionfactory \
-  compositionfactory serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
+  ghcr.io/koorikla/compositionfactory:latest serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
 ```
 
 Open <http://localhost:8080> in your browser. The embedded canvas GUI and API are served together from the single container.
 
-**4. Generate YAML from a blueprint file (`cf gen`).**
+**3. Generate YAML from a blueprint file (`cf gen`).**
 
 ```sh
 docker run --rm \
   -v "$(pwd)":/workspace \
   -v cf-cache:/home/cf/.cache/compositionfactory \
-  compositionfactory gen testdata/xqueue.cf.yaml -o out
+  ghcr.io/koorikla/compositionfactory:latest gen testdata/xqueue.cf.yaml -o out
 ```
 
 > [!TIP]
