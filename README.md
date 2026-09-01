@@ -25,43 +25,43 @@ Get up and running immediately with Docker — no local Go toolchain required:
 docker build -t compositionfactory .
 ```
 
-**2. Open the Canvas in your browser.**
+**2. Add the provider schema (one-time download into Docker cache volume).**
 
-Mount your workspace and schema cache, bind port `8080`, and start the visual editor:
+Pulls the provider's CRD schemas and pins them in `.cf.lock`:
 
 ```sh
-# On macOS:
-docker run --rm -p 8080:8080 \
+docker run --rm \
   -v "$(pwd)":/workspace \
-  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
-  compositionfactory serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
+  -v cf-cache:/home/cf/.cache/compositionfactory \
+  compositionfactory provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+```
 
-# On Linux:
+**3. Open the Canvas in your browser.**
+
+Start the visual editor on `http://localhost:8080`:
+
+```sh
 docker run --rm -p 8080:8080 \
   -v "$(pwd)":/workspace \
-  -v "$HOME/.cache/compositionfactory:/home/cf/.cache/compositionfactory" \
+  -v cf-cache:/home/cf/.cache/compositionfactory \
   compositionfactory serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
 ```
 
 Open <http://localhost:8080> in your browser. The embedded canvas GUI and API are served together from the single container.
 
-**3. Generate YAML from a blueprint file (`cf gen`).**
+**4. Generate YAML from a blueprint file (`cf gen`).**
 
 ```sh
 docker run --rm \
   -v "$(pwd)":/workspace \
-  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
+  -v cf-cache:/home/cf/.cache/compositionfactory \
   compositionfactory gen testdata/xqueue.cf.yaml -o out
 ```
 
-**4. Add a provider schema (`cf provider add`).**
-
-```sh
-docker run --rm \
-  -v "$(pwd)":/workspace \
-  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
-  compositionfactory provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
-```
+> [!TIP]
+> **Sharing cache with host:** To share cached provider schemas with a local `cf` binary rather than a Docker volume:
+> - **macOS:** `-v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory"`
+> - **Linux:** `-v "$HOME/.cache/compositionfactory:/home/cf/.cache/compositionfactory"` (run `mkdir -p ~/.cache/compositionfactory` first)
 
 ---
 
