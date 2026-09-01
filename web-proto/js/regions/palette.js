@@ -197,11 +197,40 @@ export function init(rootEl, deps) {
     return h;
   }
 
+  function drawGuide() {
+    function sec(t, body) {
+      return '<div class="grp"><span class="lbl">' + t + '</span></div>' +
+        '<div style="padding:4px 12px 10px;font-size:11px;line-height:1.55;color:var(--ink-2)">' + body + "</div>";
+    }
+    function kbd(k) { return '<b style="font-family:var(--mono);font-size:10px">' + k + "</b>"; }
+    const mod = /Mac/.test(navigator.platform) ? "\u2318" : "Ctrl";
+    return sec("The loop",
+        "Drag a kind from KINDS onto the canvas, wire XR parameters to resource fields, " +
+        "edit values in the inspector \u2014 the generated YAML below updates live and is " +
+        "written by <b>cf gen</b> byte-for-byte the same.") +
+      sec("Wires",
+        '<span style="color:var(--wire-xrd)">\u2500\u2500</span> XRD spec \u00b7 ' +
+        '<span style="color:var(--shared)">\u2500\u2500</span> shared (one parameter feeding ' +
+        "several fields) \u00b7 status and native-ref wires arrive with the engine work.") +
+      sec("Keyboard",
+        kbd(mod + "C") + " / " + kbd(mod + "V") + " copy &amp; paste to duplicate a resource \u00b7 " +
+        kbd("Delete") + " remove (confirms when wires would drop) \u00b7 " +
+        "wheel pans, " + kbd(mod + "+wheel") + " zooms to the cursor, " + kbd("\u2302") + " resets.") +
+      sec("Validate",
+        "Runs a real <b>crossplane composition render</b> against a sample XR synthesized " +
+        "from your XRD \u2014 the chip reports the composed resource count or the engine's " +
+        "error verbatim.") +
+      sec("Files",
+        "Generate writes compositions/, xrds/ and functions.yaml to the output directory " +
+        "cf serve was started with; the blueprint file is the single source of truth.");
+  }
+
   function drawRail() {
     if (searchWrapEl) searchWrapEl.style.display = rail === "kinds" ? "" : "none";
     let h, hint;
     if (rail === "kinds") { h = drawKinds(); hint = HINT_KINDS; }
     else if (rail === "shared") { h = drawShared(); hint = HINT_SHARED; }
+    else if (rail === "guide") { h = drawGuide(); hint = ""; }
     else { h = drawSources(); hint = HINT_SRC; }
     // A re-render (e.g. the providers list arriving) must not eat what the
     // user is typing into the add-provider field.

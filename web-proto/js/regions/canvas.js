@@ -198,7 +198,8 @@ function resourceCardHTML(d, r, sel) {
       req: !!(sf && sf.required),
       ty: sf ? sf.type : "",
       label: shortPath(p),
-      title: p,
+      title: p + (sf ? " \u00b7 " + sf.type + (sf.required ? " \u00b7 required" : "") : "") +
+        (sf && sf.description ? "\n" + sf.description : ""),
     });
   });
   h += '</div>';
@@ -265,7 +266,8 @@ function drawWires() {
     const col = shared ? "var(--shared)" : "var(--wire-xrd)";
     s += '<path class="' + cls + '" d="M' + a.x + ',' + a.y +
       ' C' + (a.x + dx) + ',' + a.y + ' ' + (b.x - dx) + ',' + b.y +
-      ' ' + b.x + ',' + b.y + '" stroke="' + col + '"/>';
+      ' ' + b.x + ',' + b.y + '" stroke="' + col + '" pointer-events="stroke">' +
+      '<title>$' + esc(w.param) + ' \u2192 ' + esc(w.resource) + '.' + esc(w.path) + '</title></path>';
   });
   wiresEl.innerHTML = s;
 }

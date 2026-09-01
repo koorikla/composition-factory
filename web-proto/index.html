@@ -20,8 +20,8 @@
     <span class="sp"></span>
     <span class="chip-ok" id="valid"></span>
     <button class="btn" id="themeBtn">Theme</button>
-    <button class="btn" id="validateBtn" disabled>Validate</button>
-    <button class="btn pri" id="generateBtn" disabled>Generate</button>
+    <button class="btn" id="validateBtn" disabled title="Run a real crossplane composition render of this blueprint against a sample XR">Validate</button>
+    <button class="btn pri" id="generateBtn" disabled title="Regenerate composition.yaml and definition.yaml from the blueprint now">Generate</button>
   </div>
   <!-- =============== END REGION: TOPBAR =============== -->
 
@@ -34,6 +34,7 @@
           <button data-r="kinds" aria-pressed="true">Kinds</button>
           <button data-r="shared" aria-pressed="false">Shared</button>
           <button data-r="src" aria-pressed="false">Sources</button>
+          <button data-r="guide" aria-pressed="false">Guide</button>
         </div>
       </div>
       <div id="lsearch" class="pane-h"><input class="search" id="psearch" placeholder="Search kinds…" aria-label="Search kinds"></div>
