@@ -21,3 +21,8 @@
 - [x] Type-aware parameter controls: object = free-form string map (no default/enum,
       explained inline); boolean true/false default; array (engine-rejected) no longer offered
 - [x] Resizable palette + inspector columns, clamped + persisted
+- [ ] forEach on a resource ("for objects"): N instances driven by a parameter
+      (e.g. RDS cluster + $instanceCount ClusterInstance nodes), gotpl range
+      semantics per the design spec, setResourceNameAnnotation indexed in the
+      loop (spec §8), GUI badge becomes authorable. ENGINE + GUI slice.
+      — user request 2026-09-01 ("for nf or nodes for rds")
