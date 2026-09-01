@@ -136,6 +136,17 @@ func (s *Store) LoadDigest(ref string) (string, error) {
 	return entry.Digest, nil
 }
 
+// Delete removes the cached entry for ref. A ref with no cache entry is a
+// no-op, not an error: the caller's intent — "this provider must not be in
+// the cache" — is already satisfied, and slug's full-ref hashing means the
+// removed directory can never belong to a different provider.
+func (s *Store) Delete(ref string) error {
+	if err := os.RemoveAll(filepath.Join(s.Root, slug(ref))); err != nil {
+		return fmt.Errorf("delete cached entry for %q: %w", ref, err)
+	}
+	return nil
+}
+
 // LockEntry pins one provider reference to a resolved digest.
 type LockEntry struct {
 	Ref    string `json:"ref"`
@@ -145,6 +156,18 @@ type LockEntry struct {
 // Lock is the contents of .cf.lock.
 type Lock struct {
 	Providers []LockEntry `json:"providers"`
+}
+
+// Remove deletes the entry for ref, reporting whether one was present — so a
+// caller can skip rewriting the lockfile when nothing changed.
+func (l *Lock) Remove(ref string) bool {
+	for i := range l.Providers {
+		if l.Providers[i].Ref == ref {
+			l.Providers = append(l.Providers[:i], l.Providers[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 // Set adds or replaces the entry for ref and keeps the list sorted.
