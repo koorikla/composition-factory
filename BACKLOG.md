@@ -47,3 +47,7 @@
 - [ ] Catalogue must cover upjet family services (provider-aws-rds et al. — repo
       enumeration misses monorepo-published packages). — user request 2026-09-02
 - [ ] Generate ProviderConfig scaffolds to out/providerconfigs/. — user request 2026-09-02
+- [ ] Live-cluster schema source: run against a kind/k3s (or any) cluster's API
+      to dynamically discover CRDs/kinds beyond packaged providers — the
+      "external schema" phase of the control-plane direction. Big item.
+      — user request 2026-09-02
