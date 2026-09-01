@@ -41,7 +41,7 @@
 - [ ] Cross-object atProvider wiring GUI (engine side in flight): wire e.g. a
       postgres provider field from an RDS instance's status.atProvider output —
       teal status wires, pickable from the source card's status section.
-- [ ] Provider detail view: click a provider in SOURCES → full registry ref shown,
+- [x] Provider detail view: click a provider in SOURCES → full registry ref shown,
       its kinds listed with checkboxes to select which appear in the KINDS rail
       (client-side filter, persisted). — user request 2026-09-02
 - [x] Catalogue must cover upjet family services (provider-aws-rds et al. — repo
@@ -51,9 +51,9 @@
       to dynamically discover CRDs/kinds beyond packaged providers — the
       "external schema" phase of the control-plane direction. Big item.
       — user request 2026-09-02
-- [ ] Right-click context menu on canvas objects (duplicate/remove/rename/bind…)
+- [x] Right-click context menu on canvas objects (duplicate/remove/rename/bind…)
       — improve beyond the browser default. — user request 2026-09-02
-- [ ] KINDS hover preview: a small card with the kind's description + a few key
+- [x] KINDS hover preview: a small card with the kind's description + a few key
       fields when hovering a palette row. — user request 2026-09-02
 - [ ] Effective requiredness for the inspector: the Required filter must show
       what a user actually must set — top-level required branches (Deployment's
@@ -66,9 +66,9 @@
       fields ("+ then string/boolean/int") — real XRD sub-properties instead of
       the v1 free-form string map. Emit properties/required, wire members as
       params.obj.member. — user request 2026-09-02
-- [ ] Manual card resize: drag handle on cards (fields still clip at the 340px
+- [x] Manual card resize: drag handle on cards (fields still clip at the 340px
       cap; users want to size objects themselves), size kept client-side like
       positions. — user request 2026-09-02
-- [ ] Output drawer: providerconfigs tab(s) next to the DSL tabs, annotated with
+- [x] Output drawer: providerconfigs tab(s) next to the DSL tabs, annotated with
       the picker state ("provider-aws-s3 — only Bucket enabled"), and an RBAC
       tab from GET /api/rbac. — user request 2026-09-02

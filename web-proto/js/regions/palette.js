@@ -457,7 +457,75 @@ export function init(rootEl, deps) {
     }, 200);
   });
 
+  /* ---- kind hover preview (slice 28) ---- */
+  let previewTimer = null;
+  let previewFor = null;      // "kind|av" currently shown/loading
+  const previewCache = {};    // "kind|av" -> {total, required:[{path,type,description}]}
+
+  function hideKindPreview() {
+    clearTimeout(previewTimer); previewTimer = null; previewFor = null;
+    const el = document.getElementById("kind-preview");
+    if (el) el.hidden = true;
+  }
+
+  function showKindPreview(row) {
+    const kind = row.getAttribute("data-kind"), av = row.getAttribute("data-av");
+    const key = kind + "|" + av;
+    previewFor = key;
+    const paint = function (info) {
+      if (previewFor !== key) return;
+      let el = document.getElementById("kind-preview");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "kind-preview";
+        el.style.cssText = "position:fixed;z-index:50;max-width:260px;background:var(--surface);" +
+          "border:1px solid var(--rule-2);border-radius:7px;box-shadow:var(--shadow-lg);" +
+          "padding:9px 11px;font-size:10.5px;pointer-events:none";
+        document.body.appendChild(el);
+      }
+      const r = row.getBoundingClientRect();
+      el.style.left = (r.right + 8) + "px";
+      el.style.top = Math.min(r.top, innerHeight - 180) + "px";
+      const scope = /\.m\./.test(av) || row.getAttribute("data-provider") === "k8s" ? "Namespaced" : "Cluster";
+      let h = '<div style="font-family:var(--mono);font-size:12px;font-weight:600">' + esc(kind) + "</div>" +
+        '<div class="dg" style="margin:1px 0 6px">' + esc(av) + " \u00b7 " + scope + "</div>";
+      if (info) {
+        h += '<div class="dg" style="margin-bottom:4px">' + info.total + " fields \u00b7 " +
+          info.required.length + " required</div>";
+        info.required.slice(0, 5).forEach(function (f) {
+          h += '<div style="margin-bottom:3px"><span style="font-family:var(--mono)">' + esc(f.path) +
+            '</span> <span class="dg">' + esc(f.type) + "</span>" +
+            (f.description ? '<div class="dg" style="font-size:9.5px;line-height:1.4">' +
+              esc(f.description.slice(0, 110)) + (f.description.length > 110 ? "\u2026" : "") + "</div>" : "") +
+            "</div>";
+        });
+      } else {
+        h += '<div class="dg">loading\u2026</div>';
+      }
+      el.hidden = false;
+      el.innerHTML = h;
+    };
+    if (previewCache[key]) { paint(previewCache[key]); return; }
+    paint(null);
+    api.getKindFields(av, kind, { requiredOnly: true }).then(function (req) {
+      return api.getKindFields(av, kind).then(function (all) {
+        previewCache[key] = { total: all.total, required: req.fields || [] };
+        paint(previewCache[key]);
+      });
+    }).catch(function () { if (previewFor === key) hideKindPreview(); });
+  }
+
+  railEl.addEventListener("mouseover", function (e) {
+    const row = e.target.closest(".kind[data-kind]");
+    if (!row) { hideKindPreview(); return; }
+    const key = row.getAttribute("data-kind") + "|" + row.getAttribute("data-av");
+    if (key === previewFor) return;
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(function () { showKindPreview(row); }, 220);
+  });
+  railEl.addEventListener("mouseleave", hideKindPreview);
   railEl.addEventListener("dragstart", function (e) {
+    hideKindPreview();
     const k = e.target.closest(".kind");
     if (!k) return;
     const payload = JSON.stringify({
