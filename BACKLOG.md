@@ -44,7 +44,7 @@
 - [ ] Provider detail view: click a provider in SOURCES → full registry ref shown,
       its kinds listed with checkboxes to select which appear in the KINDS rail
       (client-side filter, persisted). — user request 2026-09-02
-- [ ] Catalogue must cover upjet family services (provider-aws-rds et al. — repo
+- [x] Catalogue must cover upjet family services (provider-aws-rds et al. — repo
       enumeration misses monorepo-published packages). — user request 2026-09-02
 - [x] Generate ProviderConfig scaffolds to out/providerconfigs/. — user request 2026-09-02
 - [ ] Live-cluster schema source: run against a kind/k3s (or any) cluster's API
@@ -62,3 +62,7 @@
       only once env exists). Engine: tree.go/API change; GUI: Required filter
       semantics. Regression net already merged (required_test.go). Blocked on
       the engine-batch integration landing (tree.go is hot).
+- [ ] Typed object parameters (engine): an object param with declared member
+      fields ("+ then string/boolean/int") — real XRD sub-properties instead of
+      the v1 free-form string map. Emit properties/required, wire members as
+      params.obj.member. — user request 2026-09-02
