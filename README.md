@@ -110,11 +110,19 @@ docker build -t compositionfactory .
 
 **2. Run the canvas and open in browser.**
 
-Mount your current workspace, bind port `8080`, and pass your blueprint:
+Mount your current workspace and schema cache, bind port `8080`, and pass your blueprint:
 
 ```sh
+# On macOS:
 docker run --rm -p 8080:8080 \
   -v "$(pwd)":/workspace \
+  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
+  compositionfactory serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
+
+# On Linux:
+docker run --rm -p 8080:8080 \
+  -v "$(pwd)":/workspace \
+  -v "$HOME/.cache/compositionfactory:/home/cf/.cache/compositionfactory" \
   compositionfactory serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
 ```
 
@@ -127,22 +135,27 @@ Pass any local blueprint file to generate Compositions, XRDs, and provider confi
 ```sh
 docker run --rm \
   -v "$(pwd)":/workspace \
+  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
   compositionfactory gen testdata/xqueue.cf.yaml -o out
 ```
 
 **4. Add a provider via Docker (`cf provider add`).**
 
+To download and cache provider schemas entirely within Docker:
+
 ```sh
+# Using host cache mount:
 docker run --rm \
   -v "$(pwd)":/workspace \
+  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
+  compositionfactory provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+
+# Or using a Docker named volume (cf-cache):
+docker run --rm \
+  -v "$(pwd)":/workspace \
+  -v cf-cache:/home/cf/.cache/compositionfactory \
   compositionfactory provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
 ```
-
-> [!TIP]
-> **Persisting the schema cache across runs:**
-> Mount your host cache directory into `/home/cf/.cache/compositionfactory` so downloaded provider CRDs persist across container invocations:
-> - **Linux:** `-v ~/.cache/compositionfactory:/home/cf/.cache/compositionfactory`
-> - **macOS:** `-v ~/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory`
 
 ## The canvas
 
