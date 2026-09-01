@@ -20,6 +20,7 @@ import (
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
+	webproto "github.com/koorikla/compositionfactory/web-proto"
 )
 
 // shutdownTimeout bounds how long a SIGINT/SIGTERM's graceful shutdown waits
@@ -31,8 +32,11 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 // ServeCmd starts the compositionfactory HTTP API over the blueprint and
-// provider schema cache: schema browsing, blueprint editing and `cf gen`'s
-// generate step, all served for the canvas (M3) and MCP tooling to drive.
+// provider schema cache — schema browsing, blueprint editing and `cf gen`'s
+// generate step — and serves the embedded canvas GUI at /, so `cf serve`
+// alone gives the full app at the printed address. --no-ui drops the GUI and
+// serves the API only (for MCP tooling, or a dev iterating on web-proto/
+// through serve.py's live proxy instead of the embedded snapshot).
 //
 // SECURITY: this server has no authentication, by design -- see
 // internal/api's package comment for the full reasoning. It also both reads
@@ -47,6 +51,7 @@ type ServeCmd struct {
 	Out                        string `short:"o" help:"Output directory that POST /api/generate writes into." default:"."`
 	CacheDir                   string `help:"Schema cache directory." default:"${cachedir}"`
 	Lock                       string `help:"Lockfile path that POST /api/providers pins newly added providers into." default:".cf.lock"`
+	NoUI                       bool   `help:"Serve only the API: do not serve the embedded canvas GUI at /."`
 	IKnowThisIsUnauthenticated bool   `help:"Allow binding a non-loopback address. This server has no authentication and writes files to disk on your behalf -- only set this if you understand and accept that a non-loopback bind exposes both to your network."`
 
 	// ready, when non-nil, receives the actual listening address (host:port)
@@ -214,7 +219,7 @@ func (c *ServeCmd) run(ctx context.Context, out io.Writer) error {
 		c.ready <- ln.Addr().String()
 	}
 
-	srv := &http.Server{Handler: withRoot(handler)}
+	srv := &http.Server{Handler: withUI(handler, c.NoUI)}
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ln) }()
@@ -238,32 +243,46 @@ func (c *ServeCmd) run(ctx context.Context, out io.Writer) error {
 	}
 }
 
-// noUIMessage is served at exactly "/" in M2. It is plain text, not JSON,
-// because it is meant for a human opening the URL cf serve just printed in a
-// browser -- every /api/... response stays JSON, for API clients.
-const noUIMessage = "compositionfactory API is up.\n\n" +
-	"There is no UI here yet: the canvas arrives with the frontend milestone (M3).\n" +
-	"See GET /api/kinds, GET /api/blueprint and POST /api/generate.\n"
-
-// withRoot adds a plain "the API is up" response at exactly "/", in front of
-// api.
+// withUI mounts the embedded canvas app (web-proto/, via webproto.Files) in
+// front of api, so `cf serve` alone gives the full GUI at /: index.html at
+// the root, css/ and js/ served with the content types their extensions map
+// to (http.FileServerFS goes through mime.TypeByExtension — .js is
+// text/javascript, .css is text/css), and the app's relative /api/... calls
+// landing on the very same origin, so they just work with no proxy.
 //
-// It must match exactly "/" -- Go 1.22+ ServeMux's "GET /{$}" pattern, not a
-// bare catch-all "/" -- because api's own mux deliberately registers no "/"
-// pattern of its own (see internal/api/server.go's comment on why: a
-// catch-all "/" registered ALONGSIDE more specific patterns in the same mux
-// defeats ServeMux's built-in 404-vs-405 handling for those patterns). This
-// is a different, outer mux wrapping api as one opaque handler: it holds
-// exactly one specific pattern (root only) and one true catch-all that
-// forwards every other path, completely unmodified, to api -- which then
-// performs its own complete routing, 404s and 405s included, on it. Nothing
-// here re-registers or shadows any of api's own routes.
-func withRoot(api http.Handler) http.Handler {
+// Routing is a different, outer mux wrapping api as one opaque handler —
+// the same composition the previous withRoot used, and for the same reason:
+// api's own mux deliberately registers no "/" pattern (see
+// internal/api/server.go's comment on why a catch-all there would defeat
+// ServeMux's built-in 404-vs-405 handling). /api/ and /healthz forward to
+// api completely unmodified, method checks, 404s and 405s included; every
+// other path is the UI's. The one behavioral trade: an unknown non-API path
+// (/nope) is now the file server's plain-text 404 rather than api's JSON
+// 404 — right for a browser-facing tree, and API clients talk to /api/*,
+// whose error shape is unchanged.
+//
+// With noUI set there is no outer mux at all: api serves every path, so the
+// UI paths 404 (in api's JSON shape) while the API itself is untouched.
+func withUI(api http.Handler, noUI bool) http.Handler {
+	if noUI {
+		return api
+	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = io.WriteString(w, noUIMessage)
-	})
-	mux.Handle("/", api)
+	mux.Handle("/api/", api)
+	mux.Handle("/healthz", api)
+	mux.Handle("/", noStore(http.FileServerFS(webproto.Files)))
 	return mux
+}
+
+// noStore disables client caching on every UI response. Same discipline as
+// web-proto/serve.py's dev server, same reason: the assets change with every
+// rebuild of this binary, and a browser that cached a module from the
+// previous build ghosts stale code behind the module cache — the class of
+// silent staleness this project exists to avoid. The payloads are a few
+// hundred KB served over loopback, so re-fetching them is free.
+func noStore(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		h.ServeHTTP(w, r)
+	})
 }

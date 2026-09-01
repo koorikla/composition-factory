@@ -128,11 +128,12 @@ func TestServeMissingProviderNamesAddCommand(t *testing.T) {
 // serving, so the test knows precisely when a request will actually be
 // answered.
 //
-// It also exercises GET / while it is at it, since that path (no UI in M2,
-// just a plain "the API is up" message) is otherwise untested: nothing in
-// internal/api registers "/" (see server.go's comment on why), so it only
-// exists once ServeCmd's own withRoot wrapper is in front of the handler --
-// exactly the composition this test's server is actually running.
+// It also exercises the embedded UI while it is at it: GET / must serve the
+// canvas app's HTML and GET /js/store.js must come back with a JavaScript
+// content type. Nothing in internal/api registers "/" (see server.go's
+// comment on why), so the UI only exists once ServeCmd's own withUI wrapper
+// is in front of the handler -- exactly the composition this test's server
+// is actually running.
 func TestServeIntegration(t *testing.T) {
 	dir, bp, cacheDir := seed(t)
 	c := &ServeCmd{Addr: "127.0.0.1:0", Blueprint: bp, Out: filepath.Join(dir, "out"),
@@ -185,12 +186,29 @@ func TestServeIntegration(t *testing.T) {
 	if rootResp.StatusCode != http.StatusOK {
 		t.Errorf("GET / status = %d, want 200", rootResp.StatusCode)
 	}
-	if !strings.Contains(string(rootBody), "M3") {
-		t.Errorf("GET / body = %q, want it to say the canvas arrives with M3 (no UI in M2)", rootBody)
+	if !strings.Contains(string(rootBody), "Composition Factory Canvas") {
+		t.Errorf("GET / body does not look like the embedded canvas app (no title marker); got %d bytes starting %.80q",
+			len(rootBody), rootBody)
+	}
+
+	// A module asset must come back with a JavaScript content type, or the
+	// browser refuses to execute it as an ES module.
+	jsResp, err := http.Get("http://" + addr + "/js/store.js")
+	if err != nil {
+		t.Fatalf("GET /js/store.js: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, jsResp.Body) // see the /healthz drain comment above
+	jsResp.Body.Close()
+	if jsResp.StatusCode != http.StatusOK {
+		t.Errorf("GET /js/store.js status = %d, want 200", jsResp.StatusCode)
+	}
+	if ct := jsResp.Header.Get("Content-Type"); !strings.Contains(ct, "javascript") {
+		t.Errorf("GET /js/store.js Content-Type = %q, want a JavaScript type", ct)
 	}
 
 	// Also confirm the real API routes are still reachable through the same
-	// wrapped handler -- withRoot's catch-all must not shadow them.
+	// wrapped handler -- the UI mount must not shadow them, and they must
+	// still answer JSON, not HTML.
 	kindsResp, err := http.Get("http://" + addr + "/api/kinds")
 	if err != nil {
 		t.Fatalf("GET /api/kinds: %v", err)
@@ -199,6 +217,10 @@ func TestServeIntegration(t *testing.T) {
 	kindsResp.Body.Close()
 	if kindsResp.StatusCode != http.StatusOK {
 		t.Errorf("GET /api/kinds status = %d, want 200", kindsResp.StatusCode)
+	}
+	if ct := kindsResp.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("GET /api/kinds Content-Type = %q, want application/json — the UI mount must not "+
+			"swallow API routes", ct)
 	}
 
 	cancel()
@@ -213,5 +235,74 @@ func TestServeIntegration(t *testing.T) {
 
 	if !strings.Contains(buf.String(), addr) {
 		t.Errorf("startup output = %q, want it to print the listening address %q", buf.String(), addr)
+	}
+}
+
+// TestServeNoUIServesAPIOnly: with --no-ui the embedded canvas is not
+// mounted — / and every asset path 404 — while the API itself is completely
+// untouched. The 404s come back in the API's own JSON error shape, because
+// without the UI mount the api handler serves every path.
+func TestServeNoUIServesAPIOnly(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	c := &ServeCmd{Addr: "127.0.0.1:0", Blueprint: bp, Out: filepath.Join(dir, "out"),
+		CacheDir: cacheDir, Lock: filepath.Join(dir, ".cf.lock"), NoUI: true}
+	ready := make(chan string, 1)
+	c.ready = ready
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var buf bytes.Buffer
+	runErr := make(chan error, 1)
+	go func() { runErr <- c.run(ctx, &buf) }()
+
+	var addr string
+	select {
+	case addr = <-ready:
+	case err := <-runErr:
+		t.Fatalf("server exited before becoming ready: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not become ready in time")
+	}
+
+	get := func(path string) (int, string, string) {
+		t.Helper()
+		resp, err := http.Get("http://" + addr + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		body, err := io.ReadAll(resp.Body) // full drain; see TestServeIntegration's comment
+		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("read GET %s body: %v", path, err)
+		}
+		return resp.StatusCode, resp.Header.Get("Content-Type"), string(body)
+	}
+
+	for _, path := range []string{"/", "/js/store.js"} {
+		code, ct, body := get(path)
+		if code != http.StatusNotFound {
+			t.Errorf("GET %s with --no-ui: status = %d, want 404", path, code)
+		}
+		if !strings.Contains(ct, "application/json") || !strings.Contains(body, `"error"`) {
+			t.Errorf("GET %s with --no-ui: Content-Type = %q body = %q, want the API's JSON error shape", path, ct, body)
+		}
+	}
+
+	code, ct, _ := get("/api/kinds")
+	if code != http.StatusOK {
+		t.Errorf("GET /api/kinds with --no-ui: status = %d, want 200 — --no-ui must not touch the API", code)
+	}
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("GET /api/kinds with --no-ui: Content-Type = %q, want application/json", ct)
+	}
+
+	cancel()
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Errorf("run() after shutdown = %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down within the bounded graceful-shutdown timeout")
 	}
 }
