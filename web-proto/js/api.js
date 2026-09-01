@@ -209,3 +209,11 @@ export function renderCheck() {
 export function removeProvider(ref) {
   return request("DELETE", "/api/providers/" + encodeURIComponent(ref));
 }
+
+/**
+ * Search the static provider catalogue (CI-built index of OSS providers).
+ * @param {string} q substring filter over name/description
+ */
+export function getCatalogue(q) {
+  return request("GET", "/api/catalogue" + (q ? "?q=" + encodeURIComponent(q) : ""));
+}
