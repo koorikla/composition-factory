@@ -183,7 +183,15 @@ export function init(rootEl, deps) {
     if (rail === "kinds") { h = drawKinds(); hint = HINT_KINDS; }
     else if (rail === "shared") { h = drawShared(); hint = HINT_SHARED; }
     else { h = drawSources(); hint = HINT_SRC; }
+    // A re-render (e.g. the providers list arriving) must not eat what the
+    // user is typing into the add-provider field.
+    var prev = railEl.querySelector("#src-add-ref");
+    var keep = prev ? { v: prev.value, focus: document.activeElement === prev } : null;
     railEl.innerHTML = h;
+    if (keep) {
+      var next = railEl.querySelector("#src-add-ref");
+      if (next) { next.value = keep.v; if (keep.focus) next.focus(); }
+    }
     if (hintEl) hintEl.innerHTML = hint;
   }
 
