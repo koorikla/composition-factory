@@ -225,6 +225,13 @@ func withUI(api http.Handler, noUI bool) http.Handler {
 func noStore(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		// A page whose modules were cached under an older policy (or an
+		// older build) ghosts stale code forever; wiping the origin's HTTP
+		// cache on every document load makes each visit self-healing.
+		// Loopback-only traffic, a few hundred KB — refetching is free.
+		if r.URL.Path == "/" || strings.HasSuffix(r.URL.Path, ".html") {
+			w.Header().Set("Clear-Site-Data", `"cache"`)
+		}
 		h.ServeHTTP(w, r)
 	})
 }

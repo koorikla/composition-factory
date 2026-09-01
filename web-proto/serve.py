@@ -26,6 +26,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # Dev server: modules must never be cached, or edits ghost behind
         # the browser's module cache during the edit-reload loop.
         self.send_header("Cache-Control", "no-store")
+        # Self-heal browsers that cached modules before no-store existed (or
+        # from another server on this port): clearing the origin's HTTP cache
+        # on each document load costs a few hundred loopback KB.
+        if getattr(self, "_is_document", False):
+            self.send_header("Clear-Site-Data", '"cache"')
         super().end_headers()
     protocol_version = "HTTP/1.1"
 
@@ -34,6 +39,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     # --- static (GET/HEAD) unless /api/* ---
     def do_GET(self):
+        self._is_document = self.path in ("/", "/index.html")
         if self.path.startswith("/api/"):
             self._proxy()
         else:
