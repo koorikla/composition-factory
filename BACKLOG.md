@@ -30,3 +30,6 @@
       kind list, registry host), and remove — needs DELETE /api/providers with a
       409 naming referencers when the blueprint still uses it. More actions as
       they come. — user request 2026-09-01
+- [ ] Pipeline steps in the GUI (after the engine lands spec.pipeline): show the
+      step chain in the Output/topbar area, one-click "add auto-ready", raw
+      input editing per step. — follows the functions-support engine work
