@@ -48,7 +48,8 @@ input,select{font-family:inherit;font-size:inherit;color:inherit}
 .sp{flex:1}
 
 /* shell */
-.app{display:grid;grid-template-rows:auto 1fr;height:860px;max-height:90vh;background:var(--ground)}
+.app{display:grid;grid-template-rows:auto 1fr auto;height:100vh;background:var(--ground)}
+html,body{height:100%;overflow:hidden}
 .bar{display:flex;align-items:center;gap:14px;padding:0 14px;height:46px;
   background:var(--surface);border-bottom:1px solid var(--rule)}
 .brand{display:flex;align-items:baseline;gap:8px;font-weight:600;letter-spacing:-.01em}

@@ -235,6 +235,21 @@ async function renderResource(res) {
     (flds ? " &#183; " + flds.total + " leaf fields &#183; " + reqCount + " required" : "") +
     "</div></div>";
 
+  // for-each: repeat this resource N times, N from an integer parameter
+  var allParams = paramsOf(doc);
+  var intParams = Object.keys(allParams).filter(function (n) { return allParams[n].type === "integer"; });
+  h += '<div class="fld"><div class="frow" style="margin-bottom:0">' +
+    '<span class="lbl" style="flex:0 0 auto">for each</span>' +
+    '<select class="tsel" data-foreach="' + esc(res.name) + '" style="flex:1" ' +
+    'title="Repeat this resource N times \u2014 N comes from an integer parameter">' +
+    '<option value=""' + (!res.forEach ? " selected" : "") + ">\u2014 no loop \u2014</option>" +
+    intParams.map(function (n) {
+      var v = "params." + n;
+      return '<option value="' + esc(v) + '"' + (res.forEach === v ? " selected" : "") + ">" + esc(v) + "</option>";
+    }).join("") + "</select></div>" +
+    (intParams.length ? "" : '<div class="g" style="padding:2px 0 0">declare an integer parameter to enable looping</div>') +
+    "</div>";
+
   if (loadErr) {
     h += '<div class="warnbar">' + esc(loadErr) + "</div>";
   } else if (!meta) {
@@ -444,6 +459,16 @@ function onBoxClick(e) {
 }
 
 function onBoxChange(e) {
+  if (e.target.matches("select[data-foreach]")) {
+    var rn = e.target.getAttribute("data-foreach");
+    var val = e.target.value;
+    store.replaceDoc(function (d) {
+      var r = d.spec.resources.find(function (x) { return x.name === rn; });
+      if (!r) return;
+      if (val) r.forEach = val; else delete r.forEach;
+    });
+    return;
+  }
   var t = e.target;
   var doc = store.state.doc;
   if (!doc) return;
