@@ -51,3 +51,7 @@
       to dynamically discover CRDs/kinds beyond packaged providers — the
       "external schema" phase of the control-plane direction. Big item.
       — user request 2026-09-02
+- [ ] Right-click context menu on canvas objects (duplicate/remove/rename/bind…)
+      — improve beyond the browser default. — user request 2026-09-02
+- [ ] KINDS hover preview: a small card with the kind's description + a few key
+      fields when hovering a palette row. — user request 2026-09-02
