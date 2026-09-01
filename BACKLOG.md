@@ -8,3 +8,6 @@
 - [ ] SHARED tab: an "add shared parameter" button — create a new XRD parameter
       (name/type/required/default/enum) directly from the SHARED rail, not only
       via the XR card or field binding. — user request 2026-09-01
+- [ ] Canvas zoom in/out (and pan): scroll-wheel / pinch zoom centered on the
+      cursor, +/- controls, wires and drop coordinates tracking the transform.
+      — user request 2026-09-01
