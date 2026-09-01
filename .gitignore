@@ -1,7 +1,10 @@
-/bin/
-/out/
-/node_modules/
 .DS_Store
+.cf.lock
+.claude/launch.json
+.claude/worktrees/
+/bin/
+/node_modules/
+/out/
 node_modules/
-test-results/
 playwright-report/
+test-results/
