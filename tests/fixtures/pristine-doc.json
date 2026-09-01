@@ -1,0 +1,83 @@
+{
+  "apiVersion": "factory.crossplane.io/v1alpha1",
+  "kind": "Blueprint",
+  "metadata": {
+    "name": "xnotify"
+  },
+  "spec": {
+    "sources": [
+      {
+        "provider": "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
+      }
+    ],
+    "xrd": {
+      "group": "platform.hooli.tech",
+      "kind": "XNotify",
+      "plural": "xnotifies",
+      "version": "v1alpha1",
+      "scope": "Namespaced",
+      "parameters": {
+        "providerName": {
+          "type": "string",
+          "required": true,
+          "enum": null,
+          "default": "",
+          "description": ""
+        },
+        "region": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "eu-north-1",
+            "us-east-1"
+          ],
+          "default": "",
+          "description": ""
+        },
+        "retention": {
+          "type": "integer",
+          "required": false,
+          "enum": null,
+          "default": "345600",
+          "description": ""
+        }
+      }
+    },
+    "resources": [
+      {
+        "name": "work-queue",
+        "kind": "Queue",
+        "provider": "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0",
+        "fields": {
+          "messageRetentionSeconds": {
+            "from": "params.retention",
+            "value": "",
+            "raw": ""
+          },
+          "region": {
+            "from": "params.region",
+            "value": "",
+            "raw": ""
+          }
+        }
+      },
+      {
+        "name": "dead-letter",
+        "kind": "Queue",
+        "provider": "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0",
+        "fields": {
+          "region": {
+            "from": "params.region",
+            "value": "",
+            "raw": ""
+          },
+          "tags": {
+            "from": "",
+            "value": "",
+            "raw": "{purpose: {{ printf \"dlq-for-%s\" $xr | quote }}}"
+          }
+        }
+      }
+    ]
+  }
+}

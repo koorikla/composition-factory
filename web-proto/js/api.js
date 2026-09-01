@@ -175,3 +175,19 @@ export function renameParameter(name, to) {
 export function generate(write) {
   return request("POST", "/api/generate", { write: !!write });
 }
+
+/**
+ * List the server's cached providers.
+ * @returns {Promise<{providers: Array<{ref:string,digest:string,kinds:number}>}>}
+ */
+export function getProviders() {
+  return request("GET", "/api/providers");
+}
+
+/**
+ * Add a provider by OCI ref; the server pulls, caches and reindexes.
+ * @param {string} ref
+ */
+export function addProvider(ref) {
+  return request("POST", "/api/providers", { ref: ref });
+}

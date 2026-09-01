@@ -140,21 +140,40 @@ export function init(rootEl, deps) {
     return h;
   }
 
+  let providers = null;        // server-side cached providers, null = not loaded
+  let providersErr = null;     // verbatim server error from the last add/list
+
+  function loadProviders() {
+    api.getProviders().then(function (r) {
+      providers = r.providers || [];
+      if (rail === "src") drawRail();
+    }).catch(function () {
+      providers = null;        // endpoint absent or down: fall back to doc sources
+      if (rail === "src") drawRail();
+    });
+  }
+
   function drawSources() {
     const doc = store.state.doc;
     if (!doc) return '<div class="empty">No document loaded.</div>';
-    const sources = doc.spec && doc.spec.sources || [];
+    const sources = providers !== null
+      ? providers.map(function (p) { return { provider: p.ref, digest: p.digest, kinds: p.kinds }; })
+      : (doc.spec && doc.spec.sources || []);
     let h = '<div class="grp"><span class="lbl">Providers</span><span class="n">' + sources.length + "</span></div>";
     if (!sources.length) h += '<div class="empty">No sources declared.</div>';
     sources.forEach(function (s) {
       const ref = s && s.provider || "";
       const fam = /aws/.test(ref) ? "aws" : "k8s";
+      const meta = (s.digest ? s.digest.slice(0, 19) : "") + (s.kinds ? " \u00b7 " + s.kinds + " kinds" : "");
       h += '<div class="src-row">' +
         '<span class="sw" style="width:5px;height:22px;border-radius:1.5px;background:' + COLORS[fam] + '"></span>' +
         '<span style="min-width:0"><span class="nm" style="display:block">' + esc(ref.split("/").pop()) + "</span>" +
-        '<span class="dg">' + esc(ref) + '</span></span><span class="sp"></span></div>';
+        '<span class="dg">' + esc(meta || ref) + '</span></span><span class="sp"></span></div>';
     });
-    h += '<div style="padding:8px 10px"><button class="btn sm" id="addProv" disabled title="coming">+ Add provider</button></div>';
+    h += '<div style="padding:8px 10px;display:flex;gap:6px">' +
+      '<input id="src-add-ref" class="search" style="flex:1;min-width:0" placeholder="ghcr.io/\u2026/provider-x:vN" aria-label="Provider ref">' +
+      '<button class="btn sm" id="src-add-btn">Add</button></div>';
+    if (providersErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(providersErr) + "</div>";
     return h;
   }
 
@@ -173,6 +192,7 @@ export function init(rootEl, deps) {
     const b = e.target.closest("button");
     if (!b) return;
     rail = b.getAttribute("data-r");
+    if (rail === "src" && providers === null) loadProviders();
     [].forEach.call(tabsEl.children, function (c) {
       c.setAttribute("aria-pressed", String(c === b));
     });
@@ -182,6 +202,22 @@ export function init(rootEl, deps) {
   if (searchEl) searchEl.addEventListener("input", function () {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(loadKinds, 150);
+  });
+
+  railEl.addEventListener("click", function (e) {
+    if (!e.target.closest("#src-add-btn")) return;
+    const input = railEl.querySelector("#src-add-ref");
+    const ref = input && input.value.trim();
+    if (!ref) return;
+    e.target.disabled = true;
+    providersErr = null;
+    api.addProvider(ref).then(function () {
+      loadProviders();
+      loadKinds();             // new kinds must appear in the KINDS tab
+    }).catch(function (err) {
+      providersErr = err && err.message || String(err);
+      drawRail();
+    });
   });
 
   railEl.addEventListener("dragstart", function (e) {

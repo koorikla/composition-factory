@@ -21,6 +21,12 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+
+    def end_headers(self):
+        # Dev server: modules must never be cached, or edits ghost behind
+        # the browser's module cache during the edit-reload loop.
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
     protocol_version = "HTTP/1.1"
 
     def __init__(self, *args, **kwargs):

@@ -7,11 +7,13 @@
 // serve.py (5180) is started by playwright.config.js. Every test restores
 // the live blueprint to the exact doc it found, so the suite is idempotent.
 const { test, expect } = require('@playwright/test')
+const { resetDoc } = require('./helpers')
 
 const ENGINE = 'http://127.0.0.1:8080'
 let baseline = null
 
 test.beforeEach(async ({ request }) => {
+  await resetDoc(request)
   let api
   try { api = await request.get(ENGINE + '/api/kinds') } catch (e) { api = null }
   test.skip(!api || !api.ok(), 'cf serve is not running on 8080')
