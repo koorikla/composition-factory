@@ -200,3 +200,12 @@ export function addProvider(ref) {
 export function renderCheck() {
   return request("POST", "/api/render");
 }
+
+/**
+ * Remove a cached provider. The server refuses with 409 (naming referencers)
+ * while the blueprint still uses it.
+ * @param {string} ref
+ */
+export function removeProvider(ref) {
+  return request("DELETE", "/api/providers/" + encodeURIComponent(ref));
+}

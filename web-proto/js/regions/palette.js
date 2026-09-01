@@ -203,7 +203,9 @@ export function init(rootEl, deps) {
         h += '<div class="src-detail" style="padding:4px 12px 10px 22px;display:flex;flex-direction:column;gap:3px">' +
           '<span class="dg">' + esc(host) + "</span>" +
           '<span class="dg" style="word-break:break-all">' + esc(s.digest || "") + "</span>" +
-          kindsHtml + "</div>";
+          kindsHtml +
+          '<button class="btn sm" id="src-remove-btn" style="align-self:flex-start;margin-top:4px" ' +
+          'title="Remove this provider from the cache">Remove provider</button></div>';
       }
     });
     h += '<div style="padding:8px 10px;display:flex;gap:6px">' +
@@ -287,6 +289,19 @@ export function init(rootEl, deps) {
   });
 
   railEl.addEventListener("click", function (e) {
+    if (e.target.closest("#src-remove-btn") && expandedProvider) {
+      const ref = expandedProvider;
+      if (!window.confirm("Remove " + ref + " from the cache?")) return;
+      providersErr = null;
+      api.removeProvider(ref).then(function () {
+        expandedProvider = null; providerKinds = null;
+        loadProviders(); loadKinds();
+      }).catch(function (err) {
+        providersErr = err && err.message || String(err);
+        drawRail();
+      });
+      return;
+    }
     const srcRow = e.target.closest(".src-row[data-ref]");
     if (srcRow) {
       const ref = srcRow.getAttribute("data-ref");
