@@ -116,7 +116,12 @@ type Resource struct {
 	// today's default, so an envelope-free blueprint emits byte-identical
 	// output.
 	//
-	// Two deliberate v1 rulings, enforced by Validate and the emitter:
+	// Envelope applies to MANAGED resources only. A native Kubernetes kind
+	// (provider "k8s") has no Crossplane envelope — the composed object is
+	// not a managed resource — so the emitter refuses envelope entries on
+	// one outright (see internal/emit/envelope.go).
+	//
+	// Two further deliberate v1 rulings, enforced by Validate and the emitter:
 	//
 	//   - providerConfigRef cannot be set here. It is derived from the
 	//     required providerName parameter (one source of truth); an envelope

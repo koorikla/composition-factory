@@ -136,9 +136,7 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 	comp := filepath.Join(outDir, "compositions", "xqueues.platform.hooli.tech.yaml")
 	xrd := filepath.Join(outDir, "xrds", "xqueues.platform.hooli.tech.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
-	render := exec.Command("crossplane", "composition", "render",
-		"testdata/xr.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
-	rendered, err := render.CombinedOutput()
+	rendered, err := renderComposition(t, "testdata/xr.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
 	if err != nil {
 		t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
 	}
@@ -257,9 +255,7 @@ func TestAcceptanceForEachRenders(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			render := exec.Command("crossplane", "composition", "render",
-				tc.xr, comp, fns, "--xrd", xrd, "--timeout", "5m")
-			rendered, err := render.CombinedOutput()
+			rendered, err := renderComposition(t, tc.xr, comp, fns, "--xrd", xrd, "--timeout", "5m")
 			if err != nil {
 				t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
 			}
@@ -370,9 +366,7 @@ func TestAcceptancePipelineAutoReadyRenders(t *testing.T) {
 	// Render 1: no observed state. The pipeline must run end to end -- the
 	// declared auto-ready step's package really pulled and executed -- and
 	// the XR's Ready condition is False because nothing is observed yet.
-	render := exec.Command("crossplane", "composition", "render",
-		"testdata/xr.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
-	rendered, err := render.CombinedOutput()
+	rendered, err := renderComposition(t, "testdata/xr.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
 	if err != nil {
 		t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
 	}
@@ -415,9 +409,8 @@ status:
 `), 0o644); err != nil {
 		t.Fatalf("write observed resources: %v", err)
 	}
-	render2 := exec.Command("crossplane", "composition", "render",
+	rendered2, err := renderComposition(t,
 		"testdata/xr.yaml", comp, fns, "--xrd", xrd, "--observed-resources", observed, "--timeout", "5m")
-	rendered2, err := render2.CombinedOutput()
 	if err != nil {
 		t.Fatalf("crossplane composition render (observed): %v\n%s", err, rendered2)
 	}
@@ -486,11 +479,7 @@ func TestAcceptanceNativeCompositionRenders(t *testing.T) {
 	comp := filepath.Join(outDir, "compositions", "xwebapps.platform.hooli.tech.yaml")
 	xrd := filepath.Join(outDir, "xrds", "xwebapps.platform.hooli.tech.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
-	release := rendertest.Lock(t)
-	render := exec.Command("crossplane", "composition", "render",
-		"testdata/xr-webapp.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
-	rendered, err := render.CombinedOutput()
-	release()
+	rendered, err := renderComposition(t, "testdata/xr-webapp.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
 	if err != nil {
 		t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
 	}
@@ -546,6 +535,124 @@ func TestAcceptanceNativeCompositionRenders(t *testing.T) {
 			t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
 		}
 	}
+}
+
+// TestAcceptanceEnvelopeRenders is the authorable-envelope gate: a blueprint
+// wiring writeConnectionSecretToRef.name from an XRD parameter and setting
+// managementPolicies with the comma-separated value form, generated and
+// rendered through the real crossplane composition render — the real
+// function-go-templating engine under options: ["missingkey=error"], against
+// the real .m. namespaced Queue CRD (whose envelope genuinely carries
+// writeConnectionSecretToRef with name only). Asserted on the rendered
+// ARTIFACT: the Queue carries the XR's secret name, the policies list as a
+// real YAML sequence, and the computed providerConfigRef untouched beside
+// the authored entries.
+func TestAcceptanceEnvelopeRenders(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+
+	// Build to bin/cf for the same test-what-you-ship reason
+	// TestAcceptanceXQueueRenders documents.
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	bin := filepath.Join(repoRoot, "bin", "cf")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
+		t.Fatalf("build cf: %v\n%s", err, out)
+	}
+
+	cacheDir := filepath.Join(dir, "cache")
+	lock := filepath.Join(dir, ".cf.lock")
+
+	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("cf provider add: %v\n%s", err, out)
+	}
+
+	outDir := filepath.Join(dir, "out")
+	gen := exec.Command(bin, "gen", "testdata/xqueue-envelope.cf.yaml", "-o", outDir, "--cache-dir", cacheDir)
+	if out, err := gen.CombinedOutput(); err != nil {
+		t.Fatalf("cf gen: %v\n%s", err, out)
+	}
+	chk := exec.Command(bin, "gen", "testdata/xqueue-envelope.cf.yaml", "-o", outDir, "--cache-dir", cacheDir, "--check")
+	if out, err := chk.CombinedOutput(); err != nil {
+		t.Fatalf("cf gen --check right after gen should exit 0: %v\n%s", err, out)
+	}
+
+	comp := filepath.Join(outDir, "compositions", "xsecretqueues.platform.hooli.tech.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xsecretqueues.platform.hooli.tech.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+	rendered, err := renderComposition(t, "testdata/xr-envelope.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
+	if err != nil {
+		t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+	}
+
+	docs := decodeRenderedDocs(t, rendered)
+	queue, ok := docs["Queue"]
+	if !ok {
+		t.Fatalf("no Queue among rendered documents\n---\n%s", rendered)
+	}
+	// The wired envelope entry: the XR's secretName must land as the
+	// connection-secret name on the composed resource.
+	if got := digAny(queue, "spec", "writeConnectionSecretToRef", "name"); got != "queue-conn" {
+		t.Errorf("Queue spec.writeConnectionSecretToRef.name = %v, want the XR's parameter value queue-conn\n---\n%s",
+			got, rendered)
+	}
+	// The comma-separated value form: a real YAML sequence, not one string.
+	policies, ok := digAny(queue, "spec", "managementPolicies").([]any)
+	if !ok {
+		t.Fatalf("Queue spec.managementPolicies = %v, want a YAML sequence\n---\n%s",
+			digAny(queue, "spec", "managementPolicies"), rendered)
+	}
+	want := []any{"Observe", "Create", "Update", "Delete", "LateInitialize"}
+	if !slices.Equal(policies, want) {
+		t.Errorf("Queue spec.managementPolicies = %v, want %v", policies, want)
+	}
+	// The computed default beside the authored entries, untouched.
+	if got := digAny(queue, "spec", "providerConfigRef", "kind"); got != "ClusterProviderConfig" {
+		t.Errorf("Queue providerConfigRef.kind = %v, want ClusterProviderConfig", got)
+	}
+	if got := digAny(queue, "spec", "providerConfigRef", "name"); got != "localstack" {
+		t.Errorf("Queue providerConfigRef.name = %v, want localstack", got)
+	}
+
+	for _, bad := range []string{"<no value>", "<nil>"} {
+		if strings.Contains(string(rendered), bad) {
+			t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+		}
+	}
+}
+
+// renderComposition runs `crossplane composition render` under the
+// machine-wide render lock (internal/rendertest), retrying exactly once on
+// the CLI's known pinned-container race: generated functions.yaml pins
+// render.crossplane.io/runtime-docker-name so renders reuse one container
+// per function, and a render starting moments after another finishes can
+// find that container still attached to the previous render's dying network
+// ("is not connected to Docker network ..."). dockerd settles the previous
+// network's teardown asynchronously AFTER the previous crossplane process
+// has exited, so no amount of test-side serialization closes the window
+// completely; removing the stale containers and retrying once does. The
+// retry is gated on that exact error text — any other failure surfaces
+// immediately, unretried.
+func renderComposition(t *testing.T, args ...string) ([]byte, error) {
+	t.Helper()
+	release := rendertest.Lock(t)
+	defer release()
+	full := append([]string{"composition", "render"}, args...)
+	rendered, err := exec.Command("crossplane", full...).CombinedOutput()
+	if err != nil && bytes.Contains(rendered, []byte("is not connected to Docker network")) {
+		t.Logf("retrying render once after the pinned-container/network race:\n%s", rendered)
+		_ = exec.Command("docker", "rm", "-f", "cf-function-go-templating", "cf-function-auto-ready").Run()
+		rendered, err = exec.Command("crossplane", full...).CombinedOutput()
+	}
+	return rendered, err
 }
 
 // decodeRenderedDocs splits `crossplane composition render`'s multi-document

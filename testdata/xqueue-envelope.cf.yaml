@@ -1,0 +1,25 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-envelope
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.hooli.tech
+    kind: XSecretQueue
+    plural: xsecretqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+      secretName:   {type: string, required: true}
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {value: "eu-north-1"}
+      envelope:
+        managementPolicies:              {value: "Observe, Create, Update, Delete, LateInitialize"}
+        writeConnectionSecretToRef.name: {from: params.secretName}

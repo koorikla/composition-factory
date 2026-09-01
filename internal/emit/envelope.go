@@ -33,6 +33,20 @@ func checkEnvelopePaths(r blueprint.Resource, crd schema.CRD) (map[string]*schem
 	if len(r.Envelope) == 0 {
 		return nil, nil
 	}
+	// A native Kubernetes kind (blueprint provider "k8s") has no Crossplane
+	// envelope AT ALL: the composed object is not a managed resource, so
+	// there is no managementPolicies, writeConnectionSecretToRef or
+	// providerConfigRef to set — schema.CRD.Envelope honestly returns an
+	// empty tree for it, which would make every entry an unknown path below.
+	// Refused explicitly instead, with the reason, rather than letting the
+	// generic unknown-path message imply a typo the author could fix.
+	if crd.Native {
+		return nil, fmt.Errorf("resource %q: kind %q is a native Kubernetes kind, and a native object "+
+			"has no Crossplane envelope — it is the composed object itself, not a managed resource, "+
+			"so there is no managementPolicies, writeConnectionSecretToRef or providerConfigRef to "+
+			"set. Remove the envelope block; every settable field is addressable through fields: "+
+			"(e.g. spec.template.spec.containers[0].image)", r.Name, r.Kind)
+	}
 	nodes, err := crd.Envelope()
 	if err != nil {
 		return nil, fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
@@ -53,18 +67,19 @@ func checkEnvelopePaths(r blueprint.Resource, crd schema.CRD) (map[string]*schem
 	}
 	sort.Strings(paths) // deterministic: the same blueprint names the same path first
 	for _, p := range paths {
-		if known[p] != nil {
-			continue
-		}
 		first, _, _ := strings.Cut(p, ".")
-		// Defense in depth: Generate always validates first, and Validate
-		// already refuses providerConfigRef envelope entries — but
-		// Composition is exported, so the rule is enforced here too rather
-		// than depending on every caller's discipline.
+		// Defense in depth, and BEFORE the known-path skip — providerConfigRef
+		// genuinely exists in the envelope schema, so the known set admits it.
+		// Generate always validates first and Validate already refuses these
+		// entries, but Composition is exported, so the rule is enforced here
+		// too rather than depending on every caller's discipline.
 		if first == "providerConfigRef" {
 			return nil, fmt.Errorf("resource %q: envelope %q: providerConfigRef cannot be set via the "+
 				"envelope — it is derived from the required providerName parameter, the single source "+
 				"of truth for which ProviderConfig a composed resource binds to", r.Name, p)
+		}
+		if known[p] != nil {
+			continue
 		}
 		// deletionPolicy is the known structural difference between the two
 		// variants, so its absence gets a message naming that difference
