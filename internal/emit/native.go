@@ -94,19 +94,23 @@ func buildNativeTree(resourceName string, plan []forProviderField) (*nativeNode,
 	return root, nil
 }
 
-// analyze reports whether any descendant leaf of n renders unconditionally,
-// and the distinct optional parameter names among its descendants in
-// first-appearance (path-sorted) order — the inputs to the branch guard.
-func (n *nativeNode) analyze() (unconditional bool, params []string) {
+// analyze reports whether any descendant leaf of n renders unconditionally
+// (an empty guard), and the distinct guards among its conditional descendants
+// in first-appearance (path-sorted) order — the inputs to the branch guard.
+// Guards are deduplicated by their rendered text, which is deterministic per
+// source (one hasKey form per optional parameter, one hasKey chain per status
+// reference), so two leaves wired from the same parameter contribute one
+// condition, exactly as the old per-parameter dedup did.
+func (n *nativeNode) analyze() (unconditional bool, guards []string) {
 	seen := map[string]bool{}
 	var walk func(*nativeNode)
 	walk = func(m *nativeNode) {
 		if m.leaf != nil {
-			if !m.leaf.optional {
+			if m.leaf.guard == "" {
 				unconditional = true
-			} else if !seen[m.leaf.param] {
-				seen[m.leaf.param] = true
-				params = append(params, m.leaf.param)
+			} else if !seen[m.leaf.guard] {
+				seen[m.leaf.guard] = true
+				guards = append(guards, m.leaf.guard)
 			}
 		}
 		for _, c := range m.children {
@@ -114,7 +118,7 @@ func (n *nativeNode) analyze() (unconditional bool, params []string) {
 		}
 	}
 	walk(n)
-	return unconditional, params
+	return unconditional, guards
 }
 
 // writeNativeFields renders plan as the object's own nested body, starting
@@ -144,12 +148,12 @@ func writeNativeNode(d *Doc, indent int, n *nativeNode) {
 		return
 	}
 
-	unconditional, params := n.analyze()
+	unconditional, guards := n.analyze()
 	guarded := !unconditional
 	if guarded {
-		conds := make([]string, len(params))
-		for i, p := range params {
-			conds[i] = fmt.Sprintf("(hasKey $spec %q)", p)
+		conds := make([]string, len(guards))
+		for i, g := range guards {
+			conds[i] = "(" + g + ")"
 		}
 		d.Line(indent, "{{- if or %s }}", strings.Join(conds, " "))
 	}
@@ -163,7 +167,7 @@ func writeNativeNode(d *Doc, indent int, n *nativeNode) {
 		// mapping that follows as the element's value.
 		first := n.children[0]
 		rest := n.children
-		if first.leaf != nil && !first.leaf.optional && !first.indexed {
+		if first.leaf != nil && first.leaf.guard == "" && !first.indexed {
 			d.Line(indent+1, "- %s: %s", first.seg, first.leaf.rhs)
 			rest = n.children[1:]
 		} else {
@@ -188,8 +192,8 @@ func writeNativeNode(d *Doc, indent int, n *nativeNode) {
 // mapping on "containers[0]", say): the key opens a sequence whose single
 // element is the value.
 func writeNativeLeaf(d *Doc, indent int, n *nativeNode) {
-	if n.leaf.optional {
-		d.Line(indent, "{{- if hasKey $spec %q }}", n.leaf.param)
+	if n.leaf.guard != "" {
+		d.Line(indent, "{{- if %s }}", n.leaf.guard)
 	}
 	if n.indexed {
 		d.Line(indent, "%s:", n.seg)
@@ -197,7 +201,7 @@ func writeNativeLeaf(d *Doc, indent int, n *nativeNode) {
 	} else {
 		d.Line(indent, "%s: %s", n.seg, n.leaf.rhs)
 	}
-	if n.leaf.optional {
+	if n.leaf.guard != "" {
 		d.Line(indent, "{{- end }}")
 	}
 }

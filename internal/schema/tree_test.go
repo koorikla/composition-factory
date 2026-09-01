@@ -182,6 +182,85 @@ func TestRequiredIsCarried(t *testing.T) {
 	}
 }
 
+// statusCRD is nestedCRD's shape with a status subtree, the way every upjet
+// CRD declares one: atProvider carrying the observed values, conditions an
+// array of objects.
+var statusCRD = []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: things.test.m.example.org}
+spec:
+  group: test.m.example.org
+  scope: Namespaced
+  names: {kind: Thing, plural: things, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                properties:
+                  region: {type: string}
+          status:
+            properties:
+              atProvider:
+                properties:
+                  id: {type: string}
+                  url: {type: string}
+                  tags:
+                    type: object
+                    additionalProperties: {type: string}
+              conditions:
+                type: array
+                items:
+                  properties:
+                    status: {type: string}
+                    type: {type: string}
+`)
+
+// TestStatusExposesTheStatusSubtree pins Status() the way ForProvider() is
+// pinned: it must walk openAPIV3Schema.properties.status with the same
+// BuildTree the rest of the generator uses, so a cross-resource reference is
+// validated against exactly the tree the provider declares.
+func TestStatusExposesTheStatusSubtree(t *testing.T) {
+	c := parseOne(t, statusCRD)
+	st, err := c.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	var got []string
+	for _, l := range Leaves(st, "") {
+		got = append(got, l.Path)
+	}
+	want := []string{
+		"atProvider.id",
+		"atProvider.tags",
+		"atProvider.url",
+		"conditions[0].status",
+		"conditions[0].type",
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("Status leaves (-want +got):\n%s", diff)
+	}
+}
+
+// A CRD with no status at all returns nil, nil — the caller owns turning
+// that into an error naming the resource, not this package.
+func TestStatusIsNilWhenTheCRDDeclaresNone(t *testing.T) {
+	c := parseOne(t, nestedCRD)
+	st, err := c.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st != nil {
+		t.Errorf("Status = %v, want nil for a CRD with no status subtree", st)
+	}
+}
+
 func TestEnvelopeExcludesForProviderAndInitProvider(t *testing.T) {
 	c := parseOne(t, nestedCRD)
 	env, err := c.Envelope()

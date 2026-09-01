@@ -1,0 +1,40 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-when
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.hooli.tech
+    kind: XQueueTier
+    plural: xqueuetiers
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+      tier: {type: string, default: standard, enum: [standard, pro]}
+      replicasEnabled: {type: boolean, default: "true"}
+      replicas: {type: integer, default: "2"}
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {value: eu-north-1}
+    # Gated on a string comparison: exists only on the pro tier.
+    - name: audit-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      when: 'params.tier == "pro"'
+      fields:
+        region: {value: eu-north-1}
+    # Gated AND looped: the when wraps outside the range, so disabling
+    # replicas skips every iteration in one test.
+    - name: replica-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      when: params.replicasEnabled
+      forEach: params.replicas
+      fields:
+        region: {value: eu-north-1}

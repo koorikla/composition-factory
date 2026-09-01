@@ -1,0 +1,30 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-statusref
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.hooli.tech
+    kind: XQueuePair
+    plural: xqueuepairs
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {value: eu-north-1}
+    - name: queue-policy
+      kind: QueuePolicy
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {value: eu-north-1}
+        policy: {value: '{"Version":"2012-10-17"}'}
+        # A cross-resource status wire: absent until the queue is observed,
+        # filled in by Crossplane on a later reconcile.
+        queueUrl: {from: resources.main-queue.status.atProvider.url}

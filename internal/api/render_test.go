@@ -385,12 +385,27 @@ func TestRenderIntegrationRealCrossplane(t *testing.T) {
 	// concurrently running test processes race on that name — see
 	// internal/rendertest.
 	release := rendertest.Lock(t)
+	defer release()
 	rec := do(t, h, "POST", "/api/render", "")
-	release()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
 	}
 	resp := decodeRenderResponse(t, rec)
+	// Same once-only retry the root acceptance tests' renderComposition
+	// applies, for the same pinned-container/network race: dockerd settles a
+	// previous render's network teardown asynchronously after that crossplane
+	// process exits, so no test-side serialization closes the window
+	// completely. Gated on the exact error text; anything else fails below,
+	// unretried.
+	if !resp.OK && strings.Contains(resp.Error, "is not connected to Docker network") {
+		t.Logf("retrying render once after the pinned-container/network race: %s", resp.Error)
+		_ = exec.Command("docker", "rm", "-f", "cf-function-go-templating", "cf-function-auto-ready").Run()
+		rec = do(t, h, "POST", "/api/render", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+		}
+		resp = decodeRenderResponse(t, rec)
+	}
 	if resp.Unavailable != "" {
 		// docker info passed above but the render still could not reach the
 		// runtime — an environment problem, not a code one.

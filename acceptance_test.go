@@ -274,6 +274,346 @@ func TestAcceptanceForEachRenders(t *testing.T) {
 	}
 }
 
+// TestAcceptanceWhenRenders is the when gate: one blueprint carrying a
+// string-comparison guard (audit-queue on tier == "pro") and a bare-boolean
+// guard composed with forEach (replica-queue), generated once and rendered
+// through the real crossplane composition render both ways. The XR fixtures
+// exercise the real XRD schema defaulting: xr-when-pro.yaml sets only tier
+// (replicasEnabled/replicas default true/2 → audit plus two replicas), and
+// xr-when-off.yaml sets only replicasEnabled: false (tier defaults standard
+// → the unconditional queue alone, every loop iteration skipped by the when
+// OUTSIDE the range). Asserted on the rendered ARTIFACT's
+// composition-resource-name annotations, plus the <no value> grep.
+func TestAcceptanceWhenRenders(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	bin := filepath.Join(repoRoot, "bin", "cf")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
+		t.Fatalf("build cf: %v\n%s", err, out)
+	}
+
+	cacheDir := filepath.Join(dir, "cache")
+	lock := filepath.Join(dir, ".cf.lock")
+
+	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("cf provider add: %v\n%s", err, out)
+	}
+
+	// Generate twice into separate directories: determinism is a correctness
+	// requirement, so the two runs must agree byte for byte.
+	outDir := filepath.Join(dir, "out")
+	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
+		gen := exec.Command(bin, "gen", "testdata/xqueue-when.cf.yaml", "-o", o, "--cache-dir", cacheDir)
+		if out, err := gen.CombinedOutput(); err != nil {
+			t.Fatalf("cf gen into %s: %v\n%s", o, err, out)
+		}
+	}
+	for _, rel := range []string{
+		filepath.Join("compositions", "xqueuetiers.platform.hooli.tech.yaml"),
+		filepath.Join("xrds", "xqueuetiers.platform.hooli.tech.yaml"),
+		"functions.yaml",
+	} {
+		first, err := os.ReadFile(filepath.Join(outDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		second, err := os.ReadFile(filepath.Join(dir, "out2", rel))
+		if err != nil {
+			t.Fatalf("read second-run %s: %v", rel, err)
+		}
+		if !bytes.Equal(first, second) {
+			t.Errorf("%s: two generate runs over the same blueprint produced different bytes", rel)
+		}
+	}
+
+	comp := filepath.Join(outDir, "compositions", "xqueuetiers.platform.hooli.tech.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueuetiers.platform.hooli.tech.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+
+	cases := []struct {
+		name string
+		xr   string
+		want []string // every composition-resource-name annotation, sorted
+	}{
+		{"tier pro with defaulted replicas renders audit plus fan-out", "testdata/xr-when-pro.yaml",
+			[]string{"audit-queue", "main-queue", "replica-queue-0", "replica-queue-1"}},
+		{"defaults plus replicasEnabled false renders the unconditional queue alone", "testdata/xr-when-off.yaml",
+			[]string{"main-queue"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rendered, err := renderComposition(t,
+				tc.xr, comp, fns, "--xrd", xrd, "--timeout", "5m")
+			if err != nil {
+				t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+			}
+			got := renderedResourceNames(t, rendered)
+			sort.Strings(got)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("composition-resource-name annotations = %v, want %v\n---\n%s",
+					got, tc.want, rendered)
+			}
+			for _, bad := range []string{"<no value>", "<nil>"} {
+				if strings.Contains(string(rendered), bad) {
+					t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+				}
+			}
+		})
+	}
+}
+
+// TestAcceptanceStatusRefRenders is the cross-resource wire gate: a
+// blueprint whose queue-policy resource sources queueUrl from
+// resources.main-queue.status.atProvider.url, generated and rendered through
+// the real crossplane composition render — the real function-go-templating
+// engine seeing the real protojson shape of .observed (where an empty
+// observed-resources map is NO key at all, the exact state the emitted
+// hasKey chain's first link guards). Proven both ways on the rendered
+// ARTIFACT:
+//
+//   - with --observed-resources supplying the queue's observed status, the
+//     URL flows into the QueuePolicy's forProvider.queueUrl;
+//   - without observed state, the field is absent CLEANLY — the render
+//     succeeds, both documents appear, and no "<no value>"/"<nil>" reaches a
+//     live resource shape (Crossplane fills the value in on a later
+//     reconcile).
+func TestAcceptanceStatusRefRenders(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	bin := filepath.Join(repoRoot, "bin", "cf")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
+		t.Fatalf("build cf: %v\n%s", err, out)
+	}
+
+	cacheDir := filepath.Join(dir, "cache")
+	lock := filepath.Join(dir, ".cf.lock")
+
+	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("cf provider add: %v\n%s", err, out)
+	}
+
+	// Generate twice into separate directories: determinism is a correctness
+	// requirement, so the two runs must agree byte for byte.
+	outDir := filepath.Join(dir, "out")
+	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
+		gen := exec.Command(bin, "gen", "testdata/xqueue-statusref.cf.yaml", "-o", o, "--cache-dir", cacheDir)
+		if out, err := gen.CombinedOutput(); err != nil {
+			t.Fatalf("cf gen into %s: %v\n%s", o, err, out)
+		}
+	}
+	for _, rel := range []string{
+		filepath.Join("compositions", "xqueuepairs.platform.hooli.tech.yaml"),
+		filepath.Join("xrds", "xqueuepairs.platform.hooli.tech.yaml"),
+		"functions.yaml",
+	} {
+		first, err := os.ReadFile(filepath.Join(outDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		second, err := os.ReadFile(filepath.Join(dir, "out2", rel))
+		if err != nil {
+			t.Fatalf("read second-run %s: %v", rel, err)
+		}
+		if !bytes.Equal(first, second) {
+			t.Errorf("%s: two generate runs over the same blueprint produced different bytes", rel)
+		}
+	}
+
+	comp := filepath.Join(outDir, "compositions", "xqueuepairs.platform.hooli.tech.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueuepairs.platform.hooli.tech.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+	const url = "https://sqs.eu-north-1.amazonaws.com/123456789012/demo-pair"
+
+	t.Run("observed state flows into the wire", func(t *testing.T) {
+		rendered, err := renderComposition(t,
+			"testdata/xr-statusref.yaml", comp, fns, "--xrd", xrd,
+			"--observed-resources", "testdata/observed-main-queue.yaml", "--timeout", "5m")
+		if err != nil {
+			t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+		}
+		got := string(rendered)
+		if !strings.Contains(got, "queueUrl: "+url) {
+			t.Errorf("rendered output missing %q — the observed status value did not flow across "+
+				"the wire\n---\n%s", "queueUrl: "+url, got)
+		}
+		for _, bad := range []string{"<no value>", "<nil>"} {
+			if strings.Contains(got, bad) {
+				t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+			}
+		}
+	})
+
+	t.Run("unobserved wire is cleanly absent", func(t *testing.T) {
+		rendered, err := renderComposition(t,
+			"testdata/xr-statusref.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
+		if err != nil {
+			t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+		}
+		got := string(rendered)
+		if strings.Contains(got, "queueUrl") {
+			t.Errorf("queueUrl must be omitted entirely until the queue is observed\n---\n%s", got)
+		}
+		// Both composed documents must still be present — the guard omits one
+		// field, never a resource.
+		for _, want := range []string{"kind: Queue", "kind: QueuePolicy"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("rendered output missing %q\n---\n%s", want, got)
+			}
+		}
+		for _, bad := range []string{"<no value>", "<nil>"} {
+			if strings.Contains(got, bad) {
+				t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+			}
+		}
+	})
+}
+
+// TestAcceptanceConventionsRender is the user-templates gate: a blueprint
+// with a naming and a tags convention over two queues, one of which
+// overrides the name explicitly, generated and rendered through the real
+// crossplane composition render — the real function-go-templating engine
+// executing the emitted define blocks and the real sprig
+// include/dict/trim/nindent pipeline, not the unit tests' stubs. Asserted
+// structurally on the rendered ARTIFACT: the scalar template output becomes
+// queue-a's forProvider.name, the multi-line output becomes a real tags
+// MAPPING on both queues, and queue-b's explicit name wins.
+func TestAcceptanceConventionsRender(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	bin := filepath.Join(repoRoot, "bin", "cf")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
+		t.Fatalf("build cf: %v\n%s", err, out)
+	}
+
+	cacheDir := filepath.Join(dir, "cache")
+	lock := filepath.Join(dir, ".cf.lock")
+
+	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("cf provider add: %v\n%s", err, out)
+	}
+
+	// Generate twice into separate directories: determinism is a correctness
+	// requirement, so the two runs must agree byte for byte.
+	outDir := filepath.Join(dir, "out")
+	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
+		gen := exec.Command(bin, "gen", "testdata/xqueue-conventions.cf.yaml", "-o", o, "--cache-dir", cacheDir)
+		if out, err := gen.CombinedOutput(); err != nil {
+			t.Fatalf("cf gen into %s: %v\n%s", o, err, out)
+		}
+	}
+	for _, rel := range []string{
+		filepath.Join("compositions", "xqueueconvs.platform.hooli.tech.yaml"),
+		filepath.Join("xrds", "xqueueconvs.platform.hooli.tech.yaml"),
+		"functions.yaml",
+	} {
+		first, err := os.ReadFile(filepath.Join(outDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		second, err := os.ReadFile(filepath.Join(dir, "out2", rel))
+		if err != nil {
+			t.Fatalf("read second-run %s: %v", rel, err)
+		}
+		if !bytes.Equal(first, second) {
+			t.Errorf("%s: two generate runs over the same blueprint produced different bytes", rel)
+		}
+	}
+
+	comp := filepath.Join(outDir, "compositions", "xqueueconvs.platform.hooli.tech.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueueconvs.platform.hooli.tech.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+
+	rendered, err := renderComposition(t,
+		"testdata/xr-conventions.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
+	if err != nil {
+		t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+	}
+
+	forProviderByResource := map[string]map[string]any{}
+	for _, chunk := range strings.Split(string(rendered), "\n---\n") {
+		if strings.TrimSpace(chunk) == "" {
+			continue
+		}
+		var doc struct {
+			Metadata struct {
+				Annotations map[string]string `json:"annotations"`
+			} `json:"metadata"`
+			Spec struct {
+				ForProvider map[string]any `json:"forProvider"`
+			} `json:"spec"`
+		}
+		if err := yaml.Unmarshal([]byte(chunk), &doc); err != nil {
+			t.Fatalf("rendered document is not valid YAML: %v\n---\n%s", err, chunk)
+		}
+		if name := doc.Metadata.Annotations["crossplane.io/composition-resource-name"]; name != "" {
+			forProviderByResource[name] = doc.Spec.ForProvider
+		}
+	}
+
+	a, ok := forProviderByResource["queue-a"]
+	if !ok {
+		t.Fatalf("no queue-a document rendered\n---\n%s", rendered)
+	}
+	if a["name"] != "demo-conv-queue-a" {
+		t.Errorf("queue-a forProvider.name = %v, want demo-conv-queue-a from the naming convention", a["name"])
+	}
+	b, ok := forProviderByResource["queue-b"]
+	if !ok {
+		t.Fatalf("no queue-b document rendered\n---\n%s", rendered)
+	}
+	if b["name"] != "custom-b" {
+		t.Errorf("queue-b forProvider.name = %v, want the explicit custom-b to override the convention", b["name"])
+	}
+	for _, q := range []string{"queue-a", "queue-b"} {
+		tags, isMap := forProviderByResource[q]["tags"].(map[string]any)
+		if !isMap {
+			t.Fatalf("%s tags = %v (%T), want a YAML mapping\n---\n%s",
+				q, forProviderByResource[q]["tags"], forProviderByResource[q]["tags"], rendered)
+		}
+		if tags["managed-by"] != "crossplane" || tags["xr"] != "demo-conv" {
+			t.Errorf("%s tags = %v, want managed-by: crossplane and xr: demo-conv", q, tags)
+		}
+	}
+	for _, bad := range []string{"<no value>", "<nil>"} {
+		if strings.Contains(string(rendered), bad) {
+			t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+		}
+	}
+}
+
 // renderedResourceNames decodes every document in a rendered stream and
 // collects the composition-resource-name annotation of each composed
 // resource (the XR itself carries none and is skipped). Distinctness is

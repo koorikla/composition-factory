@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -399,6 +400,21 @@ func (b *Blueprint) Validate() error {
 		}
 	}
 
+	// Templates and conventions are validated before the resources loop:
+	// a field's template: <name> reference below is checked against the set
+	// this call has already accepted.
+	if err := b.validateTemplates(); err != nil {
+		return err
+	}
+
+	// seenResources catches a duplicate resource name at the source. Node
+	// identity is the composition-resource-name annotation (§7), which is
+	// r.Name verbatim — two resources sharing one name would emit two
+	// documents with the SAME annotation, which Crossplane keys by, silently
+	// collapsing them into one composed resource. It also makes a
+	// cross-resource reference (resources.<name>.status.<path>) ambiguous.
+	seenResources := make(map[string]int, len(b.Spec.Resources))
+
 	for i, r := range b.Spec.Resources {
 		if r.Name == "" || r.Kind == "" {
 			switch {
@@ -413,6 +429,12 @@ func (b *Blueprint) Validate() error {
 		if !resourceNameRE.MatchString(r.Name) {
 			return fmt.Errorf("spec.resources[%d] %q: invalid resource name (must be a DNS label, e.g. main-queue)", i, r.Name)
 		}
+		if prev, dup := seenResources[r.Name]; dup {
+			return fmt.Errorf("spec.resources[%d] %q: duplicate resource name (already used by spec.resources[%d]) -- "+
+				"the name becomes the composition-resource-name annotation, which Crossplane keys composed "+
+				"resources by, so two resources sharing it silently collapse into one", i, r.Name, prev)
+		}
+		seenResources[r.Name] = i
 		// r.Kind is looked up against resolveKind's list of cached CRDs by
 		// exact string equality (internal/emit/composition.go), so a bogus
 		// value fails loudly there ("kind %q not found in any cached
@@ -461,6 +483,22 @@ func (b *Blueprint) Validate() error {
 				}
 			}
 		}
+		// Templates and conventions are forProvider-plan features in v1, and a
+		// native Kubernetes kind has no forProvider plan. A convention would
+		// have to match the native object's own top-level leaves — structural
+		// fields (a Secret's type, a ConfigMap's data) where a silently
+		// defaulted value changes workload semantics — and a template call's
+		// output re-indents to the fixed forProvider column
+		// (templateFieldNindent in internal/emit), which a native field at an
+		// arbitrary nesting depth breaks. Both are refused outright rather
+		// than guessed: relaxing either later is a feature, not a fix.
+		if r.Provider == NativeProvider && len(b.Spec.Conventions) > 0 {
+			return fmt.Errorf("spec.resources[%d] (%q): spec.conventions cannot be combined with a native "+
+				"Kubernetes resource (provider %q) in v1 -- a convention fills top-level forProvider "+
+				"fields, and a native object has no forProvider; its own top-level fields are structural, "+
+				"where a silently defaulted value would change workload semantics. Remove the conventions "+
+				"or set the native resource's fields explicitly", i, r.Name, NativeProvider)
+		}
 		// forEach repeats the resource's whole rendered document N times, N
 		// read at render time from an integer XRD parameter
 		// (internal/emit/composition.go wraps the document in
@@ -499,6 +537,53 @@ func (b *Blueprint) Validate() error {
 					"schema default makes the key's presence unconditional", r.Name, param)
 			}
 		}
+		// when wraps the resource's whole rendered document in a template
+		// conditional that dereferences its parameter unguarded, so the
+		// parameter gets exactly forEach's required-or-default rule, for
+		// exactly forEach's reason. The grammar is pinned by ParseWhen; the
+		// type rules here keep the condition honest: a bare form on a
+		// non-boolean would test Go-template truthiness of an arbitrary
+		// value, and a comparison on a non-string would compare against a
+		// value the schema says can never be a string. Both are conditions
+		// that "work" and are silently wrong.
+		if r.When != "" {
+			if err := checkScalar(fmt.Sprintf("spec.resources[%d].when", i), r.When); err != nil {
+				return err
+			}
+			param, op, literal, err := ParseWhen(r.When)
+			if err != nil {
+				return fmt.Errorf("resource %q: %w", r.Name, err)
+			}
+			decl, exists := x.Parameters[param]
+			if !exists {
+				return fmt.Errorf("resource %q: when references unknown parameter %q", r.Name, param)
+			}
+			if !decl.Required && decl.Default == "" {
+				return fmt.Errorf("resource %q: when parameter %q must be required or carry a default -- "+
+					`the condition dereferences it unguarded, and under options: ["missingkey=error"] `+
+					"an absent key hard-fails the whole render; only the XRD's required gate or its "+
+					"schema default makes the key's presence unconditional", r.Name, param)
+			}
+			switch op {
+			case "":
+				if decl.Type != "boolean" {
+					return fmt.Errorf("resource %q: when parameter %q has type %q, want boolean -- "+
+						"the bare form renders {{- if $spec.%s }}, a truthiness test; compare a string "+
+						`parameter explicitly: when: params.%s == "<literal>"`,
+						r.Name, param, decl.Type, param, param)
+				}
+			default: // "==" or "!=", ParseWhen admits nothing else
+				if decl.Type != "string" {
+					return fmt.Errorf("resource %q: when parameter %q has type %q, want string -- "+
+						"the %s form compares against a string literal", r.Name, param, decl.Type, op)
+				}
+				if len(decl.Enum) > 0 && !slices.Contains(decl.Enum, literal) {
+					return fmt.Errorf("resource %q: when literal %q is not among parameter %q's enum values %v -- "+
+						"the XRD schema admits no XR carrying it, so the condition would be constant: "+
+						"a resource that silently never (or always) exists", r.Name, literal, param, decl.Enum)
+				}
+			}
+		}
 		paths := make([]string, 0, len(r.Fields))
 		for p := range r.Fields {
 			paths = append(paths, p)
@@ -507,13 +592,13 @@ func (b *Blueprint) Validate() error {
 		for _, p := range paths {
 			f := r.Fields[p]
 			set := 0
-			for _, v := range []string{f.From, f.Value, f.Raw} {
+			for _, v := range []string{f.From, f.Value, f.Raw, f.Template} {
 				if v != "" {
 					set++
 				}
 			}
 			if set != 1 {
-				return fmt.Errorf("resource %q field %q: set exactly one of from, value or raw (got %d)",
+				return fmt.Errorf("resource %q field %q: set exactly one of from, value, raw or template (got %d)",
 					r.Name, p, set)
 			}
 			// value is written into the rendered inner document as a
@@ -535,17 +620,47 @@ func (b *Blueprint) Validate() error {
 			// A slice, not a map: Validate reports the FIRST problem, so the
 			// order it inspects these in is part of its contract.
 			for _, src := range []struct{ label, val string }{
-				{"from", f.From}, {"raw", f.Raw}, {"value", f.Value},
+				{"from", f.From}, {"raw", f.Raw}, {"template", f.Template}, {"value", f.Value},
 			} {
 				if err := checkScalar(fmt.Sprintf("resource %q field %q: %s", r.Name, p, src.label), src.val); err != nil {
 					return err
 				}
 			}
+			if f.Template != "" {
+				if _, ok := b.Spec.Templates[f.Template]; !ok {
+					return fmt.Errorf("resource %q field %q: references unknown template %q "+
+						"(declare it under spec.templates)", r.Name, p, f.Template)
+				}
+				// Same v1 ruling as conventions above, for the mechanical half
+				// of the reason: a template call's output is re-indented to the
+				// fixed forProvider field column (templateFieldNindent in
+				// internal/emit), and a native field at any deeper nesting level
+				// would take that output at the wrong column — structurally
+				// broken YAML in the rendered document.
+				if r.Provider == NativeProvider {
+					return fmt.Errorf("resource %q field %q: template: fields are not supported on a native "+
+						"Kubernetes resource (provider %q) in v1 -- a template call's output re-indents to "+
+						"the fixed forProvider column, which a native field at an arbitrary nesting depth "+
+						"breaks. Set the field with value:, raw: or from:", r.Name, p, NativeProvider)
+				}
+			}
 			if f.From != "" {
+				// A cross-resource status reference gets its own validation
+				// path; see validateStatusRef. The CRD-schema half of the
+				// check (does <path> exist in the referenced kind's status,
+				// and is it a scalar leaf) lives in internal/emit, which is
+				// the layer that holds the CRDs — the same split as field
+				// paths, which checkFieldPaths validates there.
+				if strings.HasPrefix(f.From, statusRefPrefix) {
+					if err := b.validateStatusRef(r, p, f.From); err != nil {
+						return err
+					}
+					continue
+				}
 				param, ok := strings.CutPrefix(f.From, "params.")
 				if !ok {
-					return fmt.Errorf("resource %q field %q: from must start with params. (got %q)",
-						r.Name, p, f.From)
+					return fmt.Errorf("resource %q field %q: from must be params.<name> or "+
+						"resources.<name>.status.<path> (got %q)", r.Name, p, f.From)
 				}
 				decl, exists := x.Parameters[param]
 				if !exists {
@@ -582,4 +697,50 @@ func (b *Blueprint) Validate() error {
 	// putting them after the resource checks keeps the first-error contract of
 	// every existing case unchanged.
 	return b.validatePipeline()
+}
+
+// validateStatusRef checks the blueprint-level half of a cross-resource
+// status reference (resources.<name>.status.<path>): grammar, that the
+// referenced resource is declared, that the reference is not to the
+// resource's own status, that the target is not looped, and that every path
+// segment is a clean identifier (each one reaches emitted template text
+// inside hasKey guards and a dereference expression, so the identifier check
+// is a structural requirement, not a style rule). The CRD-schema half — does
+// <path> name a scalar leaf in the referenced kind's declared status —
+// belongs to internal/emit, which holds the CRDs.
+func (b *Blueprint) validateStatusRef(r Resource, fieldPath, from string) error {
+	target, path, ok := StatusRef(from)
+	if !ok {
+		return fmt.Errorf("resource %q field %q: a resources. reference must be "+
+			"resources.<name>.status.<path>, e.g. resources.main-queue.status.atProvider.url (got %q)",
+			r.Name, fieldPath, from)
+	}
+	if target == r.Name {
+		return fmt.Errorf("resource %q field %q: references its own status -- a resource cannot be "+
+			"wired to itself; the value it would read is the one its own document produces", r.Name, fieldPath)
+	}
+	var decl *Resource
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Name == target {
+			decl = &b.Spec.Resources[i]
+			break
+		}
+	}
+	if decl == nil {
+		return fmt.Errorf("resource %q field %q: references unknown resource %q", r.Name, fieldPath, target)
+	}
+	if decl.ForEach != "" {
+		return fmt.Errorf("resource %q field %q: resource %q is looped (forEach: %s), so its composed "+
+			"documents are named %s-0, %s-1, ... and the un-indexed key %q never appears in the observed "+
+			"resources map -- the reference could never resolve. Reference an unlooped resource",
+			r.Name, fieldPath, target, decl.ForEach, target, target, target)
+	}
+	for _, seg := range strings.Split(path, ".") {
+		if !paramNameRE.MatchString(seg) {
+			return fmt.Errorf("resource %q field %q: status path segment %q in %q is not a valid "+
+				"field name (must be camelCase, e.g. atProvider.url) -- each segment is written into "+
+				"the emitted template as a dereference and a hasKey guard", r.Name, fieldPath, seg, from)
+		}
+	}
+	return nil
 }

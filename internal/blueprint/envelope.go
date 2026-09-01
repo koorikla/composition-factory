@@ -79,7 +79,17 @@ func validateResourceEnvelope(x XRD, r Resource) error {
 		if f.From != "" {
 			param, ok := strings.CutPrefix(f.From, "params.")
 			if !ok {
-				return fmt.Errorf("resource %q envelope %q: from must start with params. (got %q)",
+				// Deliberately narrower than a field's from: a cross-resource
+				// status wire (resources.<name>.status.<path>) is not supported
+				// in envelope entries in v1. The envelope planner
+				// (internal/emit/envelope.go) models a wire as an optional
+				// PARAMETER (its guard is a hasKey over $spec), not as the
+				// observed-resources hasKey chain a status reference needs, so
+				// admitting the grammar here would emit a guard that can never
+				// be true. Refused at the source until the planner learns the
+				// chain.
+				return fmt.Errorf("resource %q envelope %q: from must start with params. (got %q) -- "+
+					"cross-resource status wires are supported in fields:, not in envelope entries, in v1",
 					r.Name, p, f.From)
 			}
 			decl, exists := x.Parameters[param]

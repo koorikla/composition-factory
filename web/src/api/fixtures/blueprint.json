@@ -33,17 +33,21 @@
         }
       }
     },
+    "templates": null,
+    "conventions": null,
     "resources": [
       {
         "name": "main-queue",
         "kind": "Queue",
         "provider": "xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0",
         "forEach": "",
+        "when": "",
         "fields": {
           "maxMessageSize": {
             "from": "params.maxMessageSize",
             "value": "",
-            "raw": ""
+            "raw": "",
+            "template": ""
           }
         }
       }
