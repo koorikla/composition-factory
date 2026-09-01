@@ -18,6 +18,23 @@ type Spec struct {
 	Sources   []Source   `json:"sources"`
 	XRD       XRD        `json:"xrd"`
 	Resources []Resource `json:"resources"`
+	// Pipeline, when non-empty, fully declares the Composition pipeline steps
+	// that surround the built-in go-templating step. When absent (or empty),
+	// the generator emits its default pipeline: the templating step followed
+	// by a function-auto-ready step (see internal/emit). Declaring ANY step
+	// replaces that default in full, so a blueprint that wants readiness
+	// propagation alongside its own steps must declare auto-ready explicitly:
+	//
+	//	pipeline:
+	//	  - name: auto-ready
+	//	    functionRef: function-auto-ready
+	//	    package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready
+	//
+	// omitempty keeps a blueprint that never declared the key from gaining a
+	// literal `pipeline: null` when the API server persists it back; an empty
+	// list means the same thing as an absent one, so nothing is lost by
+	// collapsing the two.
+	Pipeline []PipelineStep `json:"pipeline,omitempty"`
 }
 
 // Source is one schema source. M1 supports provider packages only.
@@ -43,6 +60,22 @@ type Parameter struct {
 	Enum        []string `json:"enum"`
 	Default     string   `json:"default"`
 	Description string   `json:"description"`
+}
+
+// PipelineStep is one blueprint-declared Composition pipeline step, placed
+// relative to the built-in go-templating step (TemplatingStepName).
+//
+// Input is the function's typed input object, held VERBATIM as the raw YAML
+// string the user wrote — never normalised on load, so a loaded blueprint
+// marshals back byte-for-byte. The emitter parses it and re-renders it
+// deterministically (sorted keys) into the Composition; Validate guarantees
+// it parses and carries apiVersion/kind before it can get that far.
+type PipelineStep struct {
+	Name        string `json:"name"`
+	FunctionRef string `json:"functionRef"`
+	Package     string `json:"package"`
+	Input       string `json:"input,omitempty"`
+	Position    string `json:"position,omitempty"`
 }
 
 // Resource is one composed resource.

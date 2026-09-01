@@ -979,3 +979,135 @@ func TestConcurrentPutAndParameterPostSerializes(t *testing.T) {
 			"already closed for N concurrent parameter edits")
 	}
 }
+
+// --- PUT /api/blueprint: spec.pipeline survives the round trip ---
+//
+// The canvas PUTs its whole document, and decodeJSON uses
+// DisallowUnknownFields: before blueprint.Spec gained the Pipeline field, a
+// document carrying spec.pipeline would have been 400'd at the door (and,
+// worse, a Blueprint re-marshaled without the field would silently DROP the
+// user's declared steps on the next persist). This pins the whole loop: PUT
+// accepts it, GET agrees, the file on disk loads back with every step — the
+// raw input string byte-for-byte — and a second identical PUT is byte-stable.
+func TestPutBlueprintRoundTripsPipeline(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	const rawInput = "kind: Input\napiVersion: fn.example.org/v1beta1\nzeta: first\nalpha: last\n"
+	current := mustLoadBlueprint(t, path)
+	updated := *current
+	updated.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "prep",
+			FunctionRef: "function-example",
+			Package:     "xpkg.crossplane.io/crossplane-contrib/function-example:v1.0.0",
+			Position:    blueprint.PositionBefore,
+			Input:       rawInput,
+		},
+		{
+			Name:        "auto-ready",
+			FunctionRef: "function-auto-ready",
+			Package:     "xpkg.crossplane.io/crossplane-contrib/function-auto-ready",
+		},
+	}
+	body, err := json.Marshal(updated)
+	if err != nil {
+		t.Fatalf("marshal PUT body: %v", err)
+	}
+
+	rec := do(t, h, "PUT", "/api/blueprint", string(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT status %d (DisallowUnknownFields rejecting spec.pipeline?): %s", rec.Code, rec.Body)
+	}
+
+	var fromPut blueprint.Blueprint
+	if err := json.Unmarshal(rec.Body.Bytes(), &fromPut); err != nil {
+		t.Fatalf("PUT response not JSON: %v", err)
+	}
+	if diff := cmp.Diff(updated.Spec.Pipeline, fromPut.Spec.Pipeline); diff != "" {
+		t.Errorf("PUT response pipeline (-sent +got):\n%s", diff)
+	}
+
+	getRec := do(t, h, "GET", "/api/blueprint", "")
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET status %d: %s", getRec.Code, getRec.Body)
+	}
+	var fromGet blueprint.Blueprint
+	if err := json.Unmarshal(getRec.Body.Bytes(), &fromGet); err != nil {
+		t.Fatalf("GET response not JSON: %v", err)
+	}
+	if diff := cmp.Diff(updated.Spec.Pipeline, fromGet.Spec.Pipeline); diff != "" {
+		t.Errorf("GET pipeline (-sent +got):\n%s", diff)
+	}
+
+	reloaded := mustLoadBlueprint(t, path)
+	if diff := cmp.Diff(updated.Spec.Pipeline, reloaded.Spec.Pipeline); diff != "" {
+		t.Errorf("persisted pipeline (-sent +got):\n%s", diff)
+	}
+	if len(reloaded.Spec.Pipeline) > 0 && reloaded.Spec.Pipeline[0].Input != rawInput {
+		t.Errorf("input did not survive persist+reload verbatim:\ngot  %q\nwant %q",
+			reloaded.Spec.Pipeline[0].Input, rawInput)
+	}
+
+	// Byte-stability, same property TestPutBlueprintIsByteStableAcrossRepeatedPuts
+	// pins for a pipeline-free document.
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after first PUT: %v", err)
+	}
+	if rec := do(t, h, "PUT", "/api/blueprint", string(body)); rec.Code != http.StatusOK {
+		t.Fatalf("second PUT: status %d: %s", rec.Code, rec.Body)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after second PUT: %v", err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Errorf("PUTting the identical pipelined document twice produced different bytes:\n"+
+			"--- first ---\n%s\n--- second ---\n%s", first, second)
+	}
+}
+
+// A pipelined document that fails the pipeline's own validation is a 400
+// with the engine's error verbatim, and the file is untouched — the same
+// contract every other PUT rejection gives.
+func TestPutBlueprintWithInvalidPipelineIs400(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	current := mustLoadBlueprint(t, path)
+	invalid := *current
+	invalid.Spec.Pipeline = []blueprint.PipelineStep{
+		{Name: blueprint.TemplatingStepName, FunctionRef: "function-x", Package: "example.org/fn-x:v1"},
+	}
+	wantErr := invalid.Validate()
+	if wantErr == nil {
+		t.Fatal("test setup: a step named after the templating step was expected to fail Validate")
+	}
+	body, err := json.Marshal(invalid)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	rec := do(t, h, "PUT", "/api/blueprint", string(body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	var errBody errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("error response not JSON: %v (%s)", err, rec.Body)
+	}
+	if errBody.Error != wantErr.Error() {
+		t.Errorf("error body = %q, want Validate's error verbatim: %q", errBody.Error, wantErr.Error())
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after rejected PUT: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("the blueprint file changed despite a rejected PUT")
+	}
+}

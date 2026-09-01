@@ -27,9 +27,21 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 	d.Line(2, "kind: %s", x.Kind)
 	d.Line(1, "mode: Pipeline")
 	d.Line(1, "pipeline:")
-	d.Line(1, "- step: render-resources")
+
+	// Blueprint-declared steps surround the built-in templating step:
+	// before-steps here, after-steps at the bottom, declaration order
+	// preserved within each side. A blueprint that declares no pipeline gets
+	// the default auto-ready step (see effectivePipeline).
+	beforeSteps, afterSteps := splitPipeline(effectivePipeline(b))
+	for _, s := range beforeSteps {
+		if err := writePipelineStep(d, s); err != nil {
+			return nil, err
+		}
+	}
+
+	d.Line(1, "- step: %s", blueprint.TemplatingStepName)
 	d.Line(2, "functionRef:")
-	d.Line(3, "name: function-go-templating")
+	d.Line(3, "name: %s", blueprint.TemplatingFunctionName)
 	d.Line(2, "input:")
 	d.Line(3, "apiVersion: gotemplating.fn.crossplane.io/v1beta1")
 	d.Line(3, "kind: GoTemplate")
@@ -139,9 +151,11 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		}
 	}
 
-	d.Line(1, "- step: auto-ready")
-	d.Line(2, "functionRef:")
-	d.Line(3, "name: function-auto-ready")
+	for _, s := range afterSteps {
+		if err := writePipelineStep(d, s); err != nil {
+			return nil, err
+		}
+	}
 	return d.Bytes(), nil
 }
 

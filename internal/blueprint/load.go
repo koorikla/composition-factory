@@ -542,5 +542,9 @@ func (b *Blueprint) Validate() error {
 			}
 		}
 	}
-	return nil
+
+	// spec.pipeline last: its checks are self-contained (see pipeline.go), so
+	// putting them after the resource checks keeps the first-error contract of
+	// every existing case unchanged.
+	return b.validatePipeline()
 }
