@@ -172,7 +172,11 @@ function resourceCardHTML(d, r, sel) {
     '<div class="node-h" style="background:var(--surface-2)">' +
     '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
     '<span class="k">' + esc(r.kind) + '</span>' +
-    '<span class="nm">' + esc(r.name) + '</span></div>' +
+    '<span class="nm">' + esc(r.name) + '</span>' +
+    (sel === r.name
+      ? '<button class="del" data-act="duplicate" data-res="' + esc(r.name) + '" title="Duplicate (\u2318C \u2318V)">\u29c9</button>' +
+        '<button class="del" data-act="delete" data-res="' + esc(r.name) + '" title="Remove (Delete)">\u00d7</button>'
+      : "") + "</div>" +
     '<div class="node-grp">' + esc(grp) + '</div>' +
     '<div class="ports">';
 
@@ -434,6 +438,16 @@ function onKeyDown(e) {
 }
 
 function onCanvasClick(e) {
+  const act = e.target.closest("[data-act]");
+  if (act) {
+    const rn = act.getAttribute("data-res");
+    const d = doc();
+    const res = d && (d.spec.resources || []).find(function (x) { return x.name === rn; });
+    if (!res) return;
+    if (act.getAttribute("data-act") === "delete") removeResource(rn);
+    else duplicateResource(res);
+    return;
+  }
   if (e.target.closest("[data-addxr]")) {
     const d = doc();
     if (!d) return;
