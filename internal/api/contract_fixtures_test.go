@@ -116,6 +116,12 @@ func TestContractFixtureRenderRoundTripsKeySet(t *testing.T) {
 	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "render.json"), &renderResponse{})
 }
 
+// GET /api/rbac likewise marshals a real production type (rbacResponse in
+// rbac.go), so the fixture decodes into the very envelope the handler writes.
+func TestContractFixtureRBACRoundTripsKeySet(t *testing.T) {
+	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "rbac.json"), &rbacResponse{})
+}
+
 // checkFixtureKeySetRoundTrips reads the JSON at path, decodes it into into
 // (a pointer to whatever Go shape that route serves) with
 // DisallowUnknownFields so an extra key on the fixture's side fails loudly,

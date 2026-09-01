@@ -1,0 +1,16 @@
+{
+  "rules": [
+    {
+      "apiGroups": ["platform.hooli.tech"],
+      "resources": ["xqueues"],
+      "verbs": ["get", "list", "watch", "create", "update", "patch", "delete"],
+      "scope": "Namespaced"
+    },
+    {
+      "apiGroups": ["sqs.aws.m.upbound.io"],
+      "resources": ["queues"],
+      "verbs": ["get", "list", "watch", "create", "update", "patch", "delete"],
+      "scope": "Namespaced"
+    }
+  ]
+}

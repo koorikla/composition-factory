@@ -170,6 +170,7 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("GET /api/providers", srv.handleListProviders)
 	mux.HandleFunc("POST /api/providers", srv.handleAddProvider)
 	mux.HandleFunc("DELETE /api/providers/{ref}", srv.handleDeleteProvider)
+	mux.HandleFunc("GET /api/rbac", srv.handleRBAC)
 	mux.HandleFunc("POST /api/generate", srv.handleGenerate)
 	mux.HandleFunc("POST /api/render", srv.handleRender)
 
