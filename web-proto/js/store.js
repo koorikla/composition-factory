@@ -37,6 +37,20 @@ function clone(x) {
   return x === null || x === undefined ? x : structuredClone(x);
 }
 
+/**
+ * Every mutating operation runs through this chain: the doc is cloned and
+ * the request fired only when the previous operation has settled, so two
+ * rapid actions can never lose each other's changes (the ghost-resurrection
+ * class: an edit cloned from the pre-delete doc re-PUTting the deleted
+ * resource). Failures don't break the chain.
+ */
+let opChain = Promise.resolve();
+function enqueue(taskFn) {
+  const run = opChain.then(taskFn, taskFn);
+  opChain = run.then(function () {}, function () {});
+  return run;
+}
+
 export const store = {
   state: {
     doc: null,
@@ -99,6 +113,11 @@ export const store = {
    * @returns {Promise<Object|null>} The persisted doc, or null on failure.
    */
   async replaceDoc(mutatorFn) {
+    const self = this;
+    return enqueue(function () { return self._replaceDocNow(mutatorFn); });
+  },
+
+  async _replaceDocNow(mutatorFn) {
     if (!this.state.doc) {
       this.emit("error", { status: 0, message: "no document loaded", source: "replaceDoc" });
       return null;
@@ -137,6 +156,11 @@ export const store = {
   async redo() { return this._timeTravel(this.state.redoStack, this.state.undoStack, "redo"); },
 
   async _timeTravel(from, to, source) {
+    const self = this;
+    return enqueue(function () { return self._timeTravelNow(from, to, source); });
+  },
+
+  async _timeTravelNow(from, to, source) {
     if (!from.length) return null;
     const target = from.pop();
     const current = clone(this.state.doc);
@@ -192,7 +216,7 @@ export const store = {
    * @returns {Promise<Object|null>} The persisted doc, or null on failure.
    */
   async addParameter(name, parameter) {
-    return this._paramOp("addParameter", api.addParameter(name, parameter));
+    return this._paramOp("addParameter", function () { return api.addParameter(name, parameter); });
   },
 
   /**
@@ -204,7 +228,7 @@ export const store = {
    * @returns {Promise<Object|null>}
    */
   async updateParameter(name, parameter) {
-    return this._paramOp("updateParameter", api.updateParameter(name, parameter));
+    return this._paramOp("updateParameter", function () { return api.updateParameter(name, parameter); });
   },
 
   /**
@@ -214,7 +238,7 @@ export const store = {
    * @returns {Promise<Object|null>}
    */
   async deleteParameter(name) {
-    return this._paramOp("deleteParameter", api.deleteParameter(name));
+    return this._paramOp("deleteParameter", function () { return api.deleteParameter(name); });
   },
 
   /**
@@ -226,7 +250,7 @@ export const store = {
    * @returns {Promise<Object|null>}
    */
   async renameParameter(name, to) {
-    return this._paramOp("renameParameter", api.renameParameter(name, to));
+    return this._paramOp("renameParameter", function () { return api.renameParameter(name, to); });
   },
 
   /**
@@ -252,10 +276,15 @@ export const store = {
    * @private Shared handler for parameter routes (each returns the full
    * persisted blueprint).
    */
-  async _paramOp(source, promise) {
+  async _paramOp(source, requestFn) {
+    const self = this;
+    return enqueue(function () { return self._paramOpNow(source, requestFn); });
+  },
+
+  async _paramOpNow(source, requestFn) {
     try {
       const prev = clone(this.state.doc);
-      const doc = await promise;
+      const doc = await requestFn();
       this._recordHistory(prev);
       this.state.doc = doc;
       this.emit("doc", doc);
