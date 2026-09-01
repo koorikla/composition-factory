@@ -250,6 +250,11 @@ export const store = {
    * @param {string} to   New name.
    * @returns {Promise<Object|null>}
    */
+  /** POST /api/blueprint/resources/{name}/rename — same contract as the parameter ops. */
+  async renameResource(name, to) {
+    return this._paramOp("renameResource", function () { return api.renameResource(name, to); });
+  },
+
   async renameParameter(name, to) {
     return this._paramOp("renameParameter", function () { return api.renameParameter(name, to); });
   },

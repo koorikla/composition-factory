@@ -217,3 +217,11 @@ export function removeProvider(ref) {
 export function getCatalogue(q) {
   return request("GET", "/api/catalogue" + (q ? "?q=" + encodeURIComponent(q) : ""));
 }
+
+/**
+ * Rename a composed resource server-side: wires, status refs, when/forEach
+ * referencers all re-point atomically; returns the full persisted blueprint.
+ */
+export function renameResource(name, to) {
+  return request("POST", "/api/blueprint/resources/" + encodeURIComponent(name) + "/rename", { to: to });
+}
