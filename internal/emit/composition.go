@@ -72,6 +72,14 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		if err := checkFieldPaths(r, crd); err != nil {
 			return nil, err
 		}
+		// Envelope paths are checked against the resolved variant's ACTUAL
+		// envelope schema (see envelope.go) — the namespaced .m. and
+		// cluster-scoped envelopes differ structurally, so this cannot be a
+		// hard-coded list.
+		envNodes, err := checkEnvelopePaths(r, crd)
+		if err != nil {
+			return nil, err
+		}
 		// forEach wraps the resource's WHOLE document in a range over the
 		// loop count, so every line below — separator, envelope,
 		// providerConfigRef — repeats per iteration; fields render exactly
@@ -154,16 +162,20 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		// scope: Cluster outright rather than letting a cluster-scoped
 		// blueprint through this function.
 		writeMapField(d, ti, "forProvider", ti+2, plan)
-		// The v2 namespaced envelope requires both kind and name here; the
-		// cluster-scoped variant instead takes {name, policy}. deletionPolicy
+		// The rest of the spec envelope: blueprint-authored entries merged
+		// with the computed providerConfigRef (namespaced only — the v2
+		// namespaced envelope requires both kind and name there; the
+		// cluster-scoped variant instead takes {name, policy}). deletionPolicy
 		// is never emitted for a namespaced MR: it is absent from that
-		// envelope (0 of 102 EC2 m-variants surveyed carry it) and would be
-		// silently pruned by the API server if present.
-		if wantNamespaced {
-			d.Line(ti, "  providerConfigRef:")
-			d.Line(ti, "    kind: ClusterProviderConfig")
-			d.Line(ti, "    name: {{ $spec.providerName }}")
+		// envelope (0 of 102 EC2 m-variants surveyed carry it), and
+		// checkEnvelopePaths rejects a blueprint that asks for it. An
+		// envelope-free resource renders byte-identically to before this
+		// grammar existed: just the providerConfigRef block.
+		envPlan, err := planEnvelope(r, b, envNodes)
+		if err != nil {
+			return nil, err
 		}
+		writeEnvelope(d, ti, envPlan, wantNamespaced)
 		if looped {
 			d.Line(ti, "{{- end }}")
 		}
