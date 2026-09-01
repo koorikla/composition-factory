@@ -191,3 +191,12 @@ export function getProviders() {
 export function addProvider(ref) {
   return request("POST", "/api/providers", { ref: ref });
 }
+
+/**
+ * Real render check: the server runs `crossplane composition render` on the
+ * current blueprint against a synthesized sample XR.
+ * @returns {Promise<{ok:boolean,resources:number,error:string,unavailable:string}>}
+ */
+export function renderCheck() {
+  return request("POST", "/api/render");
+}

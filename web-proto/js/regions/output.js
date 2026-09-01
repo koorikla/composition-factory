@@ -33,6 +33,7 @@ var MIN_CANVAS = 140;  // px — never let the drawer swallow the canvas
 
 export function init(rootEl, deps) {
   var store = deps.store;
+  var api = deps.api;
 
   var el = {
     root: rootEl,
@@ -137,6 +138,21 @@ export function init(rootEl, deps) {
     el.meta.textContent = lines + " lines · deterministic";
   }
 
+  /* ---------- render-failure bar (separate from the raw-count warnbar,
+     which is re-rendered on every doc change) ---------- */
+  function showWarn(message) {
+    var bar = document.getElementById("render-warn");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "render-warn";
+      bar.className = "warnbar";
+      bar.setAttribute("role", "alert");
+      el.warn.parentNode.insertBefore(bar, el.warn.nextSibling);
+    }
+    bar.hidden = !message;
+    bar.textContent = message || "";
+  }
+
   /* ---------- raw-template warnbar (prototype's exact copy) ---------- */
 
   function countRaws(doc) {
@@ -223,7 +239,34 @@ export function init(rootEl, deps) {
   }
 
   el.generateBtn.addEventListener("click", generateNow);
-  el.validateBtn.addEventListener("click", generateNow); // dry-run render validates; PUT is the store's job
+  el.generateBtn.disabled = false;   // wired: markup ships them disabled so an
+  el.validateBtn.disabled = false;   // early click can't hit a dead button
+  el.validateBtn.addEventListener("click", function () {
+    el.validateBtn.disabled = true;
+    el.valid.textContent = "rendering\u2026";
+    el.valid.style.color = "";
+    api.renderCheck().then(function (r) {
+      if (r.ok) {
+        showWarn("");
+        el.valid.textContent = "render ok \u00b7 " + r.resources + " resource" + (r.resources === 1 ? "" : "s");
+        el.valid.title = "";
+        el.valid.style.color = "";
+      } else if (r.unavailable) {
+        el.valid.textContent = "render check unavailable";
+        el.valid.title = r.unavailable;
+        el.valid.style.color = "var(--warn)";
+      } else {
+        el.valid.textContent = "render error";
+        el.valid.title = r.error;
+        el.valid.style.color = "var(--err)";
+        showWarn(r.error);   // verbatim engine failure where the user can read it
+      }
+    }).catch(function (err) {
+      el.valid.textContent = "render error";
+      el.valid.style.color = "var(--err)";
+      showWarn(err && err.message || String(err));
+    }).finally(function () { el.validateBtn.disabled = false; });
+  });
 
   store.subscribe("doc", function (doc) {
     drawTopbar(doc);
