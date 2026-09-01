@@ -276,6 +276,125 @@ func TestAcceptanceForEachRenders(t *testing.T) {
 	}
 }
 
+// TestAcceptanceStatusRefRenders is the cross-resource wire gate: a
+// blueprint whose queue-policy resource sources queueUrl from
+// resources.main-queue.status.atProvider.url, generated and rendered through
+// the real crossplane composition render — the real function-go-templating
+// engine seeing the real protojson shape of .observed (where an empty
+// observed-resources map is NO key at all, the exact state the emitted
+// hasKey chain's first link guards). Proven both ways on the rendered
+// ARTIFACT:
+//
+//   - with --observed-resources supplying the queue's observed status, the
+//     URL flows into the QueuePolicy's forProvider.queueUrl;
+//   - without observed state, the field is absent CLEANLY — the render
+//     succeeds, both documents appear, and no "<no value>"/"<nil>" reaches a
+//     live resource shape (Crossplane fills the value in on a later
+//     reconcile).
+func TestAcceptanceStatusRefRenders(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	bin := filepath.Join(repoRoot, "bin", "cf")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
+		t.Fatalf("build cf: %v\n%s", err, out)
+	}
+
+	cacheDir := filepath.Join(dir, "cache")
+	lock := filepath.Join(dir, ".cf.lock")
+
+	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("cf provider add: %v\n%s", err, out)
+	}
+
+	// Generate twice into separate directories: determinism is a correctness
+	// requirement, so the two runs must agree byte for byte.
+	outDir := filepath.Join(dir, "out")
+	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
+		gen := exec.Command(bin, "gen", "testdata/xqueue-statusref.cf.yaml", "-o", o, "--cache-dir", cacheDir)
+		if out, err := gen.CombinedOutput(); err != nil {
+			t.Fatalf("cf gen into %s: %v\n%s", o, err, out)
+		}
+	}
+	for _, rel := range []string{
+		filepath.Join("compositions", "xqueuepairs.platform.hooli.tech.yaml"),
+		filepath.Join("xrds", "xqueuepairs.platform.hooli.tech.yaml"),
+		"functions.yaml",
+	} {
+		first, err := os.ReadFile(filepath.Join(outDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		second, err := os.ReadFile(filepath.Join(dir, "out2", rel))
+		if err != nil {
+			t.Fatalf("read second-run %s: %v", rel, err)
+		}
+		if !bytes.Equal(first, second) {
+			t.Errorf("%s: two generate runs over the same blueprint produced different bytes", rel)
+		}
+	}
+
+	comp := filepath.Join(outDir, "compositions", "xqueuepairs.platform.hooli.tech.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueuepairs.platform.hooli.tech.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+	const url = "https://sqs.eu-north-1.amazonaws.com/123456789012/demo-pair"
+
+	t.Run("observed state flows into the wire", func(t *testing.T) {
+		render := exec.Command("crossplane", "composition", "render",
+			"testdata/xr-statusref.yaml", comp, fns, "--xrd", xrd,
+			"--observed-resources", "testdata/observed-main-queue.yaml", "--timeout", "5m")
+		rendered, err := render.CombinedOutput()
+		if err != nil {
+			t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+		}
+		got := string(rendered)
+		if !strings.Contains(got, "queueUrl: "+url) {
+			t.Errorf("rendered output missing %q — the observed status value did not flow across "+
+				"the wire\n---\n%s", "queueUrl: "+url, got)
+		}
+		for _, bad := range []string{"<no value>", "<nil>"} {
+			if strings.Contains(got, bad) {
+				t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+			}
+		}
+	})
+
+	t.Run("unobserved wire is cleanly absent", func(t *testing.T) {
+		render := exec.Command("crossplane", "composition", "render",
+			"testdata/xr-statusref.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
+		rendered, err := render.CombinedOutput()
+		if err != nil {
+			t.Fatalf("render must succeed with nothing observed: %v\n%s", err, rendered)
+		}
+		got := string(rendered)
+		if strings.Contains(got, "queueUrl") {
+			t.Errorf("queueUrl must be omitted entirely until the queue is observed\n---\n%s", got)
+		}
+		// Both composed documents must still be present — the guard omits one
+		// field, never a resource.
+		for _, want := range []string{"kind: Queue", "kind: QueuePolicy"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("rendered output missing %q\n---\n%s", want, got)
+			}
+		}
+		for _, bad := range []string{"<no value>", "<nil>"} {
+			if strings.Contains(got, bad) {
+				t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+			}
+		}
+	})
+}
+
 // renderedResourceNames decodes every document in a rendered stream and
 // collects the composition-resource-name annotation of each composed
 // resource (the XR itself carries none and is skipped). Distinctness is

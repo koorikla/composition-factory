@@ -175,6 +175,25 @@ func extractTemplate(t *testing.T, doc []byte) string {
 // acceptance test renders the same template through the real engine.
 func renderTemplate(t *testing.T, tmplBody string, xrSpec map[string]any) (string, error) {
 	t.Helper()
+	data := map[string]any{
+		"observed": map[string]any{
+			"composite": map[string]any{
+				"resource": map[string]any{
+					"metadata": map[string]any{"name": "my-xqueue"},
+					"spec":     xrSpec,
+				},
+			},
+		},
+	}
+	return renderTemplateData(t, tmplBody, data)
+}
+
+// renderTemplateData is renderTemplate's engine: it parses and executes
+// tmplBody against an arbitrary data root, so tests that need to shape
+// .observed themselves (e.g. cross-resource status references, where the
+// presence or absence of .observed.resources is the thing under test) can.
+func renderTemplateData(t *testing.T, tmplBody string, data map[string]any) (string, error) {
+	t.Helper()
 	funcs := template.FuncMap{
 		"hasKey": func(d map[string]any, key string) bool {
 			_, ok := d[key]
@@ -217,16 +236,6 @@ func renderTemplate(t *testing.T, tmplBody string, xrSpec map[string]any) (strin
 	tmpl, err := template.New("t").Option("missingkey=error").Funcs(funcs).Parse(tmplBody)
 	if err != nil {
 		t.Fatalf("template body does not parse: %v\n---\n%s", err, tmplBody)
-	}
-	data := map[string]any{
-		"observed": map[string]any{
-			"composite": map[string]any{
-				"resource": map[string]any{
-					"metadata": map[string]any{"name": "my-xqueue"},
-					"spec":     xrSpec,
-				},
-			},
-		},
 	}
 	var out bytes.Buffer
 	err = tmpl.Execute(&out, data)

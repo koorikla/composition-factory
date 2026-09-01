@@ -390,6 +390,14 @@ func (b *Blueprint) Validate() error {
 		}
 	}
 
+	// seenResources catches a duplicate resource name at the source. Node
+	// identity is the composition-resource-name annotation (§7), which is
+	// r.Name verbatim — two resources sharing one name would emit two
+	// documents with the SAME annotation, which Crossplane keys by, silently
+	// collapsing them into one composed resource. It also makes a
+	// cross-resource reference (resources.<name>.status.<path>) ambiguous.
+	seenResources := make(map[string]int, len(b.Spec.Resources))
+
 	for i, r := range b.Spec.Resources {
 		if r.Name == "" || r.Kind == "" {
 			switch {
@@ -404,6 +412,12 @@ func (b *Blueprint) Validate() error {
 		if !resourceNameRE.MatchString(r.Name) {
 			return fmt.Errorf("spec.resources[%d] %q: invalid resource name (must be a DNS label, e.g. main-queue)", i, r.Name)
 		}
+		if prev, dup := seenResources[r.Name]; dup {
+			return fmt.Errorf("spec.resources[%d] %q: duplicate resource name (already used by spec.resources[%d]) -- "+
+				"the name becomes the composition-resource-name annotation, which Crossplane keys composed "+
+				"resources by, so two resources sharing it silently collapse into one", i, r.Name, prev)
+		}
+		seenResources[r.Name] = i
 		// r.Kind is looked up against resolveKind's list of cached CRDs by
 		// exact string equality (internal/emit/composition.go), so a bogus
 		// value fails loudly there ("kind %q not found in any cached
@@ -513,10 +527,22 @@ func (b *Blueprint) Validate() error {
 				}
 			}
 			if f.From != "" {
+				// A cross-resource status reference gets its own validation
+				// path; see validateStatusRef. The CRD-schema half of the
+				// check (does <path> exist in the referenced kind's status,
+				// and is it a scalar leaf) lives in internal/emit, which is
+				// the layer that holds the CRDs — the same split as field
+				// paths, which checkFieldPaths validates there.
+				if strings.HasPrefix(f.From, statusRefPrefix) {
+					if err := b.validateStatusRef(r, p, f.From); err != nil {
+						return err
+					}
+					continue
+				}
 				param, ok := strings.CutPrefix(f.From, "params.")
 				if !ok {
-					return fmt.Errorf("resource %q field %q: from must start with params. (got %q)",
-						r.Name, p, f.From)
+					return fmt.Errorf("resource %q field %q: from must be params.<name> or "+
+						"resources.<name>.status.<path> (got %q)", r.Name, p, f.From)
 				}
 				decl, exists := x.Parameters[param]
 				if !exists {
@@ -540,6 +566,52 @@ func (b *Blueprint) Validate() error {
 						r.Name, p, param, decl.Type, param)
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// validateStatusRef checks the blueprint-level half of a cross-resource
+// status reference (resources.<name>.status.<path>): grammar, that the
+// referenced resource is declared, that the reference is not to the
+// resource's own status, that the target is not looped, and that every path
+// segment is a clean identifier (each one reaches emitted template text
+// inside hasKey guards and a dereference expression, so the identifier check
+// is a structural requirement, not a style rule). The CRD-schema half — does
+// <path> name a scalar leaf in the referenced kind's declared status —
+// belongs to internal/emit, which holds the CRDs.
+func (b *Blueprint) validateStatusRef(r Resource, fieldPath, from string) error {
+	target, path, ok := StatusRef(from)
+	if !ok {
+		return fmt.Errorf("resource %q field %q: a resources. reference must be "+
+			"resources.<name>.status.<path>, e.g. resources.main-queue.status.atProvider.url (got %q)",
+			r.Name, fieldPath, from)
+	}
+	if target == r.Name {
+		return fmt.Errorf("resource %q field %q: references its own status -- a resource cannot be "+
+			"wired to itself; the value it would read is the one its own document produces", r.Name, fieldPath)
+	}
+	var decl *Resource
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Name == target {
+			decl = &b.Spec.Resources[i]
+			break
+		}
+	}
+	if decl == nil {
+		return fmt.Errorf("resource %q field %q: references unknown resource %q", r.Name, fieldPath, target)
+	}
+	if decl.ForEach != "" {
+		return fmt.Errorf("resource %q field %q: resource %q is looped (forEach: %s), so its composed "+
+			"documents are named %s-0, %s-1, ... and the un-indexed key %q never appears in the observed "+
+			"resources map -- the reference could never resolve. Reference an unlooped resource",
+			r.Name, fieldPath, target, decl.ForEach, target, target, target)
+	}
+	for _, seg := range strings.Split(path, ".") {
+		if !paramNameRE.MatchString(seg) {
+			return fmt.Errorf("resource %q field %q: status path segment %q in %q is not a valid "+
+				"field name (must be camelCase, e.g. atProvider.url) -- each segment is written into "+
+				"the emitted template as a dereference and a hasKey guard", r.Name, fieldPath, seg, from)
 		}
 	}
 	return nil

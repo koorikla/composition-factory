@@ -169,8 +169,8 @@ func TestValidateRejectsFieldWithZeroSources(t *testing.T) {
 func TestValidateRejectsFromWithoutParamsPrefix(t *testing.T) {
 	body := strings.Replace(valid, "maxMessageSize: {from: params.maxMessageSize}", "maxMessageSize: {from: maxMessageSize}", 1)
 	_, err := Load(write(t, body))
-	if err == nil || !strings.Contains(err.Error(), "must start with params.") {
-		t.Fatalf("err = %v, want a complaint that from lacks the params. prefix", err)
+	if err == nil || !strings.Contains(err.Error(), "params.<name> or resources.<name>.status.<path>") {
+		t.Fatalf("err = %v, want a complaint naming both accepted from grammars", err)
 	}
 }
 
@@ -1129,5 +1129,151 @@ func TestValidateRejectsControlCharacterInForEach(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "forEach") {
 		t.Errorf("err = %v, want it to name the forEach field", err)
+	}
+}
+
+// --- cross-resource status references ---
+
+// statusRefBlueprint is a valid blueprint whose second resource wires a
+// field from the first resource's observed status. Mutations build every
+// rejection case from this known-good baseline, so each test pins exactly
+// one rule.
+func statusRefBlueprint(mutate func(*Blueprint)) *Blueprint {
+	b := &Blueprint{
+		Metadata: Metadata{Name: "xqueue"},
+		Spec: Spec{
+			XRD: XRD{
+				Group: "platform.hooli.tech", Kind: "XQueuePair", Plural: "xqueuepairs",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+			Resources: []Resource{{
+				Name: "main-queue", Kind: "Queue",
+				Fields: map[string]Field{"region": {Value: "eu-north-1"}},
+			}, {
+				Name: "queue-policy", Kind: "QueuePolicy",
+				Fields: map[string]Field{
+					"region":   {Value: "eu-north-1"},
+					"queueUrl": {From: "resources.main-queue.status.atProvider.url"},
+				},
+			}},
+		},
+	}
+	mutate(b)
+	return b
+}
+
+func TestValidateAcceptsStatusReference(t *testing.T) {
+	b := statusRefBlueprint(func(*Blueprint) {})
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want a well-formed cross-resource status reference to be accepted", err)
+	}
+}
+
+func TestValidateRejectsStatusReferenceToUnknownResource(t *testing.T) {
+	b := statusRefBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[1].Fields["queueUrl"] = Field{From: "resources.no-such-queue.status.atProvider.url"}
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), `"no-such-queue"`) {
+		t.Fatalf("err = %v, want an error naming the unknown resource", err)
+	}
+	if !strings.Contains(err.Error(), "queue-policy") || !strings.Contains(err.Error(), "queueUrl") {
+		t.Errorf("err = %v, want it to name the referencing resource and field", err)
+	}
+}
+
+func TestValidateRejectsStatusReferenceToSelf(t *testing.T) {
+	b := statusRefBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[1].Fields["queueUrl"] = Field{From: "resources.queue-policy.status.atProvider.id"}
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "own status") {
+		t.Fatalf("err = %v, want a self-reference to be refused", err)
+	}
+}
+
+// A looped resource's composed documents are named <name>-0, <name>-1, ...
+// (the indexed setResourceNameAnnotation), so the un-indexed key a status
+// reference names never appears in $.observed.resources: the wire could
+// never carry a value, silently.
+func TestValidateRejectsStatusReferenceToLoopedResource(t *testing.T) {
+	b := statusRefBlueprint(func(b *Blueprint) {
+		b.Spec.XRD.Parameters["instanceCount"] = Parameter{Type: "integer", Default: "2"}
+		b.Spec.Resources[0].ForEach = "params.instanceCount"
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "looped") {
+		t.Fatalf("err = %v, want a reference to a forEach resource to be refused", err)
+	}
+	if !strings.Contains(err.Error(), "main-queue") {
+		t.Errorf("err = %v, want it to name the looped target", err)
+	}
+}
+
+func TestValidateRejectsMalformedStatusReference(t *testing.T) {
+	for _, from := range []string{
+		"resources.main-queue",                     // no .status. at all
+		"resources.main-queue.status.",             // empty path
+		"resources..status.atProvider.url",         // empty name
+		"resources.main-queue.spec.forProvider.id", // not a status path
+	} {
+		t.Run(from, func(t *testing.T) {
+			b := statusRefBlueprint(func(b *Blueprint) {
+				b.Spec.Resources[1].Fields["queueUrl"] = Field{From: from}
+			})
+			err := b.Validate()
+			if err == nil || !strings.Contains(err.Error(), "resources.<name>.status.<path>") {
+				t.Fatalf("err = %v, want the grammar spelled out", err)
+			}
+		})
+	}
+}
+
+// Every status path segment reaches the emitted template inside a hasKey
+// guard and a dereference expression, so anything that is not a clean
+// camelCase identifier is a structural risk, not a style complaint.
+func TestValidateRejectsStatusReferencePathWithInvalidSegment(t *testing.T) {
+	for _, from := range []string{
+		"resources.main-queue.status.atProvider..url",
+		`resources.main-queue.status.atProvider.u"rl`,
+		"resources.main-queue.status.atProvider.a b",
+	} {
+		t.Run(from, func(t *testing.T) {
+			b := statusRefBlueprint(func(b *Blueprint) {
+				b.Spec.Resources[1].Fields["queueUrl"] = Field{From: from}
+			})
+			err := b.Validate()
+			if err == nil {
+				t.Fatalf("Validate accepted %q, want a rejection of the malformed path segment", from)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsDuplicateResourceNames(t *testing.T) {
+	b := statusRefBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[1].Name = "main-queue"
+		// Drop the reference: with both resources named main-queue the
+		// self-reference rule would fire first and mask the duplicate check.
+		b.Spec.Resources[1].Fields = map[string]Field{"region": {Value: "eu-north-1"}}
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "duplicate resource name") {
+		t.Fatalf("err = %v, want the duplicate name to be refused (it collapses two composed "+
+			"resources into one composition-resource-name)", err)
+	}
+}
+
+// A forward reference — the target declared after the referencing resource —
+// is legitimate: emission order is not dependency order.
+func TestValidateAcceptsForwardStatusReference(t *testing.T) {
+	b := statusRefBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[0], b.Spec.Resources[1] = b.Spec.Resources[1], b.Spec.Resources[0]
+	})
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want a forward reference to be accepted", err)
 	}
 }

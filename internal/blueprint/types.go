@@ -2,6 +2,8 @@
 // user edits and the single source of truth for generated output.
 package blueprint
 
+import "strings"
+
 // Blueprint is the root document.
 type Blueprint struct {
 	APIVersion string   `json:"apiVersion"`
@@ -65,8 +67,48 @@ type Resource struct {
 
 // Field sets one path on a composed resource. Exactly one of From, Value or Raw
 // must be set.
+//
+// From accepts two reference grammars:
+//
+//	params.<name>                       — an XRD parameter of the composite
+//	resources.<name>.status.<path>      — a status value observed on another
+//	                                      composed resource in this blueprint
+//
+// A status reference is a cross-resource wire: the value exists only after
+// the referenced resource has been observed at least once, so the emitter
+// renders it behind a hasKey guard chain over $.observed.resources and the
+// field is omitted cleanly until then — Crossplane fills it in on a later
+// reconcile. The referenced resource must not itself be looped (forEach):
+// a looped resource's composed names are indexed (<name>-0, <name>-1, ...),
+// so the un-indexed key the reference names never appears in the observed
+// map. Validate enforces both, plus that <path> resolves to a scalar leaf in
+// the referenced kind's CRD status schema (checked in internal/emit, which
+// holds the CRDs).
 type Field struct {
 	From  string `json:"from"`
 	Value string `json:"value"`
 	Raw   string `json:"raw"`
+}
+
+// statusRefPrefix marks a Field.From cross-resource status reference.
+const statusRefPrefix = "resources."
+
+// StatusRef splits a well-formed cross-resource reference
+// resources.<name>.status.<path> into its resource name and status-relative
+// path. ok is false when from is not shaped that way at all — either not a
+// resources. reference (a params. one, say) or a resources. reference whose
+// grammar is broken (no .status. separator, or an empty name or path).
+// Validate is the layer that turns the broken-grammar case into a specific
+// error; every other caller runs after Validate and can treat !ok as
+// "not a status reference".
+func StatusRef(from string) (resource, path string, ok bool) {
+	rest, found := strings.CutPrefix(from, statusRefPrefix)
+	if !found {
+		return "", "", false
+	}
+	resource, path, found = strings.Cut(rest, ".status.")
+	if !found || resource == "" || path == "" {
+		return "", "", false
+	}
+	return resource, path, true
 }

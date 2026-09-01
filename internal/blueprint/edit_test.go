@@ -30,6 +30,110 @@ func editable() *Blueprint {
 	}
 }
 
+// wired is editable plus a second resource whose queueUrl is a
+// cross-resource status reference to main-queue.
+func wired() *Blueprint {
+	b := editable()
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name: "queue-policy", Kind: "QueuePolicy",
+		Fields: map[string]Field{
+			"queueUrl": {From: "resources.main-queue.status.atProvider.url"},
+		},
+	})
+	return b
+}
+
+func TestRenameResourceRewritesStatusReferences(t *testing.T) {
+	b := wired()
+	if err := b.RenameResource("main-queue", "primary-queue"); err != nil {
+		t.Fatalf("RenameResource: %v", err)
+	}
+	if got := b.Spec.Resources[0].Name; got != "primary-queue" {
+		t.Errorf("resource name = %q, want primary-queue", got)
+	}
+	if got := b.Spec.Resources[1].Fields["queueUrl"].From; got != "resources.primary-queue.status.atProvider.url" {
+		t.Errorf("reference = %q, want it rewritten to the new name -- a dangling reference "+
+			"emits a guard chain over an observed key that can never exist again", got)
+	}
+	if err := b.Validate(); err != nil {
+		t.Errorf("blueprint invalid after rename: %v", err)
+	}
+}
+
+func TestRenameResourceRejectsCollisionAndChangesNothing(t *testing.T) {
+	b := wired()
+	want := wired()
+	if err := b.RenameResource("main-queue", "queue-policy"); err == nil {
+		t.Fatal("want a collision error renaming onto an existing resource name")
+	}
+	if diff := cmp.Diff(want, b); diff != "" {
+		t.Errorf("failed rename mutated the receiver:\n%s", diff)
+	}
+}
+
+func TestRenameUnknownResourceErrors(t *testing.T) {
+	b := wired()
+	if err := b.RenameResource("nope", "whatever"); err == nil || !strings.Contains(err.Error(), `"nope"`) {
+		t.Fatalf("err = %v, want an error naming the unknown resource", err)
+	}
+}
+
+func TestRenameResourceToSameNameIsANoOp(t *testing.T) {
+	b := wired()
+	want := wired()
+	if err := b.RenameResource("main-queue", "main-queue"); err != nil {
+		t.Fatalf("RenameResource to same name: %v, want a no-op success", err)
+	}
+	if diff := cmp.Diff(want, b); diff != "" {
+		t.Errorf("no-op rename mutated the receiver:\n%s", diff)
+	}
+}
+
+func TestRenameResourceRejectsInvalidNameAndChangesNothing(t *testing.T) {
+	b := wired()
+	want := wired()
+	if err := b.RenameResource("main-queue", "Not_A_DNS_Label"); err == nil {
+		t.Fatal("want a validation error renaming to a non-DNS-label name")
+	}
+	if diff := cmp.Diff(want, b); diff != "" {
+		t.Errorf("failed rename mutated the receiver:\n%s", diff)
+	}
+}
+
+func TestDeleteResourceRefusesWhenStatusReferenced(t *testing.T) {
+	b := wired()
+	err := b.DeleteResource("main-queue")
+	if err == nil {
+		t.Fatal("want an error deleting a resource whose status is still referenced")
+	}
+	if !strings.Contains(err.Error(), "queue-policy") {
+		t.Errorf("err = %v, want it to name the referencing resource", err)
+	}
+	if len(b.Spec.Resources) != 2 {
+		t.Error("resource was deleted despite the error")
+	}
+}
+
+func TestDeleteResourceSucceedsWhenUnreferenced(t *testing.T) {
+	b := wired()
+	if err := b.DeleteResource("queue-policy"); err != nil {
+		t.Fatalf("DeleteResource: %v", err)
+	}
+	if len(b.Spec.Resources) != 1 || b.Spec.Resources[0].Name != "main-queue" {
+		t.Errorf("resources = %+v, want only main-queue left", b.Spec.Resources)
+	}
+	if err := b.Validate(); err != nil {
+		t.Errorf("blueprint invalid after delete: %v", err)
+	}
+}
+
+func TestDeleteUnknownResourceErrors(t *testing.T) {
+	b := wired()
+	if err := b.DeleteResource("nope"); err == nil || !strings.Contains(err.Error(), `"nope"`) {
+		t.Fatalf("err = %v, want an error naming the unknown resource", err)
+	}
+}
+
 func TestAddParameter(t *testing.T) {
 	b := editable()
 	if err := b.AddParameter("location", Parameter{Type: "string", Required: true, Enum: []string{"EU", "US"}}); err != nil {

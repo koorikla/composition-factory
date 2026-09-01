@@ -418,6 +418,132 @@ func (srv *server) handleDeleteParameter(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, b)
 }
 
+// renameResourceRequest is the POST /api/blueprint/resources/{name}/rename
+// body.
+type renameResourceRequest struct {
+	To string `json:"to"`
+}
+
+// handleRenameResource serves POST /api/blueprint/resources/{name}/rename:
+// rename a composed resource and rewrite every cross-resource status
+// reference (resources.<name>.status.<path>) that points at it. The status
+// classification mirrors handleRenameParameter exactly, and for the same
+// reason: RenameResource checks "from declared" before "to == from" before
+// "to already declared" before validating, and a failed call leaves the
+// receiver untouched, so state captured before the call reproduces the
+// branch the edit layer took without parsing its error text.
+func (srv *server) handleRenameResource(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+
+	var req renameResourceRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// load -> edit -> persist has to be atomic against the other mutating
+	// handlers, or two concurrent edits both start from the same document
+	// and the second write silently discards the first. See server.mu.
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	b, ok := srv.loadBlueprint(w)
+	if !ok {
+		return
+	}
+
+	fromExists := resourceDeclared(b, name)
+	toCollides := resourceDeclared(b, req.To)
+
+	if err := b.RenameResource(name, req.To); err != nil {
+		switch {
+		case !fromExists:
+			writeJSONError(w, http.StatusNotFound, err.Error())
+		case toCollides:
+			writeJSONError(w, http.StatusConflict, err.Error())
+		default:
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+
+	if !srv.persistBlueprint(w, b) {
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
+}
+
+// handleDeleteResource serves DELETE /api/blueprint/resources/{name}.
+//
+// Like handleDeleteParameter, the "still referenced" check is re-run here
+// over exported data (statusReferencingResources below) so this HTTP layer
+// can choose 409 vs 400 without parsing DeleteResource's error text: 404 for
+// an unknown name, 409 when another resource still wires a field from this
+// one's status, 400 for anything else Validate refuses.
+func (srv *server) handleDeleteResource(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+
+	// load -> edit -> persist has to be atomic against the other mutating
+	// handlers, or two concurrent edits both start from the same document
+	// and the second write silently discards the first. See server.mu.
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	b, ok := srv.loadBlueprint(w)
+	if !ok {
+		return
+	}
+
+	existed := resourceDeclared(b, name)
+	refs := statusReferencingResources(b, name)
+
+	if err := b.DeleteResource(name); err != nil {
+		switch {
+		case !existed:
+			writeJSONError(w, http.StatusNotFound, err.Error())
+		case len(refs) > 0:
+			writeJSONError(w, http.StatusConflict, err.Error())
+		default:
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+
+	if !srv.persistBlueprint(w, b) {
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
+}
+
+// resourceDeclared reports whether a composed resource with this name exists.
+func resourceDeclared(b *blueprint.Blueprint, name string) bool {
+	for _, res := range b.Spec.Resources {
+		if res.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// statusReferencingResources returns the names of every resource that
+// references resources.<name>.status.<...> through a field's From, in
+// resource order. It mirrors blueprint.Blueprint's unexported
+// statusReferencingResources (see internal/blueprint/edit.go) exactly, over
+// the same exported Resource/Field data — the same one-check duplicate
+// referencingResources below is, for the same 409-classification reason.
+func statusReferencingResources(b *blueprint.Blueprint, name string) []string {
+	var refs []string
+	for _, res := range b.Spec.Resources {
+		for _, f := range res.Fields {
+			if target, _, ok := blueprint.StatusRef(f.From); ok && target == name {
+				refs = append(refs, res.Name)
+				break
+			}
+		}
+	}
+	return refs
+}
+
 // referencingResources returns the names of every resource that references
 // params.<name> — through a field's From or through its own ForEach loop
 // bound — in resource order. It mirrors blueprint.Blueprint's unexported

@@ -144,6 +144,32 @@ func (c CRD) ForProvider() ([]*Node, error) {
 	return BuildTree(inner, stringSlice(fp["required"])), nil
 }
 
+// Status returns the status subtree, the way ForProvider returns
+// spec.forProvider: BuildTree over openAPIV3Schema.properties.status. This is
+// what a cross-resource reference (resources.<name>.status.<path>) is
+// validated against — the provider's own declaration of what its controller
+// writes back, so a typo'd status path is caught at generation time instead
+// of rendering nothing forever.
+//
+// nil with no error is legitimate: a CRD may declare no status at all, and
+// the caller (internal/emit) turns that into its own, more specific error
+// naming the resource and kind.
+func (c CRD) Status() ([]*Node, error) {
+	v, err := c.Preferred()
+	if err != nil {
+		return nil, err
+	}
+	st, ok := v.Properties["status"].(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	inner, _ := st["properties"].(map[string]any)
+	if inner == nil {
+		return nil, nil
+	}
+	return BuildTree(inner, stringSlice(st["required"])), nil
+}
+
 // Envelope returns spec.properties minus forProvider and initProvider. It is
 // computed rather than hard-coded: the envelope is not universal across providers.
 func (c CRD) Envelope() ([]*Node, error) {
