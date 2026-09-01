@@ -1,0 +1,28 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-foreach
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.hooli.tech
+    kind: XQueueSet
+    plural: xqueuesets
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:  {type: string, required: true}
+      instanceCount: {type: integer, default: "2"}
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {value: eu-north-1}
+    - name: replica-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      forEach: params.instanceCount
+      fields:
+        region: {value: eu-north-1}

@@ -59,12 +59,44 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		if err := checkFieldPaths(r, crd); err != nil {
 			return nil, err
 		}
+		// forEach wraps the resource's WHOLE document in a range over the
+		// loop count, so every line below — separator, envelope,
+		// providerConfigRef — repeats per iteration; fields render exactly
+		// as they do outside a loop. The count is an integer XRD parameter
+		// (blueprint.Validate pins the grammar to params.<name>, the type to
+		// integer, and requires required-or-default, which is what makes the
+		// bare $spec dereference below safe under missingkey=error: a
+		// required key is present on any admitted XR, and a defaulted one is
+		// injected by the API server's schema defaulting before the function
+		// runs). The (int ...) cast is load-bearing, not defensive:
+		// function-go-templating receives the observed composite over
+		// protobuf, whose Struct type carries every number as a float64, and
+		// sprig's until takes an int — text/template converts between
+		// integer kinds but never float64 → int, so `until $spec.n` is a
+		// render-time error. sprig's int (cast.ToInt) handles the float64.
+		//
+		// `range $i := ...` binds $i to the ELEMENT, not the index — but
+		// until yields [0 1 ... n-1], so the element IS the iteration index.
+		looped := r.ForEach != ""
+		if looped {
+			d.Line(ti, "{{- range $i := until (int $spec.%s) }}", strings.TrimPrefix(r.ForEach, "params."))
+		}
 		d.Line(ti, "---")
 		d.Line(ti, "apiVersion: %s", apiVersion)
 		d.Line(ti, "kind: %s", crd.Kind)
 		d.Line(ti, "metadata:")
 		d.Line(ti, "  annotations:")
-		d.Line(ti, "    {{ setResourceNameAnnotation %q }}", r.Name)
+		if looped {
+			// Indexed, per the §8 rule: the composition-resource-name
+			// annotation is how Crossplane keys composed resources, so a
+			// constant name inside a range collapses every iteration into
+			// ONE resource — silently, since the collapsed document is
+			// legal. r.Name is a validated DNS label (resourceNameRE), so
+			// interpolating it bare inside the printf format is safe.
+			d.Line(ti, `    {{ setResourceNameAnnotation (printf "%s-%%d" $i) }}`, r.Name)
+		} else {
+			d.Line(ti, "    {{ setResourceNameAnnotation %q }}", r.Name)
+		}
 		plan, err := planFields(r, b)
 		if err != nil {
 			return nil, err
@@ -101,6 +133,9 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 			d.Line(ti, "  providerConfigRef:")
 			d.Line(ti, "    kind: ClusterProviderConfig")
 			d.Line(ti, "    name: {{ $spec.providerName }}")
+		}
+		if looped {
+			d.Line(ti, "{{- end }}")
 		}
 	}
 

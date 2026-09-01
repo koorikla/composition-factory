@@ -1,12 +1,17 @@
 package main_test
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 )
 
 // providerRef is the OSS provider used for the end-to-end acceptance run. It
@@ -167,6 +172,144 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 		}
 		t.Log("golden updated")
 	}
+}
+
+// TestAcceptanceForEachRenders is the forEach gate: a blueprint whose
+// replica-queue resource carries `forEach: params.instanceCount` over an
+// integer parameter with default "2", generated and rendered through the
+// real crossplane composition render — the real function-go-templating
+// engine with the real sprig until/int, not the unit tests' stubs, and the
+// real XRD schema defaulting injecting instanceCount into an XR that never
+// set it. Asserted on the rendered ARTIFACT: exactly N instances of the
+// looped resource with DISTINCT composition-resource-name annotations (a
+// constant name inside a range collapses every iteration into one resource,
+// silently), the unlooped resource exactly once, N=2 from the default and
+// N=3 from an XR override.
+func TestAcceptanceForEachRenders(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	bin := filepath.Join(repoRoot, "bin", "cf")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
+		t.Fatalf("build cf: %v\n%s", err, out)
+	}
+
+	cacheDir := filepath.Join(dir, "cache")
+	lock := filepath.Join(dir, ".cf.lock")
+
+	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("cf provider add: %v\n%s", err, out)
+	}
+
+	// Generate twice into separate directories: determinism is a correctness
+	// requirement (a churning file on a prune:true GitOps repo is a
+	// live-cluster incident), so the two runs must agree byte for byte.
+	outDir := filepath.Join(dir, "out")
+	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
+		gen := exec.Command(bin, "gen", "testdata/xqueue-foreach.cf.yaml", "-o", o, "--cache-dir", cacheDir)
+		if out, err := gen.CombinedOutput(); err != nil {
+			t.Fatalf("cf gen into %s: %v\n%s", o, err, out)
+		}
+	}
+	for _, rel := range []string{
+		filepath.Join("compositions", "xqueuesets.platform.hooli.tech.yaml"),
+		filepath.Join("xrds", "xqueuesets.platform.hooli.tech.yaml"),
+		"functions.yaml",
+	} {
+		first, err := os.ReadFile(filepath.Join(outDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		second, err := os.ReadFile(filepath.Join(dir, "out2", rel))
+		if err != nil {
+			t.Fatalf("read second-run %s: %v", rel, err)
+		}
+		if !bytes.Equal(first, second) {
+			t.Errorf("%s: two generate runs over the same blueprint produced different bytes", rel)
+		}
+	}
+
+	comp := filepath.Join(outDir, "compositions", "xqueuesets.platform.hooli.tech.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueuesets.platform.hooli.tech.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+
+	cases := []struct {
+		name string
+		xr   string
+		want []string // every composition-resource-name annotation, sorted
+	}{
+		{"XRD default fans out to 2 instances", "testdata/xr-foreach-default.yaml",
+			[]string{"main-queue", "replica-queue-0", "replica-queue-1"}},
+		{"XR override fans out to 3 instances", "testdata/xr-foreach-three.yaml",
+			[]string{"main-queue", "replica-queue-0", "replica-queue-1", "replica-queue-2"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			render := exec.Command("crossplane", "composition", "render",
+				tc.xr, comp, fns, "--xrd", xrd, "--timeout", "5m")
+			rendered, err := render.CombinedOutput()
+			if err != nil {
+				t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+			}
+			got := renderedResourceNames(t, rendered)
+			sort.Strings(got)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("composition-resource-name annotations = %v, want %v\n---\n%s",
+					got, tc.want, rendered)
+			}
+			for _, bad := range []string{"<no value>", "<nil>"} {
+				if strings.Contains(string(rendered), bad) {
+					t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+				}
+			}
+		})
+	}
+}
+
+// renderedResourceNames decodes every document in a rendered stream and
+// collects the composition-resource-name annotation of each composed
+// resource (the XR itself carries none and is skipped). Distinctness is
+// asserted structurally: a duplicate annotation means two range iterations
+// collapsed into one composed resource, so it fails here rather than
+// vanishing into a set.
+func renderedResourceNames(t *testing.T, rendered []byte) []string {
+	t.Helper()
+	var names []string
+	seen := map[string]bool{}
+	for _, chunk := range strings.Split(string(rendered), "\n---\n") {
+		if strings.TrimSpace(chunk) == "" {
+			continue
+		}
+		var doc struct {
+			Metadata struct {
+				Annotations map[string]string `json:"annotations"`
+			} `json:"metadata"`
+		}
+		if err := yaml.Unmarshal([]byte(chunk), &doc); err != nil {
+			t.Fatalf("rendered document is not valid YAML: %v\n---\n%s", err, chunk)
+		}
+		name := doc.Metadata.Annotations["crossplane.io/composition-resource-name"]
+		if name == "" {
+			continue // the XR document
+		}
+		if seen[name] {
+			t.Errorf("composition-resource-name %q appears twice — loop iterations collapsed "+
+				"into one composed resource", name)
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	return names
 }
 
 // fakeReporter records which of Skipf/Fatalf unavailable chose, so the

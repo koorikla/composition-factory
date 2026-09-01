@@ -74,6 +74,8 @@ export interface Resource {
   name: string
   kind: string
   provider?: string
+  /** "params.<name>" — repeats the resource N times over an integer parameter. */
+  forEach?: string
   fields: Record<string, FieldAssignment>
 }
 

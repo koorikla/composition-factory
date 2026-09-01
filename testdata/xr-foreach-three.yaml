@@ -1,0 +1,10 @@
+# instanceCount overrides the XRD default of 2: the render must fan the
+# looped resource out to exactly three instances.
+apiVersion: platform.hooli.tech/v1alpha1
+kind: XQueueSet
+metadata:
+  name: demo-set
+  namespace: default
+spec:
+  providerName: localstack
+  instanceCount: 3

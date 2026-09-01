@@ -3,10 +3,12 @@ package emit
 import (
 	"bytes"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"text/template"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"sigs.k8s.io/yaml"
@@ -157,10 +159,20 @@ func extractTemplate(t *testing.T, doc []byte) string {
 
 // renderTemplate executes the emitted Go-template body the way
 // function-go-templating actually does: with Option("missingkey=error") and
-// the real sprig hasKey semantics (a plain map presence check). It also
-// stubs setResourceNameAnnotation, a function-go-templating builtin, just
-// enough that the surrounding template parses and executes — its exact
-// rendered form isn't what this test is checking.
+// the real sprig hasKey/until/int semantics. It also stubs
+// setResourceNameAnnotation, a function-go-templating builtin, just enough
+// that the surrounding template parses and executes — its exact rendered
+// form isn't what this test is checking.
+//
+// until and int mirror sprig's own definitions (until is sprig's
+// untilStep(0, count, ±1); int is cast.ToInt) for exactly the value shapes
+// function-go-templating can hand a template: the function receives the
+// observed composite over protobuf, whose Struct type carries every number
+// as a float64 — which is why the emitter must cast the loop bound with
+// (int ...) before handing it to until, whose Go signature demands an int
+// (text/template converts between integer kinds but never float64 → int).
+// These stubs keep the unit tests honest about that contract; the
+// acceptance test renders the same template through the real engine.
 func renderTemplate(t *testing.T, tmplBody string, xrSpec map[string]any) (string, error) {
 	t.Helper()
 	funcs := template.FuncMap{
@@ -170,6 +182,36 @@ func renderTemplate(t *testing.T, tmplBody string, xrSpec map[string]any) (strin
 		},
 		"setResourceNameAnnotation": func(name string) string {
 			return "crossplane.io/composition-resource-name: " + name
+		},
+		"until": func(count int) []int {
+			step := 1
+			if count < 0 {
+				step = -1
+			}
+			out := []int{}
+			for i := 0; i != count; i += step {
+				out = append(out, i)
+			}
+			return out
+		},
+		"int": func(v any) int {
+			switch n := v.(type) {
+			case int:
+				return n
+			case int64:
+				return int(n)
+			case float64:
+				return int(n)
+			case string:
+				i, err := strconv.Atoi(n)
+				if err != nil {
+					t.Fatalf("int stub: %q is not an integer", n)
+				}
+				return i
+			default:
+				t.Fatalf("int stub: unhandled type %T", v)
+				return 0
+			}
 		},
 	}
 	tmpl, err := template.New("t").Option("missingkey=error").Funcs(funcs).Parse(tmplBody)
@@ -680,5 +722,190 @@ spec:
 	}
 	if !strings.Contains(err.Error(), "forProvider") {
 		t.Errorf("err = %v, want it to name forProvider", err)
+	}
+}
+
+// --- forEach ---
+
+// testForEachBlueprint is testBlueprint plus an integer instanceCount
+// parameter with a default and a second resource repeated over it.
+func testForEachBlueprint() *blueprint.Blueprint {
+	b := testBlueprint()
+	b.Spec.XRD.Parameters["instanceCount"] = blueprint.Parameter{Type: "integer", Default: "2"}
+	b.Spec.Resources = append(b.Spec.Resources, blueprint.Resource{
+		Name: "replica-queue", Kind: "Queue",
+		ForEach: "params.instanceCount",
+		Fields:  map[string]blueprint.Field{"region": {Value: "eu-north-1"}},
+	})
+	return b
+}
+
+// TestForEachGoldenTemplate pins the emitted template body byte-for-byte.
+// Determinism is a correctness requirement on a prune:true GitOps repo, so
+// the golden is exact, not a set of substring checks: any drift in the range
+// wrapper, the indexed annotation, trim markers or indentation is a diff
+// here before it is a churning file there.
+func TestForEachGoldenTemplate(t *testing.T) {
+	got, err := Composition(testForEachBlueprint(), testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	want := `{{- $spec := .observed.composite.resource.spec -}}
+{{- $xr := .observed.composite.resource.metadata.name -}}
+---
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metadata:
+  annotations:
+    {{ setResourceNameAnnotation "main-queue" }}
+spec:
+  forProvider:
+    {{- if or (hasKey $spec "maxMessageSize") }}
+    {{- if hasKey $spec "maxMessageSize" }}
+    maxMessageSize: {{ $spec.maxMessageSize }}
+    {{- end }}
+    {{- else }}
+    {}
+    {{- end }}
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: {{ $spec.providerName }}
+{{- range $i := until (int $spec.instanceCount) }}
+---
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metadata:
+  annotations:
+    {{ setResourceNameAnnotation (printf "replica-queue-%d" $i) }}
+spec:
+  forProvider:
+    region: 'eu-north-1'
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: {{ $spec.providerName }}
+{{- end }}
+`
+	if diff := cmp.Diff(want, extractTemplate(t, got)); diff != "" {
+		t.Errorf("template body drifted (-want +got):\n%s", diff)
+	}
+}
+
+// renderedDocs splits a rendered multi-document stream and decodes every
+// non-empty document.
+func renderedDocs(t *testing.T, rendered string) []map[string]any {
+	t.Helper()
+	var docs []map[string]any
+	for _, chunk := range strings.Split(rendered, "---\n") {
+		if strings.TrimSpace(chunk) == "" {
+			continue
+		}
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(chunk), &doc); err != nil {
+			t.Fatalf("rendered document is not valid YAML: %v\n---\n%s", err, chunk)
+		}
+		docs = append(docs, doc)
+	}
+	return docs
+}
+
+// resourceNames collects each rendered document's
+// composition-resource-name annotation, in document order.
+func resourceNames(t *testing.T, docs []map[string]any) []string {
+	t.Helper()
+	var names []string
+	for _, doc := range docs {
+		meta, _ := doc["metadata"].(map[string]any)
+		anns, _ := meta["annotations"].(map[string]any)
+		name, _ := anns["crossplane.io/composition-resource-name"].(string)
+		if name == "" {
+			t.Fatalf("rendered document has no composition-resource-name annotation: %v", doc)
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+// TestForEachRendersNInstancesWithDistinctAnnotations executes the emitted
+// template and proves the loop semantics on the rendered ARTIFACT: N copies
+// of the looped resource, each with a DISTINCT composition-resource-name
+// annotation (§8: a constant name inside a range collapses every iteration
+// into one resource — Crossplane keys composed resources by this
+// annotation), alongside exactly one copy of the unlooped resource.
+//
+// The loop bound is passed as float64 in the main cases because that is what
+// the real engine sees: function-go-templating receives the observed
+// composite over protobuf, whose Struct type carries every number as
+// float64. The int64 subtest covers the other decoder shape.
+func TestForEachRendersNInstancesWithDistinctAnnotations(t *testing.T) {
+	got, err := Composition(testForEachBlueprint(), testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmplBody := extractTemplate(t, got)
+
+	cases := []struct {
+		name  string
+		count any
+		want  []string
+	}{
+		{"count 2 (the XRD default, float64 as protobuf delivers it)", float64(2),
+			[]string{"main-queue", "replica-queue-0", "replica-queue-1"}},
+		{"count 3 (an XR override)", float64(3),
+			[]string{"main-queue", "replica-queue-0", "replica-queue-1", "replica-queue-2"}},
+		{"count 2 as int64 (a non-protobuf decoder shape)", int64(2),
+			[]string{"main-queue", "replica-queue-0", "replica-queue-1"}},
+		{"count 0 renders no looped instances", float64(0),
+			[]string{"main-queue"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rendered, err := renderTemplate(t, tmplBody, map[string]any{
+				"providerName":  "aws-provider",
+				"instanceCount": tc.count,
+			})
+			if err != nil {
+				t.Fatalf("render: %v\n---\n%s", err, tmplBody)
+			}
+			names := resourceNames(t, renderedDocs(t, rendered))
+			if diff := cmp.Diff(tc.want, names); diff != "" {
+				t.Errorf("composition-resource-name annotations (-want +got):\n%s", diff)
+			}
+			for _, bad := range []string{"<no value>", "<nil>"} {
+				if strings.Contains(rendered, bad) {
+					t.Errorf("rendered output contains %q\n---\n%s", bad, rendered)
+				}
+			}
+		})
+	}
+
+	// The negative half of Validate's required-or-default rule, demonstrated
+	// on the real template semantics: with the loop bound genuinely absent
+	// the render hard-fails under missingkey=error rather than silently
+	// emitting zero (or "<no value>") instances. The API server's schema
+	// defaulting makes this state unreachable for a defaulted parameter —
+	// which is exactly why blueprint.Validate refuses a forEach over a
+	// parameter that is neither required nor defaulted.
+	t.Run("absent loop bound hard-fails the render, silently emitting nothing is impossible", func(t *testing.T) {
+		_, err := renderTemplate(t, tmplBody, map[string]any{
+			"providerName": "aws-provider",
+		})
+		if err == nil {
+			t.Fatal("render succeeded with no loop bound; missingkey=error must make this a hard failure")
+		}
+	})
+}
+
+// Determinism: the same blueprint yields byte-identical output, twice.
+func TestForEachEmitIsDeterministic(t *testing.T) {
+	first, err := Composition(testForEachBlueprint(), testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	second, err := Composition(testForEachBlueprint(), testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition (second run): %v", err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Error("two runs over the same blueprint produced different bytes")
 	}
 }
