@@ -3,6 +3,7 @@
 const { defineConfig } = require('@playwright/test')
 module.exports = defineConfig({
   testDir: 'tests',
+  workers: 1,  // one live engine — parallel workers corrupt each other's doc state
   timeout: 15000,
   use: { baseURL: 'http://127.0.0.1:5180' },
   webServer: {
