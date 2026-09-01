@@ -150,13 +150,13 @@ The RBAC manager runs as `crossplane rbac start --provider-clusterrole=crossplan
 ```
 It auto-creates, per XRD:
 ```yaml
-# crossplane:composite:xqueues.platform.hooli.tech:aggregate-to-crossplane
+# crossplane:composite:xqueues.platform.sparky.ee:aggregate-to-crossplane
 labels: {rbac.crossplane.io/aggregate-to-crossplane: "true"}
 rules:
-- apiGroups: [platform.hooli.tech]
+- apiGroups: [platform.sparky.ee]
   resources: [xqueues, xqueues/status]
   verbs: ["*"]
-- apiGroups: [platform.hooli.tech]
+- apiGroups: [platform.sparky.ee]
   resources: [xqueues/finalizers]
   verbs: [update]
 ```

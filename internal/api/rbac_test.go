@@ -19,7 +19,7 @@ func TestRBACGoldenForTheDemoBlueprint(t *testing.T) {
 		t.Fatalf("status %d", code)
 	}
 	want := rbacResponse{Rules: []rbacRule{
-		{APIGroups: []string{"platform.hooli.tech"}, Resources: []string{"xqueues"}, Verbs: manageVerbs, Scope: "Namespaced"},
+		{APIGroups: []string{"platform.sparky.ee"}, Resources: []string{"xqueues"}, Verbs: manageVerbs, Scope: "Namespaced"},
 		{APIGroups: []string{"sqs.aws.m.upbound.io"}, Resources: []string{"queues"}, Verbs: manageVerbs, Scope: "Namespaced"},
 	}}
 	if !reflect.DeepEqual(got, want) {
@@ -39,7 +39,7 @@ spec:
   sources:
     - provider: ghcr.io/x/provider-aws-sqs:v2.7.0
   xrd:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues
     version: v1alpha1
@@ -65,7 +65,7 @@ func TestRBACEmptyBlueprintIsJustTheXR(t *testing.T) {
 		t.Fatalf("status %d", code)
 	}
 	want := rbacResponse{Rules: []rbacRule{
-		{APIGroups: []string{"platform.hooli.tech"}, Resources: []string{"xqueues"}, Verbs: manageVerbs, Scope: "Namespaced"},
+		{APIGroups: []string{"platform.sparky.ee"}, Resources: []string{"xqueues"}, Verbs: manageVerbs, Scope: "Namespaced"},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("rbac = %+v, want only the XR's own rule: %+v", got, want)
@@ -83,7 +83,7 @@ spec:
   sources:
     - provider: ghcr.io/x/provider-aws-sqs:v2.7.0
   xrd:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues
     version: v1alpha1
@@ -131,7 +131,7 @@ func TestRBACIsDeterministicAndDeduplicated(t *testing.T) {
 		t.Fatalf("status %d", code)
 	}
 	want := rbacResponse{Rules: []rbacRule{
-		{APIGroups: []string{"platform.hooli.tech"}, Resources: []string{"xqueues"}, Verbs: manageVerbs, Scope: "Namespaced"},
+		{APIGroups: []string{"platform.sparky.ee"}, Resources: []string{"xqueues"}, Verbs: manageVerbs, Scope: "Namespaced"},
 		{APIGroups: []string{"sqs.aws.m.upbound.io"}, Resources: []string{"queues"}, Verbs: manageVerbs, Scope: "Namespaced"},
 	}}
 	if !reflect.DeepEqual(got, want) {

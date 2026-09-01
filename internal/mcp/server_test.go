@@ -93,7 +93,7 @@ spec:
   sources:
     - provider: ghcr.io/x/provider-aws-sqs:v2.7.0
   xrd:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues
     version: v1alpha1

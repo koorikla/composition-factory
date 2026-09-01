@@ -11,7 +11,7 @@
       }
     ],
     "xrd": {
-      "group": "platform.hooli.tech",
+      "group": "platform.sparky.ee",
       "kind": "XNotify",
       "plural": "xnotifies",
       "version": "v1alpha1",

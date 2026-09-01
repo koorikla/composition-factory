@@ -19,7 +19,7 @@ spec:
   sources:
     - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2
   xrd:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues
     version: v1alpha1
@@ -114,7 +114,7 @@ func TestValidateRejectsMissingRequiredXRDFields(t *testing.T) {
 		removeLine string
 		wantSubstr string
 	}{
-		{"missing group", "    group: platform.hooli.tech\n", "spec.xrd.group is required"},
+		{"missing group", "    group: platform.sparky.ee\n", "spec.xrd.group is required"},
 		{"missing kind", "    kind: XQueue\n", "spec.xrd.kind is required"},
 		{"missing plural", "    plural: xqueues\n", "spec.xrd.plural is required"},
 		{"missing version", "    version: v1alpha1\n", "spec.xrd.version is required"},
@@ -185,7 +185,7 @@ spec:
   sources:
     - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2
   xrd:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues
     version: v1alpha1
@@ -273,7 +273,7 @@ func validParamBlueprint(paramName string) *Blueprint {
 	return &Blueprint{
 		Spec: Spec{
 			XRD: XRD{
-				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: params,
 			},
@@ -349,7 +349,7 @@ func TestValidateRejectsInvalidXRDIdentifiers(t *testing.T) {
 		old, new   string
 		wantSubstr string
 	}{
-		{"bad group: uppercase is not a valid DNS subdomain", "group: platform.hooli.tech", "group: Platform.Hooli.Tech", "spec.xrd.group"},
+		{"bad group: uppercase is not a valid DNS subdomain", "group: platform.sparky.ee", "group: Platform.sparky.ee", "spec.xrd.group"},
 		{"bad kind: must start uppercase", "kind: XQueue", "kind: xQueue", "spec.xrd.kind"},
 		{"bad plural: must be all lowercase", "plural: xqueues", "plural: XQueues", "spec.xrd.plural"},
 		{"bad version: missing v prefix", "version: v1alpha1", "version: version1", "spec.xrd.version"},
@@ -439,17 +439,17 @@ func TestValidateGroupAndPluralKeywordCheck(t *testing.T) {
 		},
 		{
 			name: `bare group "no" is a YAML keyword, rejected`,
-			old:  "group: platform.hooli.tech", new: `group: "no"`,
+			old:  "group: platform.sparky.ee", new: `group: "no"`,
 			wantReject: true, wantSubstr: "spec.xrd.group",
 		},
 		{
-			name: `group "platform.hooli.tech" is still accepted`,
-			old:  "group: platform.hooli.tech", new: "group: platform.hooli.tech",
+			name: `group "platform.sparky.ee" is still accepted`,
+			old:  "group: platform.sparky.ee", new: "group: platform.sparky.ee",
 			wantReject: false,
 		},
 		{
 			name: `group "no.example.com" is accepted: a legitimate multi-label group whose first label reads as a keyword must not be over-rejected`,
-			old:  "group: platform.hooli.tech", new: "group: no.example.com",
+			old:  "group: platform.sparky.ee", new: "group: no.example.com",
 			wantReject: false,
 		},
 	}
@@ -488,7 +488,7 @@ func blueprintWithParam(p Parameter) *Blueprint {
 	return &Blueprint{
 		Spec: Spec{
 			XRD: XRD{
-				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]Parameter{
 					"value":        p,
@@ -604,7 +604,7 @@ func scalarBlueprint(mutate func(*Blueprint)) *Blueprint {
 		Metadata: Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
-				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]Parameter{
 					"providerName": {Type: "string", Required: true},
@@ -974,7 +974,7 @@ func forEachBlueprint(mutate func(*Blueprint)) *Blueprint {
 		Metadata: Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
-				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]Parameter{
 					"providerName":  {Type: "string", Required: true},
@@ -999,7 +999,7 @@ metadata:
   name: xqueue
 spec:
   xrd:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues
     version: v1alpha1
@@ -1199,7 +1199,7 @@ func whenBlueprint(mutate func(*Blueprint)) *Blueprint {
 		Metadata: Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
-				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]Parameter{
 					"providerName": {Type: "string", Required: true},
@@ -1373,7 +1373,7 @@ func statusRefBlueprint(mutate func(*Blueprint)) *Blueprint {
 		Metadata: Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
-				Group: "platform.hooli.tech", Kind: "XQueuePair", Plural: "xqueuepairs",
+				Group: "platform.sparky.ee", Kind: "XQueuePair", Plural: "xqueuepairs",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]Parameter{
 					"providerName": {Type: "string", Required: true},

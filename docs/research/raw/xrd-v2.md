@@ -112,7 +112,7 @@ status:
     compositeResourceType:      {apiVersion, kind}
     compositeResourceClaimType: {apiVersion, kind}   # stays {"",""} in v2
 ```
-**[V]** Live example from `xqueues.platform.hooli.tech`:
+**[V]** Live example from `xqueues.platform.sparky.ee`:
 ```yaml
 status:
   conditions:
@@ -123,7 +123,7 @@ status:
     type: Established
   controllers:
     compositeResourceClaimType: {apiVersion: "", kind: ""}
-    compositeResourceType: {apiVersion: platform.hooli.tech/v1alpha1, kind: XQueue}
+    compositeResourceType: {apiVersion: platform.sparky.ee/v1alpha1, kind: XQueue}
 ```
 Condition types/reasons **[S]** (`apis/apiextensions/v1/conditions.go`): `Established`, `Offered`, `ValidPipeline`, `Responsive`; reasons `WatchingCompositeResource`, `WatchingCompositeResourceClaim`, `TerminatingCompositeResource`, `TerminatingCompositeResourceClaim`, `ValidPipeline`, `MissingCapabilities`, `WatchCircuitOpen`, `WatchCircuitClosed`.
 
@@ -196,7 +196,7 @@ case LegacyCluster: crd.Spec.Scope = extv1.ClusterScoped
 
 ## 4. The derived XR CRD — exact v2.4 layout
 
-Verified against the live `crd/xqueues.platform.hooli.tech` and reproduced by `crossplane xrd convert`.
+Verified against the live `crd/xqueues.platform.sparky.ee` and reproduced by `crossplane xrd convert`.
 
 ```yaml
 spec:                                # Namespaced XR
@@ -223,8 +223,8 @@ subresources: {status: {}}              # always
 ```yaml
 spec:
   crossplane:
-    compositionRef: {name: xqueues.aws.platform.hooli.tech}
-    compositionRevisionRef: {name: xqueues.aws.platform.hooli.tech-c6ccb78}
+    compositionRef: {name: xqueues.aws.platform.sparky.ee}
+    compositionRevisionRef: {name: xqueues.aws.platform.sparky.ee-c6ccb78}
     compositionUpdatePolicy: Automatic
     resourceRefs:
     - {apiVersion: sqs.aws.m.upbound.io/v1beta1, kind: Queue, name: cncf-pre-talk-e28dacd7ec77}

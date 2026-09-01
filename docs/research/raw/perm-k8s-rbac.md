@@ -51,7 +51,7 @@ Full inventory of `rbac.crossplane.io/*` label keys observed on the cluster (VER
 ```
 crossplane:system:aggregate-to-crossplane                                  <- static, from the Helm chart
 crossplane:composite:xmicroservices.sparky.ee:aggregate-to-crossplane      <- rbac-manager, per XRD
-crossplane:composite:xqueues.platform.hooli.tech:aggregate-to-crossplane   <- rbac-manager, per XRD
+crossplane:composite:xqueues.platform.sparky.ee:aggregate-to-crossplane   <- rbac-manager, per XRD
 crossplane:provider:provider-aws-sqs-<hash>:aggregate-to-edit              <- rbac-manager, per provider
 crossplane:provider:upbound-provider-family-aws-<hash>:aggregate-to-edit   <- rbac-manager, per provider
 ```
@@ -63,10 +63,10 @@ Note the provider roles are named `aggregate-to-edit` but **also** carry `aggreg
 The per-XRD role that rbac-manager generates grants rights on **the XR and nothing else**:
 
 ```json
-// crossplane:composite:xqueues.platform.hooli.tech:aggregate-to-crossplane
+// crossplane:composite:xqueues.platform.sparky.ee:aggregate-to-crossplane
 [
- {"apiGroups":["platform.hooli.tech"],"resources":["xqueues","xqueues/status"],"verbs":["*"]},
- {"apiGroups":["platform.hooli.tech"],"resources":["xqueues/finalizers"],"verbs":["update"]}
+ {"apiGroups":["platform.sparky.ee"],"resources":["xqueues","xqueues/status"],"verbs":["*"]},
+ {"apiGroups":["platform.sparky.ee"],"resources":["xqueues/finalizers"],"verbs":["update"]}
 ]
 ```
 

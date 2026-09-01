@@ -133,8 +133,8 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 	}
 
 	// Step 4: render what we generated.
-	comp := filepath.Join(outDir, "compositions", "xqueues.platform.hooli.tech.yaml")
-	xrd := filepath.Join(outDir, "xrds", "xqueues.platform.hooli.tech.yaml")
+	comp := filepath.Join(outDir, "compositions", "xqueues.platform.sparky.ee.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueues.platform.sparky.ee.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
 	rendered, err := renderComposition(t, "testdata/xr.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
 	if err != nil {
@@ -222,8 +222,8 @@ func TestAcceptanceForEachRenders(t *testing.T) {
 		}
 	}
 	for _, rel := range []string{
-		filepath.Join("compositions", "xqueuesets.platform.hooli.tech.yaml"),
-		filepath.Join("xrds", "xqueuesets.platform.hooli.tech.yaml"),
+		filepath.Join("compositions", "xqueuesets.platform.sparky.ee.yaml"),
+		filepath.Join("xrds", "xqueuesets.platform.sparky.ee.yaml"),
 		"functions.yaml",
 	} {
 		first, err := os.ReadFile(filepath.Join(outDir, rel))
@@ -239,8 +239,8 @@ func TestAcceptanceForEachRenders(t *testing.T) {
 		}
 	}
 
-	comp := filepath.Join(outDir, "compositions", "xqueuesets.platform.hooli.tech.yaml")
-	xrd := filepath.Join(outDir, "xrds", "xqueuesets.platform.hooli.tech.yaml")
+	comp := filepath.Join(outDir, "compositions", "xqueuesets.platform.sparky.ee.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueuesets.platform.sparky.ee.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
 
 	cases := []struct {
@@ -320,8 +320,8 @@ func TestAcceptanceWhenRenders(t *testing.T) {
 		}
 	}
 	for _, rel := range []string{
-		filepath.Join("compositions", "xqueuetiers.platform.hooli.tech.yaml"),
-		filepath.Join("xrds", "xqueuetiers.platform.hooli.tech.yaml"),
+		filepath.Join("compositions", "xqueuetiers.platform.sparky.ee.yaml"),
+		filepath.Join("xrds", "xqueuetiers.platform.sparky.ee.yaml"),
 		"functions.yaml",
 	} {
 		first, err := os.ReadFile(filepath.Join(outDir, rel))
@@ -337,8 +337,8 @@ func TestAcceptanceWhenRenders(t *testing.T) {
 		}
 	}
 
-	comp := filepath.Join(outDir, "compositions", "xqueuetiers.platform.hooli.tech.yaml")
-	xrd := filepath.Join(outDir, "xrds", "xqueuetiers.platform.hooli.tech.yaml")
+	comp := filepath.Join(outDir, "compositions", "xqueuetiers.platform.sparky.ee.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueuetiers.platform.sparky.ee.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
 
 	cases := []struct {
@@ -424,8 +424,8 @@ func TestAcceptanceStatusRefRenders(t *testing.T) {
 		}
 	}
 	for _, rel := range []string{
-		filepath.Join("compositions", "xqueuepairs.platform.hooli.tech.yaml"),
-		filepath.Join("xrds", "xqueuepairs.platform.hooli.tech.yaml"),
+		filepath.Join("compositions", "xqueuepairs.platform.sparky.ee.yaml"),
+		filepath.Join("xrds", "xqueuepairs.platform.sparky.ee.yaml"),
 		"functions.yaml",
 	} {
 		first, err := os.ReadFile(filepath.Join(outDir, rel))
@@ -441,8 +441,8 @@ func TestAcceptanceStatusRefRenders(t *testing.T) {
 		}
 	}
 
-	comp := filepath.Join(outDir, "compositions", "xqueuepairs.platform.hooli.tech.yaml")
-	xrd := filepath.Join(outDir, "xrds", "xqueuepairs.platform.hooli.tech.yaml")
+	comp := filepath.Join(outDir, "compositions", "xqueuepairs.platform.sparky.ee.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueuepairs.platform.sparky.ee.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
 	const url = "https://sqs.eu-north-1.amazonaws.com/123456789012/demo-pair"
 
@@ -535,8 +535,8 @@ func TestAcceptanceConventionsRender(t *testing.T) {
 		}
 	}
 	for _, rel := range []string{
-		filepath.Join("compositions", "xqueueconvs.platform.hooli.tech.yaml"),
-		filepath.Join("xrds", "xqueueconvs.platform.hooli.tech.yaml"),
+		filepath.Join("compositions", "xqueueconvs.platform.sparky.ee.yaml"),
+		filepath.Join("xrds", "xqueueconvs.platform.sparky.ee.yaml"),
 		"functions.yaml",
 	} {
 		first, err := os.ReadFile(filepath.Join(outDir, rel))
@@ -552,8 +552,8 @@ func TestAcceptanceConventionsRender(t *testing.T) {
 		}
 	}
 
-	comp := filepath.Join(outDir, "compositions", "xqueueconvs.platform.hooli.tech.yaml")
-	xrd := filepath.Join(outDir, "xrds", "xqueueconvs.platform.hooli.tech.yaml")
+	comp := filepath.Join(outDir, "compositions", "xqueueconvs.platform.sparky.ee.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueueconvs.platform.sparky.ee.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
 
 	rendered, err := renderComposition(t,
@@ -679,7 +679,7 @@ func TestAcceptancePipelineAutoReadyRenders(t *testing.T) {
 	// The emitted Composition is pinned byte-for-byte: determinism is a
 	// correctness requirement, and this is the one acceptance-level golden
 	// for a blueprint-declared pipeline.
-	comp := filepath.Join(outDir, "compositions", "xqueues.platform.hooli.tech.yaml")
+	comp := filepath.Join(outDir, "compositions", "xqueues.platform.sparky.ee.yaml")
 	compBytes, err := os.ReadFile(comp)
 	if err != nil {
 		t.Fatalf("read emitted composition: %v", err)
@@ -700,7 +700,7 @@ func TestAcceptancePipelineAutoReadyRenders(t *testing.T) {
 		}
 	}
 
-	xrd := filepath.Join(outDir, "xrds", "xqueues.platform.hooli.tech.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueues.platform.sparky.ee.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
 
 	// Render 1: no observed state. The pipeline must run end to end -- the
@@ -816,8 +816,8 @@ func TestAcceptanceNativeCompositionRenders(t *testing.T) {
 
 	// Step 3: render what we generated with the real crossplane CLI,
 	// serialized against other packages' real renders (see internal/rendertest).
-	comp := filepath.Join(outDir, "compositions", "xwebapps.platform.hooli.tech.yaml")
-	xrd := filepath.Join(outDir, "xrds", "xwebapps.platform.hooli.tech.yaml")
+	comp := filepath.Join(outDir, "compositions", "xwebapps.platform.sparky.ee.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xwebapps.platform.sparky.ee.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
 	rendered, err := renderComposition(t, "testdata/xr-webapp.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
 	if err != nil {
@@ -925,8 +925,8 @@ func TestAcceptanceEnvelopeRenders(t *testing.T) {
 		t.Fatalf("cf gen --check right after gen should exit 0: %v\n%s", err, out)
 	}
 
-	comp := filepath.Join(outDir, "compositions", "xsecretqueues.platform.hooli.tech.yaml")
-	xrd := filepath.Join(outDir, "xrds", "xsecretqueues.platform.hooli.tech.yaml")
+	comp := filepath.Join(outDir, "compositions", "xsecretqueues.platform.sparky.ee.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xsecretqueues.platform.sparky.ee.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
 	rendered, err := renderComposition(t, "testdata/xr-envelope.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
 	if err != nil {

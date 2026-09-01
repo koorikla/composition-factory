@@ -17,7 +17,7 @@ func TestWorkspaceCheckRefusesEscapes(t *testing.T) {
 	allowed := []string{
 		root,
 		filepath.Join(root, "functions.yaml"),
-		filepath.Join(root, "xrds", "xqueues.platform.hooli.tech.yaml"),
+		filepath.Join(root, "xrds", "xqueues.platform.sparky.ee.yaml"),
 		// Dot segments that still RESOLVE inside are fine — the gate judges
 		// where a path lands, not how it is spelled.
 		filepath.Join(root, "xrds", "..", "functions.yaml"),

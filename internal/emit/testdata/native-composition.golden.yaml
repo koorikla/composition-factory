@@ -4,10 +4,10 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: xwebapps.platform.hooli.tech
+  name: xwebapps.platform.sparky.ee
 spec:
   compositeTypeRef:
-    apiVersion: platform.hooli.tech/v1alpha1
+    apiVersion: platform.sparky.ee/v1alpha1
     kind: XWebApp
   mode: Pipeline
   pipeline:

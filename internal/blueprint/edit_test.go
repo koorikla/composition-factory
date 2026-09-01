@@ -15,7 +15,7 @@ func editable() *Blueprint {
 		Spec: Spec{
 			Sources: []Source{{Provider: "ghcr.io/x/provider-aws-sqs:v2.7.0"}},
 			XRD: XRD{
-				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]Parameter{
 					"providerName":   {Type: "string", Required: true},

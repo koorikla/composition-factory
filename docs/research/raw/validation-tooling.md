@@ -164,7 +164,7 @@ crossplane composition render xr.yaml composition.yaml functions.yaml
 produced (abridged):
 
 ```yaml
-apiVersion: platform.hooli.tech/v1alpha1
+apiVersion: platform.sparky.ee/v1alpha1
 kind: XQueue
 metadata: {name: demo-queue, namespace: team-a}
 spec:
@@ -186,7 +186,7 @@ metadata:
   name: demo-queue-2d702055d0fb
   namespace: team-a
   ownerReferences:
-  - {apiVersion: platform.hooli.tech/v1alpha1, blockOwnerDeletion: true, controller: true,
+  - {apiVersion: platform.sparky.ee/v1alpha1, blockOwnerDeletion: true, controller: true,
      kind: XQueue, name: demo-queue, uid: ac342a8b-3073-5ef8-90e7-894635caa1f2}
 spec:
   forProvider: {maxMessageSize: 2048, region: eu-north-1,
@@ -236,7 +236,7 @@ Feeding an observed Queue with `status.conditions[Ready]=True` flipped the XR's 
 Format is a **directory of JSON** files from the cluster's OpenAPI v3 endpoint:
 ```
 kubectl get --raw '/openapi/v3' | jq -r '.paths | keys[]'
-  → apis/platform.hooli.tech/v1alpha1
+  → apis/platform.sparky.ee/v1alpha1
     apis/sqs.aws.m.upbound.io/v1beta1
     apis/sqs.aws.upbound.io/v1beta1
 kubectl get --raw '/openapi/v3/apis/sqs.aws.m.upbound.io/v1beta1' > schemas/sqs_v1beta1.json   # 283 KB
@@ -289,7 +289,7 @@ Enums, numeric bounds, required, unknown fields. **Exit 1.**
 
 **CEL `x-kubernetes-validations`** ✅ — added a rule to the XRD and it fired:
 ```
-[x] CEL validation error platform.hooli.tech/v1alpha1, Kind=XQueue, demo-queue :
+[x] CEL validation error platform.sparky.ee/v1alpha1, Kind=XQueue, demo-queue :
     spec: Invalid value: EU queues must use an eu- prefixed providerConfig
 ```
 
@@ -298,7 +298,7 @@ Enums, numeric bounds, required, unknown fields. **Exit 1.**
 crossplane resource validate extensions/ composition.yaml --error-on-missing-schemas
 schemas does not exist, downloading:  xpkg.upbound.io/crossplane-contrib/function-go-templating:v0.12.0
 [✓] gotemplating.fn.crossplane.io/v1beta1, Kind=GoTemplate,  validated successfully
-[✓] apiextensions.crossplane.io/v1, Kind=Composition, xqueues.aws.platform.hooli.tech validated successfully
+[✓] apiextensions.crossplane.io/v1, Kind=Composition, xqueues.aws.platform.sparky.ee validated successfully
 ```
 Injecting `notARealField` into the GoTemplate input →
 ```
@@ -316,7 +316,7 @@ crossplane resource validate xrd.yaml xr-bad.yaml -o json
 {
   "summary": {"total": 1, "valid": 0, "invalid": 1, "missingSchemas": 0},
   "resources": [{
-    "apiVersion": "platform.hooli.tech/v1alpha1", "kind": "XQueue",
+    "apiVersion": "platform.sparky.ee/v1alpha1", "kind": "XQueue",
     "name": "bad-queue", "namespace": "team-a", "status": "invalid",
     "errors": [
       {"type": "schema", "field": "spec.location",
@@ -373,7 +373,7 @@ Pass an **empty directory** as extensions; validate falls back to Crossplane's b
 ```
 mkdir -p empty-ext
 crossplane resource validate empty-ext/ xrd.yaml
-[✓] apiextensions.crossplane.io/v2, Kind=CompositeResourceDefinition, xqueues.platform.hooli.tech validated successfully
+[✓] apiextensions.crossplane.io/v2, Kind=CompositeResourceDefinition, xqueues.platform.sparky.ee validated successfully
 EXIT=0
 ```
 
@@ -397,7 +397,7 @@ Add the `Function` manifests to extensions and it goes green ✅.
 
 ```
 kubectl apply --dry-run=server -f rendered.yaml
-xqueue.platform.hooli.tech/demo-queue created (server dry run)
+xqueue.platform.sparky.ee/demo-queue created (server dry run)
 queue.sqs.aws.m.upbound.io/demo-queue-2d702055d0fb created (server dry run)
 EXIT=0
 ```
@@ -549,7 +549,7 @@ With `providerName` made optional in the XRD, an XR omitting it renders:
 ```
 and the **entire pipeline passes**:
 ```
-[✓] platform.hooli.tech/v1alpha1, Kind=XQueue, nv2 validated successfully
+[✓] platform.sparky.ee/v1alpha1, Kind=XQueue, nv2 validated successfully
 [✓] sqs.aws.m.upbound.io/v1beta1, Kind=Queue, nv2-60a5aac40c8a validated successfully
 Total 2 resources: 0 missing schemas, 2 success cases, 0 failure cases
 EXIT=0

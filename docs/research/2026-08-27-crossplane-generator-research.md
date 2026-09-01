@@ -1005,10 +1005,10 @@ Decoded with `k8s.io/apimachinery/pkg/util/yaml.NewYAMLOrJSONDecoder` over the w
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: xqueues.aws.platform.hooli.tech
+  name: xqueues.aws.platform.sparky.ee
 spec:
   compositeTypeRef:
-    apiVersion: platform.hooli.tech/v1alpha1
+    apiVersion: platform.sparky.ee/v1alpha1
     kind: XQueue
   mode: Pipeline
   pipeline:
@@ -1047,7 +1047,7 @@ spec:
               name: default
           ---
           # status write-back: same apiVersion+kind as the XR, NO name annotation
-          apiVersion: platform.hooli.tech/v1alpha1
+          apiVersion: platform.sparky.ee/v1alpha1
           kind: XQueue
           status:
             {{- with (getComposedResource . "queue") }}
@@ -1497,7 +1497,7 @@ Against the XRD (no render, no cluster):
 CEL rules fire too:
 
 ```
-[x] CEL validation error platform.hooli.tech/v1alpha1, Kind=XQueue, demo-queue :
+[x] CEL validation error platform.sparky.ee/v1alpha1, Kind=XQueue, demo-queue :
     spec: Invalid value: EU queues must use an eu- prefixed providerConfig
 ```
 
@@ -1506,7 +1506,7 @@ CEL rules fire too:
 ```
 schemas does not exist, downloading:  xpkg.upbound.io/crossplane-contrib/function-go-templating:v0.12.0
 [✓] gotemplating.fn.crossplane.io/v1beta1, Kind=GoTemplate,  validated successfully
-[✓] apiextensions.crossplane.io/v1, Kind=Composition, xqueues.aws.platform.hooli.tech validated successfully
+[✓] apiextensions.crossplane.io/v1, Kind=Composition, xqueues.aws.platform.sparky.ee validated successfully
 ```
 
 ⚠️ Not exhaustive: changing `source: Inline` → `Inlin3` was **not** caught (the GoTemplate CRD has no enum on `source`).
@@ -1517,7 +1517,7 @@ schemas does not exist, downloading:  xpkg.upbound.io/crossplane-contrib/functio
 {
   "summary": {"total": 1, "valid": 0, "invalid": 1, "missingSchemas": 0},
   "resources": [{
-    "apiVersion": "platform.hooli.tech/v1alpha1", "kind": "XQueue",
+    "apiVersion": "platform.sparky.ee/v1alpha1", "kind": "XQueue",
     "name": "bad-queue", "namespace": "team-a", "status": "invalid",
     "errors": [
       {"type": "schema", "field": "spec.location",
@@ -1559,7 +1559,7 @@ With `--error-on-missing-schemas`: `crossplane: error: could not validate all re
 
 ```
 $ mkdir -p empty-ext && crossplane resource validate empty-ext/ xrd.yaml
-[✓] apiextensions.crossplane.io/v2, Kind=CompositeResourceDefinition, xqueues.platform.hooli.tech validated successfully
+[✓] apiextensions.crossplane.io/v2, Kind=CompositeResourceDefinition, xqueues.platform.sparky.ee validated successfully
 EXIT=0
 ```
 
@@ -1821,10 +1821,10 @@ Add Syncthing's runtime override (`--ui-dir ./web/dist`, cf. `STGUIASSETS`) — 
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: xqueues.platform.hooli.tech
+  name: xqueues.platform.sparky.ee
 spec:
   compositeTypeRef:
-    apiVersion: platform.hooli.tech/v1alpha1
+    apiVersion: platform.sparky.ee/v1alpha1
     kind: XQueue
   mode: Pipeline
   pipeline:

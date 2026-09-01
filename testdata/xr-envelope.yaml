@@ -1,4 +1,4 @@
-apiVersion: platform.hooli.tech/v1alpha1
+apiVersion: platform.sparky.ee/v1alpha1
 kind: XSecretQueue
 metadata:
   name: demo

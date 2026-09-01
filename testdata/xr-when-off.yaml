@@ -1,7 +1,7 @@
 # tier is absent (defaults to standard: no audit queue) and replicasEnabled
 # is false: the when outside the forEach range must skip every replica
 # iteration, leaving only the unconditional main queue.
-apiVersion: platform.hooli.tech/v1alpha1
+apiVersion: platform.sparky.ee/v1alpha1
 kind: XQueueTier
 metadata:
   name: demo-tier

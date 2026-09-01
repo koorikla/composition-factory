@@ -38,7 +38,7 @@ func nativeTestBlueprint() *blueprint.Blueprint {
 		Metadata:   blueprint.Metadata{Name: "xwebapp"},
 		Spec: blueprint.Spec{
 			XRD: blueprint.XRD{
-				Group: "platform.hooli.tech", Kind: "XWebApp", Plural: "xwebapps",
+				Group: "platform.sparky.ee", Kind: "XWebApp", Plural: "xwebapps",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]blueprint.Parameter{
 					"providerName": {Type: "string", Required: true},

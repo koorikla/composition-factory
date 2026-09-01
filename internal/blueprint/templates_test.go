@@ -16,7 +16,7 @@ func templatedBlueprint(mutate func(*Blueprint)) *Blueprint {
 		Metadata: Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
-				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]Parameter{
 					"providerName": {Type: "string", Required: true},

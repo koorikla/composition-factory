@@ -21,7 +21,7 @@ spec:
   sources:
     - provider: example.org/provider-test:v2
   xrd:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues
     version: v1alpha1
@@ -88,8 +88,8 @@ func TestGenWritesFiles(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	for _, p := range []string{
-		"xrds/xqueues.platform.hooli.tech.yaml",
-		"compositions/xqueues.platform.hooli.tech.yaml",
+		"xrds/xqueues.platform.sparky.ee.yaml",
+		"compositions/xqueues.platform.sparky.ee.yaml",
 		"functions.yaml",
 		// genBlueprint's one source, provider-test, is not upjet-family-shaped
 		// (internal/emit/providerconfigs.go's providerFamily), so it is its
@@ -187,8 +187,8 @@ func TestGenCheckWithNoPriorRunIsDrift(t *testing.T) {
 
 	msg := buf.String()
 	for _, want := range []string{
-		filepath.Join(out, "xrds", "xqueues.platform.hooli.tech.yaml"),
-		filepath.Join(out, "compositions", "xqueues.platform.hooli.tech.yaml"),
+		filepath.Join(out, "xrds", "xqueues.platform.sparky.ee.yaml"),
+		filepath.Join(out, "compositions", "xqueues.platform.sparky.ee.yaml"),
 		filepath.Join(out, "functions.yaml"),
 	} {
 		if !strings.Contains(msg, "drift: "+want) {
@@ -233,8 +233,8 @@ func TestGenCheckMissingOneFileNamesOnlyThatFile(t *testing.T) {
 		t.Errorf("check output = %q, want it to name the missing file %q", msg, missing)
 	}
 	for _, stillInSync := range []string{
-		filepath.Join(out, "xrds", "xqueues.platform.hooli.tech.yaml"),
-		filepath.Join(out, "compositions", "xqueues.platform.hooli.tech.yaml"),
+		filepath.Join(out, "xrds", "xqueues.platform.sparky.ee.yaml"),
+		filepath.Join(out, "compositions", "xqueues.platform.sparky.ee.yaml"),
 	} {
 		if strings.Contains(msg, "drift: "+stillInSync) {
 			t.Errorf("check output = %q, want %q reported in sync, not drifted -- only functions.yaml was removed", msg, stillInSync)

@@ -271,10 +271,10 @@ func TestGenerateWritesOneProviderConfigPerFamily(t *testing.T) {
 		t.Fatalf("got %d outputs, want 4 (composition, functions.yaml, providerconfigs/aws.yaml, xrd)", len(outs))
 	}
 	wantSuffixes := []string{
-		"compositions/xqueues.platform.hooli.tech.yaml",
+		"compositions/xqueues.platform.sparky.ee.yaml",
 		"functions.yaml",
 		"providerconfigs/aws.yaml",
-		"xrds/xqueues.platform.hooli.tech.yaml",
+		"xrds/xqueues.platform.sparky.ee.yaml",
 	}
 	for i, want := range wantSuffixes {
 		if !strings.HasSuffix(filepath.ToSlash(outs[i].Path), want) {

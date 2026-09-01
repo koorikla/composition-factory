@@ -1622,7 +1622,7 @@ spec:
   sources:
     - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2
   xrd:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues
     version: v1alpha1
@@ -1950,7 +1950,7 @@ func testBlueprint() *blueprint.Blueprint {
 		Metadata:   blueprint.Metadata{Name: "xqueue"},
 		Spec: blueprint.Spec{
 			XRD: blueprint.XRD{
-				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]blueprint.Parameter{
 					"location":       {Type: "string", Required: true, Enum: []string{"EU", "US"}},
@@ -1977,7 +1977,7 @@ func TestXRDShape(t *testing.T) {
 	for _, want := range []string{
 		"apiVersion: apiextensions.crossplane.io/v2",
 		"kind: CompositeResourceDefinition",
-		"name: xqueues.platform.hooli.tech",
+		"name: xqueues.platform.sparky.ee",
 		"scope: Namespaced",
 		"referenceable: true",
 		"enum:",
@@ -2593,8 +2593,8 @@ func TestGenerateProducesThreeFilesAtStablePaths(t *testing.T) {
 		got[filepath.ToSlash(o.Path)] = true
 	}
 	for _, want := range []string{
-		"out/xrds/xqueues.platform.hooli.tech.yaml",
-		"out/compositions/xqueues.platform.hooli.tech.yaml",
+		"out/xrds/xqueues.platform.sparky.ee.yaml",
+		"out/compositions/xqueues.platform.sparky.ee.yaml",
 		"out/functions.yaml",
 	} {
 		if !got[want] {
@@ -2636,7 +2636,7 @@ spec:
   sources:
     - provider: example.org/provider-test:v2
   xrd:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues
     version: v1alpha1
@@ -2682,8 +2682,8 @@ func TestGenWritesFiles(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	for _, p := range []string{
-		"xrds/xqueues.platform.hooli.tech.yaml",
-		"compositions/xqueues.platform.hooli.tech.yaml",
+		"xrds/xqueues.platform.sparky.ee.yaml",
+		"compositions/xqueues.platform.sparky.ee.yaml",
 		"functions.yaml",
 	} {
 		if _, err := os.Stat(filepath.Join(out, p)); err != nil {
@@ -2940,7 +2940,7 @@ spec:
   sources:
     - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2
   xrd:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues
     version: v1alpha1
@@ -2960,7 +2960,7 @@ spec:
 
 `testdata/xr.yaml`:
 ```yaml
-apiVersion: platform.hooli.tech/v1alpha1
+apiVersion: platform.sparky.ee/v1alpha1
 kind: XQueue
 metadata:
   name: demo
@@ -3034,8 +3034,8 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 	}
 
 	// Step 4: render what we generated.
-	comp := filepath.Join(outDir, "compositions", "xqueues.platform.hooli.tech.yaml")
-	xrd := filepath.Join(outDir, "xrds", "xqueues.platform.hooli.tech.yaml")
+	comp := filepath.Join(outDir, "compositions", "xqueues.platform.sparky.ee.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueues.platform.sparky.ee.yaml")
 	fns := filepath.Join(outDir, "functions.yaml")
 	render := exec.Command("crossplane", "composition", "render",
 		"testdata/xr.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")

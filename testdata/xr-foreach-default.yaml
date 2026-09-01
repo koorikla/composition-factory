@@ -1,7 +1,7 @@
 # instanceCount is deliberately absent: the XRD's schema default ("2") must
 # be injected before the composition function sees the XR, and the render
 # must fan the looped resource out to exactly two instances.
-apiVersion: platform.hooli.tech/v1alpha1
+apiVersion: platform.sparky.ee/v1alpha1
 kind: XQueueSet
 metadata:
   name: demo-set

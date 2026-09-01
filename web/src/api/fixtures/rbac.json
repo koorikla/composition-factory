@@ -1,7 +1,7 @@
 {
   "rules": [
     {
-      "apiGroups": ["platform.hooli.tech"],
+      "apiGroups": ["platform.sparky.ee"],
       "resources": ["xqueues"],
       "verbs": ["get", "list", "watch", "create", "update", "patch", "delete"],
       "scope": "Namespaced"

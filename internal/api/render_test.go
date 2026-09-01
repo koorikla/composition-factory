@@ -25,7 +25,7 @@ import (
 // composed resource it prints. The handler must count the annotated
 // documents — 2 — and never the XR.
 const okRenderStream = `---
-apiVersion: platform.hooli.tech/v1alpha1
+apiVersion: platform.sparky.ee/v1alpha1
 kind: XQueue
 metadata:
   name: render-check
@@ -147,8 +147,8 @@ func TestRenderCountsComposedResources(t *testing.T) {
 	if err := yaml.Unmarshal(gotXR, &xr); err != nil {
 		t.Fatalf("synthesized XR is not YAML: %v\n%s", err, gotXR)
 	}
-	if xr.APIVersion != "platform.hooli.tech/v1alpha1" || xr.Kind != "XQueue" {
-		t.Errorf("XR identity = %s/%s, want platform.hooli.tech/v1alpha1/XQueue", xr.APIVersion, xr.Kind)
+	if xr.APIVersion != "platform.sparky.ee/v1alpha1" || xr.Kind != "XQueue" {
+		t.Errorf("XR identity = %s/%s, want platform.sparky.ee/v1alpha1/XQueue", xr.APIVersion, xr.Kind)
 	}
 	if xr.Metadata.Name != "render-check" || xr.Metadata.Namespace != "default" {
 		t.Errorf("XR metadata = %+v, want name render-check in namespace default (Namespaced scope)", xr.Metadata)
@@ -288,7 +288,7 @@ func TestRenderIsNeverAnsweredWith304(t *testing.T) {
 func TestSampleXRUsesTypeAppropriatePlaceholders(t *testing.T) {
 	b := &blueprint.Blueprint{}
 	b.Spec.XRD = blueprint.XRD{
-		Group:   "platform.hooli.tech",
+		Group:   "platform.sparky.ee",
 		Version: "v1alpha1",
 		Kind:    "XThing",
 		Scope:   "Namespaced",
@@ -317,8 +317,8 @@ func TestSampleXRUsesTypeAppropriatePlaceholders(t *testing.T) {
 		t.Fatalf("sampleXR output is not YAML: %v\n%s", err, raw)
 	}
 
-	if xr.APIVersion != "platform.hooli.tech/v1alpha1" || xr.Kind != "XThing" {
-		t.Errorf("identity = %s/%s, want platform.hooli.tech/v1alpha1/XThing", xr.APIVersion, xr.Kind)
+	if xr.APIVersion != "platform.sparky.ee/v1alpha1" || xr.Kind != "XThing" {
+		t.Errorf("identity = %s/%s, want platform.sparky.ee/v1alpha1/XThing", xr.APIVersion, xr.Kind)
 	}
 	wantMeta := map[string]any{"name": "render-check", "namespace": "default"}
 	if diff := cmp.Diff(wantMeta, xr.Metadata); diff != "" {
@@ -344,7 +344,7 @@ func TestSampleXRUsesTypeAppropriatePlaceholders(t *testing.T) {
 func TestSampleXROmitsNamespaceOutsideNamespacedScope(t *testing.T) {
 	b := &blueprint.Blueprint{}
 	b.Spec.XRD = blueprint.XRD{
-		Group: "platform.hooli.tech", Version: "v1alpha1", Kind: "XThing", Scope: "Cluster",
+		Group: "platform.sparky.ee", Version: "v1alpha1", Kind: "XThing", Scope: "Cluster",
 	}
 	raw, err := sampleXR(b)
 	if err != nil {

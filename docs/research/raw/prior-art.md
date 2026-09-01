@@ -40,10 +40,10 @@ Output — **this is the entire file**:
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: xqueues.platform.hooli.tech
+  name: xqueues.platform.sparky.ee
 spec:
   compositeTypeRef:
-    apiVersion: platform.hooli.tech/v1alpha1
+    apiVersion: platform.sparky.ee/v1alpha1
     kind: XQueue
   mode: Pipeline
   pipeline:

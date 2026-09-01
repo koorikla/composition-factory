@@ -607,10 +607,10 @@ Caveat: `with` treats `0`, `false`, and `""` as absent. For a genuinely optional
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: xqueues.aws.platform.hooli.tech
+  name: xqueues.aws.platform.sparky.ee
 spec:
   compositeTypeRef:
-    apiVersion: platform.hooli.tech/v1alpha1
+    apiVersion: platform.sparky.ee/v1alpha1
     kind: XQueue
   mode: Pipeline
   pipeline:
@@ -649,7 +649,7 @@ spec:
               name: default
           ---
           # status write-back: same apiVersion+kind as the XR, NO name annotation
-          apiVersion: platform.hooli.tech/v1alpha1
+          apiVersion: platform.sparky.ee/v1alpha1
           kind: XQueue
           status:
             {{- with (getComposedResource . "queue") }}

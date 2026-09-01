@@ -63,7 +63,7 @@ func conventionTestBlueprint() *blueprint.Blueprint {
 		Metadata:   blueprint.Metadata{Name: "xqueueconv"},
 		Spec: blueprint.Spec{
 			XRD: blueprint.XRD{
-				Group: "platform.hooli.tech", Kind: "XQueueConv", Plural: "xqueueconvs",
+				Group: "platform.sparky.ee", Kind: "XQueueConv", Plural: "xqueueconvs",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]blueprint.Parameter{
 					"providerName": {Type: "string", Required: true},

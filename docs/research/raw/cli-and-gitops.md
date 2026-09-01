@@ -34,10 +34,10 @@ Output — the **entire** file, at `apis/xqueues/composition.yaml`:
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: xqueues.platform.hooli.tech
+  name: xqueues.platform.sparky.ee
 spec:
   compositeTypeRef:
-    apiVersion: platform.hooli.tech/v1alpha1
+    apiVersion: platform.sparky.ee/v1alpha1
     kind: XQueue
   mode: Pipeline
   pipeline:
@@ -229,7 +229,7 @@ metadata:
 spec:
   variant: aws                       # composition-name segment + directory
   api:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues                  # explicit — never pluralize automatically
     scope: Namespaced
@@ -282,7 +282,7 @@ Every one of these is **one-directional**. That is not an accident.
 
 ### Round-tripping: don't, and here is the evidence
 
-I parsed the user's actual production template (extracted live from `composition/xqueues.aws.platform.hooli.tech`) with Go's `text/template/parse`. Source at `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/tmplexp/main.go`.
+I parsed the user's actual production template (extracted live from `composition/xqueues.aws.platform.sparky.ee`) with Go's `text/template/parse`. Source at `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/tmplexp/main.go`.
 
 **First result — parsing fails outright by default:**
 ```
@@ -486,9 +486,9 @@ crossplane/
 Code search for `filename:kustomization.yaml` across the repo: **`total_count: 0`**.
 
 Naming, cross-checked between git and cluster:
-- **XRD `metadata.name` = `<plural>.<group>`** → `xqueues.platform.hooli.tech`. A hard Crossplane invariant (same rule as CRDs), not a style choice.
-- **Composition `metadata.name` = `<plural>.<variant>.<group>`** → `xqueues.aws.platform.hooli.tech`, `xmicroservices.kubernetes.sparky.ee`. A convention; nothing enforces it. The `<variant>` segment (`aws`, `kubernetes`) is a **human choice**, not derivable from the MR group (`sqs.aws.m.upbound.io` would give `sqs` or `m`, both wrong). Hence `spec.variant` in the blueprint.
-- **Filenames = `<singular-kind-lowercase>.yaml`** → `xqueue.yaml`, *not* `xqueues.platform.hooli.tech.yaml`. The directory supplies the variant; the filename need not repeat the group.
+- **XRD `metadata.name` = `<plural>.<group>`** → `xqueues.platform.sparky.ee`. A hard Crossplane invariant (same rule as CRDs), not a style choice.
+- **Composition `metadata.name` = `<plural>.<variant>.<group>`** → `xqueues.aws.platform.sparky.ee`, `xmicroservices.kubernetes.sparky.ee`. A convention; nothing enforces it. The `<variant>` segment (`aws`, `kubernetes`) is a **human choice**, not derivable from the MR group (`sqs.aws.m.upbound.io` would give `sqs` or `m`, both wrong). Hence `spec.variant` in the blueprint.
+- **Filenames = `<singular-kind-lowercase>.yaml`** → `xqueue.yaml`, *not* `xqueues.platform.sparky.ee.yaml`. The directory supplies the variant; the filename need not repeat the group.
 
 ### Recommendations
 
@@ -503,7 +503,7 @@ Make the two prefixes flags (`--xrd-dir`, `--composition-dir`) — the *conventi
 
 **Do NOT emit `kustomization.yaml` by default.** ArgoCD auto-detects source type (verified: the same cluster reports `sourceType: Helm` for `crossplane-app`/`kyverno-app` and `Directory` for the rest, purely from repo content). Dropping a `kustomization.yaml` in flips these Applications from Directory to Kustomize, and then **any file absent from `resources:` becomes invisible — which under `prune: true` means ArgoCD deletes the corresponding live object.** A generator that writes a file but forgets to register it silently destroys a resource. Offer `--layout kustomize` as opt-in, emitting a complete regenerated `resources:` list. *(The Directory/Helm auto-detection is verified from `status.sourceType`; the specific Kustomize-detection-under-`recurse` interaction is reasoned from that plus ArgoCD's documented behavior — worth a scratch-repo test before you ship the flag.)*
 
-**Never emit `argocd.argoproj.io/tracking-id`.** Verified: `crossplane/xrds/xqueue.yaml` in git has no such annotation, yet the live object carries `crossplane-xrds:apiextensions.crossplane.io/CompositeResourceDefinition:crossplane-system/xqueues.platform.hooli.tech`. ArgoCD injects it at apply time under `resourceTrackingMethod: annotation`. If your tool wrote one, a wrong app-name prefix would make ArgoCD believe another Application owns the resource. Same for `kubectl.kubernetes.io/last-applied-configuration`.
+**Never emit `argocd.argoproj.io/tracking-id`.** Verified: `crossplane/xrds/xqueue.yaml` in git has no such annotation, yet the live object carries `crossplane-xrds:apiextensions.crossplane.io/CompositeResourceDefinition:crossplane-system/xqueues.platform.sparky.ee`. ArgoCD injects it at apply time under `resourceTrackingMethod: annotation`. If your tool wrote one, a wrong app-name prefix would make ArgoCD believe another Application owns the resource. Same for `kubectl.kubernetes.io/last-applied-configuration`.
 
 Note the tracking-id's namespace segment is `crossplane-system` even though XRDs and Compositions are cluster-scoped — it reflects the Application's `destination.namespace`, another reason never to synthesize it yourself.
 

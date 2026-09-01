@@ -528,7 +528,7 @@ function leafName(path){
 function reqLeaves(list,nid){return leaves(list,'',null,nid).filter(function(l){return l.f.req})}
 
 /* ---------- editable XRD ---------- */
-var xrd={kind:"XQueue",group:"platform.hooli.tech",plural:"xqueues",version:"v1alpha1",scope:"Namespaced",
+var xrd={kind:"XQueue",group:"platform.sparky.ee",plural:"xqueues",version:"v1alpha1",scope:"Namespaced",
  fields:[
   {n:"location",t:"enum",req:1,ev:"EU, US",d:"Deployment location."},
   {n:"providerName",t:"string",req:1,d:"ClusterProviderConfig to reconcile against."},
@@ -547,7 +547,7 @@ var vars=[{n:"region",from:"location",map:'EU: eu-north-1, US: us-east-2',bindTo
 var convs=[
  {n:"naming",bindTo:"name",tpl:'{{ .xr }}-{{ .slot }}'},
  {n:"tags",bindTo:"tags,labels,matchLabels",
-  tpl:'app.kubernetes.io/managed-by: crossplane\nplatform.hooli.tech/xr: {{ .xr }}\n{{- range $k, $v := .tags }}\n{{ $k }}: {{ $v | quote }}\n{{- end }}'}
+  tpl:'app.kubernetes.io/managed-by: crossplane\nplatform.sparky.ee/xr: {{ .xr }}\n{{- range $k, $v := .tags }}\n{{ $k }}: {{ $v | quote }}\n{{- end }}'}
 ];
 var providers=[
  {ref:"xpkg.upbound.io/upbound/provider-aws-sqs:v2",dg:"sha256:1aff5a5aa39e…35f7",n:8,fam:"aws"},
@@ -556,7 +556,7 @@ var providers=[
 ];
 
 var nodes=[
- {id:"xr",kind:"XQueue",name:"composite",grp:"platform.hooli.tech/v1alpha1",fam:"xrd",x:14,y:78,isXR:true},
+ {id:"xr",kind:"XQueue",name:"composite",grp:"platform.sparky.ee/v1alpha1",fam:"xrd",x:14,y:78,isXR:true},
  {id:"q",kind:"Queue",name:"main-queue",grp:"sqs.aws.m.upbound.io/v1beta1",fam:"aws",x:238,y:14,fields:SCH.Queue},
  {id:"dlq",kind:"Queue",name:"dlq",grp:"sqs.aws.m.upbound.io/v1beta1",fam:"aws",x:238,y:286,fields:SCH.Queue,when:"$spec.enableDlq"},
  {id:"qp",kind:"QueuePolicy",name:"queue-policy",grp:"sqs.aws.m.upbound.io/v1beta1",fam:"aws",x:462,y:110,fields:SCH.QueuePolicy},

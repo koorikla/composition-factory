@@ -1,6 +1,10 @@
 {
  "providers": [
   {
+   "ref": "ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0",
+   "digest": "sha256:16c8fb42f66c5bae371abdabb9ce7f82f53d390a486b0bb51e9842137d83bee7"
+  },
+  {
    "ref": "ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0",
    "digest": "sha256:0814e9390a6db1cf98f0e946a9692cae8bfe0fc61a81e6ac40e42b3c2786daaf"
   },

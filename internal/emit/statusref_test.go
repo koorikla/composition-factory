@@ -95,7 +95,7 @@ func statusRefTestBlueprint() *blueprint.Blueprint {
 		Metadata:   blueprint.Metadata{Name: "xqueuepair"},
 		Spec: blueprint.Spec{
 			XRD: blueprint.XRD{
-				Group: "platform.hooli.tech", Kind: "XQueuePair", Plural: "xqueuepairs",
+				Group: "platform.sparky.ee", Kind: "XQueuePair", Plural: "xqueuepairs",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]blueprint.Parameter{
 					"providerName": {Type: "string", Required: true},

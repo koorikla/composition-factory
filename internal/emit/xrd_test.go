@@ -16,7 +16,7 @@ func testBlueprint() *blueprint.Blueprint {
 		Metadata:   blueprint.Metadata{Name: "xqueue"},
 		Spec: blueprint.Spec{
 			XRD: blueprint.XRD{
-				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
 				Version: "v1alpha1", Scope: "Namespaced",
 				Parameters: map[string]blueprint.Parameter{
 					"location":       {Type: "string", Required: true, Enum: []string{"EU", "US"}},
@@ -43,7 +43,7 @@ func TestXRDShape(t *testing.T) {
 	for _, want := range []string{
 		"apiVersion: apiextensions.crossplane.io/v2",
 		"kind: CompositeResourceDefinition",
-		"name: xqueues.platform.hooli.tech",
+		"name: xqueues.platform.sparky.ee",
 		"scope: Namespaced",
 		"referenceable: true",
 		"enum:",

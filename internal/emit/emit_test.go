@@ -37,8 +37,8 @@ func TestGenerateProducesThreeFilesAtStablePaths(t *testing.T) {
 		got[filepath.ToSlash(o.Path)] = true
 	}
 	for _, want := range []string{
-		"out/xrds/xqueues.platform.hooli.tech.yaml",
-		"out/compositions/xqueues.platform.hooli.tech.yaml",
+		"out/xrds/xqueues.platform.sparky.ee.yaml",
+		"out/compositions/xqueues.platform.sparky.ee.yaml",
 		"out/functions.yaml",
 	} {
 		if !got[want] {
