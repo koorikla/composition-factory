@@ -5,3 +5,6 @@
       name and all field values/wires), plus an explicit duplicate action and
       delete (with confirm listing wired fields). All through the full-doc PUT.
       — user request 2026-09-01 ("copy paste to duplicate queues")
+- [ ] SHARED tab: an "add shared parameter" button — create a new XRD parameter
+      (name/type/required/default/enum) directly from the SHARED rail, not only
+      via the XR card or field binding. — user request 2026-09-01
