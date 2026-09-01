@@ -1,0 +1,12 @@
+# tier overrides the default: the audit queue must render. replicasEnabled
+# and replicas are deliberately absent — the XRD's schema defaults (true, 2)
+# must be injected before the composition function sees the XR, fanning the
+# replica queue out to two instances.
+apiVersion: platform.hooli.tech/v1alpha1
+kind: XQueueTier
+metadata:
+  name: demo-tier
+  namespace: default
+spec:
+  providerName: localstack
+  tier: pro

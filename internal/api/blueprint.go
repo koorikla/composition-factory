@@ -545,16 +545,16 @@ func statusReferencingResources(b *blueprint.Blueprint, name string) []string {
 }
 
 // referencingResources returns the names of every resource that references
-// params.<name> — through a field's From or through its own ForEach loop
-// bound — in resource order. It mirrors blueprint.Blueprint's unexported
-// referencingResources (see internal/blueprint/edit.go) exactly, over the
-// same exported Resource/Field data — see handleDeleteParameter's doc
-// comment for why this HTTP layer needs its own copy of this one check.
+// params.<name> — through a field's From, its own ForEach loop bound, or its
+// When condition — in resource order. It mirrors blueprint.Blueprint's
+// unexported referencingResources (see internal/blueprint/edit.go) exactly,
+// over the same exported Resource/Field data — see handleDeleteParameter's
+// doc comment for why this HTTP layer needs its own copy of this one check.
 func referencingResources(b *blueprint.Blueprint, name string) []string {
 	want := "params." + name
 	var refs []string
 	for _, res := range b.Spec.Resources {
-		if res.ForEach == want {
+		if res.ForEach == want || whenReferences(res.When, name) {
 			refs = append(refs, res.Name)
 			continue
 		}
@@ -566,6 +566,17 @@ func referencingResources(b *blueprint.Blueprint, name string) []string {
 		}
 	}
 	return refs
+}
+
+// whenReferences reports whether a when expression references params.<name>.
+// Unparseable (never the case on a validated document) counts as no
+// reference, keeping the scan total.
+func whenReferences(when, name string) bool {
+	if when == "" {
+		return false
+	}
+	param, _, _, err := blueprint.ParseWhen(when)
+	return err == nil && param == name
 }
 
 // persistBlueprint writes b to srv.Blueprint, deterministically and only if

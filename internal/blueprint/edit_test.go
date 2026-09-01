@@ -30,6 +30,68 @@ func editable() *Blueprint {
 	}
 }
 
+// gated is editable plus a defaulted string parameter and a resource whose
+// when condition references it.
+func gated() *Blueprint {
+	b := editable()
+	b.Spec.XRD.Parameters["tier"] = Parameter{Type: "string", Default: "standard", Enum: []string{"standard", "pro"}}
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name: "audit-queue", Kind: "Queue",
+		When:   `params.tier == "pro"`,
+		Fields: map[string]Field{"region": {Value: "eu-north-1"}},
+	})
+	return b
+}
+
+// A when condition is a params.<name> reference exactly like a field's From
+// and a forEach loop bound, and gets the same rewrite discipline: a dangling
+// when emits a Composition whose condition dereferences a parameter that no
+// longer exists, which under missingkey=error can never render.
+func TestRenameParameterRewritesWhenReferences(t *testing.T) {
+	cases := []struct{ name, when, want string }{
+		{"comparison form", `params.tier == "pro"`, `params.level == "pro"`},
+		{"inequality form", `params.tier != "standard"`, `params.level != "standard"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := gated()
+			b.Spec.Resources[1].When = tc.when
+			if err := b.RenameParameter("tier", "level"); err != nil {
+				t.Fatalf("RenameParameter: %v", err)
+			}
+			if got := b.Spec.Resources[1].When; got != tc.want {
+				t.Errorf("When = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenameParameterRewritesBareWhenReference(t *testing.T) {
+	b := gated()
+	b.Spec.XRD.Parameters["auditEnabled"] = Parameter{Type: "boolean", Default: "false"}
+	b.Spec.Resources[1].When = "params.auditEnabled"
+	if err := b.RenameParameter("auditEnabled", "auditOn"); err != nil {
+		t.Fatalf("RenameParameter: %v", err)
+	}
+	if got := b.Spec.Resources[1].When; got != "params.auditOn" {
+		t.Errorf("When = %q, want params.auditOn", got)
+	}
+}
+
+func TestDeleteParameterRefusesWhenWhenReferences(t *testing.T) {
+	b := gated()
+	err := b.DeleteParameter("tier")
+	if err == nil {
+		t.Fatal("want an error deleting a parameter a when condition still references")
+	}
+	if !strings.Contains(err.Error(), "audit-queue") {
+		t.Errorf("err = %v, want it to name the gated resource", err)
+	}
+	if _, ok := b.Spec.XRD.Parameters["tier"]; !ok {
+		t.Error("parameter was deleted despite the error")
+	}
+}
+
 // wired is editable plus a second resource whose queueUrl is a
 // cross-resource status reference to main-queue.
 func wired() *Blueprint {

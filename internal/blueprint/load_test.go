@@ -1132,6 +1132,179 @@ func TestValidateRejectsControlCharacterInForEach(t *testing.T) {
 	}
 }
 
+// --- when conditionals ---
+
+// whenBlueprint is a valid blueprint whose only resource is gated on a when
+// condition over a defaulted string parameter with an enum. Mutations build
+// every rejection case from this known-good baseline.
+func whenBlueprint(mutate func(*Blueprint)) *Blueprint {
+	b := &Blueprint{
+		Metadata: Metadata{Name: "xqueue"},
+		Spec: Spec{
+			XRD: XRD{
+				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]Parameter{
+					"providerName": {Type: "string", Required: true},
+					"tier":         {Type: "string", Default: "standard", Enum: []string{"standard", "pro"}},
+					"auditEnabled": {Type: "boolean", Default: "false"},
+				},
+			},
+			Resources: []Resource{{
+				Name: "audit-queue", Kind: "Queue",
+				When:   `params.tier == "pro"`,
+				Fields: map[string]Field{"region": {Value: "eu-north-1"}},
+			}},
+		},
+	}
+	mutate(b)
+	return b
+}
+
+func TestParseWhen(t *testing.T) {
+	cases := []struct {
+		expr               string
+		param, op, literal string
+		wantErr            bool
+	}{
+		{expr: "params.auditEnabled", param: "auditEnabled"},
+		{expr: `params.tier == "pro"`, param: "tier", op: "==", literal: "pro"},
+		{expr: `params.tier != "standard"`, param: "tier", op: "!=", literal: "standard"},
+		{expr: `params.tier == ""`, param: "tier", op: "==", literal: ""},
+		{expr: "tier", wantErr: true},                   // no params. prefix
+		{expr: `params.tier=="pro"`, wantErr: true},     // no spaces
+		{expr: `params.tier ==  "pro"`, wantErr: true},  // two spaces
+		{expr: `params.tier == 'pro'`, wantErr: true},   // single quotes
+		{expr: `params.tier == pro`, wantErr: true},     // unquoted literal
+		{expr: `params.tier == "p\"ro"`, wantErr: true}, // embedded quote/backslash
+		{expr: `params.tier < "pro"`, wantErr: true},    // unsupported operator
+		{expr: `params.ti-er == "pro"`, wantErr: true},  // non-camelCase parameter
+		{expr: "", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.expr, func(t *testing.T) {
+			param, op, literal, err := ParseWhen(tc.expr)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("ParseWhen(%q) = (%q, %q, %q), want an error", tc.expr, param, op, literal)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseWhen(%q): %v", tc.expr, err)
+			}
+			if param != tc.param || op != tc.op || literal != tc.literal {
+				t.Errorf("ParseWhen(%q) = (%q, %q, %q), want (%q, %q, %q)",
+					tc.expr, param, op, literal, tc.param, tc.op, tc.literal)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsWhenForms(t *testing.T) {
+	for _, when := range []string{
+		`params.tier == "pro"`,
+		`params.tier != "pro"`,
+		"params.auditEnabled",
+	} {
+		t.Run(when, func(t *testing.T) {
+			b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = when })
+			if err := b.Validate(); err != nil {
+				t.Fatalf("Validate() = %v, want %q accepted", err, when)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsWhenUnknownParameter(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = `params.nope == "pro"` })
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), `"nope"`) {
+		t.Fatalf("err = %v, want an error naming the unknown parameter", err)
+	}
+	if !strings.Contains(err.Error(), "audit-queue") {
+		t.Errorf("err = %v, want it to name the offending resource", err)
+	}
+}
+
+// The condition dereferences its parameter unguarded, exactly like a forEach
+// loop bound: only required-or-defaulted parameters are safe under
+// missingkey=error.
+func TestValidateRejectsWhenOnOptionalParameterWithoutDefault(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) {
+		b.Spec.XRD.Parameters["tier"] = Parameter{Type: "string"}
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "required") || !strings.Contains(err.Error(), "default") {
+		t.Fatalf("err = %v, want the required-or-default rule", err)
+	}
+}
+
+func TestValidateRejectsBareWhenOnNonBooleanParameter(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = "params.tier" })
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "boolean") {
+		t.Fatalf("err = %v, want the bare form to require a boolean parameter", err)
+	}
+}
+
+func TestValidateRejectsWhenComparisonOnNonStringParameter(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = `params.auditEnabled == "true"` })
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "string") {
+		t.Fatalf("err = %v, want the comparison form to require a string parameter", err)
+	}
+}
+
+// A literal the enum excludes makes the condition constant: the XRD admits
+// no XR that could ever satisfy (or, for !=, fail) it — a resource that
+// silently never or always exists, with every gate green.
+func TestValidateRejectsWhenLiteralOutsideEnum(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = `params.tier == "gold"` })
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), `"gold"`) || !strings.Contains(err.Error(), "enum") {
+		t.Fatalf("err = %v, want the out-of-enum literal named and refused", err)
+	}
+}
+
+func TestValidateRejectsMalformedWhen(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = `params.tier == 'pro'` })
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "when must be") {
+		t.Fatalf("err = %v, want the grammar spelled out", err)
+	}
+}
+
+func TestValidateRejectsControlCharacterInWhen(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[0].When = "params.tier\nbogus: injected"
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "control character") {
+		t.Fatalf("err = %v, want the checkScalar control-character rejection", err)
+	}
+}
+
+// The when key must survive a marshal/unmarshal round trip exactly: the HTTP
+// API persists the whole document by re-marshaling the Go struct.
+func TestWhenRoundTripsExactly(t *testing.T) {
+	b := whenBlueprint(func(*Blueprint) {})
+	body, err := yaml.Marshal(b)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var reloaded Blueprint
+	if err := yaml.Unmarshal(body, &reloaded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if diff := cmp.Diff(b, &reloaded); diff != "" {
+		t.Errorf("blueprint changed across a marshal/unmarshal round trip (-original +reloaded):\n%s", diff)
+	}
+	if got := reloaded.Spec.Resources[0].When; got != `params.tier == "pro"` {
+		t.Errorf("When after round trip = %q, want the expression unchanged", got)
+	}
+}
+
 // --- cross-resource status references ---
 
 // statusRefBlueprint is a valid blueprint whose second resource wires a

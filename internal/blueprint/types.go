@@ -2,7 +2,11 @@
 // user edits and the single source of truth for generated output.
 package blueprint
 
-import "strings"
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
 
 // Blueprint is the root document.
 type Blueprint struct {
@@ -57,12 +61,56 @@ type Parameter struct {
 // bound unguarded, and under options: ["missingkey=error"] an absent key is
 // a hard render failure, so only the XRD's required gate or its schema
 // default makes the dereference safe.
+// When, when set, wraps the resource's whole rendered document — outside any
+// forEach range, so a false condition skips every iteration — in a template
+// conditional. The grammar is minimal and exact (see ParseWhen):
+//
+//	params.<name>                  — a bare boolean parameter
+//	params.<name> == "<literal>"   — string equality
+//	params.<name> != "<literal>"   — string inequality
+//
+// The referenced parameter must be required or carry a default: the emitted
+// condition dereferences it unguarded ({{- if $spec.<name> }}), and under
+// options: ["missingkey=error"] an absent key is a hard render failure — the
+// same rule, for the same reason, as ForEach's loop bound. The bare form
+// requires a boolean parameter; the comparison forms require a string one,
+// and when that parameter declares an enum the literal must be one of its
+// values (a literal outside the enum makes the condition constant, silently
+// dead — every gate green, a resource that can never (or always) exist).
 type Resource struct {
 	Name     string           `json:"name"`
 	Kind     string           `json:"kind"`
 	Provider string           `json:"provider"`
 	ForEach  string           `json:"forEach"`
+	When     string           `json:"when"`
 	Fields   map[string]Field `json:"fields"`
+}
+
+// when grammar, compiled once. The literal character class excludes '"' and
+// '\\' so the emitted Go-syntax quoting (%q) is always the literal wrapped
+// in plain quotes — byte-deterministic, no escape sequences to reason about.
+var (
+	whenBareRE = regexp.MustCompile(`^params\.([a-zA-Z][a-zA-Z0-9]*)$`)
+	whenCmpRE  = regexp.MustCompile(`^params\.([a-zA-Z][a-zA-Z0-9]*) (==|!=) "([^"\\]*)"$`)
+)
+
+// ParseWhen splits a when expression into its parameter name, operator and
+// literal. op is "" for the bare boolean form, "==" or "!=" for the
+// comparison forms (with literal carrying the compared string, which may be
+// empty: params.x == "" is legal). The grammar is exact — one space around
+// the operator, double quotes around the literal — so that a when expression
+// has exactly one written form and the emitted Composition is
+// byte-deterministic.
+func ParseWhen(expr string) (param, op, literal string, err error) {
+	if m := whenBareRE.FindStringSubmatch(expr); m != nil {
+		return m[1], "", "", nil
+	}
+	if m := whenCmpRE.FindStringSubmatch(expr); m != nil {
+		return m[1], m[2], m[3], nil
+	}
+	return "", "", "", fmt.Errorf("when must be params.<name> (a boolean parameter), "+
+		`params.<name> == "<literal>" or params.<name> != "<literal>" — exactly one space around `+
+		"the operator, double quotes around the literal, no backslashes or embedded quotes (got %q)", expr)
 }
 
 // Field sets one path on a composed resource. Exactly one of From, Value or Raw

@@ -43,14 +43,28 @@ func (b *Blueprint) deepCopy() *Blueprint {
 	return &cp
 }
 
+// whenParam returns the parameter a when expression references, or "" when
+// the expression is empty or unparseable. Unparseable never happens on a
+// validated blueprint; tolerating it here keeps the referencer scans total.
+func whenParam(when string) string {
+	if when == "" {
+		return ""
+	}
+	param, _, _, err := ParseWhen(when)
+	if err != nil {
+		return ""
+	}
+	return param
+}
+
 // referencingResources returns the names of every resource that references
-// params.<name> — through a field's From or through its own ForEach loop
-// bound — in resource order, each resource named at most once.
+// params.<name> — through a field's From, its own ForEach loop bound, or its
+// When condition — in resource order, each resource named at most once.
 func (b *Blueprint) referencingResources(name string) []string {
 	want := "params." + name
 	var refs []string
 	for _, r := range b.Spec.Resources {
-		if r.ForEach == want {
+		if r.ForEach == want || whenParam(r.When) == name {
 			refs = append(refs, r.Name)
 			continue
 		}
@@ -229,6 +243,18 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 		// never render.
 		if r.ForEach == oldRef {
 			cp.Spec.Resources[i].ForEach = newRef
+		}
+		// A when condition references its parameter too, and a dangling one
+		// is the same never-renders failure. Rebuilt through ParseWhen's
+		// canonical form rather than string-replaced, so the rewrite cannot
+		// touch a literal that happens to contain "params.<from>".
+		if whenParam(r.When) == from {
+			_, op, literal, _ := ParseWhen(r.When) // parseable: whenParam just parsed it
+			if op == "" {
+				cp.Spec.Resources[i].When = newRef
+			} else {
+				cp.Spec.Resources[i].When = fmt.Sprintf("%s %s %q", newRef, op, literal)
+			}
 		}
 		for path, f := range r.Fields {
 			if f.From == oldRef {

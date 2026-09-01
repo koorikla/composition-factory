@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -482,6 +483,53 @@ func (b *Blueprint) Validate() error {
 					`the loop bound is dereferenced unguarded, and under options: ["missingkey=error"] `+
 					"an absent key hard-fails the whole render; only the XRD's required gate or its "+
 					"schema default makes the key's presence unconditional", r.Name, param)
+			}
+		}
+		// when wraps the resource's whole rendered document in a template
+		// conditional that dereferences its parameter unguarded, so the
+		// parameter gets exactly forEach's required-or-default rule, for
+		// exactly forEach's reason. The grammar is pinned by ParseWhen; the
+		// type rules here keep the condition honest: a bare form on a
+		// non-boolean would test Go-template truthiness of an arbitrary
+		// value, and a comparison on a non-string would compare against a
+		// value the schema says can never be a string. Both are conditions
+		// that "work" and are silently wrong.
+		if r.When != "" {
+			if err := checkScalar(fmt.Sprintf("spec.resources[%d].when", i), r.When); err != nil {
+				return err
+			}
+			param, op, literal, err := ParseWhen(r.When)
+			if err != nil {
+				return fmt.Errorf("resource %q: %w", r.Name, err)
+			}
+			decl, exists := x.Parameters[param]
+			if !exists {
+				return fmt.Errorf("resource %q: when references unknown parameter %q", r.Name, param)
+			}
+			if !decl.Required && decl.Default == "" {
+				return fmt.Errorf("resource %q: when parameter %q must be required or carry a default -- "+
+					`the condition dereferences it unguarded, and under options: ["missingkey=error"] `+
+					"an absent key hard-fails the whole render; only the XRD's required gate or its "+
+					"schema default makes the key's presence unconditional", r.Name, param)
+			}
+			switch op {
+			case "":
+				if decl.Type != "boolean" {
+					return fmt.Errorf("resource %q: when parameter %q has type %q, want boolean -- "+
+						"the bare form renders {{- if $spec.%s }}, a truthiness test; compare a string "+
+						`parameter explicitly: when: params.%s == "<literal>"`,
+						r.Name, param, decl.Type, param, param)
+				}
+			default: // "==" or "!=", ParseWhen admits nothing else
+				if decl.Type != "string" {
+					return fmt.Errorf("resource %q: when parameter %q has type %q, want string -- "+
+						"the %s form compares against a string literal", r.Name, param, decl.Type, op)
+				}
+				if len(decl.Enum) > 0 && !slices.Contains(decl.Enum, literal) {
+					return fmt.Errorf("resource %q: when literal %q is not among parameter %q's enum values %v -- "+
+						"the XRD schema admits no XR carrying it, so the condition would be constant: "+
+						"a resource that silently never (or always) exists", r.Name, literal, param, decl.Enum)
+				}
 			}
 		}
 		paths := make([]string, 0, len(r.Fields))

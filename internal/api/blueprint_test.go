@@ -137,6 +137,36 @@ func TestDeleteForEachReferencedParameterIs409(t *testing.T) {
 	}
 }
 
+// A when condition is a params.<name> reference exactly like a field's from:
+// and a forEach loop bound: deleting its parameter must classify as 409.
+// This is the HTTP-layer half of the referencer rule — this package's
+// referencingResources mirrors blueprint's unexported one, and the mirror
+// must track when or the two would silently disagree on classification.
+func TestDeleteWhenReferencedParameterIs409(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	withWhen := strings.Replace(testBlueprintYAML,
+		"      maxMessageSize: {type: integer}",
+		"      maxMessageSize: {type: integer}\n      tier: {type: string, default: standard, enum: [standard, pro]}", 1)
+	withWhen = strings.Replace(withWhen,
+		"    - name: main-queue",
+		"    - name: audit-queue\n      kind: Queue\n      when: 'params.tier == \"pro\"'\n"+
+			"      fields:\n        region: {value: eu-north-1}\n    - name: main-queue", 1)
+	if err := os.WriteFile(path, []byte(withWhen), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blueprint.Load(path); err != nil {
+		t.Fatalf("mutated fixture does not itself validate: %v", err)
+	}
+	rec := do(t, h, "DELETE", "/api/blueprint/parameters/tier", "")
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409 — tier is still referenced by a when condition: %s",
+			rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "audit-queue") {
+		t.Errorf("body = %s, want it to name the gated resource", rec.Body)
+	}
+}
+
 // wireTestBlueprint rewrites the on-disk fixture to add a queue-policy
 // resource whose queueUrl is a cross-resource status reference to
 // main-queue, and confirms the mutated fixture still validates.

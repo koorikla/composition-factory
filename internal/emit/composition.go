@@ -80,6 +80,21 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		//
 		// `range $i := ...` binds $i to the ELEMENT, not the index — but
 		// until yields [0 1 ... n-1], so the element IS the iteration index.
+		// when wraps the resource's WHOLE document — OUTSIDE the forEach
+		// range, so a false condition skips every iteration (and the range's
+		// own loop-bound dereference) in one test rather than testing an
+		// invariant condition once per iteration. The dereference is bare
+		// and unguarded on purpose: blueprint.Validate pins the parameter to
+		// required-or-default (the same rule as the loop bound below), which
+		// is what makes it safe under missingkey=error.
+		conditional := r.When != ""
+		if conditional {
+			cond, err := whenCondition(r.When)
+			if err != nil {
+				return nil, fmt.Errorf("resource %q: %w", r.Name, err)
+			}
+			d.Line(ti, "{{- if %s }}", cond)
+		}
 		looped := r.ForEach != ""
 		if looped {
 			d.Line(ti, "{{- range $i := until (int $spec.%s) }}", strings.TrimPrefix(r.ForEach, "params."))
@@ -138,6 +153,9 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 			d.Line(ti, "    name: {{ $spec.providerName }}")
 		}
 		if looped {
+			d.Line(ti, "{{- end }}")
+		}
+		if conditional {
 			d.Line(ti, "{{- end }}")
 		}
 	}
@@ -216,6 +234,31 @@ func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
 			"caught here)", r.Name, p, crd.Kind)
 	}
 	return nil
+}
+
+// whenCondition compiles a validated when expression to the template
+// condition it wraps the document in:
+//
+//	params.x            -> $spec.x
+//	params.x == "lit"   -> eq $spec.x "lit"
+//	params.x != "lit"   -> ne $spec.x "lit"
+//
+// The literal is %q-quoted, which for ParseWhen's character class (no '"',
+// no '\\', no control runes past checkScalar) is exactly the literal wrapped
+// in plain quotes — one written form, byte-deterministic.
+func whenCondition(when string) (string, error) {
+	param, op, literal, err := blueprint.ParseWhen(when)
+	if err != nil {
+		return "", err
+	}
+	switch op {
+	case "":
+		return fmt.Sprintf("$spec.%s", param), nil
+	case "==":
+		return fmt.Sprintf("eq $spec.%s %q", param, literal), nil
+	default: // "!=", ParseWhen admits nothing else
+		return fmt.Sprintf("ne $spec.%s %q", param, literal), nil
+	}
 }
 
 // statusScalarTypes are the schema node types a cross-resource status

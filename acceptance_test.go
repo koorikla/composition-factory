@@ -276,6 +276,106 @@ func TestAcceptanceForEachRenders(t *testing.T) {
 	}
 }
 
+// TestAcceptanceWhenRenders is the when gate: one blueprint carrying a
+// string-comparison guard (audit-queue on tier == "pro") and a bare-boolean
+// guard composed with forEach (replica-queue), generated once and rendered
+// through the real crossplane composition render both ways. The XR fixtures
+// exercise the real XRD schema defaulting: xr-when-pro.yaml sets only tier
+// (replicasEnabled/replicas default true/2 → audit plus two replicas), and
+// xr-when-off.yaml sets only replicasEnabled: false (tier defaults standard
+// → the unconditional queue alone, every loop iteration skipped by the when
+// OUTSIDE the range). Asserted on the rendered ARTIFACT's
+// composition-resource-name annotations, plus the <no value> grep.
+func TestAcceptanceWhenRenders(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	bin := filepath.Join(repoRoot, "bin", "cf")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
+		t.Fatalf("build cf: %v\n%s", err, out)
+	}
+
+	cacheDir := filepath.Join(dir, "cache")
+	lock := filepath.Join(dir, ".cf.lock")
+
+	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("cf provider add: %v\n%s", err, out)
+	}
+
+	// Generate twice into separate directories: determinism is a correctness
+	// requirement, so the two runs must agree byte for byte.
+	outDir := filepath.Join(dir, "out")
+	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
+		gen := exec.Command(bin, "gen", "testdata/xqueue-when.cf.yaml", "-o", o, "--cache-dir", cacheDir)
+		if out, err := gen.CombinedOutput(); err != nil {
+			t.Fatalf("cf gen into %s: %v\n%s", o, err, out)
+		}
+	}
+	for _, rel := range []string{
+		filepath.Join("compositions", "xqueuetiers.platform.hooli.tech.yaml"),
+		filepath.Join("xrds", "xqueuetiers.platform.hooli.tech.yaml"),
+		"functions.yaml",
+	} {
+		first, err := os.ReadFile(filepath.Join(outDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		second, err := os.ReadFile(filepath.Join(dir, "out2", rel))
+		if err != nil {
+			t.Fatalf("read second-run %s: %v", rel, err)
+		}
+		if !bytes.Equal(first, second) {
+			t.Errorf("%s: two generate runs over the same blueprint produced different bytes", rel)
+		}
+	}
+
+	comp := filepath.Join(outDir, "compositions", "xqueuetiers.platform.hooli.tech.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueuetiers.platform.hooli.tech.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+
+	cases := []struct {
+		name string
+		xr   string
+		want []string // every composition-resource-name annotation, sorted
+	}{
+		{"tier pro with defaulted replicas renders audit plus fan-out", "testdata/xr-when-pro.yaml",
+			[]string{"audit-queue", "main-queue", "replica-queue-0", "replica-queue-1"}},
+		{"defaults plus replicasEnabled false renders the unconditional queue alone", "testdata/xr-when-off.yaml",
+			[]string{"main-queue"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			render := exec.Command("crossplane", "composition", "render",
+				tc.xr, comp, fns, "--xrd", xrd, "--timeout", "5m")
+			rendered, err := render.CombinedOutput()
+			if err != nil {
+				t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+			}
+			got := renderedResourceNames(t, rendered)
+			sort.Strings(got)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("composition-resource-name annotations = %v, want %v\n---\n%s",
+					got, tc.want, rendered)
+			}
+			for _, bad := range []string{"<no value>", "<nil>"} {
+				if strings.Contains(string(rendered), bad) {
+					t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+				}
+			}
+		})
+	}
+}
+
 // TestAcceptanceStatusRefRenders is the cross-resource wire gate: a
 // blueprint whose queue-policy resource sources queueUrl from
 // resources.main-queue.status.atProvider.url, generated and rendered through
