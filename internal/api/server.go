@@ -113,10 +113,11 @@ type server struct {
 	// against a concurrent `cf gen`, a hand edit, or a second `cf serve`
 	// pointed at the same blueprint; that would need file locking, which
 	// this single-user local dev tool does not have and does not need.
-	// Since POST /api/providers exists, mu also guards the two fields that
-	// route mutates: srv.Index (swapped whole on a successful add) and
-	// srv.Providers (appended to). Handlers that read either take mu for the
-	// snapshot — see server.index and handleListProviders.
+	// Since POST and DELETE /api/providers exist, mu also guards the two
+	// fields those routes mutate: srv.Index (swapped whole on a successful
+	// add or delete) and srv.Providers (appended to / removed from).
+	// Handlers that read either take mu for the snapshot — see server.index
+	// and handleListProviders.
 	mu sync.Mutex
 }
 
@@ -168,6 +169,7 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("DELETE /api/blueprint/parameters/{name}", srv.handleDeleteParameter)
 	mux.HandleFunc("GET /api/providers", srv.handleListProviders)
 	mux.HandleFunc("POST /api/providers", srv.handleAddProvider)
+	mux.HandleFunc("DELETE /api/providers/{ref}", srv.handleDeleteProvider)
 	mux.HandleFunc("POST /api/generate", srv.handleGenerate)
 	mux.HandleFunc("POST /api/render", srv.handleRender)
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -350,5 +351,198 @@ func TestConcurrentAddsAllLand(t *testing.T) {
 	}
 	if len(l.Providers) != n {
 		t.Errorf("lock has %d pins (%+v), want %d — a concurrent lock write was lost", len(l.Providers), l.Providers, n)
+	}
+}
+
+// --- DELETE /api/providers/{ref} ---
+
+// deletePath is the DELETE route for ref, escaped the way the canvas escapes
+// it (encodeURIComponent → every slash and colon percent-encoded).
+func deletePath(ref string) string {
+	return "/api/providers/" + url.PathEscape(ref)
+}
+
+// TestDeleteProviderStillReferencedIs409NamingReferencers: the test
+// blueprint's sources name testProviderRef and its main-queue resource sets
+// provider: testProviderRef, so deleting it must be refused with both
+// referencers named — the same refuse-and-name discipline parameter delete
+// applies — and must change nothing: the provider stays listed and its kinds
+// stay served.
+func TestDeleteProviderStillReferencedIs409NamingReferencers(t *testing.T) {
+	h := testHandler(t)
+
+	rec := do(t, h, "DELETE", deletePath(testProviderRef), "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	want := `delete provider "ghcr.io/x/provider-aws-sqs:v2.7.0": still referenced by the blueprint's sources and by resources "main-queue"`
+	if body.Error != want {
+		t.Errorf("error = %q, want %q", body.Error, want)
+	}
+
+	// A refused delete leaves the server exactly as it was.
+	var provs struct{ Providers []providerEntry }
+	if code := getJSON(t, h, "/api/providers", &provs); code != 200 {
+		t.Fatalf("GET /api/providers: status %d", code)
+	}
+	if len(provs.Providers) != 1 || provs.Providers[0].Ref != testProviderRef {
+		t.Errorf("providers after refused delete = %+v, want the original untouched", provs.Providers)
+	}
+	var kinds struct{ Kinds []index.Kind }
+	if code := getJSON(t, h, "/api/kinds", &kinds); code != 200 {
+		t.Fatalf("GET /api/kinds: status %d", code)
+	}
+	if len(kinds.Kinds) != 2 {
+		t.Errorf("kinds after refused delete = %d, want the original 2", len(kinds.Kinds))
+	}
+}
+
+// TestDeleteProviderRemovesKindsCacheAndPin is the happy path end to end:
+// add a provider over POST, delete it over DELETE, and see every trace gone —
+// its kinds out of /api/kinds, its entry out of the providers list (the 200
+// body carries the remaining list, GET's exact envelope), its cache entry
+// evicted, and its lockfile pin removed.
+func TestDeleteProviderRemovesKindsCacheAndPin(t *testing.T) {
+	h, o := testProviderServer(t, func(ref string) (*xpkg.Package, error) {
+		return &xpkg.Package{Ref: ref, Digest: "sha256:added", Docs: [][]byte{
+			managedCRDDoc("sns.aws.m.upbound.io", "Topic", "topics"),
+		}}, nil
+	})
+	if rec := do(t, h, "POST", "/api/providers", `{"ref":"`+addedProviderRef+`"}`); rec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d: %s", rec.Code, rec.Body)
+	}
+
+	rec := do(t, h, "DELETE", deletePath(addedProviderRef), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	var resp struct{ Providers []providerEntry }
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	wantList := []providerEntry{{Ref: testProviderRef, Digest: "sha256:test", Kinds: 2}}
+	if !reflect.DeepEqual(resp.Providers, wantList) {
+		t.Errorf("DELETE body providers = %+v, want %+v", resp.Providers, wantList)
+	}
+
+	// The index must reflect the delete immediately — no restart, no re-serve.
+	var kinds struct{ Kinds []index.Kind }
+	if code := getJSON(t, h, "/api/kinds?q=topic", &kinds); code != 200 {
+		t.Fatalf("GET /api/kinds after delete: status %d", code)
+	}
+	if len(kinds.Kinds) != 0 {
+		t.Errorf("/api/kinds?q=topic after delete = %+v, want none", kinds.Kinds)
+	}
+
+	// On disk: no cache entry, no lock pin.
+	if _, err := o.Store.Load(addedProviderRef); err == nil {
+		t.Error("the deleted provider is still loadable from the cache")
+	}
+	l, err := cache.ReadLock(o.Lock)
+	if err != nil {
+		t.Fatalf("read lock: %v", err)
+	}
+	if len(l.Providers) != 0 {
+		t.Errorf("lock = %+v, want the deleted provider's pin removed", l.Providers)
+	}
+}
+
+// TestDeleteProviderUnknownRefIs404: a ref the server does not hold is a 404,
+// decided before anything is touched.
+func TestDeleteProviderUnknownRefIs404(t *testing.T) {
+	h := testHandler(t)
+	rec := do(t, h, "DELETE", deletePath("ghcr.io/x/never-added:v1"), "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	want := `provider not found: "ghcr.io/x/never-added:v1"`
+	if body.Error != want {
+		t.Errorf("error = %q, want %q", body.Error, want)
+	}
+}
+
+// TestConcurrentDeleteAndGet is the race probe, run under -race: N concurrent
+// DELETEs of one ref racing N concurrent GETs of the two routes that read the
+// provider set and the index. Exactly one DELETE may win (the rest observe
+// the post-swap set and 404), and every GET must land on a consistent
+// snapshot — in particular the list must never 500, which is what an
+// unlocked digest read would do when it loses the race to the eviction.
+func TestConcurrentDeleteAndGet(t *testing.T) {
+	const n = 4
+	h, _ := testProviderServer(t, func(ref string) (*xpkg.Package, error) {
+		return &xpkg.Package{Ref: ref, Digest: "sha256:added", Docs: [][]byte{
+			managedCRDDoc("sns.aws.m.upbound.io", "Topic", "topics"),
+		}}, nil
+	})
+	if rec := do(t, h, "POST", "/api/providers", `{"ref":"`+addedProviderRef+`"}`); rec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d: %s", rec.Code, rec.Body)
+	}
+
+	var wg sync.WaitGroup
+	deleteCodes := make([]int, n)
+	listCodes := make([]int, n)
+	kindsCodes := make([]int, n)
+	for i := 0; i < n; i++ {
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			deleteCodes[i] = do(t, h, "DELETE", deletePath(addedProviderRef), "").Code
+		}()
+		go func() {
+			defer wg.Done()
+			listCodes[i] = do(t, h, "GET", "/api/providers", "").Code
+		}()
+		go func() {
+			defer wg.Done()
+			kindsCodes[i] = do(t, h, "GET", "/api/kinds", "").Code
+		}()
+	}
+	wg.Wait()
+
+	won := 0
+	for i, code := range deleteCodes {
+		switch code {
+		case http.StatusOK:
+			won++
+		case http.StatusNotFound:
+			// lost the race to the winning DELETE — the correct outcome
+		default:
+			t.Errorf("DELETE #%d: status = %d, want 200 or 404", i, code)
+		}
+	}
+	if won != 1 {
+		t.Errorf("%d DELETEs returned 200, want exactly 1", won)
+	}
+	for i, code := range listCodes {
+		if code != http.StatusOK {
+			t.Errorf("GET /api/providers #%d: status = %d, want 200 — a list racing a delete must "+
+				"never observe a half-deleted provider", i, code)
+		}
+	}
+	for i, code := range kindsCodes {
+		if code != http.StatusOK {
+			t.Errorf("GET /api/kinds #%d: status = %d, want 200", i, code)
+		}
+	}
+
+	// Settled state: only the original provider, only its kinds.
+	var provs struct{ Providers []providerEntry }
+	if code := getJSON(t, h, "/api/providers", &provs); code != 200 {
+		t.Fatalf("GET /api/providers: status %d", code)
+	}
+	if len(provs.Providers) != 1 || provs.Providers[0].Ref != testProviderRef {
+		t.Errorf("providers after concurrent delete = %+v, want only the original", provs.Providers)
 	}
 }

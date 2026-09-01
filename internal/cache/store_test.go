@@ -170,6 +170,53 @@ func TestLockSetIsIdempotentAndSorted(t *testing.T) {
 	}
 }
 
+// TestDeleteEvictsExactlyTheGivenRef: after a Delete the ref is no longer
+// loadable, a sibling entry survives untouched, and deleting an absent ref is
+// a no-op rather than an error (the caller's intent is already satisfied).
+func TestDeleteEvictsExactlyTheGivenRef(t *testing.T) {
+	s := New(t.TempDir())
+	keep := &xpkg.Package{Ref: "example.org/provider-keep:v1", Digest: "sha256:keep"}
+	drop := &xpkg.Package{Ref: "example.org/provider-drop:v1", Digest: "sha256:drop"}
+	for _, pkg := range []*xpkg.Package{keep, drop} {
+		if err := s.Save(pkg, []schema.CRD{{Kind: "Widget"}}); err != nil {
+			t.Fatalf("Save %s: %v", pkg.Ref, err)
+		}
+	}
+
+	if err := s.Delete(drop.Ref); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := s.Load(drop.Ref); err == nil {
+		t.Error("deleted ref is still loadable")
+	}
+	if _, err := s.Load(keep.Ref); err != nil {
+		t.Errorf("sibling entry was evicted too: %v", err)
+	}
+	if err := s.Delete("example.org/never-added:v1"); err != nil {
+		t.Errorf("Delete of an absent ref = %v, want nil (no-op)", err)
+	}
+}
+
+// TestLockRemoveReportsPresence: Remove drops exactly the named pin and
+// reports whether one was there, so a caller can skip rewriting an unchanged
+// lockfile.
+func TestLockRemoveReportsPresence(t *testing.T) {
+	l := &Lock{}
+	l.Set("example.org/a:v1", "sha256:aaa")
+	l.Set("example.org/b:v1", "sha256:bbb")
+
+	if !l.Remove("example.org/a:v1") {
+		t.Error("Remove of a present ref = false, want true")
+	}
+	if l.Remove("example.org/a:v1") {
+		t.Error("second Remove of the same ref = true, want false")
+	}
+	want := []LockEntry{{Ref: "example.org/b:v1", Digest: "sha256:bbb"}}
+	if diff := cmp.Diff(want, l.Providers); diff != "" {
+		t.Errorf("lock entries after Remove (-want +got):\n%s", diff)
+	}
+}
+
 func TestReadLockMissingFileIsEmptyNotAnError(t *testing.T) {
 	l, err := ReadLock(filepath.Join(t.TempDir(), "absent.lock"))
 	if err != nil {

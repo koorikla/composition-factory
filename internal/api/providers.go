@@ -13,7 +13,10 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
@@ -34,33 +37,47 @@ type providerEntry struct {
 // {"providers":[{"ref":...,"digest":...,"kinds":N}]}, in the server's own
 // provider order (blueprint-source order, then POST order).
 //
-// The provider set and the index are snapshotted under srv.mu as one
-// consistent pair — POST /api/providers swaps both together under the same
-// lock, so this handler can never observe a ref whose kinds are not yet (or
-// no longer) in the index it counts against. The digests are then read from
-// the store outside the lock: cache entries are written before a ref ever
-// enters srv.Providers, and nothing deletes them.
+// srv.mu is held for the whole response, digest reads included. It used to be
+// released after snapshotting the ref list and the index, with the digests
+// read from the store afterwards — safe back then because cache entries were
+// written before a ref ever entered srv.Providers and nothing deleted them.
+// DELETE /api/providers/{ref} broke that second premise: it evicts a cache
+// entry, so a list that read digests unlocked could snapshot a ref, lose the
+// race to a concurrent DELETE, and then 500 on LoadDigest for a provider it
+// had every reason to believe was cached. Under the same lock the DELETE
+// swaps under, the list always describes a provider set whose cache entries
+// all still exist.
 func (srv *server) handleListProviders(w http.ResponseWriter, _ *http.Request) {
 	srv.mu.Lock()
-	refs := append([]string(nil), srv.Providers...)
-	idx := srv.Index
-	srv.mu.Unlock()
+	defer srv.mu.Unlock()
 
-	counts := kindCountsByProvider(idx)
-	entries := make([]providerEntry, 0, len(refs))
-	for _, ref := range refs {
+	entries, err := srv.providerEntriesLocked()
+	if err != nil {
+		// The server's own cache no longer holds a provider it was
+		// started with (or added) — its fixed environment is broken, not
+		// the caller's request. The store's error already names the exact
+		// `cf provider add` command that repairs it; surface it verbatim.
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": entries})
+}
+
+// providerEntriesLocked builds the {"providers":[...]} entry list for the
+// server's current provider set — the one envelope both GET /api/providers
+// and DELETE /api/providers/{ref} serve, built in one place so the two can
+// never disagree on its shape. srv.mu must be held by the caller.
+func (srv *server) providerEntriesLocked() ([]providerEntry, error) {
+	counts := kindCountsByProvider(srv.Index)
+	entries := make([]providerEntry, 0, len(srv.Providers))
+	for _, ref := range srv.Providers {
 		digest, err := srv.Store.LoadDigest(ref)
 		if err != nil {
-			// The server's own cache no longer holds a provider it was
-			// started with (or added) — its fixed environment is broken, not
-			// the caller's request. The store's error already names the exact
-			// `cf provider add` command that repairs it; surface it verbatim.
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
-			return
+			return nil, err
 		}
 		entries = append(entries, providerEntry{Ref: ref, Digest: digest, Kinds: counts[ref]})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": entries})
+	return entries, nil
 }
 
 // kindCountsByProvider counts idx's kinds per provider ref, one pass for the
@@ -204,4 +221,167 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		"provider": providerEntry{Ref: req.Ref, Digest: pkg.Digest, Kinds: len(added)},
 		"kinds":    added,
 	})
+}
+
+// pathProviderRef extracts and unescapes the {ref} path wildcard. An xpkg
+// ref contains slashes, so the client sends it URL-path-escaped
+// (encodeURIComponent: "ghcr.io%2Fx%2Fprovider-aws-sqs%3Av2.7.0") and
+// ServeMux keeps the escaped form inside the one segment; PathValue comes
+// back already unescaped. The explicit PathUnescape below is the same
+// defense-in-depth pathAPIVersion applies to {apiVersion} — see its doc
+// comment in kinds.go for the full reasoning; it is not what makes the happy
+// path work.
+func pathProviderRef(r *http.Request) (string, error) {
+	raw := r.PathValue("ref")
+	unescaped, err := url.PathUnescape(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid ref: %q", raw)
+	}
+	return unescaped, nil
+}
+
+// handleDeleteProvider serves DELETE /api/providers/{ref}: remove a provider
+// the server currently serves — evict its cached schemas and its lockfile
+// pin, and rebuild the index over the remaining providers — answering 200
+// with the remaining providers list, the same {"providers":[...]} envelope
+// GET serves. 404 is a ref the server does not hold; 409 is a ref the
+// blueprint still references — from spec.sources or any resource's provider —
+// with the message naming every referencer, the same refuse-and-name
+// discipline DeleteParameter applies to a still-referenced parameter
+// (internal/blueprint/edit.go): the user fixes every reference in one
+// round-trip instead of discovering a broken blueprint at the next generate.
+//
+// srv.mu is held for the whole sequence — the same whole-sequence discipline
+// as handleAddProvider, and for the same reason: the referencer check, the
+// rebuild and the swap must see one consistent (blueprint, index, provider
+// set) or a concurrent add/delete loses its update.
+//
+// Ordering inside the critical section mirrors handleAddProvider's reasoning
+// in reverse. The replacement index is built FIRST, before anything on disk
+// is touched, so a rebuild failure changes nothing at all. Then cache
+// eviction, then the lock pin: a failure between the two leaves a pin with no
+// cached entry — the same loud, recoverable state a failed add can leave
+// (Load names the exact `cf provider add <ref>` that repairs it), rather
+// than the silent reverse (a cached entry nothing pins). The in-memory swap
+// happens last, only after every on-disk step succeeded.
+func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
+	ref, err := pathProviderRef(r)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	held := false
+	for _, p := range srv.Providers {
+		if p == ref {
+			held = true
+			break
+		}
+	}
+	if !held {
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("provider not found: %q", ref))
+		return
+	}
+
+	// The referencer check reads the blueprint from disk, like every handler
+	// that consults it — the file is the source of truth, and a copy held
+	// since some earlier request could miss a source or resource added since.
+	b, ok := srv.loadBlueprint(w)
+	if !ok {
+		return
+	}
+	if msg := providerReferencers(b, ref); msg != "" {
+		writeJSONError(w, http.StatusConflict, msg)
+		return
+	}
+
+	// Rebuild over the remaining providers' cached schemas — the same
+	// single-load discipline handleAddProvider follows: the index and the
+	// store must describe the same bytes, so every surviving ref is re-read
+	// from the store it was saved to.
+	remaining := make([]string, 0, len(srv.Providers)-1)
+	byProvider := make(map[string][]schema.CRD, len(srv.Providers)-1)
+	for _, p := range srv.Providers {
+		if p == ref {
+			continue
+		}
+		crds, err := srv.Store.Load(p)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		byProvider[p] = crds
+		remaining = append(remaining, p)
+	}
+	idx, err := index.Build(byProvider)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if err := srv.Store.Delete(ref); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	l, err := cache.ReadLock(srv.Lock)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if l.Remove(ref) { // a ref never pinned (or pinned elsewhere) is fine; don't rewrite for a no-op
+		if err := l.Write(srv.Lock); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	// The atomic step: index and provider set swap together, under the same
+	// mu every reader snapshots them under.
+	srv.Index = idx
+	srv.Providers = remaining
+
+	entries, err := srv.providerEntriesLocked()
+	if err != nil {
+		// The delete itself has landed; this is the server's environment
+		// failing to describe the survivors, same classification as GET's.
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": entries})
+}
+
+// providerReferencers returns the 409 message for deleting ref while the
+// blueprint still references it, or "" when nothing does. Referencers are
+// the blueprint's spec.sources entries and every resource whose provider
+// names ref; resources are listed by name, in resource order, mirroring
+// DeleteParameter's still-referenced-by message shape.
+func providerReferencers(b *blueprint.Blueprint, ref string) string {
+	inSources := false
+	for _, s := range b.Spec.Sources {
+		if s.Provider == ref {
+			inSources = true
+			break
+		}
+	}
+	var resources []string
+	for _, res := range b.Spec.Resources {
+		if res.Provider == ref {
+			resources = append(resources, fmt.Sprintf("%q", res.Name))
+		}
+	}
+
+	var parts []string
+	if inSources {
+		parts = append(parts, "the blueprint's sources")
+	}
+	if len(resources) > 0 {
+		parts = append(parts, "resources "+strings.Join(resources, ", "))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("delete provider %q: still referenced by %s", ref, strings.Join(parts, " and by "))
 }
