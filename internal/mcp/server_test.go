@@ -603,8 +603,12 @@ func TestGenerateDryRunTouchesNothing(t *testing.T) {
 	s := newStack(t)
 	v := s.toolOK(t, "generate", map[string]any{"write": false})
 	outputs := v["outputs"].([]any)
-	if len(outputs) != 3 {
-		t.Fatalf("outputs = %d files, want 3 (composition, functions, xrd)", len(outputs))
+	// Four, not three: testBlueprintYAML's one source (provider-aws-sqs)
+	// derives provider family "aws" (internal/emit/providerconfigs.go), and
+	// testCRDs carries no ClusterProviderConfig CRD for it, so Generate also
+	// emits the family's providerconfigs/aws.yaml scaffold.
+	if len(outputs) != 4 {
+		t.Fatalf("outputs = %d files, want 4 (composition, functions, providerconfigs/aws.yaml, xrd)", len(outputs))
 	}
 	if v["written"] != false {
 		t.Errorf("written = %v on a dry run, want false", v["written"])
@@ -638,8 +642,8 @@ func TestGenerateWriteMatchesTheEngineByteForByte(t *testing.T) {
 	if err != nil {
 		t.Fatalf("emit.Generate: %v", err)
 	}
-	if len(want) != 3 {
-		t.Fatalf("engine produced %d outputs, want 3", len(want))
+	if len(want) != 4 {
+		t.Fatalf("engine produced %d outputs, want 4", len(want))
 	}
 	for _, w := range want {
 		got, err := os.ReadFile(w.Path)

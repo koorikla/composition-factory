@@ -186,8 +186,12 @@ func TestGenerateProducesTheSameBytesAsTheEngine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("emit.Generate: %v", err)
 	}
-	if len(want) != 3 {
-		t.Fatalf("the engine produced %d outputs, want 3 (composition, functions.yaml, xrd) — "+
+	// Four, not three: testBlueprintYAML's one source (provider-aws-sqs)
+	// derives provider family "aws" (internal/emit/providerconfigs.go), and
+	// testGenerateFixtureCRDs carries no ClusterProviderConfig CRD for it, so
+	// Generate also emits the family's providerconfigs/aws.yaml scaffold.
+	if len(want) != 4 {
+		t.Fatalf("the engine produced %d outputs, want 4 (composition, functions.yaml, providerconfigs/aws.yaml, xrd) — "+
 			"this test's premise is broken, not the server", len(want))
 	}
 
@@ -210,7 +214,7 @@ func TestGenerateProducesTheSameBytesAsTheEngine(t *testing.T) {
 			t.Fatalf("not JSON: %v (%s)", err, rec.Body)
 		}
 		if len(got.Outputs) != len(want) {
-			t.Fatalf("got %d outputs, want %d (composition, functions.yaml, xrd)", len(got.Outputs), len(want))
+			t.Fatalf("got %d outputs, want %d (composition, functions.yaml, providerconfigs/aws.yaml, xrd)", len(got.Outputs), len(want))
 		}
 		return got.Outputs, got.Written
 	}
