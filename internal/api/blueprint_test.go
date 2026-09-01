@@ -137,6 +137,148 @@ func TestDeleteForEachReferencedParameterIs409(t *testing.T) {
 	}
 }
 
+// A when condition is a params.<name> reference exactly like a field's from:
+// and a forEach loop bound: deleting its parameter must classify as 409.
+// This is the HTTP-layer half of the referencer rule — this package's
+// referencingResources mirrors blueprint's unexported one, and the mirror
+// must track when or the two would silently disagree on classification.
+func TestDeleteWhenReferencedParameterIs409(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	withWhen := strings.Replace(testBlueprintYAML,
+		"      maxMessageSize: {type: integer}",
+		"      maxMessageSize: {type: integer}\n      tier: {type: string, default: standard, enum: [standard, pro]}", 1)
+	withWhen = strings.Replace(withWhen,
+		"    - name: main-queue",
+		"    - name: audit-queue\n      kind: Queue\n      when: 'params.tier == \"pro\"'\n"+
+			"      fields:\n        region: {value: eu-north-1}\n    - name: main-queue", 1)
+	if err := os.WriteFile(path, []byte(withWhen), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blueprint.Load(path); err != nil {
+		t.Fatalf("mutated fixture does not itself validate: %v", err)
+	}
+	rec := do(t, h, "DELETE", "/api/blueprint/parameters/tier", "")
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409 — tier is still referenced by a when condition: %s",
+			rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "audit-queue") {
+		t.Errorf("body = %s, want it to name the gated resource", rec.Body)
+	}
+}
+
+// wireTestBlueprint rewrites the on-disk fixture to add a queue-policy
+// resource whose queueUrl is a cross-resource status reference to
+// main-queue, and confirms the mutated fixture still validates.
+func wireTestBlueprint(t *testing.T, path string) {
+	t.Helper()
+	wired := strings.Replace(testBlueprintYAML,
+		"    - name: main-queue",
+		"    - name: queue-policy\n      kind: QueuePolicy\n"+
+			"      fields:\n        queueUrl: {from: resources.main-queue.status.atProvider.url}\n"+
+			"    - name: main-queue", 1)
+	if err := os.WriteFile(path, []byte(wired), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blueprint.Load(path); err != nil {
+		t.Fatalf("mutated fixture does not itself validate: %v", err)
+	}
+}
+
+func TestRenameResourceRewritesStatusReferencesOnDisk(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	wireTestBlueprint(t, path)
+	if rec := do(t, h, "POST", "/api/blueprint/resources/main-queue/rename",
+		`{"to":"primary-queue"}`); rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	var policy *blueprint.Resource
+	for i := range reloaded.Spec.Resources {
+		if reloaded.Spec.Resources[i].Name == "queue-policy" {
+			policy = &reloaded.Spec.Resources[i]
+		}
+		if reloaded.Spec.Resources[i].Name == "main-queue" {
+			t.Error("main-queue still present on disk after rename")
+		}
+	}
+	if policy == nil {
+		t.Fatal("queue-policy missing from the reloaded document")
+	}
+	if got := policy.Fields["queueUrl"].From; got != "resources.primary-queue.status.atProvider.url" {
+		t.Errorf("reference on disk = %q, want it rewritten to the new resource name", got)
+	}
+}
+
+func TestRenameUnknownResourceIs404(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	wireTestBlueprint(t, path)
+	rec := do(t, h, "POST", "/api/blueprint/resources/nope/rename", `{"to":"whatever"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestRenameResourceCollisionIs409(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	wireTestBlueprint(t, path)
+	rec := do(t, h, "POST", "/api/blueprint/resources/main-queue/rename", `{"to":"queue-policy"}`)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestRenameResourceToInvalidNameIs400(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	wireTestBlueprint(t, path)
+	rec := do(t, h, "POST", "/api/blueprint/resources/main-queue/rename", `{"to":"Not_A_Label"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+}
+
+// Deleting a resource whose status another resource still wires from is a
+// conflict with current state, exactly like deleting a parameter a field or
+// forEach still references — 409, naming the referencer, never 400.
+func TestDeleteStatusReferencedResourceIs409(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	wireTestBlueprint(t, path)
+	rec := do(t, h, "DELETE", "/api/blueprint/resources/main-queue", "")
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "queue-policy") {
+		t.Errorf("body = %s, want it to name the referencing resource", rec.Body)
+	}
+}
+
+func TestDeleteUnreferencedResourcePersists(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	wireTestBlueprint(t, path)
+	if rec := do(t, h, "DELETE", "/api/blueprint/resources/queue-policy", ""); rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(reloaded.Spec.Resources) != 1 || reloaded.Spec.Resources[0].Name != "main-queue" {
+		t.Errorf("resources on disk = %+v, want only main-queue left", reloaded.Spec.Resources)
+	}
+}
+
+func TestDeleteUnknownResourceIs404(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	wireTestBlueprint(t, path)
+	rec := do(t, h, "DELETE", "/api/blueprint/resources/nope", "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404: %s", rec.Code, rec.Body)
+	}
+}
+
 func TestMalformedJSONBodyIs400(t *testing.T) {
 	h, _ := testHandlerWithPath(t)
 	if rec := do(t, h, "POST", "/api/blueprint/parameters", `{"name":`); rec.Code != http.StatusBadRequest {

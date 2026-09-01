@@ -1,0 +1,7 @@
+apiVersion: platform.hooli.tech/v1alpha1
+kind: XQueueConv
+metadata:
+  name: demo-conv
+  namespace: default
+spec:
+  providerName: localstack

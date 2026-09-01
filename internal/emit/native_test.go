@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/schema/k8s"
@@ -391,5 +392,97 @@ func TestNativeResourceInsideForEach(t *testing.T) {
 	loopEnd := strings.Index(comp[loopStart:], "{{- end }}")
 	if loopEnd > 0 && strings.Contains(comp[loopStart:loopStart+loopEnd], "forProvider") {
 		t.Errorf("managed envelope leaked into the looped native document")
+	}
+}
+
+// TestNativeResourceWithWhenRenders executes the emitted template for a
+// native resource gated on a when condition — the wrapper the managed branch
+// closes after its envelope and which the native branch used to skip on its
+// way out of the resource loop, leaving the {{- if }} unclosed: a template
+// that cannot even parse. Rendering is the proof (text/template refuses an
+// unbalanced block at parse time), and the two spec shapes pin the gate on
+// the rendered artifact itself.
+func TestNativeResourceWithWhenRenders(t *testing.T) {
+	b := nativeTestBlueprint()
+	b.Spec.XRD.Parameters["webEnabled"] = blueprint.Parameter{Type: "boolean", Default: "true"}
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Name == "web" {
+			b.Spec.Resources[i].When = "params.webEnabled"
+		}
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate refused a when-gated native resource: %v", err)
+	}
+	comp, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+
+	on := renderedNativeDocs(t, comp, map[string]any{
+		"providerName": "p", "image": "nginx:1.29", "replicas": float64(3), "webEnabled": true,
+	})
+	if _, ok := on["Deployment"]; !ok {
+		t.Errorf("webEnabled true: no Deployment among rendered docs")
+	}
+
+	off := renderedNativeDocs(t, comp, map[string]any{
+		"providerName": "p", "image": "nginx:1.29", "replicas": float64(3), "webEnabled": false,
+	})
+	if _, ok := off["Deployment"]; ok {
+		t.Errorf("webEnabled false: the gated native Deployment still rendered")
+	}
+	for _, want := range []string{"Queue", "Service"} {
+		if _, ok := off[want]; !ok {
+			t.Errorf("webEnabled false: ungated %s missing from rendered docs", want)
+		}
+	}
+}
+
+// TestNativeWhenAndForEachCompose is the full intersection: a native resource
+// that is BOTH gated and fanned out must render with the when OUTSIDE the
+// range (a false condition skips every iteration and the loop bound's own
+// dereference), each wrapper closed, and the name annotation indexed. The
+// fan-out names on the rendered artifact are the assertion.
+func TestNativeWhenAndForEachCompose(t *testing.T) {
+	b := nativeTestBlueprint()
+	b.Spec.XRD.Parameters["webEnabled"] = blueprint.Parameter{Type: "boolean", Default: "true"}
+	b.Spec.XRD.Parameters["copies"] = blueprint.Parameter{Type: "integer", Default: "2"}
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Name == "web" {
+			b.Spec.Resources[i].When = "params.webEnabled"
+			b.Spec.Resources[i].ForEach = "params.copies"
+		}
+	}
+	comp, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmpl := extractTemplate(t, comp)
+
+	spec := func(enabled bool) map[string]any {
+		return map[string]any{
+			"providerName": "p", "image": "nginx:1.29", "replicas": float64(3),
+			"webEnabled": enabled, "copies": float64(2),
+		}
+	}
+
+	rendered, err := renderTemplate(t, tmpl, spec(true))
+	if err != nil {
+		t.Fatalf("render (enabled): %v\n---\n%s", err, tmpl)
+	}
+	got := resourceNames(t, renderedDocs(t, rendered))
+	want := []string{"main-queue", "web-0", "web-1", "web-svc"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("composition-resource-name annotations (-want +got):\n%s", diff)
+	}
+
+	rendered, err = renderTemplate(t, tmpl, spec(false))
+	if err != nil {
+		t.Fatalf("render (disabled): %v\n---\n%s", err, tmpl)
+	}
+	got = resourceNames(t, renderedDocs(t, rendered))
+	want = []string{"main-queue", "web-svc"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("composition-resource-name annotations (-want +got):\n%s", diff)
 	}
 }

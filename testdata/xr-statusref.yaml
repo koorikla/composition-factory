@@ -1,0 +1,7 @@
+apiVersion: platform.hooli.tech/v1alpha1
+kind: XQueuePair
+metadata:
+  name: demo-pair
+  namespace: default
+spec:
+  providerName: localstack

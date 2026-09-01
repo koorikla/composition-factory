@@ -1,0 +1,43 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-conventions
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.hooli.tech
+    kind: XQueueConv
+    plural: xqueueconvs
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+  # User templates: emitted as {{- define }} blocks heading the Composition's
+  # template, callable from any field via template: <name> and applied by the
+  # conventions below. The call context is documented minimal: .spec, .xr,
+  # .resource, .field.
+  templates:
+    cf.name: '{{ .xr }}-{{ .resource }}'
+    cf.tags: |
+      managed-by: crossplane
+      xr: {{ .xr | quote }}
+  # Every top-level forProvider leaf ending in the match, on every resource
+  # that does not set it explicitly, gets the template applied. Explicit
+  # wins - that IS the override.
+  conventions:
+    - {match: name, template: cf.name}
+    - {match: tags, template: cf.tags}
+  resources:
+    - name: queue-a
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {value: eu-north-1}
+    - name: queue-b
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {value: eu-north-1}
+        # Overrides the naming convention.
+        name: {value: custom-b}

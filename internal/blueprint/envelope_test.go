@@ -123,6 +123,32 @@ func TestValidateRejectsEnvelopeFromWithoutParamsPrefix(t *testing.T) {
 	}
 }
 
+// A cross-resource status wire is a fields:-only grammar in v1: the envelope
+// planner (internal/emit/envelope.go) models a wire's guard as a hasKey over
+// $spec — a parameter presence check — not the observed-resources hasKey
+// chain a status reference needs, so admitting the grammar here would emit a
+// guard that can never be true. Refused with the limitation named, not the
+// generic prefix complaint.
+func TestValidateRejectsStatusWireInEnvelope(t *testing.T) {
+	b := envelopeBlueprint(func(b *Blueprint) {
+		b.Spec.Resources = append(b.Spec.Resources, Resource{
+			Name: "other-queue", Kind: "Queue",
+			Fields: map[string]Field{"region": {Value: "eu-north-1"}},
+		})
+		b.Spec.Resources[0].Envelope["writeConnectionSecretToRef.name"] =
+			Field{From: "resources.other-queue.status.atProvider.url"}
+	})
+	err := b.Validate()
+	if err == nil {
+		t.Fatal("Validate accepted a cross-resource status wire in an envelope entry")
+	}
+	for _, want := range []string{"params.", "status wires", "fields:"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
 func TestValidateRejectsEnvelopeFromCompositeParameter(t *testing.T) {
 	b := envelopeBlueprint(func(b *Blueprint) {
 		b.Spec.XRD.Parameters["tags"] = Parameter{Type: "object"}

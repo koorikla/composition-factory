@@ -1,0 +1,15 @@
+# Mocked observed state for `crossplane composition render
+# --observed-resources`: the main-queue Queue as a reconciled cluster would
+# report it, keyed back to its canvas node by the composition-resource-name
+# annotation. The status.atProvider.url here is the value the cross-resource
+# wire in xqueue-statusref.cf.yaml must carry into the QueuePolicy.
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metadata:
+  name: demo-pair-main-queue
+  namespace: default
+  annotations:
+    crossplane.io/composition-resource-name: main-queue
+status:
+  atProvider:
+    url: https://sqs.eu-north-1.amazonaws.com/123456789012/demo-pair

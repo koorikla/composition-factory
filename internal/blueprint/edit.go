@@ -24,6 +24,14 @@ func (b *Blueprint) deepCopy() *Blueprint {
 	cp := *b
 
 	cp.Spec.Sources = append([]Source(nil), b.Spec.Sources...)
+	cp.Spec.Conventions = append([]Convention(nil), b.Spec.Conventions...)
+
+	if b.Spec.Templates != nil {
+		cp.Spec.Templates = make(map[string]string, len(b.Spec.Templates))
+		for name, body := range b.Spec.Templates {
+			cp.Spec.Templates[name] = body
+		}
+	}
 
 	cp.Spec.XRD.Parameters = make(map[string]Parameter, len(b.Spec.XRD.Parameters))
 	for name, p := range b.Spec.XRD.Parameters {
@@ -51,15 +59,30 @@ func (b *Blueprint) deepCopy() *Blueprint {
 	return &cp
 }
 
+// whenParam returns the parameter a when expression references, or "" when
+// the expression is empty or unparseable. Unparseable never happens on a
+// validated blueprint; tolerating it here keeps the referencer scans total.
+func whenParam(when string) string {
+	if when == "" {
+		return ""
+	}
+	param, _, _, err := ParseWhen(when)
+	if err != nil {
+		return ""
+	}
+	return param
+}
+
 // referencingResources returns the names of every resource that references
-// params.<name> — through a field's From, an envelope entry's From, or its
-// own ForEach loop bound — in resource order, each resource named at most
-// once.
+// params.<name> — through a field's From, an envelope entry's From, its own
+// ForEach loop bound, or its When condition — in resource order, each
+// resource named at most once.
 func (b *Blueprint) referencingResources(name string) []string {
 	want := "params." + name
 	var refs []string
 	for _, r := range b.Spec.Resources {
-		if r.ForEach == want || anyFrom(r.Fields, want) || anyFrom(r.Envelope, want) {
+		if r.ForEach == want || whenParam(r.When) == name ||
+			anyFrom(r.Fields, want) || anyFrom(r.Envelope, want) {
 			refs = append(refs, r.Name)
 		}
 	}
@@ -74,6 +97,123 @@ func anyFrom(fields map[string]Field, want string) bool {
 		}
 	}
 	return false
+}
+
+// statusReferencingResources returns the names of every resource that
+// references resources.<name>.status.<...> through a field's From, in
+// resource order, each resource named at most once. It is the cross-resource
+// mirror of referencingResources: the same discipline params refs and
+// forEach refs get, applied to status wires.
+func (b *Blueprint) statusReferencingResources(name string) []string {
+	var refs []string
+	for _, r := range b.Spec.Resources {
+		for _, f := range r.Fields {
+			if target, _, ok := StatusRef(f.From); ok && target == name {
+				refs = append(refs, r.Name)
+				break
+			}
+		}
+	}
+	return refs
+}
+
+// RenameResource renames a composed resource and rewrites every
+// cross-resource status reference (resources.<from>.status.<path>) to point
+// at the new name. Field keys and every other reference grammar are
+// untouched — only the resource-name half of a status reference changes. It
+// fails if from is not declared, if to is already declared (unless
+// to == from — a blur-submit UI resubmits an unchanged name, exactly as
+// RenameParameter documents), or if the resulting blueprint does not
+// validate; in every failure case the receiver is left unchanged.
+//
+// This matters for the same reason RenameParameter's rewrite does: a
+// dangling resources.<old>.status.<path> reference would emit a Composition
+// whose hasKey guard chain looks up an observed key that can never exist
+// again — the field silently stops materialising, forever, with every gate
+// green.
+func (b *Blueprint) RenameResource(from, to string) error {
+	idx := -1
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Name == from {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return fmt.Errorf("rename resource: %q is not declared", from)
+	}
+	if from == to {
+		return nil
+	}
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Name == to {
+			return fmt.Errorf("rename resource: %q is already declared", to)
+		}
+	}
+
+	cp := b.deepCopy()
+	cp.Spec.Resources[idx].Name = to
+
+	oldPrefix := statusRefPrefix + from + ".status."
+	newPrefix := statusRefPrefix + to + ".status."
+	for i, r := range cp.Spec.Resources {
+		for path, f := range r.Fields {
+			if rest, ok := strings.CutPrefix(f.From, oldPrefix); ok {
+				f.From = newPrefix + rest
+				cp.Spec.Resources[i].Fields[path] = f
+			}
+		}
+	}
+
+	if err := cp.Validate(); err != nil {
+		return fmt.Errorf("rename resource %q to %q: %w", from, to, err)
+	}
+
+	*b = *cp
+	return nil
+}
+
+// DeleteResource removes a composed resource. It refuses when any other
+// resource still references its status (naming every referencing resource,
+// the same one-round-trip courtesy DeleteParameter gives), when the resource
+// is not declared, or when the resulting blueprint does not validate. In
+// every failure case the receiver is left unchanged.
+//
+// spec.pipeline steps are deliberately NOT scanned: a step's input is an
+// opaque typed YAML object (see PipelineStep.Input and ParsePipelineInput) —
+// the blueprint grammar defines no way for it to reference a composed
+// resource by name, so a resource name appearing inside one is just a string
+// the function may or may not interpret. Refusing the delete on a substring
+// match would be guessing; if a resource-reference grammar for inputs ever
+// exists, this scan is where it gets enforced.
+func (b *Blueprint) DeleteResource(name string) error {
+	idx := -1
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return fmt.Errorf("delete resource: %q is not declared", name)
+	}
+	if refs := b.statusReferencingResources(name); len(refs) > 0 {
+		quoted := make([]string, len(refs))
+		for i, r := range refs {
+			quoted[i] = fmt.Sprintf("%q", r)
+		}
+		return fmt.Errorf("delete resource %q: its status is still referenced by resources %s",
+			name, strings.Join(quoted, ", "))
+	}
+
+	cp := b.deepCopy()
+	cp.Spec.Resources = append(cp.Spec.Resources[:idx], cp.Spec.Resources[idx+1:]...)
+	if err := cp.Validate(); err != nil {
+		return fmt.Errorf("delete resource %q: %w", name, err)
+	}
+
+	*b = *cp
+	return nil
 }
 
 // AddParameter declares a new XRD parameter. It fails if name is already
@@ -132,6 +272,18 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 		// never render.
 		if r.ForEach == oldRef {
 			cp.Spec.Resources[i].ForEach = newRef
+		}
+		// A when condition references its parameter too, and a dangling one
+		// is the same never-renders failure. Rebuilt through ParseWhen's
+		// canonical form rather than string-replaced, so the rewrite cannot
+		// touch a literal that happens to contain "params.<from>".
+		if whenParam(r.When) == from {
+			_, op, literal, _ := ParseWhen(r.When) // parseable: whenParam just parsed it
+			if op == "" {
+				cp.Spec.Resources[i].When = newRef
+			} else {
+				cp.Spec.Resources[i].When = fmt.Sprintf("%s %s %q", newRef, op, literal)
+			}
 		}
 		for path, f := range r.Fields {
 			if f.From == oldRef {

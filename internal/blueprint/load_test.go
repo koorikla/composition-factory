@@ -169,8 +169,8 @@ func TestValidateRejectsFieldWithZeroSources(t *testing.T) {
 func TestValidateRejectsFromWithoutParamsPrefix(t *testing.T) {
 	body := strings.Replace(valid, "maxMessageSize: {from: params.maxMessageSize}", "maxMessageSize: {from: maxMessageSize}", 1)
 	_, err := Load(write(t, body))
-	if err == nil || !strings.Contains(err.Error(), "must start with params.") {
-		t.Fatalf("err = %v, want a complaint that from lacks the params. prefix", err)
+	if err == nil || !strings.Contains(err.Error(), "params.<name> or resources.<name>.status.<path>") {
+		t.Fatalf("err = %v, want a complaint naming both accepted from grammars", err)
 	}
 }
 
@@ -1186,5 +1186,324 @@ func TestValidateRejectsUndeclaredResourceProvider(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
+	}
+}
+
+// --- when conditionals ---
+
+// whenBlueprint is a valid blueprint whose only resource is gated on a when
+// condition over a defaulted string parameter with an enum. Mutations build
+// every rejection case from this known-good baseline.
+func whenBlueprint(mutate func(*Blueprint)) *Blueprint {
+	b := &Blueprint{
+		Metadata: Metadata{Name: "xqueue"},
+		Spec: Spec{
+			XRD: XRD{
+				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]Parameter{
+					"providerName": {Type: "string", Required: true},
+					"tier":         {Type: "string", Default: "standard", Enum: []string{"standard", "pro"}},
+					"auditEnabled": {Type: "boolean", Default: "false"},
+				},
+			},
+			Resources: []Resource{{
+				Name: "audit-queue", Kind: "Queue",
+				When:   `params.tier == "pro"`,
+				Fields: map[string]Field{"region": {Value: "eu-north-1"}},
+			}},
+		},
+	}
+	mutate(b)
+	return b
+}
+
+func TestParseWhen(t *testing.T) {
+	cases := []struct {
+		expr               string
+		param, op, literal string
+		wantErr            bool
+	}{
+		{expr: "params.auditEnabled", param: "auditEnabled"},
+		{expr: `params.tier == "pro"`, param: "tier", op: "==", literal: "pro"},
+		{expr: `params.tier != "standard"`, param: "tier", op: "!=", literal: "standard"},
+		{expr: `params.tier == ""`, param: "tier", op: "==", literal: ""},
+		{expr: "tier", wantErr: true},                   // no params. prefix
+		{expr: `params.tier=="pro"`, wantErr: true},     // no spaces
+		{expr: `params.tier ==  "pro"`, wantErr: true},  // two spaces
+		{expr: `params.tier == 'pro'`, wantErr: true},   // single quotes
+		{expr: `params.tier == pro`, wantErr: true},     // unquoted literal
+		{expr: `params.tier == "p\"ro"`, wantErr: true}, // embedded quote/backslash
+		{expr: `params.tier < "pro"`, wantErr: true},    // unsupported operator
+		{expr: `params.ti-er == "pro"`, wantErr: true},  // non-camelCase parameter
+		{expr: "", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.expr, func(t *testing.T) {
+			param, op, literal, err := ParseWhen(tc.expr)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("ParseWhen(%q) = (%q, %q, %q), want an error", tc.expr, param, op, literal)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseWhen(%q): %v", tc.expr, err)
+			}
+			if param != tc.param || op != tc.op || literal != tc.literal {
+				t.Errorf("ParseWhen(%q) = (%q, %q, %q), want (%q, %q, %q)",
+					tc.expr, param, op, literal, tc.param, tc.op, tc.literal)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsWhenForms(t *testing.T) {
+	for _, when := range []string{
+		`params.tier == "pro"`,
+		`params.tier != "pro"`,
+		"params.auditEnabled",
+	} {
+		t.Run(when, func(t *testing.T) {
+			b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = when })
+			if err := b.Validate(); err != nil {
+				t.Fatalf("Validate() = %v, want %q accepted", err, when)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsWhenUnknownParameter(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = `params.nope == "pro"` })
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), `"nope"`) {
+		t.Fatalf("err = %v, want an error naming the unknown parameter", err)
+	}
+	if !strings.Contains(err.Error(), "audit-queue") {
+		t.Errorf("err = %v, want it to name the offending resource", err)
+	}
+}
+
+// The condition dereferences its parameter unguarded, exactly like a forEach
+// loop bound: only required-or-defaulted parameters are safe under
+// missingkey=error.
+func TestValidateRejectsWhenOnOptionalParameterWithoutDefault(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) {
+		b.Spec.XRD.Parameters["tier"] = Parameter{Type: "string"}
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "required") || !strings.Contains(err.Error(), "default") {
+		t.Fatalf("err = %v, want the required-or-default rule", err)
+	}
+}
+
+func TestValidateRejectsBareWhenOnNonBooleanParameter(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = "params.tier" })
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "boolean") {
+		t.Fatalf("err = %v, want the bare form to require a boolean parameter", err)
+	}
+}
+
+func TestValidateRejectsWhenComparisonOnNonStringParameter(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = `params.auditEnabled == "true"` })
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "string") {
+		t.Fatalf("err = %v, want the comparison form to require a string parameter", err)
+	}
+}
+
+// A literal the enum excludes makes the condition constant: the XRD admits
+// no XR that could ever satisfy (or, for !=, fail) it — a resource that
+// silently never or always exists, with every gate green.
+func TestValidateRejectsWhenLiteralOutsideEnum(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = `params.tier == "gold"` })
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), `"gold"`) || !strings.Contains(err.Error(), "enum") {
+		t.Fatalf("err = %v, want the out-of-enum literal named and refused", err)
+	}
+}
+
+func TestValidateRejectsMalformedWhen(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) { b.Spec.Resources[0].When = `params.tier == 'pro'` })
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "when must be") {
+		t.Fatalf("err = %v, want the grammar spelled out", err)
+	}
+}
+
+func TestValidateRejectsControlCharacterInWhen(t *testing.T) {
+	b := whenBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[0].When = "params.tier\nbogus: injected"
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "control character") {
+		t.Fatalf("err = %v, want the checkScalar control-character rejection", err)
+	}
+}
+
+// The when key must survive a marshal/unmarshal round trip exactly: the HTTP
+// API persists the whole document by re-marshaling the Go struct.
+func TestWhenRoundTripsExactly(t *testing.T) {
+	b := whenBlueprint(func(*Blueprint) {})
+	body, err := yaml.Marshal(b)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var reloaded Blueprint
+	if err := yaml.Unmarshal(body, &reloaded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if diff := cmp.Diff(b, &reloaded); diff != "" {
+		t.Errorf("blueprint changed across a marshal/unmarshal round trip (-original +reloaded):\n%s", diff)
+	}
+	if got := reloaded.Spec.Resources[0].When; got != `params.tier == "pro"` {
+		t.Errorf("When after round trip = %q, want the expression unchanged", got)
+	}
+}
+
+// --- cross-resource status references ---
+
+// statusRefBlueprint is a valid blueprint whose second resource wires a
+// field from the first resource's observed status. Mutations build every
+// rejection case from this known-good baseline, so each test pins exactly
+// one rule.
+func statusRefBlueprint(mutate func(*Blueprint)) *Blueprint {
+	b := &Blueprint{
+		Metadata: Metadata{Name: "xqueue"},
+		Spec: Spec{
+			XRD: XRD{
+				Group: "platform.hooli.tech", Kind: "XQueuePair", Plural: "xqueuepairs",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+			Resources: []Resource{{
+				Name: "main-queue", Kind: "Queue",
+				Fields: map[string]Field{"region": {Value: "eu-north-1"}},
+			}, {
+				Name: "queue-policy", Kind: "QueuePolicy",
+				Fields: map[string]Field{
+					"region":   {Value: "eu-north-1"},
+					"queueUrl": {From: "resources.main-queue.status.atProvider.url"},
+				},
+			}},
+		},
+	}
+	mutate(b)
+	return b
+}
+
+func TestValidateAcceptsStatusReference(t *testing.T) {
+	b := statusRefBlueprint(func(*Blueprint) {})
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want a well-formed cross-resource status reference to be accepted", err)
+	}
+}
+
+func TestValidateRejectsStatusReferenceToUnknownResource(t *testing.T) {
+	b := statusRefBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[1].Fields["queueUrl"] = Field{From: "resources.no-such-queue.status.atProvider.url"}
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), `"no-such-queue"`) {
+		t.Fatalf("err = %v, want an error naming the unknown resource", err)
+	}
+	if !strings.Contains(err.Error(), "queue-policy") || !strings.Contains(err.Error(), "queueUrl") {
+		t.Errorf("err = %v, want it to name the referencing resource and field", err)
+	}
+}
+
+func TestValidateRejectsStatusReferenceToSelf(t *testing.T) {
+	b := statusRefBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[1].Fields["queueUrl"] = Field{From: "resources.queue-policy.status.atProvider.id"}
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "own status") {
+		t.Fatalf("err = %v, want a self-reference to be refused", err)
+	}
+}
+
+// A looped resource's composed documents are named <name>-0, <name>-1, ...
+// (the indexed setResourceNameAnnotation), so the un-indexed key a status
+// reference names never appears in $.observed.resources: the wire could
+// never carry a value, silently.
+func TestValidateRejectsStatusReferenceToLoopedResource(t *testing.T) {
+	b := statusRefBlueprint(func(b *Blueprint) {
+		b.Spec.XRD.Parameters["instanceCount"] = Parameter{Type: "integer", Default: "2"}
+		b.Spec.Resources[0].ForEach = "params.instanceCount"
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "looped") {
+		t.Fatalf("err = %v, want a reference to a forEach resource to be refused", err)
+	}
+	if !strings.Contains(err.Error(), "main-queue") {
+		t.Errorf("err = %v, want it to name the looped target", err)
+	}
+}
+
+func TestValidateRejectsMalformedStatusReference(t *testing.T) {
+	for _, from := range []string{
+		"resources.main-queue",                     // no .status. at all
+		"resources.main-queue.status.",             // empty path
+		"resources..status.atProvider.url",         // empty name
+		"resources.main-queue.spec.forProvider.id", // not a status path
+	} {
+		t.Run(from, func(t *testing.T) {
+			b := statusRefBlueprint(func(b *Blueprint) {
+				b.Spec.Resources[1].Fields["queueUrl"] = Field{From: from}
+			})
+			err := b.Validate()
+			if err == nil || !strings.Contains(err.Error(), "resources.<name>.status.<path>") {
+				t.Fatalf("err = %v, want the grammar spelled out", err)
+			}
+		})
+	}
+}
+
+// Every status path segment reaches the emitted template inside a hasKey
+// guard and a dereference expression, so anything that is not a clean
+// camelCase identifier is a structural risk, not a style complaint.
+func TestValidateRejectsStatusReferencePathWithInvalidSegment(t *testing.T) {
+	for _, from := range []string{
+		"resources.main-queue.status.atProvider..url",
+		`resources.main-queue.status.atProvider.u"rl`,
+		"resources.main-queue.status.atProvider.a b",
+	} {
+		t.Run(from, func(t *testing.T) {
+			b := statusRefBlueprint(func(b *Blueprint) {
+				b.Spec.Resources[1].Fields["queueUrl"] = Field{From: from}
+			})
+			err := b.Validate()
+			if err == nil {
+				t.Fatalf("Validate accepted %q, want a rejection of the malformed path segment", from)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsDuplicateResourceNames(t *testing.T) {
+	b := statusRefBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[1].Name = "main-queue"
+		// Drop the reference: with both resources named main-queue the
+		// self-reference rule would fire first and mask the duplicate check.
+		b.Spec.Resources[1].Fields = map[string]Field{"region": {Value: "eu-north-1"}}
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "duplicate resource name") {
+		t.Fatalf("err = %v, want the duplicate name to be refused (it collapses two composed "+
+			"resources into one composition-resource-name)", err)
+	}
+}
+
+// A forward reference — the target declared after the referencing resource —
+// is legitimate: emission order is not dependency order.
+func TestValidateAcceptsForwardStatusReference(t *testing.T) {
+	b := statusRefBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[0], b.Spec.Resources[1] = b.Spec.Resources[1], b.Spec.Resources[0]
+	})
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want a forward reference to be accepted", err)
 	}
 }
