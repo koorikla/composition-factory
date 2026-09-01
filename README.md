@@ -189,13 +189,12 @@ emitter doesn't render it), and `LegacyCluster` is not a valid v2 scope.
 `providerName` is a required `string` parameter on every Namespaced XRD: the
 Composition dereferences it unguarded for `providerConfigRef.name`.
 
-There is no `forEach:` on a resource yet — one blueprint resource is exactly
-one composed resource, with no fan-out over an array/map/count parameter.
-`internal/blueprint.Resource` has no such field, so a hand-written
-`forEach:` key is silently dropped on load (`sigs.k8s.io/yaml` ignores
-unknown fields); the canvas's `.node` rendering has a dormant `r.forEach`
-badge for it, but nothing on the engine side ever populates it. See
-[Roadmap](#roadmap).
+**`forEach:`** repeats one blueprint resource N times: `forEach: params.<name>`
+where the parameter is a required-or-defaulted `integer`. The Composition
+wraps the resource in a Go template `range` over the count, and each replica
+gets a distinct, indexed composition-resource-name annotation. The canvas
+sets it from the inspector's "for each" control and the Validate check proves
+the fan-out through a real render.
 
 **Determinism.** Output is byte-identical for the same blueprint and cache
 state: LF-only line endings, no trailing whitespace, sorted map keys
@@ -250,11 +249,9 @@ Not yet built, per
   resource's `status.atProvider` (or its native `<f>Ref`) into another
   resource's field, and `dependsOn:` compiling to a `function-sequencer`
   step.
-- **`when:`** (conditional resources) **and `forEach:`** — a looped resource
-  following Go template `range` semantics over an array, map or integer
-  count, with an indexed `setResourceNameAnnotation` per iteration. The
-  canvas currently refuses `type: array` parameters outright rather than
-  half-supporting the fan-out this needs.
+- **`when:`** (conditional resources) — `forEach:` over an integer count is
+  built; `when:` and range-over-array/map (blocked on `type: array`
+  parameter support) are not.
 - **User-defined template functions** — a named `templates:` block
   (optionally bound to specific field names) emitted as go-template
   `define`/`include`, generalizing what would otherwise be a one-off
