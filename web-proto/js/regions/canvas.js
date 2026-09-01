@@ -461,6 +461,11 @@ function onCanvasClick(e) {
 
 function onPointerDown(e) {
   if (e.button !== undefined && e.button !== 0) return;
+  // A press on an action button is a click, never a drag: entering the drag
+  // path re-selects and re-renders the card mid-press, destroying the very
+  // button under the pointer (its click then never fires), and any micro-
+  // movement during the press turns it into a card drag instead.
+  if (e.target.closest("[data-act]") || e.target.closest("button")) return;
   const h = e.target.closest(".node-h");
   if (!h) return;
   const nodeEl = h.closest(".node");

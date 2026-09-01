@@ -182,6 +182,7 @@ export const store = {
    * @param {string|null} name Resource name, "xrd" for the composite node, or null.
    */
   select(name) {
+    if (this.state.selectedResource === name) return; // no-op reselects don't re-render
     if (this.state.selectedResource === name) return;
     this.state.selectedResource = name;
     this.emit("selection", name);
