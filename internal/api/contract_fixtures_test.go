@@ -38,6 +38,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/koorikla/compositionfactory/catalogue"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/index"
 )
@@ -83,6 +84,13 @@ type providersResponse struct {
 	Providers []providerEntry `json:"providers"`
 }
 
+// catalogueResponse mirrors GET /api/catalogue's body. Like providersResponse
+// this decodes the response ENVELOPE, not a bare slice — see that type's
+// comment for why that distinction matters.
+type catalogueResponse struct {
+	Providers []catalogue.Provider `json:"providers"`
+}
+
 func TestContractFixtureKindsRoundTripsKeySet(t *testing.T) {
 	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "kinds.json"), &kindsResponse{})
 }
@@ -105,6 +113,10 @@ func TestContractFixtureGenerateRoundTripsKeySet(t *testing.T) {
 
 func TestContractFixtureProvidersRoundTripsKeySet(t *testing.T) {
 	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "providers.json"), &providersResponse{})
+}
+
+func TestContractFixtureCatalogueRoundTripsKeySet(t *testing.T) {
+	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "catalogue.json"), &catalogueResponse{})
 }
 
 // POST /api/render's envelope has a real production type (renderResponse in
