@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/koorikla/compositionfactory/actions/workflows/ci.yml/badge.svg)](https://github.com/koorikla/compositionfactory/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/koorikla/compositionfactory?include_prereleases)](https://github.com/koorikla/compositionfactory/releases)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Container](https://img.shields.io/badge/ghcr.io-compositionfactory-blue?logo=docker)](https://github.com/koorikla/compositionfactory/pkgs/container/compositionfactory)
 
 **Schema-aware generator and visual canvas for Crossplane v2 Compositions and CompositeResourceDefinitions (XRDs).**
@@ -224,5 +224,5 @@ make lint           # Check formatting and vet
 ---
 
 ## License
-
-This project is licensed under the [Apache 2.0 License](LICENSE).
+ 
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
