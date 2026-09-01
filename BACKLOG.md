@@ -33,3 +33,11 @@
 - [ ] Pipeline steps in the GUI (after the engine lands spec.pipeline): show the
       step chain in the Output/topbar area, one-click "add auto-ready", raw
       input editing per step. — follows the functions-support engine work
+- [ ] Envelope field control: per-resource authoring of the Crossplane-native
+      envelope — writeConnectionSecretToRef (name/namespace), managementPolicies,
+      and whatever else the kind's .m. CRD envelope actually carries (validated
+      against Envelope(), same {value|from|raw} field forms). GUI: an "envelope"
+      section on the card/inspector. — user request 2026-09-01
+- [ ] Cross-object atProvider wiring GUI (engine side in flight): wire e.g. a
+      postgres provider field from an RDS instance's status.atProvider output —
+      teal status wires, pickable from the source card's status section.
