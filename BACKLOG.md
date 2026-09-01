@@ -55,3 +55,10 @@
       — improve beyond the browser default. — user request 2026-09-02
 - [ ] KINDS hover preview: a small card with the kind's description + a few key
       fields when hovering a palette row. — user request 2026-09-02
+- [ ] Effective requiredness for the inspector: the Required filter must show
+      what a user actually must set — top-level required branches (Deployment's
+      selector/template) surfaced as expandable required rows, and leaf
+      requiredness conditioned on its ancestor chain (EnvVar.name is required
+      only once env exists). Engine: tree.go/API change; GUI: Required filter
+      semantics. Regression net already merged (required_test.go). Blocked on
+      the engine-batch integration landing (tree.go is hot).
