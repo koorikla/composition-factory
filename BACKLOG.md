@@ -69,3 +69,6 @@
 - [ ] Manual card resize: drag handle on cards (fields still clip at the 340px
       cap; users want to size objects themselves), size kept client-side like
       positions. — user request 2026-09-02
+- [ ] Output drawer: providerconfigs tab(s) next to the DSL tabs, annotated with
+      the picker state ("provider-aws-s3 — only Bucket enabled"), and an RBAC
+      tab from GET /api/rbac. — user request 2026-09-02
