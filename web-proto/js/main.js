@@ -87,3 +87,28 @@ store.loadDoc();
   apply(); place();
   addEventListener("resize", function () { apply(); place(); });
 })();
+
+
+/* ---- undo/redo: topbar buttons + keys over the store's doc history ---- */
+(function () {
+  var ub = document.getElementById("undoBtn");
+  var rb = document.getElementById("redoBtn");
+  if (!ub || !rb) return;
+  function sync() {
+    ub.disabled = !store.canUndo();
+    rb.disabled = !store.canRedo();
+  }
+  ub.addEventListener("click", function () { store.undo(); });
+  rb.addEventListener("click", function () { store.redo(); });
+  store.subscribe("doc", sync);
+  store.subscribe("error", sync);
+  addEventListener("keydown", function (e) {
+    var t = e.target;
+    // native undo inside text editing always wins
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
+    e.preventDefault();
+    if (e.shiftKey) store.redo(); else store.undo();
+  });
+  sync();
+})();

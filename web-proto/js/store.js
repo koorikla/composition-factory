@@ -42,6 +42,8 @@ export const store = {
     doc: null,
     selectedResource: null,
     positions: {},
+    undoStack: [],
+    redoStack: [],
     lastGenerate: null,
   },
 
@@ -105,12 +107,48 @@ export const store = {
     const returned = mutatorFn(next);
     const candidate = returned === undefined ? next : returned;
     try {
+      const prev = clone(this.state.doc);
       const doc = await api.putBlueprint(candidate);
+      this._recordHistory(prev);
       this.state.doc = doc;
       this.emit("doc", doc);
       return doc;
     } catch (e) {
       this.emit("error", { status: e.status, message: e.message, source: "replaceDoc" });
+      return null;
+    }
+  },
+
+  /** Push the pre-change doc; a new change always clears the redo branch. */
+  _recordHistory(prevDoc) {
+    this.state.undoStack.push(prevDoc);
+    if (this.state.undoStack.length > 50) this.state.undoStack.shift();
+    this.state.redoStack.length = 0;
+  },
+
+  canUndo() { return this.state.undoStack.length > 0; },
+  canRedo() { return this.state.redoStack.length > 0; },
+
+  /**
+   * Undo/redo re-PUT a snapshot — the server stays the source of truth.
+   * On a rejected PUT the stacks are restored and the error topic fires.
+   */
+  async undo() { return this._timeTravel(this.state.undoStack, this.state.redoStack, "undo"); },
+  async redo() { return this._timeTravel(this.state.redoStack, this.state.undoStack, "redo"); },
+
+  async _timeTravel(from, to, source) {
+    if (!from.length) return null;
+    const target = from.pop();
+    const current = clone(this.state.doc);
+    try {
+      const doc = await api.putBlueprint(target);
+      to.push(current);
+      this.state.doc = doc;
+      this.emit("doc", doc);
+      return doc;
+    } catch (e) {
+      from.push(target);
+      this.emit("error", { status: e.status, message: e.message, source });
       return null;
     }
   },
@@ -216,7 +254,9 @@ export const store = {
    */
   async _paramOp(source, promise) {
     try {
+      const prev = clone(this.state.doc);
       const doc = await promise;
+      this._recordHistory(prev);
       this.state.doc = doc;
       this.emit("doc", doc);
       return doc;

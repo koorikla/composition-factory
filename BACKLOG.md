@@ -14,7 +14,7 @@
 - [x] UX polish: a Guide tab (how the canvas, DSL and generate loop work,
       keyboard shortcuts), plus richer mouseover texts — field descriptions,
       wire tooltips, button titles everywhere. — user request 2026-09-01
-- [ ] Undo/redo: topbar buttons + Cmd/Ctrl+Z / Shift+Cmd/Ctrl+Z. Needs a doc
+- [x] Undo/redo: topbar buttons + Cmd/Ctrl+Z / Shift+Cmd/Ctrl+Z. Needs a doc
       history in the proto store (snapshot ring on every successful PUT).
       — user request 2026-09-01
 - [x] Wheel zooms (shift+wheel / ground-drag pans) — user request 2026-09-01
