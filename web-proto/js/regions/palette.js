@@ -149,7 +149,8 @@ export function init(rootEl, deps) {
     names.forEach(function (n) {
       h += '<div class="card"><div class="card-h">' +
         '<span class="nm" style="color:var(--shared)">$' + esc(n) + "</span>" +
-        '<span class="sp"></span><span class="bind">' + fanOut(doc, n) + " bound</span></div>" +
+        '<span class="sp"></span><span class="bind">' + fanOut(doc, n) + " bound</span>" +
+        '<button class="del" data-param-del="' + esc(n) + '" title="Delete parameter">\u00d7</button></div>' +
         '<div class="card-b">' + paramLines(params[n]) + "</div></div>";
     });
     if (!paramFormOpen) {
@@ -160,10 +161,17 @@ export function init(rootEl, deps) {
         '<div style="display:flex;gap:6px;align-items:center">' +
         '<select id="param-add-type" class="search" style="flex:1" aria-label="Type">' +
         ["string","integer","number","boolean","object"].map(function (t) {
-          return '<option value="' + t + '">' + t + "</option>";
+          return '<option value="' + t + '"' + (t === paramType ? " selected" : "") + ">" + t + "</option>";
         }).join("") + "</select>" +
         '<label style="display:flex;gap:4px;align-items:center;font-size:10.5px;color:var(--faint)">' +
         '<input type="checkbox" id="param-add-req">required</label></div>' +
+        '<input id="param-add-default" class="search" placeholder="default (optional)"' +
+        (paramType === "object" ? " hidden" : "") + ' aria-label="Default value">' +
+        '<input id="param-add-enum" class="search" placeholder="enum values, comma-separated"' +
+        (paramType === "string" ? "" : " hidden") + ' aria-label="Enum values">' +
+        (paramType === "object"
+          ? '<div class="dg">a free-form string map (key: value pairs, like tags) \u2014 no default or enum</div>'
+          : "") +
         '<div style="display:flex;gap:6px">' +
         '<button class="btn sm pri" id="param-add-submit">Add</button>' +
         '<button class="btn sm" id="param-add-cancel">Cancel</button></div></div>';
@@ -174,6 +182,7 @@ export function init(rootEl, deps) {
 
   let paramFormOpen = false;
   let paramErr = null;
+  let paramType = "string";    // add-form type; controls which inputs render
 
   let providers = null;        // server-side cached providers, null = not loaded
   let providersErr = null;     // verbatim server error from the last add/list
@@ -331,6 +340,7 @@ export function init(rootEl, deps) {
   });
 
   railEl.addEventListener("change", function (e) {
+    if (e.target.id === "param-add-type") { paramType = e.target.value; drawRail(); return; }
     const pickAll = e.target.closest("input[data-pick-all]");
     if (pickAll) {
       const ref = pickAll.getAttribute("data-ref");
@@ -391,15 +401,28 @@ export function init(rootEl, deps) {
       }).catch(function () { providerKinds = []; if (expandedProvider === ref) drawRail(); });
       return;
     }
-    if (e.target.closest("#param-add-btn")) { paramFormOpen = true; paramErr = null; drawRail(); return; }
+    const pdel = e.target.closest("[data-param-del]");
+    if (pdel) {
+      const n = pdel.getAttribute("data-param-del");
+      if (!window.confirm("Delete parameter $" + n + "?")) return;
+      paramErr = null;
+      store.deleteParameter(n);   // failure surfaces via the error topic below
+      return;
+    }
+    if (e.target.closest("#param-add-btn")) { paramFormOpen = true; paramErr = null; paramType = "string"; drawRail(); return; }
     if (e.target.closest("#param-add-cancel")) { paramFormOpen = false; paramErr = null; drawRail(); return; }
     if (e.target.closest("#param-add-submit")) {
       const name = (railEl.querySelector("#param-add-name") || {}).value || "";
       const type = (railEl.querySelector("#param-add-type") || {}).value || "string";
       const req = !!(railEl.querySelector("#param-add-req") || {}).checked;
       if (!name.trim()) return;
+      const param = { type: type, required: req };
+      const dv = (railEl.querySelector("#param-add-default") || {}).value || "";
+      const ev = (railEl.querySelector("#param-add-enum") || {}).value || "";
+      if (dv.trim() && type !== "object") param.default = dv.trim();
+      if (ev.trim() && type === "string") param.enum = ev.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
       paramErr = null;
-      store.addParameter(name.trim(), { type: type, required: req }).then(function (res) {
+      store.addParameter(name.trim(), param).then(function (res) {
         // the store resolves null on failure and emits the verbatim error;
         // the error subscription below paints it — keep the form open.
         if (res) { paramFormOpen = false; paramErr = null; drawRail(); }
@@ -451,7 +474,7 @@ export function init(rootEl, deps) {
 
   /* ---- store subscriptions --------------------------------------------- */
   store.subscribe("error", function (e) {
-    if (e && e.source === "addParameter") { paramErr = e.message; drawRail(); }
+    if (e && (e.source === "addParameter" || e.source === "deleteParameter")) { paramErr = e.message; drawRail(); }
   });
 
   store.subscribe("doc", function () {
