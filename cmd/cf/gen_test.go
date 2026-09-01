@@ -91,10 +91,51 @@ func TestGenWritesFiles(t *testing.T) {
 		"xrds/xqueues.platform.hooli.tech.yaml",
 		"compositions/xqueues.platform.hooli.tech.yaml",
 		"functions.yaml",
+		// genBlueprint's one source, provider-test, is not upjet-family-shaped
+		// (internal/emit/providerconfigs.go's providerFamily), so it is its
+		// own family "test".
+		"providerconfigs/test.yaml",
 	} {
 		if _, err := os.Stat(filepath.Join(out, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}
+	}
+}
+
+// TestGenCheckDetectsProviderConfigDrift covers --check on the
+// providerconfigs/<family>.yaml files the same way TestGenCheckExitCodes
+// covers functions.yaml: they are ordinary entries in emit.Generate's output
+// list (internal/emit/emit.go), so GenCmd's existing --check loop needs no
+// special case for them -- this test is here to prove that wiring actually
+// holds for the new file kind, not just assert it by inspection.
+func TestGenCheckDetectsProviderConfigDrift(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	out := filepath.Join(dir, "out")
+	var buf bytes.Buffer
+
+	if err := (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir}).Run(&buf); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(out, "providerconfigs", "test.yaml")
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("providerconfigs/test.yaml was not written by a plain `cf gen`: %v", err)
+	}
+
+	code, _ := (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir, Check: true}).run(&buf)
+	if code != 0 {
+		t.Fatalf("in-sync check before any edit: code=%d, want 0", code)
+	}
+
+	if err := os.WriteFile(target, []byte("tampered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	code, _ = (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir, Check: true}).run(&buf)
+	if code != 2 {
+		t.Errorf("drift check after hand-editing providerconfigs/test.yaml: code=%d, want 2", code)
+	}
+	if !strings.Contains(buf.String(), "drift: "+target) {
+		t.Errorf("check output = %q, want it to name %q", buf.String(), target)
 	}
 }
 

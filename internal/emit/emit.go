@@ -2,6 +2,7 @@ package emit
 
 import (
 	"path/filepath"
+	"sort"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
@@ -46,10 +47,31 @@ func Generate(b *blueprint.Blueprint, crds []schema.CRD, outDir string) ([]Outpu
 	if err != nil {
 		return nil, err
 	}
-	// Sorted by path so callers can diff two runs positionally.
-	return []Output{
-		{Path: filepath.Join(outDir, "compositions", name), Body: comp},
-		{Path: filepath.Join(outDir, "functions.yaml"), Body: fns},
-		{Path: filepath.Join(outDir, "xrds", name), Body: xrd},
-	}, nil
+	pcs, err := ProviderConfigs(b, crds)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sorted by path so callers can diff two runs positionally. providerconfigs
+	// entries are variable in count (zero-to-many families), so they are
+	// collected and path-sorted separately, then spliced in between
+	// functions.yaml and xrds/ -- "providerconfigs" sorts after "functions.yaml"
+	// and before "xrds" byte-wise, so this preserves the whole-list invariant
+	// with the fixed three entries alone.
+	families := make([]string, 0, len(pcs))
+	for fam := range pcs {
+		families = append(families, fam)
+	}
+	sort.Strings(families)
+
+	out := make([]Output, 0, 3+len(families))
+	out = append(out,
+		Output{Path: filepath.Join(outDir, "compositions", name), Body: comp},
+		Output{Path: filepath.Join(outDir, "functions.yaml"), Body: fns},
+	)
+	for _, fam := range families {
+		out = append(out, Output{Path: filepath.Join(outDir, "providerconfigs", fam+".yaml"), Body: pcs[fam]})
+	}
+	out = append(out, Output{Path: filepath.Join(outDir, "xrds", name), Body: xrd})
+	return out, nil
 }
