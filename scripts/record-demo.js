@@ -12,12 +12,12 @@ async function main() {
     build.on('close', code => code === 0 ? res() : rej(new Error(`build exited ${code}`)));
   });
 
-  const port = 8123;
-  const tempDir = fs.mkdtempSync('/tmp/cf-demo-');
-  const bpPath = path.join(tempDir, 'xqueue.cf.yaml');
-  fs.copyFileSync('testdata/xqueue.cf.yaml', bpPath);
+  const port = 8130;
+  const tempDir = fs.mkdtempSync('/tmp/cf-irsa-demo-');
+  const bpPath = path.join(tempDir, 'xirsa.cf.yaml');
+  fs.copyFileSync('testdata/xirsa.cf.yaml', bpPath);
 
-  console.log('Starting cf serve...');
+  console.log('Starting cf serve with IRSA blueprint...');
   const server = spawn('./bin/cf', [
     'serve',
     '--blueprint', bpPath,
@@ -36,15 +36,29 @@ async function main() {
     await new Promise(r => setTimeout(r, 200));
   }
 
-  console.log('Launching browser...');
+  console.log('Launching browser in dark theme...');
   const browser = await chromium.launch({ headless: true });
-  const width = 1000;
-  const height = 625;
-  const page = await browser.newPage({ viewport: { width, height } });
+  const width = 1040;
+  const height = 650;
+  const context = await browser.newContext({
+    viewport: { width, height },
+    colorScheme: 'dark'
+  });
+
+  const page = await context.newPage();
+
+  // Set dark theme in localStorage before page load
+  await page.addInitScript(() => {
+    localStorage.setItem('cf-theme', 'dark');
+    document.documentElement.setAttribute('data-theme', 'dark');
+  });
 
   await page.goto(`http://127.0.0.1:${port}/`);
   await page.waitForSelector('#canvas .node');
-  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  });
+  await page.waitForTimeout(600);
 
   const frames = [];
   const captureInterval = 100; // ms
@@ -60,51 +74,51 @@ async function main() {
 
   const capturePromise = captureLoop();
 
-  console.log('Performing demo interactions...');
+  console.log('Performing demo interactions on IRSA composition...');
 
-  // Step 1: Initial pause
-  await page.waitForTimeout(800);
+  // Step 1: Initial presentation of the IRSA canvas
+  await page.waitForTimeout(1000);
 
   // Step 2: Move mouse smoothly over XRD ports to show port highlighting & fanout
   const xrdNode = page.locator('.node[data-id="xrd"]');
   const xrdBox = await xrdNode.boundingBox();
   if (xrdBox) {
-    await page.mouse.move(xrdBox.x + 50, xrdBox.y + 50, { steps: 5 });
-    await page.waitForTimeout(400);
+    await page.mouse.move(xrdBox.x + 80, xrdBox.y + 60, { steps: 6 });
+    await page.waitForTimeout(300);
     await page.mouse.move(xrdBox.x + xrdBox.width - 15, xrdBox.y + 65, { steps: 8 });
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(500);
   }
 
-  // Step 3: Drag the main-queue card smoothly
-  const queueNode = page.locator('.node[data-id="main-queue"]');
-  const queueBox = await queueNode.boundingBox();
-  if (queueBox) {
-    await page.mouse.move(queueBox.x + 60, queueBox.y + 15, { steps: 8 });
+  // Step 3: Drag the iam-role card smoothly
+  const roleNode = page.locator('.node[data-id="iam-role"]');
+  const roleBox = await roleNode.boundingBox();
+  if (roleBox) {
+    await page.mouse.move(roleBox.x + 80, roleBox.y + 15, { steps: 8 });
     await page.mouse.down();
-    await page.mouse.move(queueBox.x + 120, queueBox.y - 20, { steps: 12 });
+    await page.mouse.move(roleBox.x + 110, roleBox.y - 25, { steps: 10 });
     await page.waitForTimeout(200);
-    await page.mouse.move(queueBox.x + 90, queueBox.y + 10, { steps: 8 });
+    await page.mouse.move(roleBox.x + 90, roleBox.y + 5, { steps: 8 });
     await page.mouse.up();
     await page.waitForTimeout(500);
   }
 
-  // Step 4: Click the queue node to focus inspector
-  await page.click('.node[data-id="main-queue"] .node-h');
-  await page.waitForTimeout(700);
+  // Step 4: Click the iam-role card to focus inspector
+  await page.click('.node[data-id="iam-role"] .node-h');
+  await page.waitForTimeout(800);
 
-  // Step 5: Filter kinds palette
+  // Step 5: Filter kinds palette for IAM Policy
   await page.fill('#psearch', 'policy');
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(800);
   await page.fill('#psearch', '');
   await page.waitForTimeout(400);
 
-  // Step 6: Switch generated output drawer tabs
+  // Step 6: Switch output drawer tabs
   const tabs = ['definition.yaml', 'providerconfigs/aws.yaml', 'composition.yaml'];
   for (const tab of tabs) {
     const tabLoc = page.locator(`.tab:has-text("${tab}")`);
     if (await tabLoc.count() > 0) {
       await tabLoc.first().click();
-      await page.waitForTimeout(600);
+      await page.waitForTimeout(700);
     }
   }
 
@@ -112,7 +126,7 @@ async function main() {
   const genBtn = page.locator('#btn-gen');
   if (await genBtn.isVisible()) {
     await genBtn.click();
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(1000);
   }
 
   capturing = false;
@@ -121,7 +135,7 @@ async function main() {
   await browser.close();
   server.kill();
 
-  console.log(`Captured ${frames.length} frames. Encoding GIF...`);
+  console.log(`Captured ${frames.length} frames. Encoding dark-theme GIF...`);
 
   const encoder = new GIFEncoder(width, height, 'neuquant', true);
   const outPath = path.join(__dirname, '../docs/screenshots/demo.gif');
@@ -130,7 +144,7 @@ async function main() {
   encoder.start();
   encoder.setRepeat(0); // 0 = loop forever
   encoder.setDelay(captureInterval);
-  encoder.setQuality(10); // 10 is balanced quality/speed
+  encoder.setQuality(10);
 
   for (let i = 0; i < frames.length; i++) {
     const png = PNG.sync.read(frames[i]);
@@ -147,7 +161,7 @@ async function main() {
     writeStream.on('error', rej);
   });
 
-  console.log(`\nGIF saved to ${outPath} (${(fs.statSync(outPath).size / 1024 / 1024).toFixed(2)} MB)`);
+  console.log(`\nDark theme IRSA GIF saved to ${outPath} (${(fs.statSync(outPath).size / 1024 / 1024).toFixed(2)} MB)`);
 }
 
 main().catch(err => {
