@@ -32,3 +32,11 @@ jobs:
       - run: make test-docker
         env:
           CF_REQUIRE_ACCEPTANCE: '1'
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify Docker build
+        run: docker build .
+

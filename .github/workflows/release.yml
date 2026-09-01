@@ -1,0 +1,142 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  binaries:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Install zip
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Build and Package Cross-Platform Binaries
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          
+          for target in "linux/amd64" "linux/arm64" "darwin/amd64" "darwin/arm64" "windows/amd64"; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            ext=""
+            if [ "$os" = "windows" ]; then ext=".exe"; fi
+            out="dist/cf_${os}_${arch}${ext}"
+            echo "Building $out (version $VERSION)..."
+            
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "$out" ./cmd/cf
+            
+            archive_name="compositionfactory_${VERSION}_${os}_${arch}"
+            if [ "$os" = "windows" ]; then
+              (cd dist && zip "${archive_name}.zip" "cf_${os}_${arch}${ext}")
+            else
+              (cd dist && tar -czvf "${archive_name}.tar.gz" "cf_${os}_${arch}")
+            fi
+          done
+          
+          (cd dist && sha256sum compositionfactory_* > checksums.txt)
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: |
+            dist/compositionfactory_*
+            dist/checksums.txt
+
+  docker:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha
+
+      - name: Build and push multi-arch Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  github-release:
+    name: Create GitHub Release
+    needs: [binaries, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+          path: dist
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/* \
+            --title "compositionfactory ${GITHUB_REF_NAME}" \
+            --notes "$(cat <<'EOF'
+          ## Docker Image
+
+          ```sh
+          docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          docker pull ghcr.io/${{ github.repository }}:latest
+          ```
+
+          Run the visual canvas UI:
+          ```sh
+          docker run --rm -p 8080:8080 -v $(pwd):/workspace -v cf-cache:/home/cf/.cache/compositionfactory ghcr.io/${{ github.repository }}:${{ github.ref_name }} serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
+          ```
+
+          ### Pre-compiled Binaries
+          Multi-platform binaries and `checksums.txt` are attached below.
+          EOF
+          )"
