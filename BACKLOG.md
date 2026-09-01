@@ -66,3 +66,6 @@
       fields ("+ then string/boolean/int") — real XRD sub-properties instead of
       the v1 free-form string map. Emit properties/required, wire members as
       params.obj.member. — user request 2026-09-02
+- [ ] Manual card resize: drag handle on cards (fields still clip at the 340px
+      cap; users want to size objects themselves), size kept client-side like
+      positions. — user request 2026-09-02
