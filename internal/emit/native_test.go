@@ -361,3 +361,35 @@ func TestNativeGenerateIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// A native resource inside a forEach range is the untested intersection the
+// native-kinds merge flagged: the loop must wrap the whole native document
+// and the name annotation must stay indexed, with no managed envelope leaking
+// in. Pinned from the post-merge probe that first proved it.
+func TestNativeResourceInsideForEach(t *testing.T) {
+	b := nativeTestBlueprint()
+	b.Spec.XRD.Parameters["replicas"] = blueprint.Parameter{Type: "integer", Default: "2"}
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Provider == blueprint.NativeProvider {
+			b.Spec.Resources[i].ForEach = "params.replicas"
+		}
+	}
+	compBytes, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	comp := string(compBytes)
+	if !strings.Contains(comp, `range $i := until (int $spec.replicas)`) {
+		t.Fatalf("native forEach resource is not range-wrapped:\n%s", comp)
+	}
+	if !strings.Contains(comp, `$i`) || !strings.Contains(comp, "-%d") && !strings.Contains(comp, `printf`) {
+		t.Errorf("name annotation is not indexed inside the loop")
+	}
+	// the native document sits between the range and end markers; the managed
+	// Queue's forProvider must not appear inside that span
+	loopStart := strings.Index(comp, "range $i := until")
+	loopEnd := strings.Index(comp[loopStart:], "{{- end }}")
+	if loopEnd > 0 && strings.Contains(comp[loopStart:loopStart+loopEnd], "forProvider") {
+		t.Errorf("managed envelope leaked into the looped native document")
+	}
+}
