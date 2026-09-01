@@ -275,6 +275,83 @@ function scheduleWires() {
   rafWires = requestAnimationFrame(function () { rafWires = 0; drawWires(); });
 }
 
+/* ---------- view transform: pan + zoom (slice 6) ---------- */
+
+const view = { x: 0, y: 0, k: 1 };
+const K_MIN = 0.4, K_MAX = 2.5;
+
+function applyView() {
+  canvasEl.style.transformOrigin = "0 0";
+  canvasEl.style.transform =
+    "translate(" + view.x + "px," + view.y + "px) scale(" + view.k + ")";
+  const pct = document.getElementById("zoom-pct");
+  if (pct) pct.textContent = Math.round(view.k * 100) + "%";
+  drawWires(); // synchronous: wires must never lag the transform by a frame
+}
+
+/** screen point (relative to #cw) -> canvas space */
+function toCanvas(sx, sy) {
+  return { x: (sx - view.x) / view.k, y: (sy - view.y) / view.k };
+}
+
+function zoomAt(sx, sy, factor) {
+  const k = Math.min(K_MAX, Math.max(K_MIN, view.k * factor));
+  // keep the point under the cursor fixed
+  view.x = sx - (k / view.k) * (sx - view.x);
+  view.y = sy - (k / view.k) * (sy - view.y);
+  view.k = k;
+  applyView();
+}
+
+function onWheel(e) {
+  if (e.target.closest("#region-output")) return;
+  e.preventDefault();
+  const rect = cwEl.getBoundingClientRect();
+  if (e.ctrlKey || e.metaKey) {
+    zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.pow(1.0015, -e.deltaY));
+  } else {
+    view.x -= e.deltaX;
+    view.y -= e.deltaY;
+    applyView();
+  }
+}
+
+function onPanDown(e) {
+  // drag on empty canvas ground pans the view
+  if (e.button !== 0) return;
+  if (e.target.closest(".node") || e.target.closest("button") || e.target.closest("svg path")) return;
+  const sx = e.clientX, sy = e.clientY, ox = view.x, oy = view.y;
+  let moved = false;
+  function mv(ev) {
+    moved = true;
+    view.x = ox + ev.clientX - sx;
+    view.y = oy + ev.clientY - sy;
+    applyView();
+  }
+  function up() {
+    document.removeEventListener("pointermove", mv);
+    document.removeEventListener("pointerup", up);
+  }
+  document.addEventListener("pointermove", mv);
+  document.addEventListener("pointerup", up);
+}
+
+function buildZoomControls() {
+  const bar = document.createElement("div");
+  bar.id = "zoom-bar";
+  bar.style.cssText = "position:absolute;right:10px;bottom:10px;display:flex;gap:4px;align-items:center;z-index:5";
+  bar.innerHTML =
+    '<button class="btn sm" id="zoom-out" title="Zoom out">\u2212</button>' +
+    '<span id="zoom-pct" style="font-size:10px;color:var(--faint);min-width:34px;text-align:center">100%</span>' +
+    '<button class="btn sm" id="zoom-in" title="Zoom in">+</button>' +
+    '<button class="btn sm" id="zoom-reset" title="Reset view">\u2302</button>';
+  cwEl.appendChild(bar);
+  const rect = function () { const r = cwEl.getBoundingClientRect(); return { x: r.width / 2, y: r.height / 2 }; };
+  bar.querySelector("#zoom-in").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1.2); });
+  bar.querySelector("#zoom-out").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1 / 1.2); });
+  bar.querySelector("#zoom-reset").addEventListener("click", function () { view.x = 0; view.y = 0; view.k = 1; applyView(); });
+}
+
 /* ---------- interactions ---------- */
 
 function uniqueResourceName(d, kind) {
@@ -378,8 +455,8 @@ function onPointerDown(e) {
   let lx = start.x, ly = start.y;
 
   function mv(ev) {
-    lx = Math.max(4, start.x + ev.clientX - sx);
-    ly = Math.max(4, start.y + ev.clientY - sy);
+    lx = Math.max(4, start.x + (ev.clientX - sx) / view.k);
+    ly = Math.max(4, start.y + (ev.clientY - sy) / view.k);
     el.style.left = lx + "px";
     el.style.top = ly + "px";
     scheduleWires();
@@ -457,8 +534,9 @@ function onDrop(e) {
   const d = doc();
   if (!entry || !d) return;
   const rect = cwEl.getBoundingClientRect();
-  const x = Math.max(4, e.clientX - rect.left - 90);
-  const y = Math.max(4, e.clientY - rect.top - 16);
+  const pt = toCanvas(e.clientX - rect.left, e.clientY - rect.top);
+  const x = Math.max(4, pt.x - 90);
+  const y = Math.max(4, pt.y - 16);
   const name = uniqueResourceName(d, entry.kind);
   S.setPosition(name, { x: x, y: y });
   S.replaceDoc(function (next) {
@@ -492,6 +570,10 @@ export function init(rootEl, deps) {
   cwEl.addEventListener("drop", onDrop);
   addEventListener("resize", scheduleWires);
   addEventListener("keydown", onKeyDown);
+  cwEl.addEventListener("wheel", onWheel, { passive: false });
+  cwEl.addEventListener("pointerdown", onPanDown);
+  buildZoomControls();
+  applyView();
 
   S.subscribe("doc", render);
   S.subscribe("selection", render);
