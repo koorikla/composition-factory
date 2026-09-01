@@ -82,7 +82,9 @@ describe("palette", () => {
     await screen.findAllByText("Queue")
     // upjet ships every MR twice; a user picking the wrong one gets fields pruned
     expect(screen.getAllByText("Queue")).toHaveLength(2)
-    expect(screen.getByTestId("scope-Namespaced")).toBeInTheDocument()
+    // The fixture also carries the native Deployment (provider "k8s"), which
+    // is namespaced too — so Namespaced badges are plural, Cluster's is not.
+    expect(screen.getAllByTestId("scope-Namespaced").length).toBeGreaterThan(0)
     expect(screen.getByTestId("scope-Cluster")).toBeInTheDocument()
   })
 

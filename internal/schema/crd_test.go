@@ -189,3 +189,19 @@ func TestAPIVersionErrorsRatherThanReturningMalformedString(t *testing.T) {
 		t.Errorf("APIVersion() = %q, want empty string on error", got)
 	}
 }
+
+// A native core-group kind (Group "") has the bare version as its
+// apiVersion -- "v1", never the malformed "/v1" the naive concatenation
+// would produce. Only internal/schema/k8s builds CRDs with an empty group;
+// a parsed CustomResourceDefinition cannot have one.
+func TestAPIVersionOfCoreGroupIsBareVersion(t *testing.T) {
+	c := CRD{Kind: "ConfigMap", Plural: "configmaps", Native: true,
+		Versions: []Version{{Name: "v1", Served: true, Storage: true}}}
+	got, err := c.APIVersion()
+	if err != nil {
+		t.Fatalf("APIVersion: %v", err)
+	}
+	if got != "v1" {
+		t.Errorf("APIVersion() = %q, want %q", got, "v1")
+	}
+}

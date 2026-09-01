@@ -2,6 +2,16 @@
 // user edits and the single source of truth for generated output.
 package blueprint
 
+// NativeProvider is the provider label for native Kubernetes kinds — the
+// value a resource's provider field carries to compose a Deployment or
+// Service directly, and the provider label those kinds wear in the index
+// and /api/kinds. It is a label, not a package reference: native kinds are
+// vendored into cf itself (internal/schema/k8s, pinned per Kubernetes
+// version) and are always available, so nothing ever fetches, caches or
+// digest-pins a source named "k8s" — which is why Validate refuses it in
+// spec.sources.
+const NativeProvider = "k8s"
+
 // Blueprint is the root document.
 type Blueprint struct {
 	APIVersion string   `json:"apiVersion"`

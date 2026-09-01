@@ -117,10 +117,14 @@ func (srv *server) handleKindFields(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// See handleKind: a CRD version with no schema block makes ForProvider
-	// fail; that is zero fields, not a server error (index.Build treats it
+	// FieldTree serves both composable families from one call: the
+	// forProvider subtree for a managed resource, and for a native kind the
+	// object's own settable tree, whose paths read exactly like a manifest
+	// (spec.template.spec.containers[0].image on a Deployment). See
+	// handleKind: a CRD version with no schema block makes FieldTree fail;
+	// that is zero fields, not a server error (index.Build treats it
 	// identically when building Kind.Fields/Kind.Required).
-	nodes, err := crd.ForProvider()
+	nodes, err := crd.FieldTree()
 	if err != nil {
 		nodes = nil
 	}

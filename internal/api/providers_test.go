@@ -12,10 +12,24 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/index"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
+
+// nativeKindCount is how many vendored native kinds every index rebuild
+// re-indexes under provider "k8s" — read from the vendored source itself so
+// this file never hard-codes a number that internal/schema/k8s owns.
+func nativeKindCount(t *testing.T) int {
+	t.Helper()
+	native, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+	return len(native)
+}
 
 // TestProvidersListsTheServersProviders pins GET /api/providers' whole
 // response: the one provider the test server was started with, carrying the
@@ -341,8 +355,27 @@ func TestConcurrentAddsAllLand(t *testing.T) {
 	if code := getJSON(t, h, "/api/kinds", &kinds); code != 200 {
 		t.Fatalf("GET /api/kinds: status %d", code)
 	}
-	if len(kinds.Kinds) != n+2 { // 2 Queues + one Thing per added provider
-		t.Errorf("kinds = %d (%+v), want %d — an add's index swap was lost", len(kinds.Kinds), kinds.Kinds, n+2)
+	// Every rebuild also re-indexes the vendored native Kubernetes kinds
+	// under provider "k8s" (see handleAddProvider), so the survivors of the
+	// concurrent adds are counted per family: each added provider's Thing
+	// must have landed, the fixture's 2 Queues must remain, and the native
+	// kinds must all still be there — losing THEM to a rebuild is exactly
+	// the regression the byProvider[NativeProvider] line guards against.
+	byProvider := map[string]int{}
+	for _, k := range kinds.Kinds {
+		byProvider[k.Provider]++
+	}
+	for _, ref := range refs {
+		if byProvider[ref] != 1 {
+			t.Errorf("provider %s has %d kinds in the index, want 1 — an add's index swap was lost", ref, byProvider[ref])
+		}
+	}
+	if byProvider[testProviderRef] != 2 {
+		t.Errorf("fixture provider has %d kinds, want its 2 Queues", byProvider[testProviderRef])
+	}
+	if byProvider[blueprint.NativeProvider] != nativeKindCount(t) {
+		t.Errorf("provider %q has %d kinds after the rebuilds, want all %d vendored native kinds",
+			blueprint.NativeProvider, byProvider[blueprint.NativeProvider], nativeKindCount(t))
 	}
 
 	l, err := cache.ReadLock(o.Lock)

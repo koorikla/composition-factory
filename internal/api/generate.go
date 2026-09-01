@@ -18,6 +18,7 @@ import (
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
 // generateRequest is the POST /api/generate body.
@@ -127,7 +128,10 @@ func (srv *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 // loadSourceCRDs loads every provider schema b.Spec.Sources names, from
 // srv.Store — the identical loop cmd/cf/gen.go's run uses, so this route reads
 // the provider cache exactly the way `cf gen` does rather than inventing its
-// own lookup order or error handling for it.
+// own lookup order or error handling for it — then appends the vendored
+// native Kubernetes kinds, exactly the way `cf gen` does. Native kinds name
+// no source (blueprint.Validate refuses a source called "k8s") and live in
+// no cache: they are compiled into the binary and always available.
 func (srv *server) loadSourceCRDs(b *blueprint.Blueprint) ([]schema.CRD, error) {
 	var crds []schema.CRD
 	for _, s := range b.Spec.Sources {
@@ -137,5 +141,9 @@ func (srv *server) loadSourceCRDs(b *blueprint.Blueprint) ([]schema.CRD, error) 
 		}
 		crds = append(crds, got...)
 	}
-	return crds, nil
+	native, err := k8s.Kinds()
+	if err != nil {
+		return nil, err
+	}
+	return append(crds, native...), nil
 }

@@ -205,6 +205,15 @@ func (b *Blueprint) Validate() error {
 		if s.Provider == "" {
 			return fmt.Errorf("spec.sources[%d].provider is required", i)
 		}
+		// "k8s" is a label, not a package: every loader treats a source entry
+		// as something to pull from the schema cache (cache.Store.Load), so a
+		// source named "k8s" would fail there with a misleading "run: cf
+		// provider add k8s". Refuse it here with the real explanation instead.
+		if s.Provider == NativeProvider {
+			return fmt.Errorf("spec.sources[%d].provider: %q is not a package source -- native Kubernetes "+
+				"kinds are vendored into cf itself and always available. Delete this source entry and set "+
+				"provider: %s on the resources that compose native kinds", i, s.Provider, NativeProvider)
+		}
 		if err := checkScalar(fmt.Sprintf("spec.sources[%d].provider", i), s.Provider); err != nil {
 			return err
 		}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/rendertest"
 	"sigs.k8s.io/yaml"
 )
 
@@ -379,7 +380,13 @@ func TestRenderIntegrationRealCrossplane(t *testing.T) {
 
 	h := testHandler(t) // nil seams: the real exec path end to end
 
+	// Serialized against the root acceptance tests' renders: all of them
+	// reuse the same runtime-docker-name containers, and two renders in
+	// concurrently running test processes race on that name — see
+	// internal/rendertest.
+	release := rendertest.Lock(t)
 	rec := do(t, h, "POST", "/api/render", "")
+	release()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
 	}

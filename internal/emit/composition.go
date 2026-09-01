@@ -7,6 +7,7 @@ import (
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
 // Composition renders the Composition for b, resolving each resource's kind
@@ -60,7 +61,7 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 	d.Line(ti, "{{- $xr := .observed.composite.resource.metadata.name -}}")
 
 	for _, r := range b.Spec.Resources {
-		crd, err := resolveKind(crds, r.Kind, wantNamespaced)
+		crd, err := resolveKind(crds, r, wantNamespaced)
 		if err != nil {
 			return nil, err
 		}
@@ -113,9 +114,26 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		// A native Kubernetes kind takes the whole other branch of the
+		// envelope fork: apiVersion/kind/metadata/spec ARE the composed
+		// object, so its (object-rooted) field paths render as a real nested
+		// tree and NOTHING below this comment — no forProvider, no
+		// providerConfigRef, no managementPolicies — applies to it. A native
+		// object is not a managed resource: it has no provider credentials
+		// to reference, and a Crossplane envelope key would be silently
+		// pruned by the API server, the exact defect class checkFieldPaths
+		// exists to close.
+		if crd.Native {
+			if err := writeNativeFields(d, ti, r.Name, plan); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		d.Line(ti, "spec:")
-		// M1 assumes a forProvider-shaped spec envelope, and this is the one
-		// place that assumption is written down as code.
+		// M1 assumes a forProvider-shaped spec envelope for MANAGED
+		// resources, and this is the one place that assumption is written
+		// down as code (native kinds branch off above, before any envelope
+		// exists to assume).
 		//
 		// Global Constraint 8 says never hard-code the managed-resource spec
 		// envelope: compute `envelope = spec.properties - {forProvider,
@@ -160,8 +178,9 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 }
 
 // checkFieldPaths resolves every blueprint field path for r against the
-// resolved CRD's spec.forProvider schema, erroring on any path the schema
-// does not define.
+// resolved kind's settable-field schema — spec.forProvider for a managed
+// resource, the object's own vendored schema for a native kind — erroring on
+// any path the schema does not define.
 //
 // This closes a silent-wrongness path of exactly the kind this project
 // treats as its central defect class. A typo'd `visibiltyTimeout` used to be
@@ -182,11 +201,23 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 // too. What is rejected is a path that matches nothing in the schema at any
 // depth, which is the typo case.
 func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
-	nodes, err := crd.ForProvider()
+	// FieldTree branches on what "the settable fields" means: the
+	// spec.forProvider subtree for a managed resource, the object's own
+	// (object-rooted) schema for a native kind — so a native blueprint path
+	// like spec.template.spec.containers[0].image validates against the
+	// vendored Kubernetes schema through the same known-set logic below.
+	nodes, err := crd.FieldTree()
 	if err != nil {
 		return fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
 	}
 	if len(nodes) == 0 {
+		if crd.Native {
+			// Unlike the forProvider case below this is never a legitimate
+			// schema shape: every vendored native kind has settable fields,
+			// so an empty tree means the vendored subset itself is broken.
+			return fmt.Errorf("resource %q: native kind %q resolved to an empty vendored schema; "+
+				"this is a defect in the vendored OpenAPI subset (internal/schema/k8s), not in the blueprint", r.Name, r.Kind)
+		}
 		// Not an internal error: provider-kubernetes' ObservedObjectCollection
 		// genuinely has no forProvider. M1 cannot compose such a resource
 		// (see the envelope comment in Composition), and saying so is far
@@ -195,6 +226,10 @@ func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
 		return fmt.Errorf("resource %q: kind %q has no spec.forProvider properties in its CRD; "+
 			"M1 can only compose forProvider-shaped managed resources "+
 			"(computing the full spec envelope is M2 work)", r.Name, r.Kind)
+	}
+	where := crd.Kind + " spec.forProvider"
+	if crd.Native {
+		where = "the native " + crd.Kind + " schema"
 	}
 
 	leaves := schema.Leaves(nodes, "")
@@ -218,13 +253,13 @@ func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
 			continue
 		}
 		if s := closestPath(p, suggestions); s != "" {
-			return fmt.Errorf("resource %q: field %q is not in %s spec.forProvider; did you mean %q? "+
+			return fmt.Errorf("resource %q: field %q is not in %s; did you mean %q? "+
 				"(an unknown field is silently pruned by the API server on apply, so it must be "+
-				"caught here)", r.Name, p, crd.Kind, s)
+				"caught here)", r.Name, p, where, s)
 		}
-		return fmt.Errorf("resource %q: field %q is not in %s spec.forProvider "+
+		return fmt.Errorf("resource %q: field %q is not in %s "+
 			"(an unknown field is silently pruned by the API server on apply, so it must be "+
-			"caught here)", r.Name, p, crd.Kind)
+			"caught here)", r.Name, p, where)
 	}
 	return nil
 }
@@ -439,14 +474,43 @@ func writeField(d *Doc, indent int, fld forProviderField) {
 	d.Line(indent, "{{- end }}")
 }
 
-// resolveKind finds the CRD for kind, preferring the scope the XRD needs. For a
-// Namespaced XRD that is the ".m." group variant; the legacy cluster-scoped one
-// has a different spec envelope and its fields get pruned.
-func resolveKind(crds []schema.CRD, kind string, wantNamespaced bool) (schema.CRD, error) {
+// resolveKind finds the CRD for r's kind, matching on (kind, provider): a
+// resource whose provider is "k8s" resolves ONLY against the vendored native
+// kinds, and every other resource resolves only against managed resources,
+// preferring the scope the XRD needs. For a Namespaced XRD that is the ".m."
+// group variant; the legacy cluster-scoped one has a different spec envelope
+// and its fields get pruned.
+//
+// The native match is deliberately explicit-only. Kind names collide across
+// the two families for real (provider-aws-ecs ships a managed "Service";
+// Kubernetes has one too), and a resolution that quietly preferred one
+// family for a bare kind name would emit a structurally different resource
+// than the author meant — with no error anywhere. So a native kind is never
+// selected without provider: k8s on the resource; a bare kind that matches
+// only a native kind fails with the hint instead of being auto-upgraded.
+func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (schema.CRD, error) {
+	if r.Provider == blueprint.NativeProvider {
+		for _, c := range crds {
+			if c.Native && c.Kind == r.Kind {
+				return c, nil
+			}
+		}
+		return schema.CRD{}, fmt.Errorf("resource %q: kind %q is not one of the vendored native Kubernetes kinds "+
+			"(provider %q serves the subset pinned to Kubernetes %s)", r.Name, r.Kind, blueprint.NativeProvider, k8s.Version)
+	}
+
 	var fallback *schema.CRD
+	nativeExists := false
 	for i := range crds {
 		c := crds[i]
-		if c.Kind != kind || !c.IsManaged() {
+		if c.Kind != r.Kind {
+			continue
+		}
+		if c.Native {
+			nativeExists = true
+			continue
+		}
+		if !c.IsManaged() {
 			continue
 		}
 		if c.Namespaced() == wantNamespaced {
@@ -460,7 +524,12 @@ func resolveKind(crds []schema.CRD, kind string, wantNamespaced bool) (schema.CR
 	}
 	if fallback != nil {
 		return schema.CRD{}, fmt.Errorf("kind %q: no %s variant found (only %s in %s); "+
-			"a %s XRD needs the matching variant", kind, scope, fallback.Scope, fallback.Group, scope)
+			"a %s XRD needs the matching variant", r.Kind, scope, fallback.Scope, fallback.Group, scope)
 	}
-	return schema.CRD{}, fmt.Errorf("kind %q not found in any cached provider; run cf provider add", kind)
+	if nativeExists {
+		return schema.CRD{}, fmt.Errorf("kind %q not found in any cached provider, but a native Kubernetes "+
+			"kind with that name exists; to compose the native %s, set provider: %s on the resource",
+			r.Kind, r.Kind, blueprint.NativeProvider)
+	}
+	return schema.CRD{}, fmt.Errorf("kind %q not found in any cached provider; run cf provider add", r.Kind)
 }
