@@ -36,14 +36,45 @@ served as a fixed snapshot — not answered per request.
 
 ## What's in it
 
-`scripts/build-catalogue` enumerates crossplane-contrib's `provider-*` and
-`function-*` GitHub repositories (excluding forks) and, for each one, tries
-to resolve the latest **stable** tag of its `ghcr.io/crossplane-contrib/<repo>`
-image — a strict `vMAJOR.MINOR.PATCH` tag, never a pre-release
-(`v1.2.3-rc1`) and never one of the Go pseudo-version tags several of these
-repos push to ghcr.io on every commit to `main`
-(`v0.0.0-20251028114116-30cc3a089783` — these outnumber real releases by
-roughly 10:1 in the tag lists this generator observed).
+`scripts/build-catalogue` combines two sources into one catalogue:
+
+1. **Repositories.** It enumerates crossplane-contrib's `provider-*` and
+   `function-*` GitHub repositories (excluding forks) and, for each one,
+   tries to resolve the latest **stable** tag of its
+   `ghcr.io/crossplane-contrib/<repo>` image — a strict `vMAJOR.MINOR.PATCH`
+   tag, never a pre-release (`v1.2.3-rc1`) and never one of the Go
+   pseudo-version tags several of these repos push to ghcr.io on every
+   commit to `main` (`v0.0.0-20251028114116-30cc3a089783` — these outnumber
+   real releases by roughly 10:1 in the tag lists this generator observed).
+   This covers the ordinary case: one repo, one image.
+
+2. **Upjet provider families** (`scripts/build-catalogue/family.go`). Four
+   crossplane-contrib repos today — `provider-upjet-aws`,
+   `provider-upjet-gcp`, `provider-upjet-azure`,
+   `provider-upjet-alibabacloud` — are monorepos that don't publish one
+   image per repo at all. Each one publishes a *separate*
+   `ghcr.io/crossplane-contrib/provider-<cloud>-<service>` image per service
+   directory under its own `cmd/provider/` (e.g. `provider-aws-rds`,
+   `provider-aws-s3`, `provider-gcp-storage` — this project's own testdata
+   and README install `provider-aws-sqs`, a sibling of both from the same
+   family), and none of those ~370 images has a GitHub repository of its
+   own for the repo-based enumeration above to find. `family.go` finds every
+   `provider-upjet-*` repo whose `cmd/provider/` directory actually splits
+   into per-service subdirectories (as opposed to one that happens to share
+   the naming convention but ships a single image — nine other
+   `provider-upjet-*` repos crossplane-contrib has today are like that), and
+   synthesizes one catalogue entry per service, named the same way the image
+   itself is (`provider-<cloud>-<service>`).
+
+   Tag resolution for a family is sampled, not exhaustive: a family
+   publishes every one of its images from a single release, so
+   `resolveFamilyTags` resolves the family's own `provider-family-<cloud>`
+   package plus a handful of its services, and — once those agree — trusts
+   that one tag for the rest rather than paying for ~370 more
+   request pairs on every run. If even one sampled service disagrees, it
+   falls back to resolving every service in that family individually. See
+   `resolveFamilyTags`'s doc comment for the live numbers this was verified
+   against.
 
 The result is written to `catalogue/providers.json`:
 
@@ -55,29 +86,45 @@ The result is written to `catalogue/providers.json`:
     "description": "A Go templating composition function",
     "source": "https://github.com/crossplane-contrib/function-go-templating",
     "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-rds",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0",
+    "description": "AWS Provider for Crossplane. — rds service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
   }
 ]
 ```
 
-Sorted by `name`, one entry per repository, five fields always present.
+Sorted by `name`, one entry per repository *or* per family service, five
+fields always present. `mergeCatalogue` (`scripts/build-catalogue/family.go`)
+combines the two sources and deduplicates by `name` — no known collision
+between them exists today (no plain GitHub repo happens to be named
+`provider-<cloud>-<service>` for a pair an upjet family also publishes), but
+a repo-derived entry wins one if it ever occurs.
 
 ### Policy: label, don't hide
 
 Not every `provider-*`/`function-*` repository has a resolvable
-`ghcr.io/crossplane-contrib/<repo>` image. When this catalogue was first
-generated, **63 of 108** matching repositories had none — most of the large
-upjet provider families (`provider-upjet-aws`, `provider-upjet-gcp`, …)
-publish many per-service images under `xpkg.upbound.io/upbound/provider-<service>`
-instead of one monolithic `ghcr.io/crossplane-contrib/<repo>` image, and a
-handful of archived repositories no longer have a package under that path at
-all.
+`ghcr.io/crossplane-contrib/<repo>` image, and a repository is what "label,
+don't hide" applies to — the four upjet family *repos* themselves
+(`provider-upjet-aws` and friends) are exactly this case: the family repo
+gets its own entry with `ref: ""`, because the repo itself still doesn't
+publish one `ghcr.io/crossplane-contrib/provider-upjet-aws` image; its
+*services* do, under different names, which is what family.go adds
+separately (see above). When this catalogue was first generated (before
+family.go existed), **65 of 108** matching repositories had `ref: ""` for
+this reason, most of them the upjet families themselves plus a handful of
+archived repositories with no package left under that path at all.
 
 Those repositories are **not dropped from the catalogue**. Each still gets
 an entry — `name`, `description`, `source` and `license` from GitHub, same
 as any other — with `ref: ""` labelling that no installable image reference
 could be resolved. A caller that only wants installable entries filters on
 `ref != ""` itself; the generator does not make that filtering decision for
-every consumer.
+every consumer. A family service works the same way: if its own tag (and the
+family's) can't be resolved, it still gets an entry, with `ref: ""`.
 
 `license` follows the same rule: a repository GitHub reports no detected
 license for gets `"NOASSERTION"` (the SPDX placeholder for "no license
@@ -130,7 +177,7 @@ committed in this repository was generated exactly this way: `curl` did the
 live fetching, and its output was reshaped into a manifest the (offline,
 sandboxed) generator could consume.
 
-A manifest is a JSON object with two keys:
+A manifest is a JSON object with up to three keys:
 
 ```json
 {
@@ -139,7 +186,20 @@ A manifest is a JSON object with two keys:
   ],
   "tags": {
     "function-go-templating": ["v0.9.2", "v0.10.0", "v0.11.0", "v0.0.0-20251028114116-30cc3a089783"]
-  }
+  },
+  "families": [
+    {
+      "repo": "provider-upjet-aws",
+      "description": "AWS Provider for Crossplane.",
+      "html_url": "https://github.com/crossplane-contrib/provider-upjet-aws",
+      "license_spdx_id": "Apache-2.0",
+      "services": ["ec2", "rds", "s3", "sqs", "..."],
+      "tags": {
+        "provider-family-aws": ["v2.6.0", "v2.7.0"],
+        "provider-aws-accessanalyzer": ["v2.6.0", "v2.7.0"]
+      }
+    }
+  ]
 }
 ```
 
@@ -152,6 +212,28 @@ filtering. A repo present in `repos` but absent (or empty) in `tags` is
 treated the same way live mode treats a repo whose ghcr.io token request was
 denied: no resolvable ref, entry still present (see "label, don't hide"
 above).
+
+`families` is optional (absent or empty means exactly what it meant before
+family.go existed: no synthesized per-service entries) and is the
+`--from-file` counterpart of `discoverFamilies`/`resolveFamilyTags`
+(`family.go`). One entry per upjet family repo:
+
+- `repo`/`description`/`html_url`/`license_spdx_id` mirror a `repos[]` entry
+  for the same repo.
+- `services` is the `cmd/provider/<service>` directory names this family
+  publishes as per-service packages — the contents-API equivalent of
+  `curl https://api.github.com/repos/<owner>/<repo>/contents/cmd/provider`,
+  filtered to directories other than `monolith` (the all-in-one image) and
+  `config` (the family's ProviderConfig-only package, published separately
+  as `provider-family-<cloud>` — see `nonServiceSubpackages` in family.go).
+- `tags` maps a full ghcr.io package name to that package's own unfiltered
+  `tags/list` output, same shape as the top-level `tags` key but keyed by
+  package name instead of repo name. In practice this holds the family's own
+  `provider-family-<cloud>` package plus a small sample of individual
+  services (`resolveFamilyTags`'s politeness sample — see "What's in it"
+  above); a service named in `services` but absent here inherits the family
+  package's resolved tag (`resolveFamilyServiceTags`) instead of going
+  unresolved.
 
 The curl recipe that built this repository's manifest, roughly:
 
@@ -166,13 +248,29 @@ token=$(curl -s "https://ghcr.io/token?service=ghcr.io&scope=repository:crosspla
 curl -s -H "Authorization: Bearer $token" \
   "https://ghcr.io/v2/crossplane-contrib/<repo>/tags/list" -o tags/<repo>.json
 
-# 3. Assemble page1.json + page2.json + tags/*.json into one manifest.json
-#    (repos: [...], tags: {<repo>: [...]}) and run the generator against it.
+# 3. For each provider-upjet-* repo, list cmd/provider/ to find its services
+#    (a repo with only cmd/provider/main.go and no subdirectories here is not
+#    a family — skip it, its repos[]/tags[] entry above already covers it):
+curl -s "https://api.github.com/repos/crossplane-contrib/<repo>/contents/cmd/provider?ref=main" \
+  -o cmd-provider/<repo>.json
+
+# 4. For each family repo found in step 3, resolve its own
+#    provider-family-<cloud> package's tags (step 2's recipe, applied to
+#    that package name) plus a handful of its services' — enough to confirm
+#    they all share one version (see resolveFamilyTags) — and put the raw
+#    results in families[].tags, keyed by full package name.
+
+# 5. Assemble page1.json + page2.json + tags/*.json + cmd-provider/*.json
+#    into one manifest.json (repos: [...], tags: {...}, families: [...])
+#    and run the generator against it.
 go run ./scripts/build-catalogue --from-file manifest.json --out catalogue/providers.json
 ```
 
 `scripts/build-catalogue/testdata/manifest.json` is a small, hand-written
-manifest in this exact shape, used by the package's own tests.
+manifest in this exact shape (without a `families` key — that path is
+covered separately by `scripts/build-catalogue/family_test.go` and
+`TestRunFromFileIncludesUpjetFamilyServices` in `main_test.go`), used by the
+package's own tests.
 
 ## Testing
 
@@ -180,11 +278,25 @@ manifest in this exact shape, used by the package's own tests.
   `catalogue/providers.json`: non-empty, parses, sorted by name, no
   duplicates (`TestEmbeddedCatalogueIsValid`) — this is the gate that fails
   `go test ./...` if a future regeneration ever produces a broken file.
+  `TestEmbeddedCatalogueHasUpjetFamilyServices` additionally pins that
+  `provider-aws-rds`, `provider-aws-s3` and `provider-gcp-storage` exist with
+  a non-empty `ref` — established, actively published family services stable
+  enough to name directly, unlike a specific version tag (which this test
+  deliberately does not pin).
 - `scripts/build-catalogue/*_test.go` covers the generator itself against
   fake fixtures and an `httptest` server standing in for `api.github.com`
   and `ghcr.io` — tag selection (stable vs. pre-release vs. pseudo-version),
   the label-don't-hide policy, pagination, rate-limit handling, and
   deterministic output — with zero real network access.
+  `scripts/build-catalogue/family_test.go` covers family.go the same way:
+  `discoverFamilies` telling a real family apart from a
+  same-naming-convention single-image repo against recorded-fixture-shaped
+  GitHub contents API responses (`testdata/cmd_provider_family.json`,
+  `testdata/cmd_provider_monolithic.json`), `resolveFamilyTags`'s sampled
+  fast path and its fallback when a sampled service disagrees with the
+  family tag, and `mergeCatalogue`'s dedupe-by-name policy.
+  `TestRunFromFileIncludesUpjetFamilyServices` (`main_test.go`) drives the
+  whole `--from-file` path end to end with a family present in the manifest.
 - `internal/api/catalogue_test.go` covers the HTTP route: the full list, the
   `q` filter, and participation in the shared ETag/gzip middleware.
 - `internal/api/contract_fixtures_test.go`'s

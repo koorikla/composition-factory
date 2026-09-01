@@ -1,0 +1,32 @@
+[
+  {
+    "name": "config",
+    "path": "cmd/provider/config",
+    "sha": "ce673a4576d4c9c913dbd470fb39e55408ace553",
+    "type": "dir"
+  },
+  {
+    "name": "monolith",
+    "path": "cmd/provider/monolith",
+    "sha": "e6870ed5a87cfb4f095a7c597a93236dc38bcea9",
+    "type": "dir"
+  },
+  {
+    "name": "rds",
+    "path": "cmd/provider/rds",
+    "sha": "59a9783a71ef7248f17ab6c094d202f24f51536c",
+    "type": "dir"
+  },
+  {
+    "name": "s3",
+    "path": "cmd/provider/s3",
+    "sha": "1e9cd83f17861131d306d85e11df31786abdf395",
+    "type": "dir"
+  },
+  {
+    "name": "sqs",
+    "path": "cmd/provider/sqs",
+    "sha": "9a327a5d3384f3a89327a5d3384f3a89327a5d3",
+    "type": "dir"
+  }
+]

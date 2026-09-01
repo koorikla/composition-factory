@@ -2,6 +2,45 @@ package catalogue
 
 import "testing"
 
+// TestEmbeddedCatalogueHasUpjetFamilyServices pins the fix for this
+// catalogue's "searching for provider-aws-rds finds nothing" gap: the upjet
+// provider families (provider-upjet-aws, provider-upjet-gcp, ...) publish
+// per-service ghcr.io/crossplane-contrib/provider-<cloud>-<service> images
+// with no GitHub repository of their own, so scripts/build-catalogue has to
+// synthesize an entry for each one (see scripts/build-catalogue/family.go)
+// rather than only ever enumerating GitHub repositories.
+//
+// These three are pinned directly, by name, with a non-empty Ref: all three
+// are established, actively published AWS/GCP service packages (this
+// project's own testdata and README install
+// ghcr.io/crossplane-contrib/provider-aws-sqs — a sibling of
+// provider-aws-rds and provider-aws-s3 from the very same family) stable
+// enough not to disappear from crossplane-contrib's catalogue between
+// regenerations, unlike a specific version tag, which this test
+// deliberately does not pin.
+func TestEmbeddedCatalogueHasUpjetFamilyServices(t *testing.T) {
+	entries, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	byName := make(map[string]Provider, len(entries))
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+
+	for _, name := range []string{"provider-aws-rds", "provider-aws-s3", "provider-gcp-storage"} {
+		e, ok := byName[name]
+		if !ok {
+			t.Errorf("%s is missing from the embedded catalogue entirely", name)
+			continue
+		}
+		if e.Ref == "" {
+			t.Errorf("%s has an empty Ref — want a resolved, pullable ghcr.io image reference", name)
+		}
+	}
+}
+
 // TestEmbeddedCatalogueIsValid is the gate scripts/build-catalogue's own
 // output has to clear: the file actually committed at
 // catalogue/providers.json parses, is non-empty, and is sorted by Name with

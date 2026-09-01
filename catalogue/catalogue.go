@@ -29,25 +29,32 @@ import (
 //go:embed providers.json
 var providersJSON []byte
 
-// Provider is one entry in the discovery catalogue: a single
-// crossplane-contrib provider-* or function-* repository, resolved to its
-// latest stable ghcr.io image where one could be found.
+// Provider is one entry in the discovery catalogue: either a single
+// crossplane-contrib provider-* or function-* repository, or a single
+// per-service package published by one of the upjet provider family
+// monorepos (provider-upjet-aws, provider-upjet-gcp, ...) that has no
+// GitHub repository of its own — see scripts/build-catalogue/family.go and
+// docs/catalogue.md. Either way, resolved to its latest stable ghcr.io image
+// where one could be found.
 type Provider struct {
-	// Name is the repository name, e.g. "provider-aws" or
-	// "function-go-templating" — also the ghcr.io/crossplane-contrib image
-	// name when Ref is non-empty.
+	// Name is the repository name (e.g. "provider-aws",
+	// "function-go-templating") for a repo-derived entry, or the
+	// ghcr.io/crossplane-contrib image name (e.g. "provider-aws-rds") for a
+	// family-service entry — either way, also the ghcr.io/crossplane-contrib
+	// image name when Ref is non-empty.
 	Name string `json:"name"`
 	// Ref is the full, installable image reference for the latest stable
 	// (strict semver, non-prerelease) tag scripts/build-catalogue could
-	// resolve on ghcr.io, e.g. "ghcr.io/crossplane-contrib/function-go-templating:v0.11.0".
+	// resolve on ghcr.io, e.g. "ghcr.io/crossplane-contrib/function-go-templating:v0.11.0"
+	// or "ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0".
 	//
 	// Empty, deliberately, rather than the entry being omitted, when no
-	// stable tag could be resolved — an archived repo, one published under a
-	// different registry/namespace entirely (most upjet provider families
-	// ship as xpkg.upbound.io/upbound/provider-<service>, not a single
-	// ghcr.io/crossplane-contrib/<repo> image), or one with no releases at
-	// all. This project's catalogue policy is to label such repos, not hide
-	// them — see scripts/build-catalogue's buildCatalogue.
+	// stable tag could be resolved — an archived repo, one with no releases
+	// at all, or (for a repo-derived entry) an upjet provider family
+	// monorepo itself: its own repo name has no ghcr.io image (its services
+	// do, each as its own family-service entry — see above). This project's
+	// catalogue policy is to label such repos, not hide them — see
+	// scripts/build-catalogue's buildCatalogue and mergeCatalogue.
 	Ref string `json:"ref"`
 	// Description is the repository's own GitHub description, verbatim.
 	Description string `json:"description"`

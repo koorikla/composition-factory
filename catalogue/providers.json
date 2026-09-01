@@ -161,6 +161,146 @@
     "license": "Apache-2.0"
   },
   {
+    "name": "provider-alibabacloud-ack",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-ack:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — ack service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-ackone",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-ackone:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — ackone service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-alb",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-alb:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — alb service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-alidns",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-alidns:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — alidns service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-cdn",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-cdn:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — cdn service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-cloudmonitorservice",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-cloudmonitorservice:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — cloudmonitorservice service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-cr",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-cr:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — cr service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-ecs",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-ecs:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — ecs service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-fcv3",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-fcv3:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — fcv3 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-kms",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-kms:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — kms service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-messageservice",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-messageservice:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — messageservice service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-oos",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-oos:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — oos service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-oss",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-oss:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — oss service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-polardb",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-polardb:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — polardb service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-privatelink",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-privatelink:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — privatelink service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-quotas",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-quotas:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — quotas service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-ram",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-ram:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — ram service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-slb",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-slb:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — slb service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-tair",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-tair:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — tair service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibabacloud-vpc",
+    "ref": "ghcr.io/crossplane-contrib/provider-alibabacloud-vpc:v1.3.0",
+    "description": "AlibabaCloud Provider for Crossplane. — vpc service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
     "name": "provider-ansible",
     "ref": "ghcr.io/crossplane-contrib/provider-ansible:v0.8.0",
     "description": "Crossplane provider to execute Ansible contents remotely inside a Kubernetes cluster.",
@@ -182,10 +322,1886 @@
     "license": "Apache-2.0"
   },
   {
+    "name": "provider-aws-accessanalyzer",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-accessanalyzer:v2.7.0",
+    "description": "AWS Provider for Crossplane. — accessanalyzer service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-account",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-account:v2.7.0",
+    "description": "AWS Provider for Crossplane. — account service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-acm",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-acm:v2.7.0",
+    "description": "AWS Provider for Crossplane. — acm service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-acmpca",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-acmpca:v2.7.0",
+    "description": "AWS Provider for Crossplane. — acmpca service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-amp",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-amp:v2.7.0",
+    "description": "AWS Provider for Crossplane. — amp service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-amplify",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-amplify:v2.7.0",
+    "description": "AWS Provider for Crossplane. — amplify service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-apigateway",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-apigateway:v2.7.0",
+    "description": "AWS Provider for Crossplane. — apigateway service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-apigatewayv2",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-apigatewayv2:v2.7.0",
+    "description": "AWS Provider for Crossplane. — apigatewayv2 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-appautoscaling",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-appautoscaling:v2.7.0",
+    "description": "AWS Provider for Crossplane. — appautoscaling service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-appconfig",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-appconfig:v2.7.0",
+    "description": "AWS Provider for Crossplane. — appconfig service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-appflow",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-appflow:v2.7.0",
+    "description": "AWS Provider for Crossplane. — appflow service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-appintegrations",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-appintegrations:v2.7.0",
+    "description": "AWS Provider for Crossplane. — appintegrations service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-applicationinsights",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-applicationinsights:v2.7.0",
+    "description": "AWS Provider for Crossplane. — applicationinsights service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-appmesh",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-appmesh:v2.7.0",
+    "description": "AWS Provider for Crossplane. — appmesh service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-apprunner",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-apprunner:v2.7.0",
+    "description": "AWS Provider for Crossplane. — apprunner service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-appstream",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-appstream:v2.7.0",
+    "description": "AWS Provider for Crossplane. — appstream service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-appsync",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-appsync:v2.7.0",
+    "description": "AWS Provider for Crossplane. — appsync service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-athena",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-athena:v2.7.0",
+    "description": "AWS Provider for Crossplane. — athena service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-autoscaling",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-autoscaling:v2.7.0",
+    "description": "AWS Provider for Crossplane. — autoscaling service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-autoscalingplans",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-autoscalingplans:v2.7.0",
+    "description": "AWS Provider for Crossplane. — autoscalingplans service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-backup",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-backup:v2.7.0",
+    "description": "AWS Provider for Crossplane. — backup service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-batch",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-batch:v2.7.0",
+    "description": "AWS Provider for Crossplane. — batch service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-bedrock",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-bedrock:v2.7.0",
+    "description": "AWS Provider for Crossplane. — bedrock service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-bedrockagent",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-bedrockagent:v2.7.0",
+    "description": "AWS Provider for Crossplane. — bedrockagent service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-bedrockagentcore",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-bedrockagentcore:v2.7.0",
+    "description": "AWS Provider for Crossplane. — bedrockagentcore service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-budgets",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-budgets:v2.7.0",
+    "description": "AWS Provider for Crossplane. — budgets service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-ce",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-ce:v2.7.0",
+    "description": "AWS Provider for Crossplane. — ce service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-chime",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-chime:v2.7.0",
+    "description": "AWS Provider for Crossplane. — chime service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cloud9",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cloud9:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cloud9 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cloudcontrol",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cloudcontrol:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cloudcontrol service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cloudformation",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cloudformation:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cloudformation service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cloudfront",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cloudfront:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cloudfront service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cloudsearch",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cloudsearch:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cloudsearch service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cloudtrail",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cloudtrail:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cloudtrail service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cloudwatch",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cloudwatch:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cloudwatch service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cloudwatchevents",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cloudwatchevents:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cloudwatchevents service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cloudwatchlogs",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cloudwatchlogs:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cloudwatchlogs service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-codeartifact",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-codeartifact:v2.7.0",
+    "description": "AWS Provider for Crossplane. — codeartifact service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-codebuild",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-codebuild:v2.7.0",
+    "description": "AWS Provider for Crossplane. — codebuild service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-codecommit",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-codecommit:v2.7.0",
+    "description": "AWS Provider for Crossplane. — codecommit service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-codeguruprofiler",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-codeguruprofiler:v2.7.0",
+    "description": "AWS Provider for Crossplane. — codeguruprofiler service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-codepipeline",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-codepipeline:v2.7.0",
+    "description": "AWS Provider for Crossplane. — codepipeline service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-codestarconnections",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-codestarconnections:v2.7.0",
+    "description": "AWS Provider for Crossplane. — codestarconnections service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-codestarnotifications",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-codestarnotifications:v2.7.0",
+    "description": "AWS Provider for Crossplane. — codestarnotifications service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cognitoidentity",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cognitoidentity:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cognitoidentity service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cognitoidp",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cognitoidp:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cognitoidp service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-configservice",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-configservice:v2.7.0",
+    "description": "AWS Provider for Crossplane. — configservice service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-connect",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-connect:v2.7.0",
+    "description": "AWS Provider for Crossplane. — connect service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-cur",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-cur:v2.7.0",
+    "description": "AWS Provider for Crossplane. — cur service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-dataexchange",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-dataexchange:v2.7.0",
+    "description": "AWS Provider for Crossplane. — dataexchange service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-datapipeline",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-datapipeline:v2.7.0",
+    "description": "AWS Provider for Crossplane. — datapipeline service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-datasync",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-datasync:v2.7.0",
+    "description": "AWS Provider for Crossplane. — datasync service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-dax",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-dax:v2.7.0",
+    "description": "AWS Provider for Crossplane. — dax service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-deploy",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-deploy:v2.7.0",
+    "description": "AWS Provider for Crossplane. — deploy service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-detective",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-detective:v2.7.0",
+    "description": "AWS Provider for Crossplane. — detective service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-devicefarm",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-devicefarm:v2.7.0",
+    "description": "AWS Provider for Crossplane. — devicefarm service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-directconnect",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-directconnect:v2.7.0",
+    "description": "AWS Provider for Crossplane. — directconnect service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-dlm",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-dlm:v2.7.0",
+    "description": "AWS Provider for Crossplane. — dlm service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-dms",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-dms:v2.7.0",
+    "description": "AWS Provider for Crossplane. — dms service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-docdb",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-docdb:v2.7.0",
+    "description": "AWS Provider for Crossplane. — docdb service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-ds",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-ds:v2.7.0",
+    "description": "AWS Provider for Crossplane. — ds service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-dsql",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-dsql:v2.7.0",
+    "description": "AWS Provider for Crossplane. — dsql service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-dynamodb",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-dynamodb:v2.7.0",
+    "description": "AWS Provider for Crossplane. — dynamodb service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-ec2",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-ec2:v2.7.0",
+    "description": "AWS Provider for Crossplane. — ec2 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-ecr",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-ecr:v2.7.0",
+    "description": "AWS Provider for Crossplane. — ecr service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-ecrpublic",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-ecrpublic:v2.7.0",
+    "description": "AWS Provider for Crossplane. — ecrpublic service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-ecs",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-ecs:v2.7.0",
+    "description": "AWS Provider for Crossplane. — ecs service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-efs",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-efs:v2.7.0",
+    "description": "AWS Provider for Crossplane. — efs service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-eks",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-eks:v2.7.0",
+    "description": "AWS Provider for Crossplane. — eks service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-elasticache",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-elasticache:v2.7.0",
+    "description": "AWS Provider for Crossplane. — elasticache service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-elasticbeanstalk",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-elasticbeanstalk:v2.7.0",
+    "description": "AWS Provider for Crossplane. — elasticbeanstalk service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-elasticsearch",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-elasticsearch:v2.7.0",
+    "description": "AWS Provider for Crossplane. — elasticsearch service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-elastictranscoder",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-elastictranscoder:v2.7.0",
+    "description": "AWS Provider for Crossplane. — elastictranscoder service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-elb",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-elb:v2.7.0",
+    "description": "AWS Provider for Crossplane. — elb service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-elbv2",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-elbv2:v2.7.0",
+    "description": "AWS Provider for Crossplane. — elbv2 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-emr",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-emr:v2.7.0",
+    "description": "AWS Provider for Crossplane. — emr service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-emrcontainers",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-emrcontainers:v2.7.0",
+    "description": "AWS Provider for Crossplane. — emrcontainers service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-emrserverless",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-emrserverless:v2.7.0",
+    "description": "AWS Provider for Crossplane. — emrserverless service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-evidently",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-evidently:v2.7.0",
+    "description": "AWS Provider for Crossplane. — evidently service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-firehose",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-firehose:v2.7.0",
+    "description": "AWS Provider for Crossplane. — firehose service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-fis",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-fis:v2.7.0",
+    "description": "AWS Provider for Crossplane. — fis service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-fsx",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-fsx:v2.7.0",
+    "description": "AWS Provider for Crossplane. — fsx service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-gamelift",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-gamelift:v2.7.0",
+    "description": "AWS Provider for Crossplane. — gamelift service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-glacier",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-glacier:v2.7.0",
+    "description": "AWS Provider for Crossplane. — glacier service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-globalaccelerator",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-globalaccelerator:v2.7.0",
+    "description": "AWS Provider for Crossplane. — globalaccelerator service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-glue",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-glue:v2.7.0",
+    "description": "AWS Provider for Crossplane. — glue service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-grafana",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-grafana:v2.7.0",
+    "description": "AWS Provider for Crossplane. — grafana service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-guardduty",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-guardduty:v2.7.0",
+    "description": "AWS Provider for Crossplane. — guardduty service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-iam",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0",
+    "description": "AWS Provider for Crossplane. — iam service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-identitystore",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-identitystore:v2.7.0",
+    "description": "AWS Provider for Crossplane. — identitystore service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-imagebuilder",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-imagebuilder:v2.7.0",
+    "description": "AWS Provider for Crossplane. — imagebuilder service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-inspector",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-inspector:v2.7.0",
+    "description": "AWS Provider for Crossplane. — inspector service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-inspector2",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-inspector2:v2.7.0",
+    "description": "AWS Provider for Crossplane. — inspector2 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-iot",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-iot:v2.7.0",
+    "description": "AWS Provider for Crossplane. — iot service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-ivs",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-ivs:v2.7.0",
+    "description": "AWS Provider for Crossplane. — ivs service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-kafka",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-kafka:v2.7.0",
+    "description": "AWS Provider for Crossplane. — kafka service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-kafkaconnect",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-kafkaconnect:v2.7.0",
+    "description": "AWS Provider for Crossplane. — kafkaconnect service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-kendra",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-kendra:v2.7.0",
+    "description": "AWS Provider for Crossplane. — kendra service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-keyspaces",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-keyspaces:v2.7.0",
+    "description": "AWS Provider for Crossplane. — keyspaces service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-kinesis",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-kinesis:v2.7.0",
+    "description": "AWS Provider for Crossplane. — kinesis service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-kinesisanalytics",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-kinesisanalytics:v2.7.0",
+    "description": "AWS Provider for Crossplane. — kinesisanalytics service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-kinesisanalyticsv2",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-kinesisanalyticsv2:v2.7.0",
+    "description": "AWS Provider for Crossplane. — kinesisanalyticsv2 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-kinesisvideo",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-kinesisvideo:v2.7.0",
+    "description": "AWS Provider for Crossplane. — kinesisvideo service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-kms",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-kms:v2.7.0",
+    "description": "AWS Provider for Crossplane. — kms service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-lakeformation",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-lakeformation:v2.7.0",
+    "description": "AWS Provider for Crossplane. — lakeformation service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-lambda",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-lambda:v2.7.0",
+    "description": "AWS Provider for Crossplane. — lambda service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-lexmodels",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-lexmodels:v2.7.0",
+    "description": "AWS Provider for Crossplane. — lexmodels service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-licensemanager",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-licensemanager:v2.7.0",
+    "description": "AWS Provider for Crossplane. — licensemanager service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-lightsail",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-lightsail:v2.7.0",
+    "description": "AWS Provider for Crossplane. — lightsail service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-location",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-location:v2.7.0",
+    "description": "AWS Provider for Crossplane. — location service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-macie2",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-macie2:v2.7.0",
+    "description": "AWS Provider for Crossplane. — macie2 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-mediaconvert",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-mediaconvert:v2.7.0",
+    "description": "AWS Provider for Crossplane. — mediaconvert service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-medialive",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-medialive:v2.7.0",
+    "description": "AWS Provider for Crossplane. — medialive service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-mediapackage",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-mediapackage:v2.7.0",
+    "description": "AWS Provider for Crossplane. — mediapackage service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-mediastore",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-mediastore:v2.7.0",
+    "description": "AWS Provider for Crossplane. — mediastore service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-memorydb",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-memorydb:v2.7.0",
+    "description": "AWS Provider for Crossplane. — memorydb service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-mq",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-mq:v2.7.0",
+    "description": "AWS Provider for Crossplane. — mq service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-mwaa",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-mwaa:v2.7.0",
+    "description": "AWS Provider for Crossplane. — mwaa service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-neptune",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-neptune:v2.7.0",
+    "description": "AWS Provider for Crossplane. — neptune service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-networkfirewall",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-networkfirewall:v2.7.0",
+    "description": "AWS Provider for Crossplane. — networkfirewall service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-networkmanager",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-networkmanager:v2.7.0",
+    "description": "AWS Provider for Crossplane. — networkmanager service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-networkmonitor",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-networkmonitor:v2.7.0",
+    "description": "AWS Provider for Crossplane. — networkmonitor service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-oam",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-oam:v2.7.0",
+    "description": "AWS Provider for Crossplane. — oam service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-opensearch",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-opensearch:v2.7.0",
+    "description": "AWS Provider for Crossplane. — opensearch service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-opensearchserverless",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-opensearchserverless:v2.7.0",
+    "description": "AWS Provider for Crossplane. — opensearchserverless service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-organizations",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-organizations:v2.7.0",
+    "description": "AWS Provider for Crossplane. — organizations service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-osis",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-osis:v2.7.0",
+    "description": "AWS Provider for Crossplane. — osis service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-pinpoint",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-pinpoint:v2.7.0",
+    "description": "AWS Provider for Crossplane. — pinpoint service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-pipes",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-pipes:v2.7.0",
+    "description": "AWS Provider for Crossplane. — pipes service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-qldb",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-qldb:v2.7.0",
+    "description": "AWS Provider for Crossplane. — qldb service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-quicksight",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-quicksight:v2.7.0",
+    "description": "AWS Provider for Crossplane. — quicksight service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-ram",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-ram:v2.7.0",
+    "description": "AWS Provider for Crossplane. — ram service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-rds",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0",
+    "description": "AWS Provider for Crossplane. — rds service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-redshift",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-redshift:v2.7.0",
+    "description": "AWS Provider for Crossplane. — redshift service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-redshiftserverless",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-redshiftserverless:v2.7.0",
+    "description": "AWS Provider for Crossplane. — redshiftserverless service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-resourcegroups",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-resourcegroups:v2.7.0",
+    "description": "AWS Provider for Crossplane. — resourcegroups service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-rolesanywhere",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-rolesanywhere:v2.7.0",
+    "description": "AWS Provider for Crossplane. — rolesanywhere service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-route53",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-route53:v2.7.0",
+    "description": "AWS Provider for Crossplane. — route53 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-route53profiles",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-route53profiles:v2.7.0",
+    "description": "AWS Provider for Crossplane. — route53profiles service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-route53recoverycontrolconfig",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-route53recoverycontrolconfig:v2.7.0",
+    "description": "AWS Provider for Crossplane. — route53recoverycontrolconfig service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-route53recoveryreadiness",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-route53recoveryreadiness:v2.7.0",
+    "description": "AWS Provider for Crossplane. — route53recoveryreadiness service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-route53resolver",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-route53resolver:v2.7.0",
+    "description": "AWS Provider for Crossplane. — route53resolver service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-rum",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-rum:v2.7.0",
+    "description": "AWS Provider for Crossplane. — rum service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-s3",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0",
+    "description": "AWS Provider for Crossplane. — s3 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-s3control",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-s3control:v2.7.0",
+    "description": "AWS Provider for Crossplane. — s3control service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-s3vectors",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-s3vectors:v2.7.0",
+    "description": "AWS Provider for Crossplane. — s3vectors service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-sagemaker",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-sagemaker:v2.7.0",
+    "description": "AWS Provider for Crossplane. — sagemaker service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-scheduler",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-scheduler:v2.7.0",
+    "description": "AWS Provider for Crossplane. — scheduler service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-schemas",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-schemas:v2.7.0",
+    "description": "AWS Provider for Crossplane. — schemas service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-secretsmanager",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-secretsmanager:v2.7.0",
+    "description": "AWS Provider for Crossplane. — secretsmanager service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-securityhub",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-securityhub:v2.7.0",
+    "description": "AWS Provider for Crossplane. — securityhub service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-serverlessrepo",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-serverlessrepo:v2.7.0",
+    "description": "AWS Provider for Crossplane. — serverlessrepo service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-servicecatalog",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-servicecatalog:v2.7.0",
+    "description": "AWS Provider for Crossplane. — servicecatalog service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-servicediscovery",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-servicediscovery:v2.7.0",
+    "description": "AWS Provider for Crossplane. — servicediscovery service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-servicequotas",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-servicequotas:v2.7.0",
+    "description": "AWS Provider for Crossplane. — servicequotas service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-ses",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-ses:v2.7.0",
+    "description": "AWS Provider for Crossplane. — ses service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-sesv2",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-sesv2:v2.7.0",
+    "description": "AWS Provider for Crossplane. — sesv2 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-sfn",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-sfn:v2.7.0",
+    "description": "AWS Provider for Crossplane. — sfn service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-signer",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-signer:v2.7.0",
+    "description": "AWS Provider for Crossplane. — signer service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-sns",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-sns:v2.7.0",
+    "description": "AWS Provider for Crossplane. — sns service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-sqs",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0",
+    "description": "AWS Provider for Crossplane. — sqs service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-ssm",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-ssm:v2.7.0",
+    "description": "AWS Provider for Crossplane. — ssm service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-ssoadmin",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-ssoadmin:v2.7.0",
+    "description": "AWS Provider for Crossplane. — ssoadmin service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-swf",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-swf:v2.7.0",
+    "description": "AWS Provider for Crossplane. — swf service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-timestreaminfluxdb",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-timestreaminfluxdb:v2.7.0",
+    "description": "AWS Provider for Crossplane. — timestreaminfluxdb service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-timestreamwrite",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-timestreamwrite:v2.7.0",
+    "description": "AWS Provider for Crossplane. — timestreamwrite service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-transcribe",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-transcribe:v2.7.0",
+    "description": "AWS Provider for Crossplane. — transcribe service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-transfer",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-transfer:v2.7.0",
+    "description": "AWS Provider for Crossplane. — transfer service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-verifiedaccess",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-verifiedaccess:v2.7.0",
+    "description": "AWS Provider for Crossplane. — verifiedaccess service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-vpc",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-vpc:v2.7.0",
+    "description": "AWS Provider for Crossplane. — vpc service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-vpclattice",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-vpclattice:v2.7.0",
+    "description": "AWS Provider for Crossplane. — vpclattice service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-waf",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-waf:v2.7.0",
+    "description": "AWS Provider for Crossplane. — waf service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-wafregional",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-wafregional:v2.7.0",
+    "description": "AWS Provider for Crossplane. — wafregional service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-wafv2",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-wafv2:v2.7.0",
+    "description": "AWS Provider for Crossplane. — wafv2 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-workspaces",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-workspaces:v2.7.0",
+    "description": "AWS Provider for Crossplane. — workspaces service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws-xray",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws-xray:v2.7.0",
+    "description": "AWS Provider for Crossplane. — xray service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
     "name": "provider-azure",
     "ref": "",
     "description": "Crossplane Azure Provider",
     "source": "https://github.com/crossplane-contrib/provider-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-alertsmanagement",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-alertsmanagement:v2.7.0",
+    "description": "Azure Provider for Crossplane. — alertsmanagement service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-analysisservices",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-analysisservices:v2.7.0",
+    "description": "Azure Provider for Crossplane. — analysisservices service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-apimanagement",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-apimanagement:v2.7.0",
+    "description": "Azure Provider for Crossplane. — apimanagement service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-appconfiguration",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-appconfiguration:v2.7.0",
+    "description": "Azure Provider for Crossplane. — appconfiguration service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-appplatform",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-appplatform:v2.7.0",
+    "description": "Azure Provider for Crossplane. — appplatform service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-attestation",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-attestation:v2.7.0",
+    "description": "Azure Provider for Crossplane. — attestation service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-authorization",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-authorization:v2.7.0",
+    "description": "Azure Provider for Crossplane. — authorization service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-automation",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-automation:v2.7.0",
+    "description": "Azure Provider for Crossplane. — automation service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-azure",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-azure:v2.7.0",
+    "description": "Azure Provider for Crossplane. — azure service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-azurestackhci",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-azurestackhci:v2.7.0",
+    "description": "Azure Provider for Crossplane. — azurestackhci service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-botservice",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-botservice:v2.7.0",
+    "description": "Azure Provider for Crossplane. — botservice service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-cache",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-cache:v2.7.0",
+    "description": "Azure Provider for Crossplane. — cache service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-cdn",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-cdn:v2.7.0",
+    "description": "Azure Provider for Crossplane. — cdn service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-certificateregistration",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-certificateregistration:v2.7.0",
+    "description": "Azure Provider for Crossplane. — certificateregistration service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-cognitiveservices",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-cognitiveservices:v2.7.0",
+    "description": "Azure Provider for Crossplane. — cognitiveservices service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-communication",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-communication:v2.7.0",
+    "description": "Azure Provider for Crossplane. — communication service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-compute",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-compute:v2.7.0",
+    "description": "Azure Provider for Crossplane. — compute service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-confidentialledger",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-confidentialledger:v2.7.0",
+    "description": "Azure Provider for Crossplane. — confidentialledger service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-consumption",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-consumption:v2.7.0",
+    "description": "Azure Provider for Crossplane. — consumption service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-containerapp",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-containerapp:v2.7.0",
+    "description": "Azure Provider for Crossplane. — containerapp service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-containerregistry",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-containerregistry:v2.7.0",
+    "description": "Azure Provider for Crossplane. — containerregistry service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-containerservice",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-containerservice:v2.7.0",
+    "description": "Azure Provider for Crossplane. — containerservice service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-cosmosdb",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-cosmosdb:v2.7.0",
+    "description": "Azure Provider for Crossplane. — cosmosdb service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-costmanagement",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-costmanagement:v2.7.0",
+    "description": "Azure Provider for Crossplane. — costmanagement service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-customproviders",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-customproviders:v2.7.0",
+    "description": "Azure Provider for Crossplane. — customproviders service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-dashboard",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-dashboard:v2.7.0",
+    "description": "Azure Provider for Crossplane. — dashboard service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-databoxedge",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-databoxedge:v2.7.0",
+    "description": "Azure Provider for Crossplane. — databoxedge service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-databricks",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-databricks:v2.7.0",
+    "description": "Azure Provider for Crossplane. — databricks service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-datafactory",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-datafactory:v2.7.0",
+    "description": "Azure Provider for Crossplane. — datafactory service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-datamigration",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-datamigration:v2.7.0",
+    "description": "Azure Provider for Crossplane. — datamigration service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-dataprotection",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-dataprotection:v2.7.0",
+    "description": "Azure Provider for Crossplane. — dataprotection service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-datashare",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-datashare:v2.7.0",
+    "description": "Azure Provider for Crossplane. — datashare service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-dbformysql",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-dbformysql:v2.7.0",
+    "description": "Azure Provider for Crossplane. — dbformysql service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-dbforpostgresql",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-dbforpostgresql:v2.7.0",
+    "description": "Azure Provider for Crossplane. — dbforpostgresql service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-desktopvirtualization",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-desktopvirtualization:v2.7.0",
+    "description": "Azure Provider for Crossplane. — desktopvirtualization service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-devcenter",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-devcenter:v2.7.0",
+    "description": "Azure Provider for Crossplane. — devcenter service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-devices",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-devices:v2.7.0",
+    "description": "Azure Provider for Crossplane. — devices service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-deviceupdate",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-deviceupdate:v2.7.0",
+    "description": "Azure Provider for Crossplane. — deviceupdate service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-devopsinfrastructure",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-devopsinfrastructure:v2.7.0",
+    "description": "Azure Provider for Crossplane. — devopsinfrastructure service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-devtestlab",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-devtestlab:v2.7.0",
+    "description": "Azure Provider for Crossplane. — devtestlab service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-digitaltwins",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-digitaltwins:v2.7.0",
+    "description": "Azure Provider for Crossplane. — digitaltwins service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-elastic",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-elastic:v2.7.0",
+    "description": "Azure Provider for Crossplane. — elastic service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-eventgrid",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-eventgrid:v2.7.0",
+    "description": "Azure Provider for Crossplane. — eventgrid service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-eventhub",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-eventhub:v2.7.0",
+    "description": "Azure Provider for Crossplane. — eventhub service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-fluidrelay",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-fluidrelay:v2.7.0",
+    "description": "Azure Provider for Crossplane. — fluidrelay service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-guestconfiguration",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-guestconfiguration:v2.7.0",
+    "description": "Azure Provider for Crossplane. — guestconfiguration service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-hdinsight",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-hdinsight:v2.7.0",
+    "description": "Azure Provider for Crossplane. — hdinsight service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-healthbot",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-healthbot:v2.7.0",
+    "description": "Azure Provider for Crossplane. — healthbot service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-healthcareapis",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-healthcareapis:v2.7.0",
+    "description": "Azure Provider for Crossplane. — healthcareapis service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-insights",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-insights:v2.7.0",
+    "description": "Azure Provider for Crossplane. — insights service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-iotcentral",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-iotcentral:v2.7.0",
+    "description": "Azure Provider for Crossplane. — iotcentral service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-keyvault",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-keyvault:v2.7.0",
+    "description": "Azure Provider for Crossplane. — keyvault service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-kusto",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-kusto:v2.7.0",
+    "description": "Azure Provider for Crossplane. — kusto service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-loadtestservice",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-loadtestservice:v2.7.0",
+    "description": "Azure Provider for Crossplane. — loadtestservice service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-logic",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-logic:v2.7.0",
+    "description": "Azure Provider for Crossplane. — logic service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-machinelearningservices",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-machinelearningservices:v2.7.0",
+    "description": "Azure Provider for Crossplane. — machinelearningservices service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-maintenance",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-maintenance:v2.7.0",
+    "description": "Azure Provider for Crossplane. — maintenance service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-managedidentity",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-managedidentity:v2.7.0",
+    "description": "Azure Provider for Crossplane. — managedidentity service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-management",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-management:v2.7.0",
+    "description": "Azure Provider for Crossplane. — management service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-maps",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-maps:v2.7.0",
+    "description": "Azure Provider for Crossplane. — maps service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-marketplaceordering",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-marketplaceordering:v2.7.0",
+    "description": "Azure Provider for Crossplane. — marketplaceordering service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-netapp",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-netapp:v2.7.0",
+    "description": "Azure Provider for Crossplane. — netapp service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-network",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-network:v2.7.0",
+    "description": "Azure Provider for Crossplane. — network service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-notificationhubs",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-notificationhubs:v2.7.0",
+    "description": "Azure Provider for Crossplane. — notificationhubs service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-operationalinsights",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-operationalinsights:v2.7.0",
+    "description": "Azure Provider for Crossplane. — operationalinsights service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-operationsmanagement",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-operationsmanagement:v2.7.0",
+    "description": "Azure Provider for Crossplane. — operationsmanagement service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-oracle",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-oracle:v2.7.0",
+    "description": "Azure Provider for Crossplane. — oracle service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-orbital",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-orbital:v2.7.0",
+    "description": "Azure Provider for Crossplane. — orbital service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-policyinsights",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-policyinsights:v2.7.0",
+    "description": "Azure Provider for Crossplane. — policyinsights service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-portal",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-portal:v2.7.0",
+    "description": "Azure Provider for Crossplane. — portal service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-powerbidedicated",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-powerbidedicated:v2.7.0",
+    "description": "Azure Provider for Crossplane. — powerbidedicated service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-purview",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-purview:v2.7.0",
+    "description": "Azure Provider for Crossplane. — purview service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-recoveryservices",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-recoveryservices:v2.7.0",
+    "description": "Azure Provider for Crossplane. — recoveryservices service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-relay",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-relay:v2.7.0",
+    "description": "Azure Provider for Crossplane. — relay service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-resources",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-resources:v2.7.0",
+    "description": "Azure Provider for Crossplane. — resources service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-search",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-search:v2.7.0",
+    "description": "Azure Provider for Crossplane. — search service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-security",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-security:v2.7.0",
+    "description": "Azure Provider for Crossplane. — security service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-securityinsights",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-securityinsights:v2.7.0",
+    "description": "Azure Provider for Crossplane. — securityinsights service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-servicebus",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-servicebus:v2.7.0",
+    "description": "Azure Provider for Crossplane. — servicebus service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-servicefabric",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-servicefabric:v2.7.0",
+    "description": "Azure Provider for Crossplane. — servicefabric service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-servicelinker",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-servicelinker:v2.7.0",
+    "description": "Azure Provider for Crossplane. — servicelinker service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-servicenetworking",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-servicenetworking:v2.7.0",
+    "description": "Azure Provider for Crossplane. — servicenetworking service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-signalrservice",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-signalrservice:v2.7.0",
+    "description": "Azure Provider for Crossplane. — signalrservice service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-solutions",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-solutions:v2.7.0",
+    "description": "Azure Provider for Crossplane. — solutions service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-spring",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-spring:v2.7.0",
+    "description": "Azure Provider for Crossplane. — spring service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-sql",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-sql:v2.7.0",
+    "description": "Azure Provider for Crossplane. — sql service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-storage",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-storage:v2.7.0",
+    "description": "Azure Provider for Crossplane. — storage service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-storagecache",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-storagecache:v2.7.0",
+    "description": "Azure Provider for Crossplane. — storagecache service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-storagesync",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-storagesync:v2.7.0",
+    "description": "Azure Provider for Crossplane. — storagesync service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-streamanalytics",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-streamanalytics:v2.7.0",
+    "description": "Azure Provider for Crossplane. — streamanalytics service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-synapse",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-synapse:v2.7.0",
+    "description": "Azure Provider for Crossplane. — synapse service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure-web",
+    "ref": "ghcr.io/crossplane-contrib/provider-azure-web:v2.7.0",
+    "description": "Azure Provider for Crossplane. — web service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
     "license": "Apache-2.0"
   },
   {
@@ -273,10 +2289,570 @@
     "license": "Apache-2.0"
   },
   {
+    "name": "provider-gcp-accesscontextmanager",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-accesscontextmanager:v3.0.0",
+    "description": "GCP Provider for Crossplane. — accesscontextmanager service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-activedirectory",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-activedirectory:v3.0.0",
+    "description": "GCP Provider for Crossplane. — activedirectory service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-alloydb",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-alloydb:v3.0.0",
+    "description": "GCP Provider for Crossplane. — alloydb service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-apigee",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-apigee:v3.0.0",
+    "description": "GCP Provider for Crossplane. — apigee service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-appengine",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-appengine:v3.0.0",
+    "description": "GCP Provider for Crossplane. — appengine service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-artifact",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-artifact:v3.0.0",
+    "description": "GCP Provider for Crossplane. — artifact service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
     "name": "provider-gcp-beta",
     "ref": "",
     "description": "Crossplane Google Cloud Platform (GCP) infrastructure provider. provider-gcp-beta contains managed resources relying on beta APIs of GCP APIs.",
     "source": "https://github.com/crossplane-contrib/provider-gcp-beta",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-beyondcorp",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-beyondcorp:v3.0.0",
+    "description": "GCP Provider for Crossplane. — beyondcorp service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-bigquery",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-bigquery:v3.0.0",
+    "description": "GCP Provider for Crossplane. — bigquery service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-bigtable",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-bigtable:v3.0.0",
+    "description": "GCP Provider for Crossplane. — bigtable service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-binaryauthorization",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-binaryauthorization:v3.0.0",
+    "description": "GCP Provider for Crossplane. — binaryauthorization service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-certificatemanager",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-certificatemanager:v3.0.0",
+    "description": "GCP Provider for Crossplane. — certificatemanager service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-cloud",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-cloud:v3.0.0",
+    "description": "GCP Provider for Crossplane. — cloud service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-cloudbuild",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-cloudbuild:v3.0.0",
+    "description": "GCP Provider for Crossplane. — cloudbuild service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-cloudfunctions",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-cloudfunctions:v3.0.0",
+    "description": "GCP Provider for Crossplane. — cloudfunctions service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-cloudfunctions2",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-cloudfunctions2:v3.0.0",
+    "description": "GCP Provider for Crossplane. — cloudfunctions2 service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-cloudidentity",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-cloudidentity:v3.0.0",
+    "description": "GCP Provider for Crossplane. — cloudidentity service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-cloudplatform",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-cloudplatform:v3.0.0",
+    "description": "GCP Provider for Crossplane. — cloudplatform service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-cloudquotas",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-cloudquotas:v3.0.0",
+    "description": "GCP Provider for Crossplane. — cloudquotas service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-cloudrun",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-cloudrun:v3.0.0",
+    "description": "GCP Provider for Crossplane. — cloudrun service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-cloudscheduler",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-cloudscheduler:v3.0.0",
+    "description": "GCP Provider for Crossplane. — cloudscheduler service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-cloudtasks",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-cloudtasks:v3.0.0",
+    "description": "GCP Provider for Crossplane. — cloudtasks service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-composer",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-composer:v3.0.0",
+    "description": "GCP Provider for Crossplane. — composer service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-compute",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-compute:v3.0.0",
+    "description": "GCP Provider for Crossplane. — compute service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-container",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-container:v3.0.0",
+    "description": "GCP Provider for Crossplane. — container service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-containeranalysis",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-containeranalysis:v3.0.0",
+    "description": "GCP Provider for Crossplane. — containeranalysis service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-containerattached",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-containerattached:v3.0.0",
+    "description": "GCP Provider for Crossplane. — containerattached service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-containeraws",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-containeraws:v3.0.0",
+    "description": "GCP Provider for Crossplane. — containeraws service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-containerazure",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-containerazure:v3.0.0",
+    "description": "GCP Provider for Crossplane. — containerazure service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-datacatalog",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-datacatalog:v3.0.0",
+    "description": "GCP Provider for Crossplane. — datacatalog service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-dataflow",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-dataflow:v3.0.0",
+    "description": "GCP Provider for Crossplane. — dataflow service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-datafusion",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-datafusion:v3.0.0",
+    "description": "GCP Provider for Crossplane. — datafusion service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-datalossprevention",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-datalossprevention:v3.0.0",
+    "description": "GCP Provider for Crossplane. — datalossprevention service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-dataplex",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-dataplex:v3.0.0",
+    "description": "GCP Provider for Crossplane. — dataplex service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-dataproc",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-dataproc:v3.0.0",
+    "description": "GCP Provider for Crossplane. — dataproc service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-datastream",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-datastream:v3.0.0",
+    "description": "GCP Provider for Crossplane. — datastream service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-developerconnect",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-developerconnect:v3.0.0",
+    "description": "GCP Provider for Crossplane. — developerconnect service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-dialogflowcx",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-dialogflowcx:v3.0.0",
+    "description": "GCP Provider for Crossplane. — dialogflowcx service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-dns",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-dns:v3.0.0",
+    "description": "GCP Provider for Crossplane. — dns service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-documentai",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-documentai:v3.0.0",
+    "description": "GCP Provider for Crossplane. — documentai service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-essentialcontacts",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-essentialcontacts:v3.0.0",
+    "description": "GCP Provider for Crossplane. — essentialcontacts service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-eventarc",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-eventarc:v3.0.0",
+    "description": "GCP Provider for Crossplane. — eventarc service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-filestore",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-filestore:v3.0.0",
+    "description": "GCP Provider for Crossplane. — filestore service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-firebaserules",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-firebaserules:v3.0.0",
+    "description": "GCP Provider for Crossplane. — firebaserules service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-firestore",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-firestore:v3.0.0",
+    "description": "GCP Provider for Crossplane. — firestore service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-gemini",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-gemini:v3.0.0",
+    "description": "GCP Provider for Crossplane. — gemini service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-gke",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-gke:v3.0.0",
+    "description": "GCP Provider for Crossplane. — gke service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-gkehub",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-gkehub:v3.0.0",
+    "description": "GCP Provider for Crossplane. — gkehub service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-healthcare",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-healthcare:v3.0.0",
+    "description": "GCP Provider for Crossplane. — healthcare service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-iam",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-iam:v3.0.0",
+    "description": "GCP Provider for Crossplane. — iam service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-iap",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-iap:v3.0.0",
+    "description": "GCP Provider for Crossplane. — iap service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-identityplatform",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-identityplatform:v3.0.0",
+    "description": "GCP Provider for Crossplane. — identityplatform service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-kms",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-kms:v3.0.0",
+    "description": "GCP Provider for Crossplane. — kms service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-logging",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-logging:v3.0.0",
+    "description": "GCP Provider for Crossplane. — logging service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-memcache",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-memcache:v3.0.0",
+    "description": "GCP Provider for Crossplane. — memcache service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-memorystore",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-memorystore:v3.0.0",
+    "description": "GCP Provider for Crossplane. — memorystore service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-mlengine",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-mlengine:v3.0.0",
+    "description": "GCP Provider for Crossplane. — mlengine service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-modelarmor",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-modelarmor:v3.0.0",
+    "description": "GCP Provider for Crossplane. — modelarmor service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-monitoring",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-monitoring:v3.0.0",
+    "description": "GCP Provider for Crossplane. — monitoring service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-networkconnectivity",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-networkconnectivity:v3.0.0",
+    "description": "GCP Provider for Crossplane. — networkconnectivity service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-networkmanagement",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-networkmanagement:v3.0.0",
+    "description": "GCP Provider for Crossplane. — networkmanagement service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-networksecurity",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-networksecurity:v3.0.0",
+    "description": "GCP Provider for Crossplane. — networksecurity service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-networkservices",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-networkservices:v3.0.0",
+    "description": "GCP Provider for Crossplane. — networkservices service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-notebooks",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-notebooks:v3.0.0",
+    "description": "GCP Provider for Crossplane. — notebooks service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-orgpolicy",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-orgpolicy:v3.0.0",
+    "description": "GCP Provider for Crossplane. — orgpolicy service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-osconfig",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-osconfig:v3.0.0",
+    "description": "GCP Provider for Crossplane. — osconfig service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-oslogin",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-oslogin:v3.0.0",
+    "description": "GCP Provider for Crossplane. — oslogin service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-privateca",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-privateca:v3.0.0",
+    "description": "GCP Provider for Crossplane. — privateca service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-pubsub",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-pubsub:v3.0.0",
+    "description": "GCP Provider for Crossplane. — pubsub service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-redis",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-redis:v3.0.0",
+    "description": "GCP Provider for Crossplane. — redis service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-secretmanager",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-secretmanager:v3.0.0",
+    "description": "GCP Provider for Crossplane. — secretmanager service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-servicenetworking",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-servicenetworking:v3.0.0",
+    "description": "GCP Provider for Crossplane. — servicenetworking service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-sourcerepo",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-sourcerepo:v3.0.0",
+    "description": "GCP Provider for Crossplane. — sourcerepo service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-spanner",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-spanner:v3.0.0",
+    "description": "GCP Provider for Crossplane. — spanner service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-sql",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-sql:v3.0.0",
+    "description": "GCP Provider for Crossplane. — sql service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-storage",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-storage:v3.0.0",
+    "description": "GCP Provider for Crossplane. — storage service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-storagetransfer",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-storagetransfer:v3.0.0",
+    "description": "GCP Provider for Crossplane. — storagetransfer service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-tags",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-tags:v3.0.0",
+    "description": "GCP Provider for Crossplane. — tags service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-vertexai",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-vertexai:v3.0.0",
+    "description": "GCP Provider for Crossplane. — vertexai service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-vpcaccess",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-vpcaccess:v3.0.0",
+    "description": "GCP Provider for Crossplane. — vpcaccess service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-workflows",
+    "ref": "ghcr.io/crossplane-contrib/provider-gcp-workflows:v3.0.0",
+    "description": "GCP Provider for Crossplane. — workflows service package",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
     "license": "Apache-2.0"
   },
   {

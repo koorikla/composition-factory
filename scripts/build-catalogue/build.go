@@ -118,13 +118,15 @@ func licenseOr(spdx string) string {
 //
 // Every element of repos becomes exactly one entry: this is the project's
 // "label, don't hide" catalogue policy in code. A repo this generator could
-// not resolve a stable ghcr.io tag for — archived, published under a
-// different registry/namespace (most upjet provider families ship as
-// xpkg.upbound.io/upbound/provider-<service>, not one
-// ghcr.io/crossplane-contrib/<repo> image — see docs/catalogue.md), or
-// genuinely tagless — still appears, with Ref == "" labelling that fact,
-// rather than silently vanishing from the list. A caller that only wants
-// installable entries filters on Ref != "" itself.
+// not resolve a stable ghcr.io/crossplane-contrib/<repo> tag for — archived,
+// genuinely tagless, or one of the upjet provider family monorepos
+// (provider-upjet-aws, provider-upjet-gcp, ...), which publish many
+// per-service images (ghcr.io/crossplane-contrib/provider-<cloud>-<service>,
+// e.g. provider-aws-rds) instead of one image under the repo's own name —
+// see family.go, which synthesizes those as separate entries, and
+// docs/catalogue.md — still appears here, with Ref == "" labelling that this
+// repo itself has no image, rather than silently vanishing from the list. A
+// caller that only wants installable entries filters on Ref != "" itself.
 func buildCatalogue(repos []repo, tagsByRepo map[string][]string) []catalogue.Provider {
 	out := make([]catalogue.Provider, 0, len(repos))
 	for _, r := range repos {
