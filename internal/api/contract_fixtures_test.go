@@ -107,6 +107,15 @@ func TestContractFixtureProvidersRoundTripsKeySet(t *testing.T) {
 	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "providers.json"), &providersResponse{})
 }
 
+// POST /api/render's envelope has a real production type (renderResponse in
+// render.go, no omitempty on any key — the contract is that all four keys
+// are always present), so unlike kindResponse/generateResponse there is no
+// test-local mirror to declare: the fixture decodes into the type the
+// handler itself marshals.
+func TestContractFixtureRenderRoundTripsKeySet(t *testing.T) {
+	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "render.json"), &renderResponse{})
+}
+
 // checkFixtureKeySetRoundTrips reads the JSON at path, decodes it into into
 // (a pointer to whatever Go shape that route serves) with
 // DisallowUnknownFields so an extra key on the fixture's side fails loudly,

@@ -16,6 +16,7 @@ package api
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -48,6 +49,15 @@ type Options struct {
 	// network — the same unexported seam ProviderAddCmd carries in
 	// cmd/cf/provider.go. nil means the real xpkg.Fetch.
 	fetch func(ref string) (*xpkg.Package, error)
+
+	// render and lookPath are swapped in tests so POST /api/render never
+	// execs the real crossplane CLI — the same unexported-seam pattern as
+	// fetch above. render runs `crossplane composition render` over the four
+	// files and returns its combined output (nil means the real command; see
+	// runCrossplaneRender in render.go); lookPath locates the crossplane
+	// binary (nil means exec.LookPath).
+	render   func(ctx context.Context, xr, comp, fns, xrd string) ([]byte, error)
+	lookPath func(file string) (string, error)
 }
 
 // validate reports the first incomplete field in o. New calls this so a
@@ -159,6 +169,7 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("GET /api/providers", srv.handleListProviders)
 	mux.HandleFunc("POST /api/providers", srv.handleAddProvider)
 	mux.HandleFunc("POST /api/generate", srv.handleGenerate)
+	mux.HandleFunc("POST /api/render", srv.handleRender)
 
 	return wrap(mux), nil
 }
