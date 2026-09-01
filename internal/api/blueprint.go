@@ -419,27 +419,31 @@ func (srv *server) handleDeleteParameter(w http.ResponseWriter, r *http.Request)
 }
 
 // referencingResources returns the names of every resource that references
-// params.<name> — through a field's From or through its own ForEach loop
-// bound — in resource order. It mirrors blueprint.Blueprint's unexported
-// referencingResources (see internal/blueprint/edit.go) exactly, over the
-// same exported Resource/Field data — see handleDeleteParameter's doc
-// comment for why this HTTP layer needs its own copy of this one check.
+// params.<name> — through a field's From, an envelope entry's From, or its
+// own ForEach loop bound — in resource order. It mirrors
+// blueprint.Blueprint's unexported referencingResources (see
+// internal/blueprint/edit.go) exactly, over the same exported Resource/Field
+// data — see handleDeleteParameter's doc comment for why this HTTP layer
+// needs its own copy of this one check.
 func referencingResources(b *blueprint.Blueprint, name string) []string {
 	want := "params." + name
 	var refs []string
 	for _, res := range b.Spec.Resources {
-		if res.ForEach == want {
+		if res.ForEach == want || anyFrom(res.Fields, want) || anyFrom(res.Envelope, want) {
 			refs = append(refs, res.Name)
-			continue
-		}
-		for _, f := range res.Fields {
-			if f.From == want {
-				refs = append(refs, res.Name)
-				break
-			}
 		}
 	}
 	return refs
+}
+
+// anyFrom reports whether any entry in fields wires from want.
+func anyFrom(fields map[string]blueprint.Field, want string) bool {
+	for _, f := range fields {
+		if f.From == want {
+			return true
+		}
+	}
+	return false
 }
 
 // persistBlueprint writes b to srv.Blueprint, deterministically and only if

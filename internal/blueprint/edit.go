@@ -37,6 +37,14 @@ func (b *Blueprint) deepCopy() *Blueprint {
 		for path, f := range b.Spec.Resources[i].Fields {
 			r.Fields[path] = f
 		}
+		// nil stays nil (not an empty map): Envelope is omitempty, and a
+		// resource that never declared the key must round-trip that way.
+		if b.Spec.Resources[i].Envelope != nil {
+			r.Envelope = make(map[string]Field, len(b.Spec.Resources[i].Envelope))
+			for path, f := range b.Spec.Resources[i].Envelope {
+				r.Envelope[path] = f
+			}
+		}
 		cp.Spec.Resources[i] = r
 	}
 
@@ -44,24 +52,28 @@ func (b *Blueprint) deepCopy() *Blueprint {
 }
 
 // referencingResources returns the names of every resource that references
-// params.<name> — through a field's From or through its own ForEach loop
-// bound — in resource order, each resource named at most once.
+// params.<name> — through a field's From, an envelope entry's From, or its
+// own ForEach loop bound — in resource order, each resource named at most
+// once.
 func (b *Blueprint) referencingResources(name string) []string {
 	want := "params." + name
 	var refs []string
 	for _, r := range b.Spec.Resources {
-		if r.ForEach == want {
+		if r.ForEach == want || anyFrom(r.Fields, want) || anyFrom(r.Envelope, want) {
 			refs = append(refs, r.Name)
-			continue
-		}
-		for _, f := range r.Fields {
-			if f.From == want {
-				refs = append(refs, r.Name)
-				break
-			}
 		}
 	}
 	return refs
+}
+
+// anyFrom reports whether any entry in fields wires from want.
+func anyFrom(fields map[string]Field, want string) bool {
+	for _, f := range fields {
+		if f.From == want {
+			return true
+		}
+	}
+	return false
 }
 
 // AddParameter declares a new XRD parameter. It fails if name is already
@@ -83,9 +95,9 @@ func (b *Blueprint) AddParameter(name string, p Parameter) error {
 }
 
 // RenameParameter renames an XRD parameter and rewrites every resource
-// reference (params.<from>) to point at the new name — both field From
-// references and forEach loop bounds. Field keys are untouched -- only the
-// reference value changes. It fails if from
+// reference (params.<from>) to point at the new name — field From references,
+// envelope From references, and forEach loop bounds. Field keys are untouched
+// -- only the reference value changes. It fails if from
 // is not declared, if to is already declared (unless to == from -- see
 // below), or if the resulting blueprint does not validate; in every failure
 // case the receiver is left unchanged.
@@ -125,6 +137,16 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 			if f.From == oldRef {
 				f.From = newRef
 				cp.Spec.Resources[i].Fields[path] = f
+			}
+		}
+		// Envelope froms are the same reference shape and get the same
+		// rewrite: a dangling one would emit a Composition dereferencing a
+		// parameter that no longer exists, unrenderable under
+		// missingkey=error.
+		for path, f := range r.Envelope {
+			if f.From == oldRef {
+				f.From = newRef
+				cp.Spec.Resources[i].Envelope[path] = f
 			}
 		}
 	}

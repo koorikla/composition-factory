@@ -541,6 +541,12 @@ func (b *Blueprint) Validate() error {
 				}
 			}
 		}
+		// Envelope entries get the same structural discipline as fields (see
+		// envelope.go); schema-aware checks live in internal/emit, which
+		// holds the resolved CRD.
+		if err := validateResourceEnvelope(x, r); err != nil {
+			return err
+		}
 	}
 
 	// spec.pipeline last: its checks are self-contained (see pipeline.go), so

@@ -94,6 +94,35 @@ type Resource struct {
 	Provider string           `json:"provider"`
 	ForEach  string           `json:"forEach"`
 	Fields   map[string]Field `json:"fields"`
+	// Envelope sets paths on the resource's Crossplane-native spec envelope —
+	// the kind's spec.properties minus forProvider/initProvider, exactly what
+	// schema.CRD.Envelope computes from the .m. CRD (managementPolicies,
+	// writeConnectionSecretToRef, and whatever else that variant actually
+	// carries; the namespaced and cluster-scoped variants differ structurally,
+	// so paths are checked against the resolved variant's own schema at emit
+	// time, never against a hard-coded list). Entries use the same
+	// exactly-one-of {from|value|raw} Field forms as Fields, and override the
+	// generator's computed defaults field by field: an unset entry keeps
+	// today's default, so an envelope-free blueprint emits byte-identical
+	// output.
+	//
+	// Two deliberate v1 rulings, enforced by Validate and the emitter:
+	//
+	//   - providerConfigRef cannot be set here. It is derived from the
+	//     required providerName parameter (one source of truth); an envelope
+	//     entry for it would be a second, silently-divergent one.
+	//   - An array-typed envelope leaf (e.g. managementPolicies, an array of
+	//     enum strings) takes `value` as a COMMA-SEPARATED list, rendered as a
+	//     YAML flow sequence of quoted strings ("Observe, Create" ->
+	//     ['Observe', 'Create']), or `raw` as the literal-YAML escape hatch.
+	//     `from` is rejected on array leaves: a scalar parameter renders one
+	//     scalar, and M1 refuses array-typed parameters outright (see
+	//     load.go), so there is nothing a wire could correctly render.
+	//
+	// omitempty for the same reason Spec.Pipeline has it: a resource that
+	// never declared the key must not gain a literal `envelope: null` when the
+	// document is persisted back.
+	Envelope map[string]Field `json:"envelope,omitempty"`
 }
 
 // Field sets one path on a composed resource. Exactly one of From, Value or Raw
