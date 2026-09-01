@@ -41,3 +41,9 @@
 - [ ] Cross-object atProvider wiring GUI (engine side in flight): wire e.g. a
       postgres provider field from an RDS instance's status.atProvider output —
       teal status wires, pickable from the source card's status section.
+- [ ] Provider detail view: click a provider in SOURCES → full registry ref shown,
+      its kinds listed with checkboxes to select which appear in the KINDS rail
+      (client-side filter, persisted). — user request 2026-09-02
+- [ ] Catalogue must cover upjet family services (provider-aws-rds et al. — repo
+      enumeration misses monorepo-published packages). — user request 2026-09-02
+- [ ] Generate ProviderConfig scaffolds to out/providerconfigs/. — user request 2026-09-02
