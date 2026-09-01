@@ -31,6 +31,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/koorikla/compositionfactory/catalogue"
 )
 
 // defaultOrg is the GitHub org / ghcr.io namespace this catalogue indexes.
@@ -67,8 +69,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
+	warn := func(format string, a ...any) {
+		fmt.Fprintf(stderr, format+"\n", a...)
+	}
+
 	var repos []repo
 	var tags map[string][]string
+	var families []family
+	// familyTags maps a family repo name to its raw, unfiltered per-package
+	// ghcr.io tag data — see resolveFamilyTags and manifestFamily.Tags,
+	// which produce this same shape from the network and from a manifest
+	// file respectively.
+	familyTags := map[string]map[string][]string{}
 
 	if *fromFile != "" {
 		m, err := loadManifest(*fromFile)
@@ -77,6 +89,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 		repos = m.repos(*org)
 		tags = m.Tags
+		families = m.families(*org)
+		for _, fam := range families {
+			familyTags[fam.Repo.Name] = m.familyTags(fam.Repo.Name)
+		}
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -93,12 +109,22 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 		filtered := filterCatalogueRepos(all)
 		repos = toRepos(*org, filtered)
-		tags = fetchAllGhcrTags(ctx, client, ghcrBaseURL, *org, repos, func(format string, a ...any) {
-			fmt.Fprintf(stderr, format+"\n", a...)
-		})
+		tags = fetchAllGhcrTags(ctx, client, ghcrBaseURL, *org, repos, warn)
+
+		families = discoverFamilies(ctx, client, githubAPIBaseURL, *org, repos, warn)
+		for _, fam := range families {
+			familyTags[fam.Repo.Name] = resolveFamilyTags(ctx, client, ghcrBaseURL, *org, fam, warn)
+		}
 	}
 
-	entries := buildCatalogue(repos, tags)
+	repoEntries := buildCatalogue(repos, tags)
+	var familyEntries []catalogue.Provider
+	for _, fam := range families {
+		serviceTags := resolveFamilyServiceTags(fam, familyTags[fam.Repo.Name])
+		familyEntries = append(familyEntries, buildFamilyCatalogue(fam, serviceTags)...)
+	}
+	entries := mergeCatalogue(repoEntries, familyEntries, warn)
+
 	if err := writeCatalogue(*out, entries); err != nil {
 		return err
 	}
