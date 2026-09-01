@@ -106,13 +106,16 @@ func (srv *server) handleRender(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		switch filepath.Base(filepath.Dir(out.Path)) {
-		case "compositions":
+		switch {
+		case filepath.Base(filepath.Dir(out.Path)) == "compositions":
 			compPath = out.Path
-		case "xrds":
+		case filepath.Base(filepath.Dir(out.Path)) == "xrds":
 			xrdPath = out.Path
-		default:
+		case filepath.Base(out.Path) == "functions.yaml":
 			fnsPath = out.Path
+			// anything else (providerconfigs/, future outputs) is cluster
+			// setup, not render input — crossplane would reject it as
+			// "not a function".
 		}
 	}
 
