@@ -15,6 +15,8 @@ Output is plain YAML meant to sit in a Git repo an existing GitOps pipeline
 already syncs — there is no database and no cluster requirement; `cf gen`
 touches neither.
 
+![Composition Factory Canvas Interface](docs/screenshots/canvas.png)
+
 ## Quickstart (Docker)
 
 Get up and running immediately with Docker from GitHub Container Registry — no clone or Go toolchain required:
@@ -71,6 +73,8 @@ docker run --rm -p 8080:8080 \
 ```
 
 Open <http://localhost:8080> in your browser. The embedded canvas GUI and API are served together from the single container.
+
+![Composition Factory Interactive Demo](docs/screenshots/demo.gif)
 
 **3. Generate YAML from a blueprint file (`cf gen`).**
 
