@@ -1,4 +1,4 @@
-# compositionfactory
+# composition-factory
 
 [![CI](https://github.com/koorikla/compositionfactory/actions/workflows/ci.yml/badge.svg)](https://github.com/koorikla/compositionfactory/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/koorikla/compositionfactory?include_prereleases)](https://github.com/koorikla/compositionfactory/releases)
