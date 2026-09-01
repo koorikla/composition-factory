@@ -545,6 +545,15 @@ function onDrop(e) {
   const name = uniqueResourceName(d, entry.kind);
   S.setPosition(name, { x: x, y: y });
   S.replaceDoc(function (next) {
+    // sources is the dependency manifest the server loads providers from at
+    // startup — a dropped kind's provider must be declared there or generate
+    // cannot load its CRDs after a restart. Native kinds ("k8s") are not
+    // provider packages and never appear in sources.
+    if (entry.provider && entry.provider !== "k8s") {
+      next.spec.sources = next.spec.sources || [];
+      var declared = next.spec.sources.some(function (s) { return s.provider === entry.provider; });
+      if (!declared) next.spec.sources.push({ provider: entry.provider });
+    }
     next.spec.resources = next.spec.resources || [];
     next.spec.resources.push({
       name: name,

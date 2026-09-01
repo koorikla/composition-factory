@@ -932,6 +932,11 @@ func TestValidateAcceptsValidResourceProviderForms(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := scalarBlueprint(func(b *Blueprint) {
 				b.Spec.Resources[0].Provider = ref
+				// this test is about ref FORMAT; the manifest rule (provider
+				// must be declared in sources) is covered separately.
+				if ref != "" {
+					b.Spec.Sources = append(b.Spec.Sources, Source{Provider: ref})
+				}
 			})
 			if err := b.Validate(); err != nil {
 				t.Errorf("Validate() = %v, want provider %q to be accepted", err, name)
@@ -1160,5 +1165,26 @@ func TestValidateAcceptsK8sAsAResourceProvider(t *testing.T) {
 	})
 	if err := b.Validate(); err != nil {
 		t.Fatalf("Validate refused a native resource with provider: k8s: %v", err)
+	}
+}
+
+// A resource whose provider is not declared in spec.sources generates fine
+// on a warm server but cannot survive a restart: startup loads providers
+// from sources alone, so generate 400s with "kind not found in any cached
+// provider" — hours after the mistake was made. Catch it at the source.
+func TestValidateRejectsUndeclaredResourceProvider(t *testing.T) {
+	body := strings.Replace(valid, "  resources:\n", "  resources:\n"+
+		"    - name: stray-bucket\n"+
+		"      kind: Bucket\n"+
+		"      provider: ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0\n"+
+		"      fields: {}\n", 1)
+	_, err := Load(write(t, body))
+	if err == nil {
+		t.Fatal("Validate accepted a resource provider absent from spec.sources")
+	}
+	for _, want := range []string{"stray-bucket", "provider-aws-s3", "spec.sources"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
 	}
 }

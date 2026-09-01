@@ -440,6 +440,26 @@ func (b *Blueprint) Validate() error {
 				return fmt.Errorf("spec.resources[%d].provider: %q is not a valid provider reference "+
 					"(e.g. ghcr.io/org/provider-name:v1.2.3, or ...@sha256:<digest>)", i, r.Provider)
 			}
+			// spec.sources is the dependency manifest: startup and generate
+			// load provider schemas from it alone, so a resource pinned to a
+			// provider nobody declared works on a warm server (the runtime
+			// add extended the index) and then fails hours later, after a
+			// restart, as "kind not found in any cached provider". Native
+			// kinds are not provider packages and are exempt.
+			if r.Provider != NativeProvider {
+				declared := false
+				for _, src := range b.Spec.Sources {
+					if src.Provider == r.Provider {
+						declared = true
+						break
+					}
+				}
+				if !declared {
+					return fmt.Errorf("spec.resources[%d] (%q): provider %q is not declared in "+
+						"spec.sources; add it there so generation can load its schemas after a restart",
+						i, r.Name, r.Provider)
+				}
+			}
 		}
 		// forEach repeats the resource's whole rendered document N times, N
 		// read at render time from an integer XRD parameter
