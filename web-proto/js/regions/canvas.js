@@ -294,6 +294,63 @@ function uniqueParamName(d) {
   return n;
 }
 
+/* ---------- duplicate / remove (slice 4) ---------- */
+
+let copiedResource = null; // internal copy buffer, not the system clipboard
+
+function uniqueCopyName(d, name) {
+  const names = {};
+  (d.spec.resources || []).forEach(function (r) { names[r.name] = true; });
+  const base = name.replace(/-\d+$/, "");
+  let i = 2;
+  while (names[base + "-" + i]) i++;
+  return base + "-" + i;
+}
+
+function duplicateResource(src) {
+  const d = doc();
+  if (!d) return;
+  const copyName = uniqueCopyName(d, src.name);
+  S.replaceDoc(function (draft) {
+    const dupe = JSON.parse(JSON.stringify(
+      draft.spec.resources.find(function (r) { return r.name === src.name; }) || src));
+    dupe.name = copyName;
+    draft.spec.resources.push(dupe);
+  }).then(function (ok) {
+    if (!ok) return;
+    const p = S.getPosition(src.name);
+    if (p) S.setPosition(copyName, { x: p.x + 28, y: p.y + 28 });
+    S.select(copyName);
+  });
+}
+
+function removeResource(name) {
+  const d = doc();
+  if (!d) return;
+  const res = (d.spec.resources || []).find(function (r) { return r.name === name; });
+  if (!res) return;
+  const wired = Object.keys(res.fields || {}).filter(function (k) { return res.fields[k] && res.fields[k].from; });
+  if (wired.length &&
+      !window.confirm('Remove "' + name + '"? Wired fields will be dropped: ' + wired.join(", "))) return;
+  S.replaceDoc(function (draft) {
+    draft.spec.resources = draft.spec.resources.filter(function (r) { return r.name !== name; });
+  }).then(function (ok) { if (ok) S.select(null); });
+}
+
+function onKeyDown(e) {
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  if (String(window.getSelection && window.getSelection())) return; // real text copy wins
+  const sel = S.state.selectedResource;
+  if (!sel || sel === XR_ID) return;
+  const d = doc();
+  const res = d && (d.spec.resources || []).find(function (r) { return r.name === sel; });
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && e.key === "c" && res) { copiedResource = JSON.parse(JSON.stringify(res)); }
+  else if (mod && e.key === "v" && copiedResource) { e.preventDefault(); duplicateResource(copiedResource); }
+  else if ((e.key === "Delete" || e.key === "Backspace") && res) { e.preventDefault(); removeResource(sel); }
+}
+
 function onCanvasClick(e) {
   if (e.target.closest("[data-addxr]")) {
     const d = doc();
@@ -434,6 +491,7 @@ export function init(rootEl, deps) {
   cwEl.addEventListener("dragleave", onDragLeave);
   cwEl.addEventListener("drop", onDrop);
   addEventListener("resize", scheduleWires);
+  addEventListener("keydown", onKeyDown);
 
   S.subscribe("doc", render);
   S.subscribe("selection", render);
