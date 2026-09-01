@@ -1,0 +1,18 @@
+{
+  "providers": [
+    {
+      "name": "function-go-templating",
+      "ref": "ghcr.io/crossplane-contrib/function-go-templating:v0.11.0",
+      "description": "A Go templating composition function",
+      "source": "https://github.com/crossplane-contrib/function-go-templating",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "provider-upjet-aws",
+      "ref": "",
+      "description": "A generator repo for the provider-aws-* family; not itself a single installable image.",
+      "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+      "license": "Apache-2.0"
+    }
+  ]
+}

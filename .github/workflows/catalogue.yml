@@ -1,0 +1,71 @@
+name: catalogue
+
+# Keeps catalogue/providers.json (the GET /api/catalogue data — see
+# docs/catalogue.md) fresh. Runs weekly and on demand; never on push or pull
+# request — regenerating a static, CI-refreshed index on every commit would
+# both be pointless (nothing about a code change moves ghcr.io's tags) and
+# make every PR's CI depend on api.github.com/ghcr.io being reachable and
+# rate-limit-available, which docs/catalogue.md is explicit is not something
+# to build a live dependency on.
+#
+# Uses only actions/checkout, actions/setup-go and the gh CLI (all
+# GitHub-official, gh preinstalled on every hosted runner) — no third-party
+# "open a PR" action — so opening the refresh PR has no supply-chain surface
+# beyond GitHub's own tooling and this project's own go.mod dependencies.
+#
+# This workflow does not run until it is pushed to the repository's default
+# branch — GitHub only schedules workflows that exist there.
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Monday 06:00 UTC
+  workflow_dispatch: {} # manual trigger, for a refresh that can't wait a week
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with: { go-version: '1.25' }
+
+      # Live mode: talks to api.github.com and ghcr.io directly, anonymously
+      # (see scripts/build-catalogue/main.go). No secrets are needed or used.
+      - name: Regenerate catalogue/providers.json
+        run: go run ./scripts/build-catalogue --out catalogue/providers.json
+
+      # The same gate `go test ./...` runs on every push — catches a
+      # malformed/empty/unsorted regeneration before it ever reaches a PR,
+      # rather than only at GET /api/catalogue request time.
+      - name: Validate the regenerated catalogue
+        run: go test ./catalogue/... -run TestEmbeddedCatalogueIsValid -v
+
+      - name: Open a PR if the catalogue changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- catalogue/providers.json; then
+            echo "catalogue/providers.json is unchanged; nothing to open a PR for."
+            exit 0
+          fi
+
+          branch="catalogue/weekly-refresh-$(date -u +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add catalogue/providers.json
+          git commit -m "catalogue: refresh providers.json"
+          git push origin "$branch"
+
+          gh pr create \
+            --title "catalogue: weekly refresh" \
+            --body "Automated weekly refresh of \`catalogue/providers.json\` from crossplane-contrib's GitHub repositories and their ghcr.io images. See \`docs/catalogue.md\` for what this catalogue is, how it's built, and this project's \"label, don't hide\" policy for repositories with no resolvable image.
+
+          Opened by \`.github/workflows/catalogue.yml\`; not reviewed by a person before being opened." \
+            --head "$branch"

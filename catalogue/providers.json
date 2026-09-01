@@ -1,0 +1,758 @@
+[
+  {
+    "name": "function-auto-ready",
+    "ref": "ghcr.io/crossplane-contrib/function-auto-ready:v0.6.0",
+    "description": "A composition function that automatically detects when resources are ready",
+    "source": "https://github.com/crossplane-contrib/function-auto-ready",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-cel-filter",
+    "ref": "ghcr.io/crossplane-contrib/function-cel-filter:v0.2.0",
+    "description": "Conditionally filter composed resources using CEL",
+    "source": "https://github.com/crossplane-contrib/function-cel-filter",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-cue",
+    "ref": "ghcr.io/crossplane-contrib/function-cue:v0.4.1",
+    "description": "A crossplane function that runs cue scripts to produce desired resources",
+    "source": "https://github.com/crossplane-contrib/function-cue",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-cue-archived",
+    "ref": "",
+    "description": "Cuelang Integration for Crossplane's Composition Function",
+    "source": "https://github.com/crossplane-contrib/function-cue-archived",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-deletion-protection",
+    "ref": "ghcr.io/crossplane-contrib/function-deletion-protection:v0.3.0",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/function-deletion-protection",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-dummy",
+    "ref": "ghcr.io/crossplane-contrib/function-dummy:v0.4.1",
+    "description": "A composition function that returns what you tell it to",
+    "source": "https://github.com/crossplane-contrib/function-dummy",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-environment-configs",
+    "ref": "ghcr.io/crossplane-contrib/function-environment-configs:v0.7.1",
+    "description": "A function building the environment from EnvironmentConfigs",
+    "source": "https://github.com/crossplane-contrib/function-environment-configs",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-extra-resources",
+    "ref": "ghcr.io/crossplane-contrib/function-extra-resources:v0.2.0",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/function-extra-resources",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-gitlab-importer",
+    "ref": "ghcr.io/crossplane-contrib/function-gitlab-importer:v0.3.5",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/function-gitlab-importer",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-go-templating",
+    "ref": "ghcr.io/crossplane-contrib/function-go-templating:v0.11.0",
+    "description": "A Go templating composition function",
+    "source": "https://github.com/crossplane-contrib/function-go-templating",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-hcl",
+    "ref": "ghcr.io/crossplane-contrib/function-hcl:v0.1.3",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/function-hcl",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-kcl",
+    "ref": "ghcr.io/crossplane-contrib/function-kcl:v0.12.3",
+    "description": "Crossplane Composition Functions using KCL Programming Language",
+    "source": "https://github.com/crossplane-contrib/function-kcl",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-kro",
+    "ref": "ghcr.io/crossplane-contrib/function-kro:v0.3.0",
+    "description": "YAML+CEL experience from kro as a Crossplane function",
+    "source": "https://github.com/crossplane-contrib/function-kro",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-patch-and-transform",
+    "ref": "ghcr.io/crossplane-contrib/function-patch-and-transform:v0.10.0",
+    "description": "A patch & transform composition function",
+    "source": "https://github.com/crossplane-contrib/function-patch-and-transform",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-pkl",
+    "ref": "",
+    "description": "An @apple pkl composition function",
+    "source": "https://github.com/crossplane-contrib/function-pkl",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-python",
+    "ref": "ghcr.io/crossplane-contrib/function-python:v0.5.0",
+    "description": "Compose @crossplane resources using Python",
+    "source": "https://github.com/crossplane-contrib/function-python",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-pythonic",
+    "ref": "ghcr.io/crossplane-contrib/function-pythonic:v0.6.2",
+    "description": "Python based Crossplane Function providing a clean and elegant syntax for writing Crossplane Compositions.",
+    "source": "https://github.com/crossplane-contrib/function-pythonic",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-sequencer",
+    "ref": "ghcr.io/crossplane-contrib/function-sequencer:v0.3.0",
+    "description": "Crossplane composition function to define sequencing rules delaying the creation of resources until other resources are ready.",
+    "source": "https://github.com/crossplane-contrib/function-sequencer",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-shell",
+    "ref": "ghcr.io/crossplane-contrib/function-shell:v0.5.0",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/function-shell",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-status-transformer",
+    "ref": "ghcr.io/crossplane-contrib/function-status-transformer:v0.5.2",
+    "description": "A @crossplane composition function that can create custom status conditions and events for claims and XRs",
+    "source": "https://github.com/crossplane-contrib/function-status-transformer",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-tag-manager",
+    "ref": "ghcr.io/crossplane-contrib/function-tag-manager:v0.5.0",
+    "description": "A Crossplane Function to manage tags on Resources",
+    "source": "https://github.com/crossplane-contrib/function-tag-manager",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "function-unit-test",
+    "ref": "",
+    "description": "Experimental Unit test function",
+    "source": "https://github.com/crossplane-contrib/function-unit-test",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-alibaba",
+    "ref": "",
+    "description": "Crossplane provider for Alibaba Cloud",
+    "source": "https://github.com/crossplane-contrib/provider-alibaba",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-ansible",
+    "ref": "ghcr.io/crossplane-contrib/provider-ansible:v0.8.0",
+    "description": "Crossplane provider to execute Ansible contents remotely inside a Kubernetes cluster.",
+    "source": "https://github.com/crossplane-contrib/provider-ansible",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-argocd",
+    "ref": "ghcr.io/crossplane-contrib/provider-argocd:v0.14.3",
+    "description": "Crossplane provider to provision and manage Argo CD objects",
+    "source": "https://github.com/crossplane-contrib/provider-argocd",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-aws",
+    "ref": "ghcr.io/crossplane-contrib/provider-aws:v0.59.0",
+    "description": "Crossplane AWS Provider",
+    "source": "https://github.com/crossplane-contrib/provider-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-azure",
+    "ref": "",
+    "description": "Crossplane Azure Provider",
+    "source": "https://github.com/crossplane-contrib/provider-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-bitbucket-server",
+    "ref": "",
+    "description": "A Crossplane Provider for Bitbucket Server",
+    "source": "https://github.com/crossplane-contrib/provider-bitbucket-server",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-capi",
+    "ref": "",
+    "description": "@crossplane provider for @kubernetes-sigs Cluster API",
+    "source": "https://github.com/crossplane-contrib/provider-capi",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-civo",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-civo",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-cloudflare",
+    "ref": "",
+    "description": "A Cloudflare provider for Crossplane",
+    "source": "https://github.com/crossplane-contrib/provider-cloudflare",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-cloudinit",
+    "ref": "",
+    "description": "Crossplane provider for Cloud-init templating",
+    "source": "https://github.com/crossplane-contrib/provider-cloudinit",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-confluent",
+    "ref": "",
+    "description": "Crossplane upjet provider for Confluent Cloud: https://registry.terraform.io/providers/confluentinc/confluent/latest/docs",
+    "source": "https://github.com/crossplane-contrib/provider-confluent",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-cortex",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-cortex",
+    "license": "NOASSERTION"
+  },
+  {
+    "name": "provider-digitalocean",
+    "ref": "",
+    "description": "Crossplane DigitalOcean infrastructure provider",
+    "source": "https://github.com/crossplane-contrib/provider-digitalocean",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-dynatrace",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-dynatrace",
+    "license": "NOASSERTION"
+  },
+  {
+    "name": "provider-equinix",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-equinix",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-equinix-metal",
+    "ref": "",
+    "description": "DEPRECATED: Use provider-jet-equinix :warning:",
+    "source": "https://github.com/crossplane-contrib/provider-equinix-metal",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp",
+    "ref": "",
+    "description": "Crossplane GCP provider",
+    "source": "https://github.com/crossplane-contrib/provider-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gcp-beta",
+    "ref": "",
+    "description": "Crossplane Google Cloud Platform (GCP) infrastructure provider. provider-gcp-beta contains managed resources relying on beta APIs of GCP APIs.",
+    "source": "https://github.com/crossplane-contrib/provider-gcp-beta",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gen-aws",
+    "ref": "",
+    "description": "A Crossplane Provider that has been generated using AWS ACK Project",
+    "source": "https://github.com/crossplane-contrib/provider-gen-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-github",
+    "ref": "",
+    "description": "Crossplane Provider for GitHub",
+    "source": "https://github.com/crossplane-contrib/provider-github",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-gitlab",
+    "ref": "ghcr.io/crossplane-contrib/provider-gitlab:v0.20.0",
+    "description": "Crossplane Gitlab provider",
+    "source": "https://github.com/crossplane-contrib/provider-gitlab",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-helm",
+    "ref": "ghcr.io/crossplane-contrib/provider-helm:v1.4.0",
+    "description": "Crossplane Helm Provider",
+    "source": "https://github.com/crossplane-contrib/provider-helm",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-http",
+    "ref": "ghcr.io/crossplane-contrib/provider-http:v1.0.15",
+    "description": "Crossplane Provider designed to facilitate sending HTTP requests as resources.",
+    "source": "https://github.com/crossplane-contrib/provider-http",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-ibm-cloud",
+    "ref": "",
+    "description": "Crossplane provider for @ibm-cloud",
+    "source": "https://github.com/crossplane-contrib/provider-ibm-cloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-in-cluster",
+    "ref": "",
+    "description": "@crossplane provider for in-cluster resources",
+    "source": "https://github.com/crossplane-contrib/provider-in-cluster",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-influxdb",
+    "ref": "",
+    "description": "Crossplane provider for InfluxDB Cloud",
+    "source": "https://github.com/crossplane-contrib/provider-influxdb",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-infoblox-nios",
+    "ref": "",
+    "description": "A crossplane provider for the infoblox NIOS platform",
+    "source": "https://github.com/crossplane-contrib/provider-infoblox-nios",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-jet-alibaba",
+    "ref": "",
+    "description": "A Crossplane provider for Alibaba Cloud (@aliyun)",
+    "source": "https://github.com/crossplane-contrib/provider-jet-alibaba",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-jet-aws",
+    "ref": "",
+    "description": "AWS Provider for Crossplane that is built with Terrajet.",
+    "source": "https://github.com/crossplane-contrib/provider-jet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-jet-azure",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-jet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-jet-datadog",
+    "ref": "",
+    "description": "@crossplane provider to drive @datadog configuration control plane way",
+    "source": "https://github.com/crossplane-contrib/provider-jet-datadog",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-jet-ec",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-jet-ec",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-jet-equinix",
+    "ref": "",
+    "description": "Crossplane Provider for Equinix Metal, Fabric, and Network Edge",
+    "source": "https://github.com/crossplane-contrib/provider-jet-equinix",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-jet-gcp",
+    "ref": "",
+    "description": "GCP Provider for Crossplane generated using Terrajet",
+    "source": "https://github.com/crossplane-contrib/provider-jet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-jet-linode",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-jet-linode",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-jet-rancher",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-jet-rancher",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-jet-template",
+    "ref": "",
+    "description": "A template for building terrajet based @crossplane providers",
+    "source": "https://github.com/crossplane-contrib/provider-jet-template",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-jet-vault",
+    "ref": "",
+    "description": "Generated crossplane provider for vault",
+    "source": "https://github.com/crossplane-contrib/provider-jet-vault",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-k3s",
+    "ref": "ghcr.io/crossplane-contrib/provider-k3s:v0.4.0",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-k3s",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-kafka",
+    "ref": "ghcr.io/crossplane-contrib/provider-kafka:v1.3.2",
+    "description": "Crossplane provider for Kafka",
+    "source": "https://github.com/crossplane-contrib/provider-kafka",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-keycloak",
+    "ref": "ghcr.io/crossplane-contrib/provider-keycloak:v2.1.0",
+    "description": "Crossplane provider declaratively configuring Keycloak",
+    "source": "https://github.com/crossplane-contrib/provider-keycloak",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-kops",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-kops",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-kubernetes",
+    "ref": "ghcr.io/crossplane-contrib/provider-kubernetes:v1.3.1",
+    "description": "Crossplane provider to provision and manage Kubernetes objects on (remote) Kubernetes clusters.",
+    "source": "https://github.com/crossplane-contrib/provider-kubernetes",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-linode",
+    "ref": "",
+    "description": "Demonstrative Crossplane Stack for Linode resources",
+    "source": "https://github.com/crossplane-contrib/provider-linode",
+    "license": "NOASSERTION"
+  },
+  {
+    "name": "provider-mongodbatlas",
+    "ref": "ghcr.io/crossplane-contrib/provider-mongodbatlas:v1.3.1",
+    "description": "MongoDB Atlas Provider based on Terrajet",
+    "source": "https://github.com/crossplane-contrib/provider-mongodbatlas",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-newrelic",
+    "ref": "",
+    "description": "Crossplane NewRelic Provider",
+    "source": "https://github.com/crossplane-contrib/provider-newrelic",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-nop",
+    "ref": "ghcr.io/crossplane-contrib/provider-nop:v0.5.0",
+    "description": "The least useful @crossplane provider",
+    "source": "https://github.com/crossplane-contrib/provider-nop",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-okta",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-okta",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-openstack",
+    "ref": "ghcr.io/crossplane-contrib/provider-openstack:v0.10.0",
+    "description": "Crossplane provider for Openstack generated with Upjet from terraform-provider-openstack",
+    "source": "https://github.com/crossplane-contrib/provider-openstack",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-opsgenie",
+    "ref": "",
+    "description": "Crossplane Provider for Atlassian OpsGenie",
+    "source": "https://github.com/crossplane-contrib/provider-opsgenie",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-pagerduty",
+    "ref": "ghcr.io/crossplane-contrib/provider-pagerduty:v1.1.3",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-pagerduty",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-palette",
+    "ref": "ghcr.io/crossplane-contrib/provider-palette:v0.29.9",
+    "description": "Crossplane provider for Spectro Cloud Palette. Auto-generated from TF provider via Upjet.",
+    "source": "https://github.com/crossplane-contrib/provider-palette",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-planetscale",
+    "ref": "",
+    "description": "Introduced as part of the following Kubecon Talk https://www.youtube.com/watch?v=EN_vqJivZrk",
+    "source": "https://github.com/crossplane-contrib/provider-planetscale",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-rancher",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-rancher",
+    "license": "NOASSERTION"
+  },
+  {
+    "name": "provider-redpanda",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-redpanda",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-rook",
+    "ref": "",
+    "description": "Crossplane Rook infrastructure provider",
+    "source": "https://github.com/crossplane-contrib/provider-rook",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-secret",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-secret",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-sonarqube",
+    "ref": "ghcr.io/crossplane-contrib/provider-sonarqube:v0.13.0",
+    "description": "Crossplane Provider for SonarQube instances management",
+    "source": "https://github.com/crossplane-contrib/provider-sonarqube",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-spotify",
+    "ref": "ghcr.io/crossplane-contrib/provider-spotify:v0.2.5",
+    "description": "A @crossplane provider for managing Spotify playlists in Kubernetes",
+    "source": "https://github.com/crossplane-contrib/provider-spotify",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-sql",
+    "ref": "ghcr.io/crossplane-contrib/provider-sql:v0.16.1",
+    "description": "An SQL provider for @crossplane",
+    "source": "https://github.com/crossplane-contrib/provider-sql",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-ssh",
+    "ref": "",
+    "description": "@crossplane SSH Provider",
+    "source": "https://github.com/crossplane-contrib/provider-ssh",
+    "license": "NOASSERTION"
+  },
+  {
+    "name": "provider-styra",
+    "ref": "",
+    "description": "Crossplane Provider for Styra",
+    "source": "https://github.com/crossplane-contrib/provider-styra",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-talos",
+    "ref": "ghcr.io/crossplane-contrib/provider-talos:v0.2.1",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-talos",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-tencentcloud",
+    "ref": "ghcr.io/crossplane-contrib/provider-tencentcloud:v0.8.6",
+    "description": "Crossplane Tencentcloud Provider",
+    "source": "https://github.com/crossplane-contrib/provider-tencentcloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-terraform",
+    "ref": "ghcr.io/crossplane-contrib/provider-terraform:v1.2.0",
+    "description": "A @crossplane provider for Terraform",
+    "source": "https://github.com/crossplane-contrib/provider-terraform",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-terraform-aws",
+    "ref": "",
+    "description": "An experimental Crossplane provider for @aws",
+    "source": "https://github.com/crossplane-contrib/provider-terraform-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-terraform-vsphere",
+    "ref": "",
+    "description": "An experimental @crossplane provider for @vmware vSphere",
+    "source": "https://github.com/crossplane-contrib/provider-terraform-vsphere",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-tf-equinix-metal",
+    "ref": "",
+    "description": "DEPRECATED: use provider-jet-equinix :warning: ",
+    "source": "https://github.com/crossplane-contrib/provider-tf-equinix-metal",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-tinkerbell",
+    "ref": "",
+    "description": "**EXPERIMENTAL** (and non-functional) Crossplane Provider for Tinkerbell",
+    "source": "https://github.com/crossplane-contrib/provider-tinkerbell",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-alibabacloud",
+    "ref": "",
+    "description": "AlibabaCloud Provider for Crossplane.",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-alibabacloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-aws",
+    "ref": "",
+    "description": "AWS Provider for Crossplane.",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-aws",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-azure",
+    "ref": "",
+    "description": "Azure Provider for Crossplane.",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azure",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-azuread",
+    "ref": "",
+    "description": "AzureAD Provider for Crossplane.",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-azuread",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-cloudflare",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-cloudflare",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-digitalocean",
+    "ref": "ghcr.io/crossplane-contrib/provider-upjet-digitalocean:v1.0.2",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-digitalocean",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-ec",
+    "ref": "",
+    "description": "crossplane upjet provider for the Elastic Cloud Provider: https://registry.terraform.io/providers/elastic/ec/latest/docs",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-ec",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-edgeadc",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-edgeadc",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-gcp",
+    "ref": "",
+    "description": "GCP Provider for Crossplane.",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-gcp",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-github",
+    "ref": "ghcr.io/crossplane-contrib/provider-upjet-github:v0.19.1",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-github",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-kafka",
+    "ref": "",
+    "description": "A crossplane provider generated using Upjet from Mongey/terraform-provider-kafka",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-kafka",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-mysql",
+    "ref": "",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-mysql",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-upjet-zitadel",
+    "ref": "ghcr.io/crossplane-contrib/provider-upjet-zitadel:v0.1.1",
+    "description": "",
+    "source": "https://github.com/crossplane-contrib/provider-upjet-zitadel",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-vultr",
+    "ref": "",
+    "description": "Crossplane Vultr provider",
+    "source": "https://github.com/crossplane-contrib/provider-vultr",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-workflows",
+    "ref": "",
+    "description": "Repository for commonly shared GitHub workflows that can be used by Crossplane provider packages",
+    "source": "https://github.com/crossplane-contrib/provider-workflows",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-yandex-cloud",
+    "ref": "",
+    "description": "A @crossplane provider for @yandex cloud",
+    "source": "https://github.com/crossplane-contrib/provider-yandex-cloud",
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "provider-zpa",
+    "ref": "",
+    "description": "An experimental crossplane provider for @zscaler zpa",
+    "source": "https://github.com/crossplane-contrib/provider-zpa",
+    "license": "Apache-2.0"
+  }
+]

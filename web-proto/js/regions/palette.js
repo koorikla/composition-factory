@@ -162,6 +162,8 @@ export function init(rootEl, deps) {
 
   let providers = null;        // server-side cached providers, null = not loaded
   let providersErr = null;     // verbatim server error from the last add/list
+  let catRows = null;          // catalogue search results, null = untouched
+  let catTimer = null;
   let expandedProvider = null; // ref whose detail row is open
   let providerKinds = null;    // kinds of the expanded provider, null = loading
 
@@ -211,6 +213,21 @@ export function init(rootEl, deps) {
     h += '<div style="padding:8px 10px;display:flex;gap:6px">' +
       '<input id="src-add-ref" class="search" style="flex:1;min-width:0" placeholder="ghcr.io/\u2026/provider-x:vN" aria-label="Provider ref">' +
       '<button class="btn sm" id="src-add-btn">Add</button></div>';
+    h += '<div class="grp"><span class="lbl">Catalogue</span></div>' +
+      '<div style="padding:0 10px 6px"><input id="cat-search" class="search" placeholder="Search OSS providers\u2026" aria-label="Search catalogue"></div>';
+    if (catRows === null) {
+      h += '<div class="empty">Type to search the catalogue.</div>';
+    } else if (!catRows.length) {
+      h += '<div class="empty">No catalogue matches.</div>';
+    } else {
+      catRows.slice(0, 20).forEach(function (c) {
+        h += '<div class="cat-row src-row" style="cursor:default" title="' + esc(c.description || c.name) + '">' +
+          '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(c.name) + "</span>" +
+          '<span class="dg">' + esc(c.ref || "no published image \u2014 publishes elsewhere") + "</span></span>" +
+          (c.ref ? '<button class="btn sm cat-add" data-cat-ref="' + esc(c.ref) + '">Add</button>' : "") +
+          "</div>";
+      });
+    }
     if (providersErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(providersErr) + "</div>";
     return h;
   }
@@ -252,7 +269,7 @@ export function init(rootEl, deps) {
     else { h = drawSources(); hint = HINT_SRC; }
     // A re-render (e.g. the providers list arriving) must not eat what the
     // user is typing into the add-provider field.
-    var keepIds = ["src-add-ref", "param-add-name", "param-add-type", "param-add-req"];
+    var keepIds = ["src-add-ref", "cat-search", "param-add-name", "param-add-type", "param-add-req"];
     var kept = {};
     keepIds.forEach(function (id) {
       var el = railEl.querySelector("#" + id);
@@ -302,6 +319,18 @@ export function init(rootEl, deps) {
       });
       return;
     }
+    const catBtn = e.target.closest("button.cat-add");
+    if (catBtn) {
+      catBtn.disabled = true;
+      providersErr = null;
+      api.addProvider(catBtn.getAttribute("data-cat-ref")).then(function () {
+        loadProviders(); loadKinds();
+      }).catch(function (err) {
+        providersErr = err && err.message || String(err);
+        drawRail();
+      });
+      return;
+    }
     const srcRow = e.target.closest(".src-row[data-ref]");
     if (srcRow) {
       const ref = srcRow.getAttribute("data-ref");
@@ -344,6 +373,19 @@ export function init(rootEl, deps) {
       providersErr = err && err.message || String(err);
       drawRail();
     });
+  });
+
+  railEl.addEventListener("input", function (e) {
+    if (e.target.id !== "cat-search") return;
+    const q = e.target.value.trim();
+    clearTimeout(catTimer);
+    catTimer = setTimeout(function () {
+      if (!q) { catRows = null; drawRail(); return; }
+      api.getCatalogue(q).then(function (r) {
+        catRows = r.providers || [];
+        if (rail === "src") drawRail();
+      }).catch(function () { catRows = []; if (rail === "src") drawRail(); });
+    }, 200);
   });
 
   railEl.addEventListener("dragstart", function (e) {

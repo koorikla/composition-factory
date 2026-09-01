@@ -1,0 +1,9 @@
+apiVersion: platform.hooli.tech/v1alpha1
+kind: XWebApp
+metadata:
+  name: demo-webapp
+  namespace: default
+spec:
+  providerName: localstack
+  image: nginx:1.29.1
+  replicas: 3

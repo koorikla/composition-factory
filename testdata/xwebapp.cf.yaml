@@ -1,0 +1,38 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xwebapp
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.hooli.tech
+    kind: XWebApp
+    plural: xwebapps
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+      image:        {type: string, required: true}
+      replicas:     {type: integer, default: "2"}
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {value: "eu-north-1"}
+    - name: web
+      kind: Deployment
+      provider: k8s
+      fields:
+        spec.replicas:                          {from: params.replicas}
+        spec.selector.matchLabels:              {raw: "{app: web}"}
+        spec.template.metadata.labels:          {raw: "{app: web}"}
+        spec.template.spec.containers[0].name:  {value: "web"}
+        spec.template.spec.containers[0].image: {from: params.image}
+    - name: web-svc
+      kind: Service
+      provider: k8s
+      fields:
+        spec.selector:      {raw: "{app: web}"}
+        spec.ports[0].port: {raw: "80"}

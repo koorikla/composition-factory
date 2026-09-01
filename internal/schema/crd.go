@@ -9,6 +9,11 @@ import (
 )
 
 // CRD is the subset of a CustomResourceDefinition the generator needs.
+//
+// Despite the name, a CRD is also how a native Kubernetes kind (Deployment,
+// Service, ...) travels through the generator: internal/schema/k8s builds one
+// per vendored kind, with Native set, so the index, the API and the emitter
+// share one schema shape instead of growing a parallel native-kind type.
 type CRD struct {
 	Group      string
 	Kind       string
@@ -16,6 +21,15 @@ type CRD struct {
 	Scope      string
 	Categories []string
 	Versions   []Version
+
+	// Native marks a vendored native Kubernetes kind rather than a
+	// provider-shipped managed resource. It changes what "the settable
+	// fields" means (the object's own schema, not spec.forProvider — see
+	// FieldTree) and what envelope the emitter renders (none: the composed
+	// object IS the Kubernetes object, with no forProvider wrapper and no
+	// providerConfigRef). Only internal/schema/k8s sets it; ParseCRDs never
+	// does, so no fetched package can smuggle a kind into the native path.
+	Native bool `json:"native,omitempty"`
 }
 
 // Version is one served version of a CRD.
@@ -125,10 +139,19 @@ func (c CRD) Namespaced() bool { return c.Scope == "Namespaced" }
 // APIVersion returns group/version for the preferred version. It returns an
 // error instead of a malformed apiVersion string (e.g. "group/" with an empty
 // version segment) when the CRD has no usable version.
+//
+// An empty Group is the core/legacy Kubernetes API group (native ConfigMap,
+// Service, ...), whose apiVersion is the bare version — "v1", never "/v1".
+// A parsed CustomResourceDefinition can never take this branch: the API
+// server requires spec.group to be a non-empty DNS subdomain, so an empty
+// group here always means a native kind from internal/schema/k8s.
 func (c CRD) APIVersion() (string, error) {
 	v, err := c.Preferred()
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", c.Kind, err)
+	}
+	if c.Group == "" {
+		return v.Name, nil
 	}
 	return c.Group + "/" + v.Name, nil
 }
