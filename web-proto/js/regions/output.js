@@ -55,10 +55,11 @@ export function init(rootEl, deps) {
   /* ---------- tabs (prototype markup, built live) ---------- */
 
   function buildTabs() {
+    var bpLabel = bpTabLabel(store.state.doc);
     var h =
       '<button data-t="comp" aria-pressed="' + (tab === "comp") + '">composition.yaml</button>' +
       '<button data-t="xrd" aria-pressed="' + (tab === "xrd") + '">definition.yaml</button>' +
-      '<button data-t="bp" aria-pressed="' + (tab === "bp") + '">blueprint.cf.yaml</button>';
+      '<button data-t="bp" aria-pressed="' + (tab === "bp") + '">' + esc(bpLabel) + '</button>';
     // one tab per generated providerconfig family (outputs carry the bodies)
     var g = store.state.lastGenerate;
     (g && g.outputs || []).forEach(function (o) {
