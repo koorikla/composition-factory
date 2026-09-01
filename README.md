@@ -15,7 +15,57 @@ Output is plain YAML meant to sit in a Git repo an existing GitOps pipeline
 already syncs — there is no database and no cluster requirement; `cf gen`
 touches neither.
 
-## Quickstart
+## Quickstart (Docker)
+
+Get up and running immediately with Docker — no local Go toolchain required:
+
+**1. Build the image.**
+
+```sh
+docker build -t compositionfactory .
+```
+
+**2. Open the Canvas in your browser.**
+
+Mount your workspace and schema cache, bind port `8080`, and start the visual editor:
+
+```sh
+# On macOS:
+docker run --rm -p 8080:8080 \
+  -v "$(pwd)":/workspace \
+  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
+  compositionfactory serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
+
+# On Linux:
+docker run --rm -p 8080:8080 \
+  -v "$(pwd)":/workspace \
+  -v "$HOME/.cache/compositionfactory:/home/cf/.cache/compositionfactory" \
+  compositionfactory serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
+```
+
+Open <http://localhost:8080> in your browser. The embedded canvas GUI and API are served together from the single container.
+
+**3. Generate YAML from a blueprint file (`cf gen`).**
+
+```sh
+docker run --rm \
+  -v "$(pwd)":/workspace \
+  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
+  compositionfactory gen testdata/xqueue.cf.yaml -o out
+```
+
+**4. Add a provider schema (`cf provider add`).**
+
+```sh
+docker run --rm \
+  -v "$(pwd)":/workspace \
+  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
+  compositionfactory provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+```
+
+---
+
+## Quickstart (Local Binary)
 
 **1. Build.**
 
@@ -42,7 +92,7 @@ spec:
   sources:
     - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
   xrd:
-    group: platform.hooli.tech
+    group: platform.sparky.ee
     kind: XQueue
     plural: xqueues
     version: v1alpha1
@@ -69,9 +119,9 @@ text, written verbatim, unquoted — the escape hatch). See
 
 ```sh
 bin/cf gen testdata/xqueue.cf.yaml -o out
-# wrote out/compositions/xqueues.platform.hooli.tech.yaml
+# wrote out/compositions/xqueues.platform.sparky.ee.yaml
 # wrote out/functions.yaml
-# wrote out/xrds/xqueues.platform.hooli.tech.yaml
+# wrote out/xrds/xqueues.platform.sparky.ee.yaml
 ```
 
 `cf gen --check` writes nothing and instead exits `0` (in sync), `1` (tool
@@ -82,9 +132,9 @@ distinguishes a broken generator from hand-edited generated YAML with.
 
 ```sh
 crossplane composition render testdata/xr.yaml \
-  out/compositions/xqueues.platform.hooli.tech.yaml \
+  out/compositions/xqueues.platform.sparky.ee.yaml \
   out/functions.yaml \
-  --xrd out/xrds/xqueues.platform.hooli.tech.yaml --timeout 5m
+  --xrd out/xrds/xqueues.platform.sparky.ee.yaml --timeout 5m
 ```
 
 This needs the `crossplane` CLI and a reachable Docker daemon (the pipeline
@@ -97,65 +147,6 @@ bin/cf serve --blueprint testdata/xqueue.cf.yaml --out out
 ```
 
 Open <http://127.0.0.1:8080>. (For UI development on `web-proto/` with hot reloading, `python3 web-proto/serve.py` is also available on `:5180` and proxies `/api/*` to `:8080`).
-
-## Running with Docker
-
-You can build and run `compositionfactory` as a self-contained container with no local Go toolchain required.
-
-**1. Build the image.**
-
-```sh
-docker build -t compositionfactory .
-```
-
-**2. Run the canvas and open in browser.**
-
-Mount your current workspace and schema cache, bind port `8080`, and pass your blueprint:
-
-```sh
-# On macOS:
-docker run --rm -p 8080:8080 \
-  -v "$(pwd)":/workspace \
-  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
-  compositionfactory serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
-
-# On Linux:
-docker run --rm -p 8080:8080 \
-  -v "$(pwd)":/workspace \
-  -v "$HOME/.cache/compositionfactory:/home/cf/.cache/compositionfactory" \
-  compositionfactory serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
-```
-
-Open <http://localhost:8080> in your browser. The embedded canvas GUI and API are served together from the single container.
-
-**3. Pass a blueprint file to generate YAML (`cf gen`).**
-
-Pass any local blueprint file to generate Compositions, XRDs, and provider configurations into your output directory:
-
-```sh
-docker run --rm \
-  -v "$(pwd)":/workspace \
-  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
-  compositionfactory gen testdata/xqueue.cf.yaml -o out
-```
-
-**4. Add a provider via Docker (`cf provider add`).**
-
-To download and cache provider schemas entirely within Docker:
-
-```sh
-# Using host cache mount:
-docker run --rm \
-  -v "$(pwd)":/workspace \
-  -v "$HOME/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory" \
-  compositionfactory provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
-
-# Or using a Docker named volume (cf-cache):
-docker run --rm \
-  -v "$(pwd)":/workspace \
-  -v cf-cache:/home/cf/.cache/compositionfactory \
-  compositionfactory provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
-```
 
 ## The canvas
 
