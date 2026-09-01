@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -304,5 +305,47 @@ func TestServeNoUIServesAPIOnly(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not shut down within the bounded graceful-shutdown timeout")
+	}
+}
+
+// The embedded UI is a build-time snapshot; a checkout serving stale code in
+// a fresh browser looked like time travel. When ./web-proto exists on disk,
+// serve THAT.
+func TestServePrefersLiveWebProtoOverEmbedded(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "web-proto"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := "<title>live-from-disk</title>"
+	if err := os.WriteFile(filepath.Join(dir, "web-proto", "index.html"), []byte(marker), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(old)
+
+	h := withUI(http.NotFoundHandler(), false)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if !strings.Contains(rec.Body.String(), "live-from-disk") {
+		t.Fatalf("/ served the embedded snapshot, not the on-disk web-proto; body: %.120s", rec.Body.String())
+	}
+}
+
+func TestServeFallsBackToEmbeddedWithoutWebProto(t *testing.T) {
+	dir := t.TempDir()
+	old, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(old)
+
+	h := withUI(http.NotFoundHandler(), false)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Composition Factory") {
+		t.Fatalf("embedded fallback broken: code=%d body: %.120s", rec.Code, rec.Body.String())
 	}
 }

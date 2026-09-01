@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -212,7 +213,17 @@ func withUI(api http.Handler, noUI bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/api/", api)
 	mux.Handle("/healthz", api)
-	mux.Handle("/", noStore(http.FileServerFS(webproto.Files)))
+	// The embedded tree is a BUILD-TIME snapshot: running cf serve from a
+	// checkout after editing web-proto/ would silently serve stale code (a
+	// "waaay too old version" in a fresh browser, no cache involved). When
+	// the working directory holds the live source, serve that instead; the
+	// embedded copy remains the story for installed binaries run elsewhere.
+	if _, err := os.Stat(filepath.Join("web-proto", "index.html")); err == nil {
+		fmt.Fprintln(os.Stderr, "cf serve: serving the canvas from ./web-proto (live source; the embedded snapshot is bypassed)")
+		mux.Handle("/", noStore(http.FileServer(http.Dir("web-proto"))))
+	} else {
+		mux.Handle("/", noStore(http.FileServerFS(webproto.Files)))
+	}
 	return mux
 }
 
