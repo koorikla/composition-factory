@@ -109,7 +109,7 @@ export function init(rootEl, deps) {
           ' data-provider="' + esc(k.provider || "") + '"' +
           ' data-fam="' + esc(fam) + '">' +
           '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
-          '<span class="nm">' + esc(k.kind) + '</span>' +
+          '<span class="nm" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(k.kind) + '">' + esc(k.kind) + '</span>' +
           '<span class="req">' + (k.required | 0) + " req</span></div>";
       });
     });

@@ -134,7 +134,7 @@ function xrCardHTML(d, sel) {
   const params = xrd.parameters || {};
   const pos = S.getPosition(XR_ID) || { x: 36, y: 48 };
   let h = '<div class="node' + (sel === XR_ID ? " sel" : "") + '" data-id="' + esc(XR_ID) + '"' +
-    ' style="left:' + pos.x + 'px;top:' + pos.y + 'px;width:198px">' +
+    ' style="left:' + pos.x + 'px;top:' + pos.y + 'px">' +
     '<div class="node-h" style="background:var(--wire-xrd-soft)">' +
     '<span class="sw" style="background:' + COLORS.xrd + '"></span>' +
     '<span class="k">' + esc(xrd.kind || "XR") + '</span>' +
@@ -168,7 +168,7 @@ function resourceCardHTML(d, r, sel) {
 
   let h = '<div class="node' + (sel === r.name ? " sel" : "") +
     (r.forEach ? " stack" : "") + '" data-id="' + esc(r.name) + '"' +
-    ' style="left:' + pos.x + 'px;top:' + pos.y + 'px;width:198px">' +
+    ' style="left:' + pos.x + 'px;top:' + pos.y + 'px">' +
     '<div class="node-h" style="background:var(--surface-2)">' +
     '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
     '<span class="k">' + esc(r.kind) + '</span>' +
