@@ -1,5 +1,6 @@
 # Multi-stage build for compositionfactory (cf)
-FROM golang:alpine AS builder
+# Build on native host platform using Go cross-compilation (avoids slow QEMU emulation)
+FROM --platform=$BUILDPLATFORM golang:alpine AS builder
 
 WORKDIR /src
 
@@ -10,13 +11,13 @@ RUN go mod download
 
 COPY . .
 
-ARG VERSION=dev
-RUN CGO_ENABLED=0 go build \
+ARG TARGETOS TARGETARCH VERSION=dev
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -trimpath \
     -ldflags "-s -w -X main.version=${VERSION}" \
     -o /bin/cf ./cmd/cf
 
-# Final minimal runtime image
+# Final minimal runtime image for the target architecture
 FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates tzdata && \
