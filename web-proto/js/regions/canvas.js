@@ -177,6 +177,11 @@ function resourceCardHTML(d, r, sel) {
       ? '<button class="del" data-act="duplicate" data-res="' + esc(r.name) + '" title="Duplicate (\u2318C \u2318V)">\u29c9</button>' +
         '<button class="del" data-act="delete" data-res="' + esc(r.name) + '" title="Remove (Delete)">\u00d7</button>'
       : "") + "</div>" +
+    (sel === r.name
+      ? '<span data-resize data-res="' + esc(r.name) + '" title="Drag to resize \u00b7 double-click to reset"' +
+        ' style="position:absolute;right:-2px;bottom:-2px;width:14px;height:14px;cursor:nwse-resize;' +
+        'border-right:2px solid var(--faint);border-bottom:2px solid var(--faint);border-radius:0 0 4px 0"></span>'
+      : "") +
     '<div class="node-grp">' + esc(grp) + '</div>' +
     '<div class="ports">';
 
@@ -236,6 +241,10 @@ function render() {
     h += resourceCardHTML(d, r, sel);
   });
   canvasEl.innerHTML = h;
+  Object.keys(cardSizes).forEach(function (n) {
+    const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(n) + '"]');
+    if (el) applyCardSize(el, n);
+  });
   drawWires();
   // one extra pass after layout/fonts settle
   scheduleWires();
@@ -359,6 +368,15 @@ function buildZoomControls() {
   bar.querySelector("#zoom-in").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1.2); });
   bar.querySelector("#zoom-out").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1 / 1.2); });
   bar.querySelector("#zoom-reset").addEventListener("click", function () { view.x = 0; view.y = 0; view.k = 1; applyView(); });
+}
+
+/* ---------- manual card size (slice 26): client-side, like positions ---- */
+
+const cardSizes = {}; // name -> width px; absent = automatic
+
+function applyCardSize(el, name) {
+  const w = cardSizes[name];
+  if (w) { el.style.width = w + "px"; el.style.maxWidth = "none"; }
 }
 
 /* ---------- context menu (slice 25) ---------- */
@@ -518,7 +536,33 @@ function onCanvasClick(e) {
   if (n) S.select(n.getAttribute("data-id"));
 }
 
+function onResizeDown(e) {
+  const grip = e.target.closest("[data-resize]");
+  if (!grip || e.button !== 0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const name = grip.getAttribute("data-res");
+  const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(name) + '"]');
+  if (!el) return;
+  const startW = el.getBoundingClientRect().width / view.k;
+  const sx = e.clientX;
+  function mv(ev) {
+    const w = Math.max(198, startW + (ev.clientX - sx) / view.k);
+    cardSizes[name] = Math.round(w);
+    el.style.width = cardSizes[name] + "px";
+    el.style.maxWidth = "none";
+    scheduleWires();
+  }
+  function up() {
+    document.removeEventListener("pointermove", mv);
+    document.removeEventListener("pointerup", up);
+  }
+  document.addEventListener("pointermove", mv);
+  document.addEventListener("pointerup", up);
+}
+
 function onPointerDown(e) {
+  if (e.target.closest("[data-resize]")) { onResizeDown(e); return; }
   if (e.button !== undefined && e.button !== 0) return;
   // A press on an action button is a click, never a drag: entering the drag
   // path re-selects and re-renders the card mid-press, destroying the very
@@ -664,6 +708,15 @@ export function init(rootEl, deps) {
   addEventListener("keydown", onKeyDown);
   cwEl.addEventListener("wheel", onWheel, { passive: false });
   cwEl.addEventListener("contextmenu", onContextMenu);
+  canvasEl.addEventListener("dblclick", function (e) {
+    const grip = e.target.closest("[data-resize]");
+    if (!grip) return;
+    const name = grip.getAttribute("data-res");
+    delete cardSizes[name];
+    const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(name) + '"]');
+    if (el) { el.style.width = ""; el.style.maxWidth = ""; }
+    scheduleWires();
+  });
   document.addEventListener("click", function (e) { if (!e.target.closest("#ctx-menu")) closeCtxMenu(); });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeCtxMenu(); });
   cwEl.addEventListener("pointerdown", onPanDown);
