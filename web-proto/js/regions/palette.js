@@ -61,6 +61,20 @@ export function init(rootEl, deps) {
 
   let rail = "kinds";          // "kinds" | "shared" | "src"
   let kinds = [];              // last /api/kinds result rows
+  // per-provider kind visibility, persisted: { "<providerRef>": ["Kind",...] }
+  // lists the HIDDEN kinds; a provider absent from the map hides nothing.
+  let hiddenKinds = {};
+  try { hiddenKinds = JSON.parse(localStorage.getItem("cf-hidden-kinds")) || {}; } catch (_) { /* fresh */ }
+  function saveHidden() {
+    try { localStorage.setItem("cf-hidden-kinds", JSON.stringify(hiddenKinds)); } catch (_) { /* private mode */ }
+  }
+  // identity is kind|apiVersion — Namespaced and Cluster variants share the
+  // kind name under one provider (the classic kind-alone collision).
+  function isHidden(provider, kind, apiVersion) {
+    const l = hiddenKinds[provider];
+    return !!l && l.indexOf(kind + "|" + (apiVersion || "")) >= 0;
+  }
+
   let kindsError = null;       // verbatim server message, or null
   let kindsLoaded = false;
   let searchSeq = 0;
@@ -93,6 +107,7 @@ export function init(rootEl, deps) {
     const order = [];
     const byGroup = {};
     kinds.forEach(function (k) {
+      if (isHidden(k.provider, k.kind, k.apiVersion)) return;
       const g = k.group || k.apiVersion || "";
       if (!byGroup[g]) { byGroup[g] = []; order.push(g); }
       byGroup[g].push(k);
@@ -180,34 +195,44 @@ export function init(rootEl, deps) {
   function drawSources() {
     const doc = store.state.doc;
     if (!doc) return '<div class="empty">No document loaded.</div>';
-    const sources = providers !== null
+    let sources = providers !== null
       ? providers.map(function (p) { return { provider: p.ref, digest: p.digest, kinds: p.kinds }; })
-      : (doc.spec && doc.spec.sources || []);
+      : (doc.spec && doc.spec.sources || []).slice();
+    // the native k8s pseudo-provider is a first-class row: its kinds are
+    // real palette entries and hiding "the primitives" happens here.
+    const nativeCount = kinds.filter(function (k) { return k.provider === "k8s"; }).length;
+    if (nativeCount) sources = sources.concat([{ provider: "k8s", digest: "", kinds: nativeCount, native: true }]);
     let h = '<div class="grp"><span class="lbl">Providers</span><span class="n">' + sources.length + "</span></div>";
     if (!sources.length) h += '<div class="empty">No sources declared.</div>';
     sources.forEach(function (s) {
       const ref = s && s.provider || "";
       const fam = /aws/.test(ref) ? "aws" : "k8s";
       const meta = (s.digest ? s.digest.slice(0, 19) : "") + (s.kinds ? " \u00b7 " + s.kinds + " kinds" : "");
-      h += '<div class="src-row" data-ref="' + esc(ref) + '" style="cursor:pointer" title="Click for details">' +
+      h += '<div class="src-row" data-ref="' + esc(ref) + '" style="cursor:pointer" title="Click for details" aria-expanded="' + (expandedProvider === ref) + '">' +
         '<span class="sw" style="width:5px;height:22px;border-radius:1.5px;background:' + COLORS[fam] + '"></span>' +
         '<span style="min-width:0"><span class="nm" style="display:block">' + esc(ref.split("/").pop()) + "</span>" +
         '<span class="dg">' + esc(meta || ref) + '</span></span><span class="sp"></span></div>';
       if (expandedProvider === ref) {
-        const host = ref.split("/")[0];
+        const hiddenList = hiddenKinds[ref] || [];
         const kindsHtml = providerKinds === null
           ? '<div class="g">loading kinds\u2026</div>'
-          : providerKinds.map(function (k) {
-              return '<div style="display:flex;gap:6px;align-items:baseline">' +
+          : '<label style="display:flex;gap:6px;align-items:center;font-size:10.5px;margin:2px 0">' +
+            '<input type="checkbox" data-pick-all data-ref="' + esc(ref) + '"' +
+            (hiddenList.length === 0 ? " checked" : "") + ">show all kinds</label>" +
+            providerKinds.map(function (k) {
+              return '<label style="display:flex;gap:6px;align-items:center;font-size:10.5px">' +
+                '<input type="checkbox" data-pick-kind="' + esc(k.kind) + '" data-av="' + esc(k.apiVersion) + '" data-ref="' + esc(ref) + '"' +
+                (isHidden(ref, k.kind, k.apiVersion) ? "" : " checked") + ">" +
                 '<span style="font-family:var(--mono);font-size:11px">' + esc(k.kind) + "</span>" +
-                '<span class="dg">' + esc(k.scope) + "</span></div>";
+                '<span class="dg" style="margin-left:auto">' + esc(k.scope) + "</span></label>";
             }).join("");
         h += '<div class="src-detail" style="padding:4px 12px 10px 22px;display:flex;flex-direction:column;gap:3px">' +
-          '<span class="dg">' + esc(host) + "</span>" +
-          '<span class="dg" style="word-break:break-all">' + esc(s.digest || "") + "</span>" +
+          '<span class="dg" style="word-break:break-all" title="Full registry reference">' + esc(ref) + "</span>" +
+          (s.digest ? '<span class="dg" style="word-break:break-all">' + esc(s.digest) + "</span>" : "") +
           kindsHtml +
-          '<button class="btn sm" id="src-remove-btn" style="align-self:flex-start;margin-top:4px" ' +
-          'title="Remove this provider from the cache">Remove provider</button></div>';
+          (s.native ? "" :
+            '<button class="btn sm" id="src-remove-btn" style="align-self:flex-start;margin-top:4px" ' +
+            'title="Remove this provider from the cache">Remove provider</button>') + "</div>";
       }
     });
     h += '<div style="padding:8px 10px;display:flex;gap:6px">' +
@@ -305,6 +330,26 @@ export function init(rootEl, deps) {
     debounceTimer = setTimeout(loadKinds, 150);
   });
 
+  railEl.addEventListener("change", function (e) {
+    const pickAll = e.target.closest("input[data-pick-all]");
+    if (pickAll) {
+      const ref = pickAll.getAttribute("data-ref");
+      if (pickAll.checked) delete hiddenKinds[ref];
+      else hiddenKinds[ref] = (providerKinds || [])
+        .map(function (k) { return k.kind + "|" + k.apiVersion; });
+      saveHidden(); drawRail(); return;
+    }
+    const pick = e.target.closest("input[data-pick-kind]");
+    if (pick) {
+      const ref = pick.getAttribute("data-ref");
+      const key = pick.getAttribute("data-pick-kind") + "|" + (pick.getAttribute("data-av") || "");
+      const l = (hiddenKinds[ref] || []).filter(function (k) { return k !== key; });
+      if (!pick.checked) l.push(key);
+      if (l.length) hiddenKinds[ref] = l; else delete hiddenKinds[ref];
+      saveHidden(); drawRail(); return;
+    }
+  });
+
   railEl.addEventListener("click", function (e) {
     if (e.target.closest("#src-remove-btn") && expandedProvider) {
       const ref = expandedProvider;
@@ -331,6 +376,7 @@ export function init(rootEl, deps) {
       });
       return;
     }
+    if (e.target.closest(".src-detail")) return; // the change listener owns it
     const srcRow = e.target.closest(".src-row[data-ref]");
     if (srcRow) {
       const ref = srcRow.getAttribute("data-ref");
