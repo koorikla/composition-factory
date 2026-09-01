@@ -19,7 +19,36 @@ touches neither.
 
 Get up and running immediately with Docker from GitHub Container Registry — no clone or Go toolchain required:
 
-**1. Add the provider schema (one-time download into Docker cache volume).**
+**1. Create a starter blueprint and cache provider schemas.**
+
+```sh
+cat <<'EOF' > xqueue.cf.yaml
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.sparky.ee
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      location:       {type: string, required: true, enum: [EU, US]}
+      providerName:   {type: string, required: true}
+      maxMessageSize: {type: integer, default: "2048"}
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region:         {value: "eu-north-1"}
+        maxMessageSize: {from: params.maxMessageSize}
+EOF
+```
 
 Pulls the provider's CRD schemas and pins them in `.cf.lock`:
 
@@ -38,7 +67,7 @@ Start the visual editor on `http://localhost:8080`:
 docker run --rm -p 8080:8080 \
   -v "$(pwd)":/workspace \
   -v cf-cache:/home/cf/.cache/compositionfactory \
-  ghcr.io/koorikla/compositionfactory:latest serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
+  ghcr.io/koorikla/compositionfactory:latest serve --blueprint xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
 ```
 
 Open <http://localhost:8080> in your browser. The embedded canvas GUI and API are served together from the single container.
@@ -49,7 +78,7 @@ Open <http://localhost:8080> in your browser. The embedded canvas GUI and API ar
 docker run --rm \
   -v "$(pwd)":/workspace \
   -v cf-cache:/home/cf/.cache/compositionfactory \
-  ghcr.io/koorikla/compositionfactory:latest gen testdata/xqueue.cf.yaml -o out
+  ghcr.io/koorikla/compositionfactory:latest gen xqueue.cf.yaml -o out
 ```
 
 > [!TIP]
