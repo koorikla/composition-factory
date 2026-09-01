@@ -90,22 +90,59 @@ crossplane composition render testdata/xr.yaml \
 This needs the `crossplane` CLI and a reachable Docker daemon (the pipeline
 functions run as containers); `functions.yaml` is a required third argument.
 
-**6. Run the canvas.** `cf serve` is loopback-only by default and needs the
-providers named in the blueprint already cached (step 2):
+**6. Run the canvas.** `cf serve` embeds the GUI directly at `/`, so one command starts the full app on `:8080`:
 
 ```sh
 bin/cf serve --blueprint testdata/xqueue.cf.yaml --out out
 ```
 
-In another shell:
+Open <http://127.0.0.1:8080>. (For UI development on `web-proto/` with hot reloading, `python3 web-proto/serve.py` is also available on `:5180` and proxies `/api/*` to `:8080`).
+
+## Running with Docker
+
+You can build and run `compositionfactory` as a self-contained container with no local Go toolchain required.
+
+**1. Build the image.**
 
 ```sh
-python3 web-proto/serve.py
+docker build -t compositionfactory .
 ```
 
-Open <http://127.0.0.1:5180>. `serve.py` is a static file server for
-`web-proto/` that proxies every `/api/*` request to `cf serve` on `:8080`, so
-every fetch the browser makes is same-origin.
+**2. Run the canvas and open in browser.**
+
+Mount your current workspace, bind port `8080`, and pass your blueprint:
+
+```sh
+docker run --rm -p 8080:8080 \
+  -v "$(pwd)":/workspace \
+  compositionfactory serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
+```
+
+Open <http://localhost:8080> in your browser. The embedded canvas GUI and API are served together from the single container.
+
+**3. Pass a blueprint file to generate YAML (`cf gen`).**
+
+Pass any local blueprint file to generate Compositions, XRDs, and provider configurations into your output directory:
+
+```sh
+docker run --rm \
+  -v "$(pwd)":/workspace \
+  compositionfactory gen testdata/xqueue.cf.yaml -o out
+```
+
+**4. Add a provider via Docker (`cf provider add`).**
+
+```sh
+docker run --rm \
+  -v "$(pwd)":/workspace \
+  compositionfactory provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+```
+
+> [!TIP]
+> **Persisting the schema cache across runs:**
+> Mount your host cache directory into `/home/cf/.cache/compositionfactory` so downloaded provider CRDs persist across container invocations:
+> - **Linux:** `-v ~/.cache/compositionfactory:/home/cf/.cache/compositionfactory`
+> - **macOS:** `-v ~/Library/Caches/compositionfactory:/home/cf/.cache/compositionfactory`
 
 ## The canvas
 
