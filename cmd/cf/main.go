@@ -20,6 +20,7 @@ type CLI struct {
 	Provider ProviderCmd `cmd:"" help:"Manage provider schema sources."`
 	Gen      GenCmd      `cmd:"" help:"Generate XRD, Composition and functions.yaml from a blueprint."`
 	Serve    ServeCmd    `cmd:"" help:"Serve the compositionfactory HTTP API, loopback-only by default."`
+	MCP      MCPCmd      `cmd:"" name:"mcp" help:"Serve the compositionfactory MCP server over stdio, for agent tooling."`
 }
 
 type VersionCmd struct{}
