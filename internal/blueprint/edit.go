@@ -24,6 +24,14 @@ func (b *Blueprint) deepCopy() *Blueprint {
 	cp := *b
 
 	cp.Spec.Sources = append([]Source(nil), b.Spec.Sources...)
+	cp.Spec.Conventions = append([]Convention(nil), b.Spec.Conventions...)
+
+	if b.Spec.Templates != nil {
+		cp.Spec.Templates = make(map[string]string, len(b.Spec.Templates))
+		for name, body := range b.Spec.Templates {
+			cp.Spec.Templates[name] = body
+		}
+	}
 
 	cp.Spec.XRD.Parameters = make(map[string]Parameter, len(b.Spec.XRD.Parameters))
 	for name, p := range b.Spec.XRD.Parameters {

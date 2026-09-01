@@ -2,6 +2,7 @@ package emit
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -233,7 +234,37 @@ func renderTemplateData(t *testing.T, tmplBody string, data map[string]any) (str
 			}
 		},
 	}
-	tmpl, err := template.New("t").Option("missingkey=error").Funcs(funcs).Parse(tmplBody)
+	// The user-template call chain, mirroring the real engine:
+	// function-go-templating's include (ExecuteTemplate into a buffer, the
+	// Helm idiom) and sprig's dict/trim/nindent, faithfully enough that the
+	// emitted `include ... | trim | nindent N` pipeline exercises the same
+	// indentation semantics the render will. nindent is sprig's exactly:
+	// indent every line by n and prepend a newline.
+	tmpl := template.New("t").Option("missingkey=error")
+	funcs["include"] = func(name string, data any) (string, error) {
+		var buf bytes.Buffer
+		err := tmpl.ExecuteTemplate(&buf, name, data)
+		return buf.String(), err
+	}
+	funcs["trim"] = strings.TrimSpace
+	funcs["nindent"] = func(n int, s string) string {
+		pad := strings.Repeat(" ", n)
+		return "\n" + pad + strings.ReplaceAll(s, "\n", "\n"+pad)
+	}
+	funcs["dict"] = func(pairs ...any) map[string]any {
+		d := make(map[string]any, len(pairs)/2)
+		for i := 0; i+1 < len(pairs); i += 2 {
+			key, ok := pairs[i].(string)
+			if !ok {
+				t.Fatalf("dict stub: key %v is not a string", pairs[i])
+			}
+			d[key] = pairs[i+1]
+		}
+		return d
+	}
+	funcs["quote"] = func(v any) string { return strconv.Quote(fmt.Sprint(v)) }
+
+	tmpl, err := tmpl.Funcs(funcs).Parse(tmplBody)
 	if err != nil {
 		t.Fatalf("template body does not parse: %v\n---\n%s", err, tmplBody)
 	}

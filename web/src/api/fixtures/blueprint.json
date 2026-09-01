@@ -33,6 +33,8 @@
         }
       }
     },
+    "templates": null,
+    "conventions": null,
     "resources": [
       {
         "name": "main-queue",
@@ -44,7 +46,8 @@
           "maxMessageSize": {
             "from": "params.maxMessageSize",
             "value": "",
-            "raw": ""
+            "raw": "",
+            "template": ""
           }
         }
       }

@@ -21,9 +21,37 @@ type Metadata struct {
 }
 
 type Spec struct {
-	Sources   []Source   `json:"sources"`
-	XRD       XRD        `json:"xrd"`
-	Resources []Resource `json:"resources"`
+	Sources []Source `json:"sources"`
+	XRD     XRD      `json:"xrd"`
+	// Templates are user-defined Go templates, name -> body. Each is emitted
+	// as a {{- define "<name>" }} block heading the Composition's template
+	// and is callable from a field via template: <name> (or applied by a
+	// convention). Bodies are validated by parsing them under the real
+	// engine's contract — text/template with missingkey=error and
+	// function-go-templating's function set (sprig minus env/expandenv, plus
+	// its own additions) — so a body that cannot parse at render time is
+	// refused at the source. A body renders with the minimal context the
+	// field call passes: .spec (the composite's spec), .xr (the composite's
+	// metadata.name), .resource (the composed resource's name) and .field
+	// (the field path being set). Dereferences of optional .spec keys inside
+	// a body are the author's contract: guard them with hasKey, exactly as
+	// the generator does.
+	Templates map[string]string `json:"templates"`
+	// Conventions apply a template to every matching field a resource does
+	// NOT set explicitly. Match is a case-sensitive suffix of a top-level
+	// forProvider field name (e.g. "tags" matches tags; "Name" matches
+	// queueName); the first matching convention in list order wins for each
+	// field, and an explicit field always wins over any convention — that is
+	// the override mechanism.
+	Conventions []Convention `json:"conventions"`
+	Resources   []Resource   `json:"resources"`
+}
+
+// Convention binds a template to every top-level forProvider leaf whose name
+// ends with Match, on every resource that does not set that field itself.
+type Convention struct {
+	Match    string `json:"match"`
+	Template string `json:"template"`
 }
 
 // Source is one schema source. M1 supports provider packages only.
@@ -113,8 +141,11 @@ func ParseWhen(expr string) (param, op, literal string, err error) {
 		"the operator, double quotes around the literal, no backslashes or embedded quotes (got %q)", expr)
 }
 
-// Field sets one path on a composed resource. Exactly one of From, Value or Raw
-// must be set.
+// Field sets one path on a composed resource. Exactly one of From, Value,
+// Raw or Template must be set. Template names an entry in spec.templates and
+// renders as an include call whose output becomes the field's YAML value —
+// a scalar on one line, or an indented block for a multi-line body (the
+// generator owns the nindent).
 //
 // From accepts two reference grammars:
 //
@@ -133,9 +164,10 @@ func ParseWhen(expr string) (param, op, literal string, err error) {
 // the referenced kind's CRD status schema (checked in internal/emit, which
 // holds the CRDs).
 type Field struct {
-	From  string `json:"from"`
-	Value string `json:"value"`
-	Raw   string `json:"raw"`
+	From     string `json:"from"`
+	Value    string `json:"value"`
+	Raw      string `json:"raw"`
+	Template string `json:"template"`
 }
 
 // statusRefPrefix marks a Field.From cross-resource status reference.

@@ -391,6 +391,13 @@ func (b *Blueprint) Validate() error {
 		}
 	}
 
+	// Templates and conventions are validated before the resources loop:
+	// a field's template: <name> reference below is checked against the set
+	// this call has already accepted.
+	if err := b.validateTemplates(); err != nil {
+		return err
+	}
+
 	// seenResources catches a duplicate resource name at the source. Node
 	// identity is the composition-resource-name annotation (§7), which is
 	// r.Name verbatim — two resources sharing one name would emit two
@@ -540,13 +547,13 @@ func (b *Blueprint) Validate() error {
 		for _, p := range paths {
 			f := r.Fields[p]
 			set := 0
-			for _, v := range []string{f.From, f.Value, f.Raw} {
+			for _, v := range []string{f.From, f.Value, f.Raw, f.Template} {
 				if v != "" {
 					set++
 				}
 			}
 			if set != 1 {
-				return fmt.Errorf("resource %q field %q: set exactly one of from, value or raw (got %d)",
+				return fmt.Errorf("resource %q field %q: set exactly one of from, value, raw or template (got %d)",
 					r.Name, p, set)
 			}
 			// value is written into the rendered inner document as a
@@ -568,10 +575,16 @@ func (b *Blueprint) Validate() error {
 			// A slice, not a map: Validate reports the FIRST problem, so the
 			// order it inspects these in is part of its contract.
 			for _, src := range []struct{ label, val string }{
-				{"from", f.From}, {"raw", f.Raw}, {"value", f.Value},
+				{"from", f.From}, {"raw", f.Raw}, {"template", f.Template}, {"value", f.Value},
 			} {
 				if err := checkScalar(fmt.Sprintf("resource %q field %q: %s", r.Name, p, src.label), src.val); err != nil {
 					return err
+				}
+			}
+			if f.Template != "" {
+				if _, ok := b.Spec.Templates[f.Template]; !ok {
+					return fmt.Errorf("resource %q field %q: references unknown template %q "+
+						"(declare it under spec.templates)", r.Name, p, f.Template)
 				}
 			}
 			if f.From != "" {

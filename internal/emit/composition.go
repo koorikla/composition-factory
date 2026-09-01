@@ -44,6 +44,25 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 	d.Line(4, "template: |")
 
 	const ti = 5 // template body indent level
+
+	// User-defined templates head the template body as {{- define }} blocks,
+	// in sorted name order (determinism). The lines come from
+	// blueprint.TemplateBlockLines — the SAME assembly Validate parsed under
+	// the real engine contract, so what was validated is what ships. Every
+	// declared template is emitted whether or not anything calls it: a define
+	// block renders nothing by itself, and pruning "unused" ones would make
+	// emission depend on reference analysis it does not need.
+	tmplNames := make([]string, 0, len(b.Spec.Templates))
+	for n := range b.Spec.Templates {
+		tmplNames = append(tmplNames, n)
+	}
+	sort.Strings(tmplNames)
+	for _, n := range tmplNames {
+		for _, line := range blueprint.TemplateBlockLines(n, b.Spec.Templates[n]) {
+			d.Line(ti, "%s", line)
+		}
+	}
+
 	d.Line(ti, "{{- $spec := .observed.composite.resource.spec -}}")
 	d.Line(ti, "{{- $xr := .observed.composite.resource.metadata.name -}}")
 
@@ -115,7 +134,16 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		} else {
 			d.Line(ti, "    {{ setResourceNameAnnotation %q }}", r.Name)
 		}
-		plan, err := planFields(r, b)
+		// Conventions fill in matching fields the blueprint does NOT set
+		// explicitly; an explicit field always wins — that IS the override
+		// mechanism. The merge happens on a copy, never on r.Fields itself.
+		fields, err := conventionFields(r, b, crd)
+		if err != nil {
+			return nil, err
+		}
+		rc := r
+		rc.Fields = fields
+		plan, err := planFields(rc, b)
 		if err != nil {
 			return nil, err
 		}
@@ -234,6 +262,66 @@ func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
 			"caught here)", r.Name, p, crd.Kind)
 	}
 	return nil
+}
+
+// templateFieldNindent is the inner-document column a template call's output
+// is re-indented to. Every field line is written at childIndent = ti+2 Doc
+// levels, which lands at column 4 of the INNER document (the block scalar
+// strips ti levels), so the field's children belong at column 6. nindent
+// makes both output shapes land correctly there: a scalar becomes the
+// field's next-line value ("name:\n      myqueue" parses as name: myqueue),
+// and a multi-line mapping nests under the key. If writeMapField's
+// childIndent ever moves, this must move with it.
+const templateFieldNindent = 6
+
+// templateCallRHS renders a field's template: <name> as an include call with
+// the documented minimal context — .spec (the composite's spec), .xr (its
+// metadata.name), .resource (the composed resource's name) and .field (the
+// field path being set). trim strips the define block's own leading/trailing
+// newlines so nindent's re-indentation is exact for scalars and blocks
+// alike. resource is a validated DNS label and field a schema-checked path,
+// so the %q interpolations are exact.
+func templateCallRHS(name, resource, field string) string {
+	return fmt.Sprintf(`{{ include %q (dict "spec" $spec "xr" $xr "resource" %q "field" %q) | trim | nindent %d }}`,
+		name, resource, field, templateFieldNindent)
+}
+
+// conventionFields merges spec.conventions into r's explicit fields: every
+// TOP-LEVEL leaf of the resolved CRD's forProvider (no dots, no array
+// indices — a convention names a field, not a subtree path) whose name ends
+// with a convention's match, and which the blueprint does not set
+// explicitly, gains a template field. The first matching convention in list
+// order wins for each leaf; an explicit field of any form wins over every
+// convention — that is the override mechanism, so it is a merge rule here
+// rather than a special case anywhere else. The receiver's Fields map is
+// never mutated.
+func conventionFields(r blueprint.Resource, b *blueprint.Blueprint, crd schema.CRD) (map[string]blueprint.Field, error) {
+	if len(b.Spec.Conventions) == 0 {
+		return r.Fields, nil
+	}
+	nodes, err := crd.ForProvider()
+	if err != nil {
+		return nil, fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
+	}
+	merged := make(map[string]blueprint.Field, len(r.Fields)+len(nodes))
+	for k, v := range r.Fields {
+		merged[k] = v
+	}
+	for _, n := range nodes {
+		if len(n.Children) > 0 {
+			continue // a branch is a subtree, not a settable field
+		}
+		if _, explicit := merged[n.Name]; explicit {
+			continue // explicit wins: that IS the override
+		}
+		for _, c := range b.Spec.Conventions {
+			if strings.HasSuffix(n.Name, c.Match) {
+				merged[n.Name] = blueprint.Field{Template: c.Template}
+				break
+			}
+		}
+	}
+	return merged, nil
 }
 
 // whenCondition compiles a validated when expression to the template
@@ -462,6 +550,11 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint) ([]forProviderFiel
 			plan = append(plan, forProviderField{path: p, rhs: quoteYAML(f.Value)})
 		case f.Raw != "":
 			plan = append(plan, forProviderField{path: p, rhs: f.Raw})
+		case f.Template != "":
+			if _, ok := b.Spec.Templates[f.Template]; !ok {
+				return nil, fmt.Errorf("resource %q field %q: unknown template %q", r.Name, p, f.Template)
+			}
+			plan = append(plan, forProviderField{path: p, rhs: templateCallRHS(f.Template, r.Name, p)})
 		case f.From != "":
 			// A cross-resource status reference: the value lives on another
 			// composed resource's observed status, which does not exist until
