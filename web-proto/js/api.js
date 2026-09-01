@@ -225,3 +225,8 @@ export function getCatalogue(q) {
 export function renameResource(name, to) {
   return request("POST", "/api/blueprint/resources/" + encodeURIComponent(name) + "/rename", { to: to });
 }
+
+/** GET /api/rbac — the RBAC rules the composed kinds need (broad-by-default). */
+export function getRBAC() {
+  return request("GET", "/api/rbac");
+}

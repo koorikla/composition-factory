@@ -55,10 +55,20 @@ export function init(rootEl, deps) {
   /* ---------- tabs (prototype markup, built live) ---------- */
 
   function buildTabs() {
-    el.tabs.innerHTML =
-      '<button data-t="comp" aria-pressed="true">composition.yaml</button>' +
-      '<button data-t="xrd" aria-pressed="false">definition.yaml</button>' +
-      '<button data-t="bp" aria-pressed="false">blueprint.cf.yaml</button>';
+    var h =
+      '<button data-t="comp" aria-pressed="' + (tab === "comp") + '">composition.yaml</button>' +
+      '<button data-t="xrd" aria-pressed="' + (tab === "xrd") + '">definition.yaml</button>' +
+      '<button data-t="bp" aria-pressed="' + (tab === "bp") + '">blueprint.cf.yaml</button>';
+    // one tab per generated providerconfig family (outputs carry the bodies)
+    var g = store.state.lastGenerate;
+    (g && g.outputs || []).forEach(function (o) {
+      var m = /providerconfigs[\/\\]([^\/\\]+)\.yaml$/.exec(o.path);
+      if (!m) return;
+      var key = "pc:" + m[1];
+      h += '<button data-t="' + key + '" aria-pressed="' + (tab === key) + '">providerconfigs/' + m[1] + ".yaml</button>";
+    });
+    h += '<button data-t="rbac" aria-pressed="' + (tab === "rbac") + '">rbac</button>';
+    el.tabs.innerHTML = h;
   }
 
   function bpTabLabel(doc) {
@@ -120,17 +130,73 @@ export function init(rootEl, deps) {
     }).join("\n");
   }
 
+  var rbacCache = null; // invalidated on every doc emit
+
   function currentText() {
     if (tab === "bp") {
       var doc = store.state.doc;
       return doc ? toYaml(doc) : "";
     }
+    if (tab.indexOf("pc:") === 0) {
+      var fam = tab.slice(3);
+      var g = store.state.lastGenerate;
+      var pcs = (g && g.outputs || []).filter(function (o) {
+        return new RegExp("providerconfigs[/\\\\]" + fam + "\\.yaml$").test(o.path);
+      });
+      return pcs.length ? pcs[0].body : "";
+    }
+    if (tab === "rbac") {
+      if (rbacCache) return rbacCache;
+      api.getRBAC().then(function (r) {
+        rbacCache = (r.rules || []).map(function (rule) {
+          return "- apiGroups: [" + rule.apiGroups.join(", ") + "]\n" +
+            "  resources: [" + rule.resources.join(", ") + "]\n" +
+            "  verbs: [" + rule.verbs.join(", ") + "]\n" +
+            "  # scope: " + rule.scope;
+        }).join("\n");
+        if (tab === "rbac") render();
+      }).catch(function (e) { rbacCache = "# rbac unavailable: " + (e && e.message || e); if (tab === "rbac") render(); });
+      return "# loading rbac\u2026";
+    }
     var out = matchOutput(tab);
     return out ? out.body : "";
   }
 
+  function pickerNote() {
+    // annotate the family scaffold with the client-side kind picker state
+    var fam = tab.slice(3);
+    var hidden = {};
+    try { hidden = JSON.parse(localStorage.getItem("cf-hidden-kinds")) || {}; } catch (_) { /* none */ }
+    var doc = store.state.doc;
+    var lines = [];
+    (doc && doc.spec && doc.spec.sources || []).forEach(function (src) {
+      var ref = src.provider || "";
+      var m = /provider-([a-z0-9]+)-/.exec(ref);
+      var srcFam = m ? m[1] : ref.split("/").pop().replace(/^provider-/, "").split(":")[0];
+      if (srcFam !== fam) return;
+      var n = (hidden[ref] || []).length;
+      var name = ref.split("/").pop();
+      lines.push(name + (n ? " \u2014 " + n + " kind" + (n > 1 ? "s" : "") + " hidden in the palette" : " \u2014 all kinds enabled"));
+    });
+    return lines.join(" \u00b7 ");
+  }
+
   function render() {
     var text = currentText();
+    var note = document.getElementById("pc-note");
+    if (tab.indexOf("pc:") === 0) {
+      if (!note) {
+        note = document.createElement("div");
+        note.id = "pc-note";
+        note.className = "dg";
+        note.style.cssText = "padding:4px 12px;border-bottom:1px solid var(--rule)";
+        el.code.parentNode.insertBefore(note, el.code);
+      }
+      note.hidden = false;
+      note.textContent = pickerNote();
+    } else if (note) {
+      note.hidden = true;
+    }
     el.code.innerHTML = highlight(text);
     var lines = text ? text.split("\n").filter(function (l, i, a) {
       return !(i === a.length - 1 && l === "");
@@ -275,8 +341,10 @@ export function init(rootEl, deps) {
     scheduleGenerate();
   });
 
+  store.subscribe("doc", function () { rbacCache = null; });
   store.subscribe("generate", function (result) {
     chipOk(result && result.outputs ? result.outputs.length : 0);
+    buildTabs(); // providerconfig families can appear/vanish with sources
     if (tab !== "bp") render();
   });
 
