@@ -26,3 +26,7 @@
       semantics per the design spec, setResourceNameAnnotation indexed in the
       loop (spec §8), GUI badge becomes authorable. ENGINE + GUI slice.
       — user request 2026-09-01 ("for nf or nodes for rds")
+- [ ] Provider actions in SOURCES: expandable info per provider (digest, version,
+      kind list, registry host), and remove — needs DELETE /api/providers with a
+      409 naming referencers when the blueprint still uses it. More actions as
+      they come. — user request 2026-09-01
