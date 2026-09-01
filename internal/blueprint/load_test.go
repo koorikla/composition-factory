@@ -1129,6 +1129,9 @@ func TestValidateRejectsControlCharacterInForEach(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "forEach") {
 		t.Errorf("err = %v, want it to name the forEach field", err)
+	}
+}
+
 // "k8s" is a resource-level label (compose this native kind), never a source
 // package: a source entry named "k8s" would reach cache.Store.Load and fail
 // with a misleading "run: cf provider add k8s", so Validate refuses it with

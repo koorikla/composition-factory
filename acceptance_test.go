@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/koorikla/compositionfactory/internal/rendertest"
 )
 
 // providerRef is the OSS provider used for the end-to-end acceptance run. It

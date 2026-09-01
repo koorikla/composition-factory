@@ -7,6 +7,10 @@
   {
    "ref": "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0",
    "digest": "sha256:2cfadf9f941f79aa0e4628e237cf93fb435be91fc653e34cf98daf955080ef20"
+  },
+  {
+   "ref": "ghcr.io/crossplane-contrib/provider-nop:v0.5.0",
+   "digest": "sha256:706f509632bb5ccb85315e31e6ddebbcec4e19546f86819cba0c16ec5bf3dafd"
   }
  ]
 }

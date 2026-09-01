@@ -78,7 +78,7 @@ func nativeTestBlueprint() *blueprint.Blueprint {
 // renderedDocs executes the emitted template and decodes every document in
 // the rendered stream, keyed by kind (each kind appears once in these
 // fixtures).
-func renderedDocs(t *testing.T, comp []byte, xrSpec map[string]any) map[string]map[string]any {
+func renderedNativeDocs(t *testing.T, comp []byte, xrSpec map[string]any) map[string]map[string]any {
 	t.Helper()
 	rendered, err := renderTemplate(t, extractTemplate(t, comp), xrSpec)
 	if err != nil {
@@ -113,7 +113,7 @@ func TestNativeResourceRendersAsTheObjectItself(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Composition: %v", err)
 	}
-	docs := renderedDocs(t, comp, map[string]any{
+	docs := renderedNativeDocs(t, comp, map[string]any{
 		"providerName": "aws-provider",
 		"image":        "nginx:1.29",
 		"replicas":     3,
@@ -186,7 +186,7 @@ func TestNativeOptionalFieldsAreOmittedNotNulled(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Composition: %v", err)
 		}
-		docs := renderedDocs(t, comp, map[string]any{
+		docs := renderedNativeDocs(t, comp, map[string]any{
 			"providerName": "aws-provider",
 			"image":        "nginx:1.29",
 			// replicas deliberately absent
@@ -212,13 +212,13 @@ func TestNativeOptionalFieldsAreOmittedNotNulled(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Composition: %v", err)
 		}
-		docs := renderedDocs(t, comp, map[string]any{"providerName": "aws-provider", "image": "x"})
+		docs := renderedNativeDocs(t, comp, map[string]any{"providerName": "aws-provider", "image": "x"})
 		dep := docs["Deployment"]
 		if v, present := dep["spec"]; present {
 			t.Errorf("spec rendered as %v with no set field under it — a bare key is a YAML null the API server rejects", v)
 		}
 
-		withParam := renderedDocs(t, comp, map[string]any{"providerName": "p", "image": "x", "replicas": 2})
+		withParam := renderedNativeDocs(t, comp, map[string]any{"providerName": "p", "image": "x", "replicas": 2})
 		if got := dig(t, withParam["Deployment"], "spec", "replicas"); got != float64(2) && got != 2 {
 			t.Errorf("spec.replicas = %v, want 2 once the parameter is set", got)
 		}
