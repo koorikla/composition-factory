@@ -1,0 +1,173 @@
+stages:
+  - test
+  - build
+  - upload
+  - release
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/compositionfactory/${CI_COMMIT_TAG}"
+
+# ==============================================================================
+# Testing & Linting
+# ==============================================================================
+
+test:unit:
+  stage: test
+  image: golang:alpine
+  before_script:
+    - apk add --no-cache git
+  script:
+    - go test -v -short -count=1 ./...
+
+lint:fmt:
+  stage: test
+  image: golang:alpine
+  script:
+    - test -z "$(gofmt -l .)"
+    - go vet ./...
+
+# ==============================================================================
+# Binary & Docker Builds
+# ==============================================================================
+
+build:binaries:
+  stage: build
+  image: golang:alpine
+  before_script:
+    - apk add --no-cache git tar gzip zip
+  script:
+    - VERSION="${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}"
+    - mkdir -p dist
+    - |
+      for target in "linux/amd64" "linux/arm64" "darwin/amd64" "darwin/arm64" "windows/amd64"; do
+        os="${target%/*}"
+        arch="${target#*/}"
+        ext=""
+        if [ "$os" = "windows" ]; then ext=".exe"; fi
+        out="dist/cf_${os}_${arch}${ext}"
+        echo "Building $out (version $VERSION)..."
+        GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build \
+          -trimpath \
+          -ldflags "-s -w -X main.version=${VERSION}" \
+          -o "$out" ./cmd/cf
+        
+        archive_name="compositionfactory_${VERSION}_${os}_${arch}"
+        if [ "$os" = "windows" ]; then
+          (cd dist && zip "${archive_name}.zip" "cf_${os}_${arch}${ext}")
+        else
+          (cd dist && tar -czvf "${archive_name}.tar.gz" "cf_${os}_${arch}")
+        fi
+      done
+    - (cd dist && sha256sum compositionfactory_* > checksums.txt)
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+
+build:docker:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - VERSION="${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}"
+    - |
+      TAGS="-t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        TAGS="$TAGS -t $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG -t $CI_REGISTRY_IMAGE:latest"
+      elif [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        TAGS="$TAGS -t $CI_REGISTRY_IMAGE:latest"
+      else
+        TAGS="$TAGS -t $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG"
+      fi
+      
+      echo "Building Docker image with version=$VERSION and tags=$TAGS..."
+      docker build \
+        --build-arg VERSION="${VERSION}" \
+        $TAGS .
+      
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+        docker push "$CI_REGISTRY_IMAGE:latest"
+      elif [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        docker push "$CI_REGISTRY_IMAGE:latest"
+      else
+        docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG"
+      fi
+      docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+
+# ==============================================================================
+# Upload Binary Artifacts to GitLab Generic Package Registry
+# ==============================================================================
+
+upload:binaries:
+  stage: upload
+  image: curlimages/curl:latest
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs:
+    - job: build:binaries
+      artifacts: true
+  script:
+    - |
+      cd dist
+      for file in compositionfactory_* checksums.txt; do
+        echo "Uploading $file to ${PACKAGE_REGISTRY_URL}/${file}..."
+        curl --fail-with-body --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+          --upload-file "${file}" \
+          "${PACKAGE_REGISTRY_URL}/${file}"
+      done
+
+# ==============================================================================
+# GitLab Official Release (Binaries + Docker image)
+# ==============================================================================
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs:
+    - job: upload:binaries
+    - job: build:docker
+  script:
+    - echo "Creating release for $CI_COMMIT_TAG..."
+  release:
+    name: "Release $CI_COMMIT_TAG"
+    tag_name: "$CI_COMMIT_TAG"
+    description: |
+      ## compositionfactory $CI_COMMIT_TAG
+      
+      ### Docker Image
+      
+      ```sh
+      docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+      docker pull $CI_REGISTRY_IMAGE:latest
+      ```
+      
+      Run the canvas UI:
+      ```sh
+      docker run --rm -p 8080:8080 -v $(pwd):/workspace -v cf-cache:/home/cf/.cache/compositionfactory $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
+      ```
+      
+      ### Pre-compiled Binaries
+      
+      Download the binary for your platform below, or verify checksums with `checksums.txt`.
+    assets:
+      links:
+        - name: "compositionfactory_${CI_COMMIT_TAG}_linux_amd64.tar.gz"
+          url: "${PACKAGE_REGISTRY_URL}/compositionfactory_${CI_COMMIT_TAG}_linux_amd64.tar.gz"
+        - name: "compositionfactory_${CI_COMMIT_TAG}_linux_arm64.tar.gz"
+          url: "${PACKAGE_REGISTRY_URL}/compositionfactory_${CI_COMMIT_TAG}_linux_arm64.tar.gz"
+        - name: "compositionfactory_${CI_COMMIT_TAG}_darwin_amd64.tar.gz"
+          url: "${PACKAGE_REGISTRY_URL}/compositionfactory_${CI_COMMIT_TAG}_darwin_amd64.tar.gz"
+        - name: "compositionfactory_${CI_COMMIT_TAG}_darwin_arm64.tar.gz"
+          url: "${PACKAGE_REGISTRY_URL}/compositionfactory_${CI_COMMIT_TAG}_darwin_arm64.tar.gz"
+        - name: "compositionfactory_${CI_COMMIT_TAG}_windows_amd64.zip"
+          url: "${PACKAGE_REGISTRY_URL}/compositionfactory_${CI_COMMIT_TAG}_windows_amd64.zip"
+        - name: "checksums.txt"
+          url: "${PACKAGE_REGISTRY_URL}/checksums.txt"
