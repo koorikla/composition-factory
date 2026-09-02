@@ -506,12 +506,20 @@ func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
 
 	leaves := schema.Leaves(nodes, "")
 	known := make(map[string]bool, len(leaves)*2)
-	suggestions := make([]string, 0, len(leaves))
+	suggestions := make([]string, 0, len(leaves)*2)
+	seenSugg := make(map[string]bool)
 	for _, l := range leaves {
 		known[l.Path] = true
-		suggestions = append(suggestions, l.Path)
+		if !seenSugg[l.Path] {
+			seenSugg[l.Path] = true
+			suggestions = append(suggestions, l.Path)
+		}
 		for _, ancestor := range ancestorPaths(l.Path) {
 			known[ancestor] = true
+			if !seenSugg[ancestor] {
+				seenSugg[ancestor] = true
+				suggestions = append(suggestions, ancestor)
+			}
 		}
 	}
 
@@ -773,10 +781,30 @@ func closestPath(path string, candidates []string) string {
 			best, bestDist = c, d
 		}
 	}
-	if best == "" || bestDist > 3 || bestDist*2 >= len(path) {
-		return ""
+	if best != "" && bestDist <= 3 && bestDist*2 < len(path) {
+		return best
 	}
-	return best
+
+	// For nested paths (e.g. "spec.selector.machLabels"), check candidates sharing the parent prefix
+	if idx := strings.LastIndex(path, "."); idx != -1 {
+		prefix := path[:idx]
+		leaf := path[idx+1:]
+		var leafCandidates []string
+		prefixDot := prefix + "."
+		for _, c := range candidates {
+			if strings.HasPrefix(c, prefixDot) {
+				leafCandidates = append(leafCandidates, strings.TrimPrefix(c, prefixDot))
+			}
+		}
+		if len(leafCandidates) > 0 {
+			bestLeaf := closestPath(leaf, leafCandidates)
+			if bestLeaf != "" {
+				return prefix + "." + bestLeaf
+			}
+		}
+	}
+
+	return ""
 }
 
 // editDistance is Levenshtein distance over runes, two rows at a time.

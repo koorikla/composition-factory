@@ -42,6 +42,12 @@ spec:
                 properties:
                   kind: {type: string}
                   name: {type: string}
+          status:
+            properties:
+              atProvider:
+                properties:
+                  arn: {type: string}
+                  url: {type: string}
 `
 
 // QueueClusterCRDYAML is the Cluster-scoped Queue CRD fixture.

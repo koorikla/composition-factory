@@ -225,6 +225,11 @@ func dockerUnavailable(output string) bool {
 		"error during connect",
 		"runtime-docker-network",
 		"is not connected to docker network",
+		"is marked for removal",
+		"marked for removal",
+		"is already in progress",
+		"daemon is not running",
+		"cannot connect to the docker daemon",
 	} {
 		if strings.Contains(s, marker) {
 			return true

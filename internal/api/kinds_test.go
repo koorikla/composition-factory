@@ -335,3 +335,53 @@ spec:
 			kindResp.Kind.Provider, providerZ)
 	}
 }
+
+func TestKindsQueryStrictnessAndSearchAlias(t *testing.T) {
+	h := testHandler(t)
+
+	// Search alias
+	var got struct{ Kinds []index.Kind }
+	if code := getJSON(t, h, "/api/kinds?search=sqs.aws.m", &got); code != 200 {
+		t.Fatalf("status %d", code)
+	}
+	if len(got.Kinds) != 1 {
+		t.Errorf("search=sqs.aws.m returned %d, want 1", len(got.Kinds))
+	}
+
+	// Unknown query parameter on /api/kinds
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/kinds?unknown_param=foo", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 Bad Request on unknown param", rec.Code)
+	}
+
+	// Unknown query parameter on /api/kinds/.../fields
+	esc := url.PathEscape("sqs.aws.m.upbound.io/v1beta1")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/kinds/"+esc+"/Queue/fields?invalid_field_query=1", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 Bad Request on unknown field query param", rec.Code)
+	}
+
+	// Status query param on /api/kinds/.../fields
+	var statusResp struct {
+		Fields []index.Field
+		Total  int
+	}
+	if code := getJSON(t, h, "/api/kinds/"+esc+"/Queue/fields?status=true", &statusResp); code != 200 {
+		t.Fatalf("fields status query: code %d", code)
+	}
+	if len(statusResp.Fields) == 0 {
+		t.Fatal("expected status fields to be returned")
+	}
+	foundURL := false
+	for _, f := range statusResp.Fields {
+		if f.Path == "atProvider.url" {
+			foundURL = true
+			break
+		}
+	}
+	if !foundURL {
+		t.Errorf("status fields %+v missing atProvider.url", statusResp.Fields)
+	}
+}

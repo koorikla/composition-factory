@@ -734,3 +734,60 @@ spec:
 		t.Errorf("blueprint name = %v, want test-adopted-mcp", meta["name"])
 	}
 }
+
+func TestGetKindFieldsStatus(t *testing.T) {
+	s := newStack(t)
+	v := s.toolOK(t, "get_kind_fields", map[string]any{
+		"api_version": "sqs.aws.m.upbound.io/v1beta1",
+		"kind":        "Queue",
+		"status":      true,
+	})
+	fieldsRaw, ok := v["fields"].([]any)
+	if !ok || len(fieldsRaw) == 0 {
+		t.Fatalf("expected status fields in response: %+v", v)
+	}
+	foundURL := false
+	for _, fRaw := range fieldsRaw {
+		fMap, _ := fRaw.(map[string]any)
+		if fMap["path"] == "atProvider.url" {
+			foundURL = true
+			break
+		}
+	}
+	if !foundURL {
+		t.Errorf("status fields %+v missing atProvider.url", fieldsRaw)
+	}
+}
+
+func TestReplaceBlueprintValidationAndAtomic(t *testing.T) {
+	s := newStack(t)
+	before, _ := os.ReadFile(s.blueprint)
+
+	// Load valid blueprint
+	bp, err := blueprint.Load(s.blueprint)
+	if err != nil {
+		t.Fatalf("load blueprint: %v", err)
+	}
+
+	// Insert invalid typo field
+	bp.Spec.Resources[0].Fields["regin"] = blueprint.Field{Value: "eu-west-1"}
+	bpBytes, _ := json.Marshal(bp)
+
+	var doc map[string]any
+	_ = json.Unmarshal(bpBytes, &doc)
+
+	text, isErr := s.callTool(t, "replace_blueprint", map[string]any{
+		"blueprint": doc,
+	})
+	if !isErr {
+		t.Fatal("expected replace_blueprint with invalid field to error")
+	}
+	if !strings.Contains(text, `did you mean "region"?`) {
+		t.Errorf("error %q should contain did-you-mean suggestion", text)
+	}
+
+	after, _ := os.ReadFile(s.blueprint)
+	if !bytes.Equal(before, after) {
+		t.Error("blueprint file changed on disk despite invalid replace_blueprint")
+	}
+}

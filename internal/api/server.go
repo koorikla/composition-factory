@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -30,6 +31,7 @@ import (
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/cluster"
+	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/schema/k8s"
@@ -499,6 +501,30 @@ func BuildIndex(store *cache.Store, providers []string, b *blueprint.Blueprint, 
 // rebuildIndexLocked rebuilds srv.Index from srv.Store, srv.Providers,
 // vendored Kubernetes native kinds, and any CRD sources declared in the blueprint.
 // Caller must hold srv.mu.
+// validateQueryParams returns an error if q contains any query parameter not in allowed.
+func validateQueryParams(q url.Values, allowed ...string) error {
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, a := range allowed {
+		allowedSet[a] = true
+	}
+	for k := range q {
+		if !allowedSet[k] {
+			return fmt.Errorf("unknown query parameter: %q", k)
+		}
+	}
+	return nil
+}
+
+func (srv *server) validateBlueprintAgainstCRDs(b *blueprint.Blueprint, crds []schema.CRD) error {
+	if _, err := emit.Composition(b, crds); err != nil {
+		return err
+	}
+	if _, err := emit.XRD(b); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (srv *server) rebuildIndexLocked(optB ...*blueprint.Blueprint) error {
 	var b *blueprint.Blueprint
 	if len(optB) > 0 && optB[0] != nil {

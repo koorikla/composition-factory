@@ -128,3 +128,48 @@ func TestDeleteResourceUnknownNameErrors(t *testing.T) {
 		t.Fatalf("err = %v, want an error naming the unknown resource", err)
 	}
 }
+
+func TestRenameResourceRewritesRawReferences(t *testing.T) {
+	b := wiredBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[1].Fields["rawField"] = Field{
+			Raw: `{{ index $.observed.resources "main-queue" "resource" "status" "atProvider" "url" }}`,
+		}
+		if b.Spec.Templates == nil {
+			b.Spec.Templates = make(map[string]string)
+		}
+		b.Spec.Templates["helper"] = `{{ index .observed.resources "main-queue" "status" "arn" }}`
+	})
+
+	if err := b.RenameResource("main-queue", "primary-queue"); err != nil {
+		t.Fatalf("RenameResource: %v", err)
+	}
+
+	rawGot := b.Spec.Resources[1].Fields["rawField"].Raw
+	wantRaw := `{{ index $.observed.resources "primary-queue" "resource" "status" "atProvider" "url" }}`
+	if rawGot != wantRaw {
+		t.Errorf("raw field = %q, want %q", rawGot, wantRaw)
+	}
+
+	tmplGot := b.Spec.Templates["helper"]
+	wantTmpl := `{{ index .observed.resources "primary-queue" "status" "arn" }}`
+	if tmplGot != wantTmpl {
+		t.Errorf("template = %q, want %q", tmplGot, wantTmpl)
+	}
+}
+
+func TestDeleteResourceRefusesWhileRawReferencesExist(t *testing.T) {
+	b := wiredBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[1].Fields["queueUrl"] = Field{Value: "static"}
+		b.Spec.Resources[1].Fields["rawField"] = Field{
+			Raw: `{{ index $.observed.resources "main-queue" }}`,
+		}
+	})
+
+	err := b.DeleteResource("main-queue")
+	if err == nil {
+		t.Fatal("expected DeleteResource to fail with raw reference")
+	}
+	if !strings.Contains(err.Error(), "queue-policy") {
+		t.Errorf("error %q should mention queue-policy", err.Error())
+	}
+}

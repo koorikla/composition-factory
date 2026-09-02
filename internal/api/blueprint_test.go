@@ -1327,9 +1327,9 @@ func TestStatusWireSurvivesPutAndGetVerbatim(t *testing.T) {
 
 	const wire = "resources.main-queue.status.atProvider.url"
 	doc.Spec.Resources = append(doc.Spec.Resources, blueprint.Resource{
-		Name: "queue-policy", Kind: "QueuePolicy",
+		Name: "queue-policy", Kind: "Queue",
 		Fields: map[string]blueprint.Field{
-			"queueUrl": {From: wire},
+			"region": {From: wire},
 		},
 	})
 	body, err := json.Marshal(doc)
@@ -1345,7 +1345,7 @@ func TestStatusWireSurvivesPutAndGetVerbatim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("blueprint on disk no longer loads: %v", err)
 	}
-	if got := reloaded.Spec.Resources[1].Fields["queueUrl"].From; got != wire {
+	if got := reloaded.Spec.Resources[1].Fields["region"].From; got != wire {
 		t.Errorf("wire on disk = %q, want %q verbatim", got, wire)
 	}
 
@@ -1354,7 +1354,7 @@ func TestStatusWireSurvivesPutAndGetVerbatim(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &after); err != nil {
 		t.Fatalf("GET after PUT: %v", err)
 	}
-	if got := after.Spec.Resources[1].Fields["queueUrl"].From; got != wire {
+	if got := after.Spec.Resources[1].Fields["region"].From; got != wire {
 		t.Errorf("wire from GET = %q, want %q verbatim", got, wire)
 	}
 }
@@ -1386,5 +1386,64 @@ func TestStatusWireToUnknownResourceIs400OnPut(t *testing.T) {
 	after, _ := os.ReadFile(path)
 	if !bytes.Equal(before, after) {
 		t.Error("the blueprint file changed despite a rejected PUT")
+	}
+}
+
+func TestPutBlueprintWithUnknownFieldGivesDidYouMeanSuggestionAndLeavesFileUntouched(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	before, _ := os.ReadFile(path)
+
+	rec := do(t, h, "GET", "/api/blueprint", "")
+	var doc blueprint.Blueprint
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("GET body: %v", err)
+	}
+
+	// Typo "regin" instead of "region"
+	doc.Spec.Resources[0].Fields["regin"] = blueprint.Field{Value: "eu-west-1"}
+	body, _ := json.Marshal(doc)
+
+	rec = do(t, h, "PUT", "/api/blueprint", string(body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	var errBody errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if !strings.Contains(errBody.Error, `did you mean "region"?`) {
+		t.Errorf("error %q does not contain expected did-you-mean suggestion", errBody.Error)
+	}
+
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Error("the blueprint file changed despite a rejected PUT")
+	}
+}
+
+func TestPutBlueprintWithUnknownSourceFetchFailureLeavesFileUntouched(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	before, _ := os.ReadFile(path)
+
+	rec := do(t, h, "GET", "/api/blueprint", "")
+	var doc blueprint.Blueprint
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("GET body: %v", err)
+	}
+
+	// Add new unresolvable provider source
+	doc.Spec.Sources = append(doc.Spec.Sources, blueprint.Source{
+		Provider: "example.org/nonexistent/provider:v9.9.9",
+	})
+	body, _ := json.Marshal(doc)
+
+	rec = do(t, h, "PUT", "/api/blueprint", string(body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Error("the blueprint file changed despite a failed fetch on PUT")
 	}
 }

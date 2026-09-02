@@ -19,6 +19,10 @@ import (
 // the canvas gets a one-click .xpkg. Held under srv.mu like generate: the
 // package must render a document that existed as a whole.
 func (srv *server) handlePackage(w http.ResponseWriter, r *http.Request) {
+	if err := validateQueryParams(r.URL.Query(), "format"); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 

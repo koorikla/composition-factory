@@ -502,3 +502,20 @@ spec:
 		t.Errorf("expected type mismatch error, got: %s", resp.Error)
 	}
 }
+
+func TestRenderUnavailableWhenContainerMarkedForRemoval(t *testing.T) {
+	const removalOutput = `crossplane: error: cannot render composition: Error response from daemon: container 1234abcd is marked for removal and cannot be connected`
+	h, _ := testRenderServer(t, func(context.Context, string, string, string, string) ([]byte, error) {
+		return []byte(removalOutput + "\n"), errors.New("exit status 1")
+	})
+
+	rec := do(t, h, "POST", "/api/render", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	got := decodeRenderResponse(t, rec)
+	want := renderResponse{OK: false, Unavailable: removalOutput}
+	if got != want {
+		t.Errorf("response = %+v, want %+v", got, want)
+	}
+}

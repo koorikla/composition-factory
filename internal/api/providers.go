@@ -162,7 +162,28 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	// existing refs are re-read from the store they were saved to, and the
 	// new ref uses the exact CRDs Save just persisted.
 	srv.Providers = append(srv.Providers, req.Ref)
-	if err := srv.rebuildIndexLocked(); err != nil {
+
+	// Declare the provider source in spec.sources idempotently
+	b, ok := srv.loadBlueprint(w)
+	if !ok {
+		return
+	}
+	hasSource := false
+	for _, s := range b.Spec.Sources {
+		if s.Provider == req.Ref {
+			hasSource = true
+			break
+		}
+	}
+	if !hasSource {
+		b.Spec.Sources = append(b.Spec.Sources, blueprint.Source{Provider: req.Ref})
+		if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	if err := srv.rebuildIndexLocked(b); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -254,6 +275,24 @@ func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Remove from spec.sources if present
+	newSources := make([]blueprint.Source, 0, len(b.Spec.Sources))
+	changedSources := false
+	for _, s := range b.Spec.Sources {
+		if s.Provider == ref {
+			changedSources = true
+			continue
+		}
+		newSources = append(newSources, s)
+	}
+	if changedSources {
+		b.Spec.Sources = newSources
+		if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
 	remaining := make([]string, 0, len(srv.Providers)-1)
 	for _, p := range srv.Providers {
 		if p != ref {
@@ -313,16 +352,13 @@ func providerReferencers(b *blueprint.Blueprint, ref string) string {
 			resources = append(resources, fmt.Sprintf("%q", res.Name))
 		}
 	}
-
+	if len(resources) == 0 {
+		return ""
+	}
 	var parts []string
 	if inSources {
 		parts = append(parts, "the blueprint's sources")
 	}
-	if len(resources) > 0 {
-		parts = append(parts, "resources "+strings.Join(resources, ", "))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
+	parts = append(parts, "resources "+strings.Join(resources, ", "))
 	return fmt.Sprintf("delete provider %q: still referenced by %s", ref, strings.Join(parts, " and by "))
 }

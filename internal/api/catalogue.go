@@ -61,8 +61,15 @@ func handleCatalogue(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, catalogueErr.Error())
 		return
 	}
+	if err := validateQueryParams(r.URL.Query(), "q", "search", "type"); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	q := strings.ToLower(r.URL.Query().Get("q"))
+	if q == "" {
+		q = strings.ToLower(r.URL.Query().Get("search"))
+	}
 	typ := strings.ToLower(r.URL.Query().Get("type")) // "function", "provider", or ""
 	if q == "" && typ == "" {
 		w.Header().Set("Content-Type", "application/json")
