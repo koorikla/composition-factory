@@ -5,8 +5,6 @@ const { resetDoc, ENGINE } = require('./helpers')
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)
-  const api = await request.get(ENGINE + '/api/kinds')
-  test.skip(!api.ok(), 'cf serve is not running on 8080')
   const add = await request.post(ENGINE + '/api/blueprint/parameters', {
     data: { name: 'instanceCount', parameter: { type: 'integer', default: '2' } },
   })

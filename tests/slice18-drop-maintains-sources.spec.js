@@ -6,8 +6,6 @@ const { resetDoc, ENGINE } = require('./helpers')
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request) // pristine doc: sources = [provider-aws-sqs] only
-  const api = await request.get(ENGINE + '/api/kinds')
-  test.skip(!api.ok(), 'cf serve is not running on 8080')
   // load s3 into the running engine (runtime add; sources persistence is
   // exactly what this slice tests). 200 = newly added, 409 = already loaded.
   const add = await request.post(ENGINE + '/api/providers', {

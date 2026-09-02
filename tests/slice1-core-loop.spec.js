@@ -6,16 +6,13 @@
 // The suite runs against its own isolated engine on 127.0.0.1:8081. Every test restores
 // the live blueprint to the exact doc it found, so the suite is idempotent.
 const { test, expect } = require('@playwright/test')
-const { resetDoc } = require('./helpers')
+const { resetDoc, ENGINE } = require('./helpers')
 
-const ENGINE = 'http://127.0.0.1:8081'
 let baseline = null
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)
   let api
-  try { api = await request.get(ENGINE + '/api/kinds') } catch (e) { api = null }
-  test.skip(!api || !api.ok(), 'cf serve is not running on 8080')
   baseline = await (await request.get(ENGINE + '/api/blueprint')).json()
 })
 
