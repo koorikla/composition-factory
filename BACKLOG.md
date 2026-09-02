@@ -109,6 +109,11 @@
       at any depth); wire dropdowns enumerate nested paths; paramFrom no
       longer drops properties on unrelated updates. Arrays stay refused
       with a clear error. — completed 2026-09-02
+- [x] `cf adopt`: Ingest existing Crossplane Compositions (supporting both
+      function-go-templating and classic patch-and-transform, with optional
+      embedded/sibling XRDs) into clean, deterministic blueprints. Exposed via
+      `cf adopt` CLI, `POST /api/blueprint/adopt` HTTP API, and `adopt_composition`
+      MCP tool. — completed 2026-09-02
 - [ ] go-templating FileSystem source export (user request 2026-09-02): an
       export option that emits templates as a folder structure (one object
       per yaml file, helm-chart-style readability), wired for `source:

@@ -22,6 +22,13 @@ var templatingFunction = fn{
 // may share a function), each carrying its package exactly as the blueprint
 // declared it -- tag, digest pin, or neither, verbatim.
 func Functions(b *blueprint.Blueprint) ([]byte, error) {
+	return functionsDoc(b, "")
+}
+
+// functionsDoc renders functions.yaml; a non-empty runtimeConfigName pins a
+// DeploymentRuntimeConfig onto the templating function (the FileSystem
+// export's ConfigMap mounts — see fsexport.go).
+func functionsDoc(b *blueprint.Blueprint, runtimeConfigName string) ([]byte, error) {
 	fns, err := functionList(b)
 	if err != nil {
 		return nil, err
@@ -45,6 +52,10 @@ func Functions(b *blueprint.Blueprint) ([]byte, error) {
 		d.Line(2, "render.crossplane.io/runtime-docker-name: cf-%s", f.name)
 		d.Line(0, "spec:")
 		d.Line(1, "package: %s", f.pkg)
+		if runtimeConfigName != "" && f.name == blueprint.TemplatingFunctionName {
+			d.Line(1, "runtimeConfigRef:")
+			d.Line(2, "name: %s", runtimeConfigName)
+		}
 	}
 	return d.Bytes(), nil
 }

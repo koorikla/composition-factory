@@ -23,6 +23,7 @@ type CLI struct {
 	MCP      MCPCmd      `cmd:"" name:"mcp" help:"Serve the compositionfactory MCP server over stdio, for agent tooling."`
 	Package  PackageCmd  `cmd:"" help:"Build a Crossplane Configuration package (.xpkg) from a blueprint."`
 	Push     PushCmd     `cmd:"" help:"Push a built .xpkg to an OCI registry."`
+	Adopt    AdoptCmd    `cmd:"" help:"Import an existing Crossplane Composition into a blueprint."`
 }
 
 type VersionCmd struct{}

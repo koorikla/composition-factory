@@ -19,6 +19,13 @@ type GenCmd struct {
 	Out       string `short:"o" help:"Output directory." default:"."`
 	CacheDir  string `help:"Schema cache directory." default:"${cachedir}"`
 	Check     bool   `help:"Do not write. Exit 0 if in sync, 2 if the tree has drifted."`
+
+	// filesystem ships the go-template body as a templates/ folder (one
+	// object per file), ConfigMaps under the ~1MiB cap, and a
+	// DeploymentRuntimeConfig mounting them into the function pod. The
+	// rendered documents are byte-identical to the inline form: the
+	// function concatenates the folder exactly back into the inline body.
+	TemplateSource string `help:"Where the Composition's go-template body lives: inline (default) or filesystem (templates/ folder + ConfigMaps + DeploymentRuntimeConfig)." enum:"inline,filesystem" default:"inline"`
 }
 
 func (c *GenCmd) Run(out io.Writer) error {
@@ -52,7 +59,11 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 		return 1, err
 	}
 	crds = append(crds, native...)
-	outputs, err := emit.Generate(b, crds, c.Out)
+	generate := emit.Generate
+	if c.TemplateSource == "filesystem" {
+		generate = emit.GenerateFS
+	}
+	outputs, err := generate(b, crds, c.Out)
 	if err != nil {
 		return 1, err
 	}

@@ -275,7 +275,7 @@ func TestListToolsAdvertisesTheFullOperationSet(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 	want := []string{
-		"add_parameter", "add_provider", "delete_parameter", "generate",
+		"add_parameter", "add_provider", "adopt_composition", "delete_parameter", "generate",
 		"get_blueprint", "get_kind_fields", "list_kinds", "list_providers",
 		"rename_parameter", "render_check", "replace_blueprint", "update_parameter",
 	}
@@ -719,4 +719,48 @@ func TestRenderCheckBrokenCacheMatchesHTTP(t *testing.T) {
 		t.Fatalf("break cache: %v", err)
 	}
 	s.assertToolErrorMatchesHTTP(t, "render_check", nil, http.MethodPost, "/api/render", "")
+}
+
+func TestAdoptComposition(t *testing.T) {
+	s := newStack(t)
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-adopted-mcp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: {{ $spec.region }}
+`
+	v := s.toolOK(t, "adopt_composition", map[string]any{
+		"manifest": manifest,
+		"provider": "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
+		"persist":  true,
+	})
+	bpRaw, ok := v["blueprint"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected blueprint in adopt_composition response")
+	}
+	meta, _ := bpRaw["metadata"].(map[string]any)
+	if meta["name"] != "test-adopted-mcp" {
+		t.Errorf("blueprint name = %v, want test-adopted-mcp", meta["name"])
+	}
 }

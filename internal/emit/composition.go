@@ -13,6 +13,17 @@ import (
 // Composition renders the Composition for b, resolving each resource's kind
 // against crds.
 func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
+	return composition(b, crds, "")
+}
+
+// CompositionFileSystem renders the same Composition with the templating
+// step reading from fsDir (source: FileSystem) instead of carrying the
+// template inline — the export pairing with TemplateFiles/GenerateFS.
+func CompositionFileSystem(b *blueprint.Blueprint, crds []schema.CRD, fsDir string) ([]byte, error) {
+	return composition(b, crds, fsDir)
+}
+
+func composition(b *blueprint.Blueprint, crds []schema.CRD, fsDir string) ([]byte, error) {
 	x := b.Spec.XRD
 	wantNamespaced := x.Scope == "Namespaced"
 
@@ -46,18 +57,52 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 	d.Line(2, "input:")
 	d.Line(3, "apiVersion: gotemplating.fn.crossplane.io/v1beta1")
 	d.Line(3, "kind: GoTemplate")
-	d.Line(3, "source: Inline")
-	// options is a SIBLING of inline, not nested inside it. The function's own
-	// README shows it nested; that is a fatal runtime error. Without this
-	// option, a missing field renders the literal string "<no value>" into a
-	// live managed resource, and because that string is legal YAML the whole
-	// validate -> render -> validate pipeline still exits 0.
-	d.Line(3, `options: ["missingkey=error"]`)
-	d.Line(3, "inline:")
-	d.Line(4, "template: |")
+	if fsDir != "" {
+		d.Line(3, "source: FileSystem")
+		// same missingkey discipline as inline — options is a sibling of the
+		// source stanza either way
+		d.Line(3, `options: ["missingkey=error"]`)
+		d.Line(3, "fileSystem:")
+		d.Line(4, "dirPath: %s", fsDir)
+		// the template body still gates emission: every resource is
+		// resolved and checked exactly as the inline form would be, the
+		// bytes just ship in the templates/ folder instead
+		if _, err := inlineTemplateBody(b, crds); err != nil {
+			return nil, err
+		}
+	} else {
+		d.Line(3, "source: Inline")
+		// options is a SIBLING of inline, not nested inside it. The function's own
+		// README shows it nested; that is a fatal runtime error. Without this
+		// option, a missing field renders the literal string "<no value>" into a
+		// live managed resource, and because that string is legal YAML the whole
+		// validate -> render -> validate pipeline still exits 0.
+		d.Line(3, `options: ["missingkey=error"]`)
+		d.Line(3, "inline:")
+		d.Line(4, "template: |")
 
-	const ti = 5 // template body indent level
+		const ti = 5 // template body indent level
 
+		if err := writeTemplateBody(d, ti, b, crds, wantNamespaced); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, s := range afterSteps {
+		if err := writePipelineStep(d, s); err != nil {
+			return nil, err
+		}
+	}
+	return d.Bytes(), nil
+}
+
+// writeTemplateBody renders the whole go-template body — user-defined
+// define blocks, the context preamble, one document per resource — into d
+// at indent ti. Composition inlines it at the block-scalar column; the
+// FileSystem export renders it at column zero and splits it into files
+// whose "\n---\n" concatenation (exactly what the function's FileSystem
+// source reassembles) is byte-identical to the inline body.
+func writeTemplateBody(d *Doc, ti int, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) error {
 	// User-defined templates head the template body as {{- define }} blocks,
 	// in sorted name order (determinism). The lines come from
 	// blueprint.TemplateBlockLines — the SAME assembly Validate parsed under
@@ -86,14 +131,14 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 	for _, r := range b.Spec.Resources {
 		crd, err := resolveKind(crds, r, wantNamespaced)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		apiVersion, err := crd.APIVersion()
 		if err != nil {
-			return nil, fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
+			return fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
 		}
 		if err := checkFieldPaths(r, crd); err != nil {
-			return nil, err
+			return err
 		}
 		// Envelope paths are checked against the resolved variant's ACTUAL
 		// envelope schema (see envelope.go) — the namespaced .m. and
@@ -101,10 +146,10 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		// hard-coded list.
 		envNodes, err := checkEnvelopePaths(r, crd)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if err := checkStatusRefs(r, b, crds, wantNamespaced); err != nil {
-			return nil, err
+			return err
 		}
 		// Annotations are planned up front, like fields, so a bad entry errors
 		// before a single line of this resource's document is written. The
@@ -113,7 +158,7 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		// families identically (see annotations.go).
 		annPlan, err := planAnnotations(r, b, crds, wantNamespaced)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		// forEach wraps the resource's WHOLE document in a range over the
 		// loop count, so every line below — separator, envelope,
@@ -146,7 +191,7 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		if conditional {
 			cond, err := whenCondition(r.When)
 			if err != nil {
-				return nil, fmt.Errorf("resource %q: %w", r.Name, err)
+				return fmt.Errorf("resource %q: %w", r.Name, err)
 			}
 			d.Line(ti, "{{- if %s }}", cond)
 		}
@@ -171,7 +216,7 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 			if ref, perr := blueprint.ParseFrom(r.ForEach); perr == nil && ref.Resource != "" {
 				guard, expr, err := forEachStatusBound(ref, r, b, crds, wantNamespaced)
 				if err != nil {
-					return nil, err
+					return err
 				}
 				d.Line(ti, "{{- if %s }}", guard)
 				d.Line(ti, "{{- range $i := until (int %s) }}", expr)
@@ -211,14 +256,14 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 			var cerr error
 			fields, cerr = conventionFields(r, b, crd)
 			if cerr != nil {
-				return nil, cerr
+				return cerr
 			}
 		}
 		rc := r
 		rc.Fields = fields
 		plan, err := planFields(rc, b, crds, wantNamespaced)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		// A native Kubernetes kind takes the whole other branch of the
 		// envelope fork: apiVersion/kind/metadata/spec ARE the composed
@@ -241,14 +286,14 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 			// because Composition is exported.
 			for _, fld := range plan {
 				if f, ok := rc.Fields[fld.path]; ok && f.Template != "" {
-					return nil, fmt.Errorf("resource %q field %q: template: fields are not supported on "+
+					return fmt.Errorf("resource %q field %q: template: fields are not supported on "+
 						"native Kubernetes kind %q in v1 -- the template call's output re-indents to the "+
 						"fixed forProvider column, which a native field at an arbitrary nesting depth "+
 						"breaks (see blueprint.Validate)", r.Name, fld.path, r.Kind)
 				}
 			}
 			if err := writeNativeFields(d, ti, r.Name, plan); err != nil {
-				return nil, err
+				return err
 			}
 		} else {
 			d.Line(ti, "spec:")
@@ -287,7 +332,7 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 			// grammar existed: just the providerConfigRef block.
 			envPlan, err := planEnvelope(r, b, envNodes)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			writeEnvelope(d, ti, envPlan, wantNamespaced)
 		}
@@ -305,12 +350,7 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		}
 	}
 
-	for _, s := range afterSteps {
-		if err := writePipelineStep(d, s); err != nil {
-			return nil, err
-		}
-	}
-	return d.Bytes(), nil
+	return nil
 }
 
 // checkFieldPaths resolves every blueprint field path for r against the

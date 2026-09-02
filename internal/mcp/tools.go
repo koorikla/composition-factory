@@ -204,6 +204,13 @@ func (s *server) register(srv *sdk.Server) {
 			"crossplane CLI on PATH, or no Docker daemon) — which says nothing about whether the " +
 			"blueprint is correct. Slow on first use: the render may pull function images.",
 	}, s.renderCheck)
+
+	sdk.AddTool(srv, &sdk.Tool{
+		Name: "adopt_composition",
+		Description: "Import an existing Crossplane Composition YAML manifest (and optional XRD) into a " +
+			"structured Blueprint document, inferring parameters, composed resources, fields, and wires. " +
+			"Set persist: true to replace the workspace blueprint with the adopted result.",
+	}, s.adoptComposition)
 }
 
 // mustSchemaJSON parses a hand-written 2020-12 JSON schema literal. The
@@ -475,4 +482,18 @@ func rawOrNull(raw json.RawMessage) json.RawMessage {
 		return json.RawMessage("null")
 	}
 	return raw
+}
+
+type adoptInput struct {
+	Manifest string `json:"manifest" jsonschema:"The raw Crossplane Composition (and optional XRD) YAML manifest to import."`
+	Persist  bool   `json:"persist,omitempty" jsonschema:"When true, saves the adopted blueprint to disk at the workspace blueprint path."`
+	Provider string `json:"provider,omitempty" jsonschema:"Default provider package reference to use when not inferrable from CRDs."`
+}
+
+func (s *server) adoptComposition(_ context.Context, _ *sdk.CallToolRequest, in adoptInput) (*sdk.CallToolResult, any, error) {
+	body, err := json.Marshal(in)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode request: %w", err)
+	}
+	return s.bridge(http.MethodPost, "/api/blueprint/adopt", body)
 }
