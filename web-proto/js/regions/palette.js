@@ -144,13 +144,26 @@ export function init(rootEl, deps) {
       if (!byGroup[g]) { byGroup[g] = []; order.push(g); }
       byGroup[g].push(k);
     });
+    const doc = store.state.doc;
+    const xrdScope = (doc && doc.spec && doc.spec.xrd && doc.spec.xrd.scope) || "Namespaced";
+    const isNamespacedXRD = xrdScope !== "Cluster";
+
     let h = "";
     order.forEach(function (g) {
       const items = byGroup[g];
-      h += '<div class="grp"><span class="lbl">' + esc(g) + '</span><span class="n">' + items.length + "</span></div>";
+      items.sort(function (a, b) { return (a.kind || "").localeCompare(b.kind || ""); });
+
+      const isClusterGroup = isNamespacedXRD && items.length > 0 && items.every(function (k) {
+        return k.scope === "Cluster" || k.namespaced === false;
+      });
+      const clusterTag = isClusterGroup
+        ? '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:rgba(255,255,255,0.06);color:var(--faint);border-radius:3px;margin-left:6px">cluster-scoped</span>'
+        : "";
+
+      h += '<div class="grp"><span class="lbl">' + esc(g) + '</span>' + clusterTag + '<span class="n">' + items.length + "</span></div>";
       items.forEach(function (k) {
         const fam = famOf(k);
-        const clusterTag = k.provider === "cluster"
+        const kClusterTag = k.provider === "cluster"
           ? '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:rgba(6,182,212,0.12);color:#06b6d4;border-radius:3px;margin-right:4px">cluster</span>'
           : "";
         h += '<div class="kind" draggable="true"' +
@@ -160,7 +173,7 @@ export function init(rootEl, deps) {
           ' data-fam="' + esc(fam) + '">' +
           '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
           '<span class="nm" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(k.kind) + '">' + esc(k.kind) + '</span>' +
-          clusterTag +
+          kClusterTag +
           '<span class="req">' + (k.required | 0) + " req</span></div>";
       });
     });
@@ -905,7 +918,7 @@ export function init(rootEl, deps) {
       lastSourcesSig = sig;
       loadKinds();
     }
-    if (rail !== "kinds") drawRail();
+    drawRail();
   });
 
   /* ---- boot ------------------------------------------------------------ */

@@ -473,7 +473,11 @@ function workloadPresetHtml(res, doc, allParams, otherResources) {
       if (!f) return "";
       if (f.value) return f.value;
       if (f.raw) {
-        var m = /app:\s*([a-zA-Z0-9_-]+)/.exec(f.raw);
+        try {
+          var parsed = JSON.parse(f.raw);
+          if (parsed && typeof parsed === "object" && parsed.app) return parsed.app;
+        } catch (_) {}
+        var m = /app[:=]\s*["']?([a-zA-Z0-9_-]+)["']?/.exec(f.raw);
         if (m) return m[1];
         return f.raw;
       }
@@ -523,8 +527,14 @@ function workloadPresetHtml(res, doc, allParams, otherResources) {
     if (selAppF) {
       if (selAppF.value) selAppVal = selAppF.value;
       else if (selAppF.raw) {
-        var sm = /app:\s*([a-zA-Z0-9_-]+)/.exec(selAppF.raw);
-        selAppVal = sm ? sm[1] : selAppF.raw;
+        try {
+          var parsed = JSON.parse(selAppF.raw);
+          if (parsed && typeof parsed === "object" && parsed.app) selAppVal = parsed.app;
+        } catch (_) {}
+        if (!selAppVal) {
+          var sm = /app[:=]\s*["']?([a-zA-Z0-9_-]+)["']?/.exec(selAppF.raw);
+          selAppVal = sm ? sm[1] : selAppF.raw;
+        }
       }
     }
     var portF = fields["spec.ports[0].port"];
@@ -557,8 +567,14 @@ function workloadPresetHtml(res, doc, allParams, otherResources) {
         var cwMatchF = cwFields["spec.selector.matchLabels"] || cwFields["spec.template.metadata.labels"];
         var cwApp = "";
         if (cwMatchF && cwMatchF.raw) {
-          var cwm = /app:\s*([a-zA-Z0-9_-]+)/.exec(cwMatchF.raw);
-          cwApp = cwm ? cwm[1] : cw.name;
+          try {
+            var parsed = JSON.parse(cwMatchF.raw);
+            if (parsed && typeof parsed === "object" && parsed.app) cwApp = parsed.app;
+          } catch (_) {}
+          if (!cwApp) {
+            var cwm = /app[:=]\s*["']?([a-zA-Z0-9_-]+)["']?/.exec(cwMatchF.raw);
+            cwApp = cwm ? cwm[1] : cw.name;
+          }
         } else {
           cwApp = (cwFields["spec.selector.matchLabels.app"] && cwFields["spec.selector.matchLabels.app"].value) || cw.name;
         }
@@ -1384,8 +1400,8 @@ function onBoxClick(e) {
         r.fields = r.fields || {};
         delete r.fields["spec.selector.matchLabels.app"];
         delete r.fields["spec.template.metadata.labels.app"];
-        r.fields["spec.selector.matchLabels"] = { raw: "{app: " + val + "}" };
-        r.fields["spec.template.metadata.labels"] = { raw: "{app: " + val + "}" };
+        r.fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: val }) };
+        r.fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: val }) };
         if (!r.fields["spec.template.spec.containers[0].name"]) {
           r.fields["spec.template.spec.containers[0].name"] = { value: rname };
         }
@@ -1404,7 +1420,7 @@ function onBoxClick(e) {
         if (!r) return;
         r.fields = r.fields || {};
         delete r.fields["spec.selector.app"];
-        r.fields["spec.selector"] = { raw: "{app: " + matchApp + "}" };
+        r.fields["spec.selector"] = { raw: JSON.stringify({ app: matchApp }) };
         r.fields["spec.ports[0].port"] = { raw: "8080" };
       });
     });
@@ -1478,8 +1494,8 @@ function onBoxChange(e) {
           r.fields = r.fields || {};
           delete r.fields["spec.selector.matchLabels.app"];
           delete r.fields["spec.template.metadata.labels.app"];
-          r.fields["spec.selector.matchLabels"] = { raw: "{app: " + wlAppVal + "}" };
-          r.fields["spec.template.metadata.labels"] = { raw: "{app: " + wlAppVal + "}" };
+          r.fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: wlAppVal }) };
+          r.fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: wlAppVal }) };
         });
       });
     }

@@ -581,13 +581,17 @@ function scheduleWires() {
 const view = { x: 0, y: 0, k: 1 };
 const K_MIN = 0.4, K_MAX = 2.5;
 
-function applyView() {
+function applyView(deferWires) {
   canvasEl.style.transformOrigin = "0 0";
   canvasEl.style.transform =
     "translate(" + view.x + "px," + view.y + "px) scale(" + view.k + ")";
   const pct = document.getElementById("zoom-pct");
   if (pct) pct.textContent = Math.round(view.k * 100) + "%";
-  drawWires(); // synchronous: wires must never lag the transform by a frame
+  if (deferWires) {
+    scheduleWires();
+  } else {
+    drawWires(); // synchronous: wires must never lag the transform by a frame
+  }
 }
 
 /** screen point (relative to #cw) -> canvas space */
@@ -1721,7 +1725,7 @@ export function init(rootEl, deps) {
       const dy = e.touches[0].clientY - touchStartCenter.y;
       view.x = touchStartView.x + dx;
       view.y = touchStartView.y + dy;
-      applyView();
+      applyView(true);
     } else if (e.touches.length === 2) {
       e.preventDefault();
       const dx = e.touches[1].clientX - e.touches[0].clientX;
@@ -1732,12 +1736,15 @@ export function init(rootEl, deps) {
       view.x = touchStartCenter.x - (k / touchStartView.k) * (touchStartCenter.x - touchStartView.x);
       view.y = touchStartCenter.y - (k / touchStartView.k) * (touchStartCenter.y - touchStartView.y);
       view.k = k;
-      applyView();
+      applyView(true);
     }
   }, { passive: false });
 
   cwEl.addEventListener("touchend", function (e) {
-    if (e.touches.length === 0) isTouching = false;
+    if (e.touches.length === 0) {
+      isTouching = false;
+      drawWires();
+    }
   });
 
   buildZoomControls();

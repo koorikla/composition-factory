@@ -443,6 +443,72 @@ export function init(rootEl, deps) {
     }
   }
 
+  /* ---------- environment diagnostics & next steps ---------- */
+
+  function diagnoseError(errMsg) {
+    if (!errMsg) return { isEnv: false, tip: "" };
+    var str = String(errMsg).toLowerCase();
+    if (str.indexOf("docker") !== -1 || str.indexOf("daemon") !== -1 || str.indexOf("docker.sock") !== -1) {
+      return {
+        isEnv: true,
+        tip: "Make sure Docker Desktop or dockerd is running and accessible."
+      };
+    }
+    if (str.indexOf("crossplane") !== -1 && (str.indexOf("not found") !== -1 || str.indexOf("executable file") !== -1 || str.indexOf("no such file") !== -1 || str.indexOf("absent") !== -1)) {
+      return {
+        isEnv: true,
+        tip: "Install Crossplane CLI: curl -sL https://raw.githubusercontent.com/crossplane/crossplane/master/install.sh | sh"
+      };
+    }
+    if (str.indexOf("connection refused") !== -1 || str.indexOf("dial tcp") !== -1) {
+      return {
+        isEnv: true,
+        tip: "Check local environment and network connectivity."
+      };
+    }
+    return { isEnv: false, tip: "" };
+  }
+
+  function formatErrorMessage(errMsg) {
+    if (!errMsg) return "";
+    var diag = diagnoseError(errMsg);
+    if (diag.isEnv && diag.tip) {
+      return errMsg + "\n\n💡 Environment Fix Tip: " + diag.tip;
+    }
+    return errMsg;
+  }
+
+  function updateNextSteps(result) {
+    var banner = document.getElementById("next-steps-banner");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.id = "next-steps-banner";
+      banner.className = "next-steps-banner";
+      banner.style.cssText = "padding:6px 12px;background:rgba(16,185,129,0.08);border-bottom:1px solid rgba(16,185,129,0.2);font-family:var(--mono);font-size:11px;color:var(--ok);display:flex;align-items:center;gap:6px;flex-shrink:0";
+      var vp = document.getElementById("code-viewport") || el.code;
+      vp.parentNode.insertBefore(banner, vp);
+    }
+    if (result && result.outputs && result.outputs.length > 0) {
+      var outPath = "out";
+      var first = result.outputs[0].path || "";
+      var m = /^(.*?)(?:[\\/]compositions[\\/]|[\\/]xrds[\\/]|[\\/]templates[\\/]|[\\/]runtime[\\/]|[\\/]providerconfigs[\\/]|functions\.yaml|package\.yaml)/.exec(first);
+      if (m && m[1]) {
+        outPath = m[1].replace(/[\\/]$/, "") || "out";
+      } else if (first.indexOf("/") !== -1 || first.indexOf("\\") !== -1) {
+        var parts = first.split(/[\/\\]/);
+        parts.pop();
+        outPath = parts.join("/") || "out";
+      }
+      banner.hidden = false;
+      banner.innerHTML = '<span style="color:var(--ok)">✓</span> ' +
+        'Output written to <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">' + esc(outPath) + '</code> ' +
+        '\u00b7 Apply: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">kubectl apply -f ' + esc(outPath) + '</code> ' +
+        '\u00b7 Package: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">cf package</code>';
+    } else {
+      banner.hidden = true;
+    }
+  }
+
   /* ---------- render-failure bar (separate from the raw-count warnbar,
      which is re-rendered on every doc change) ---------- */
   function showWarn(message) {
@@ -452,10 +518,11 @@ export function init(rootEl, deps) {
       bar.id = "render-warn";
       bar.className = "warnbar";
       bar.setAttribute("role", "alert");
+      bar.style.whiteSpace = "pre-wrap";
       el.warn.parentNode.insertBefore(bar, el.warn.nextSibling);
     }
     bar.hidden = !message;
-    bar.textContent = message || "";
+    bar.textContent = message ? formatErrorMessage(message) : "";
   }
 
   /* ---------- raw-template warnbar (prototype's exact copy) ---------- */
@@ -513,7 +580,7 @@ export function init(rootEl, deps) {
 
   function chipErr(message) {
     el.valid.textContent = "error";
-    el.valid.title = message; // server's message, verbatim
+    el.valid.title = formatErrorMessage(message); // server's message, verbatim + fix tips
     el.valid.style.color = "var(--err)";
   }
 
@@ -555,6 +622,20 @@ export function init(rootEl, deps) {
   el.generateBtn.addEventListener("click", generateNow);
   el.generateBtn.disabled = false;   // wired: markup ships them disabled so an
   el.validateBtn.disabled = false;   // early click can't hit a dead button
+  if (el.valid) {
+    el.valid.style.cursor = "pointer";
+    el.valid.addEventListener("click", function () {
+      if (rootEl.hasAttribute("data-collapsed")) {
+        rootEl.removeAttribute("data-collapsed");
+        rootEl.style.height = "250px";
+      }
+      var warnBar = document.getElementById("render-warn");
+      if (warnBar && !warnBar.hidden) {
+        warnBar.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    });
+  }
+
   el.validateBtn.addEventListener("click", function () {
     el.validateBtn.disabled = true;
     el.valid.textContent = "rendering\u2026";
@@ -567,18 +648,21 @@ export function init(rootEl, deps) {
         el.valid.style.color = "";
       } else if (r.unavailable) {
         el.valid.textContent = "render check unavailable";
-        el.valid.title = r.unavailable;
+        el.valid.title = formatErrorMessage(r.unavailable);
         el.valid.style.color = "var(--warn)";
+        showWarn(r.unavailable);
       } else {
         el.valid.textContent = "render error";
-        el.valid.title = r.error;
+        el.valid.title = formatErrorMessage(r.error);
         el.valid.style.color = "var(--err)";
-        showWarn(r.error);   // verbatim engine failure where the user can read it
+        showWarn(r.error);   // verbatim engine failure with fix tips
       }
     }).catch(function (err) {
+      var msg = err && err.message || String(err);
       el.valid.textContent = "render error";
+      el.valid.title = formatErrorMessage(msg);
       el.valid.style.color = "var(--err)";
-      showWarn(err && err.message || String(err));
+      showWarn(msg);
     }).finally(function () { el.validateBtn.disabled = false; });
   });
 
@@ -643,8 +727,10 @@ export function init(rootEl, deps) {
 
   store.subscribe("doc", function () { rbacCache = null; pkgCache = null; });
   store.subscribe("generate", function (result) {
+    showWarn("");
     chipOk(result && result.outputs ? result.outputs.length : 0);
     buildTabs(); // providerconfig families can appear/vanish with sources
+    updateNextSteps(result);
     if (tab !== "bp") render();
   });
 
