@@ -335,10 +335,12 @@ xr: {{ .xr | quote }}
 	}
 }
 
-// The merge ruling for conventions x native kinds: refused, loudly, at both
-// layers. Validate's half is pinned in internal/blueprint; this is the
-// emitter's belt for direct Composition callers.
-func TestConventionsAreRefusedOnNativeKinds(t *testing.T) {
+// Conventions x native kinds, revised ruling: conventions SKIP native
+// resources instead of refusing the document (their top-level leaves are
+// structural — never convention targets), so a conventions-bearing
+// blueprint can freely compose native kinds. Managed siblings still get
+// the convention; the native document must carry no template call.
+func TestConventionsSkipNativeKinds(t *testing.T) {
 	native, err := k8s.Kinds()
 	if err != nil {
 		t.Fatalf("k8s.Kinds: %v", err)
@@ -350,17 +352,32 @@ func TestConventionsAreRefusedOnNativeKinds(t *testing.T) {
 		Name: "web", Kind: "Deployment", Provider: blueprint.NativeProvider,
 		Fields: map[string]blueprint.Field{"spec.replicas": {Raw: "2"}},
 	})
-	if err := b.Validate(); err == nil {
-		t.Error("Validate accepted spec.conventions alongside a native resource; the v1 ruling refuses the combination")
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want conventions accepted alongside a native resource", err)
 	}
-	_, err = Composition(b, crds)
-	if err == nil {
-		t.Fatal("Composition accepted spec.conventions alongside a native resource")
+	comp, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
 	}
-	for _, want := range []string{"web", "Deployment", "forProvider"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not mention %q", err, want)
-		}
+	doc := string(comp)
+	// the managed queues keep their convention calls…
+	if !strings.Contains(doc, `include "cf.tags"`) {
+		t.Error("managed resources lost their convention template calls")
+	}
+	// …and the native document between its name annotation and the next
+	// resource carries none.
+	webStart := strings.Index(doc, `setResourceNameAnnotation "web"`)
+	if webStart < 0 {
+		t.Fatal("native resource document not found in the Composition")
+	}
+	webEnd := strings.Index(doc[webStart:], "setResourceNameAnnotation")
+	rest := doc[webStart:]
+	if next := strings.Index(rest[1:], "setResourceNameAnnotation"); next > 0 {
+		rest = rest[:next+1]
+	}
+	_ = webEnd
+	if strings.Contains(rest, `include "cf.`) {
+		t.Error("a convention template call leaked into the native document")
 	}
 }
 

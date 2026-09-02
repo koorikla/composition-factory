@@ -269,28 +269,19 @@ func TestDeepCopyDoesNotAliasTemplatesOrConventions(t *testing.T) {
 // Secret's type, a ConfigMap's data), where a silently defaulted value
 // changes workload semantics. The alternative — silently not applying — is
 // this project's central defect class.
-func TestValidateRefusesConventionsWithNativeResource(t *testing.T) {
+func TestValidateAcceptsConventionsAlongsideNativeResources(t *testing.T) {
+	// Conventions do not APPLY to native resources (the emitter skips them —
+	// their top-level leaves are structural), but their presence in the same
+	// document must not refuse the blueprint: the default example carries a
+	// tags convention, and dropping a Deployment onto it has to work.
 	b := templatedBlueprint(func(b *Blueprint) {
 		b.Spec.Resources = append(b.Spec.Resources, Resource{
 			Name: "web", Kind: "Deployment", Provider: NativeProvider,
 			Fields: map[string]Field{"spec.replicas": {Raw: "2"}},
 		})
 	})
-	err := b.Validate()
-	if err == nil {
-		t.Fatal("Validate accepted spec.conventions alongside a native resource")
-	}
-	for _, want := range []string{`"web"`, "conventions", "forProvider", NativeProvider} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not mention %q", err, want)
-		}
-	}
-	// Dropping the conventions clears the refusal: templates alone are fine
-	// alongside a native resource (a template field on a MANAGED resource
-	// stays legal in the same document).
-	b.Spec.Conventions = nil
 	if err := b.Validate(); err != nil {
-		t.Fatalf("Validate() = %v, want templates without conventions accepted alongside a native resource", err)
+		t.Fatalf("Validate() = %v, want conventions accepted alongside a native resource", err)
 	}
 }
 

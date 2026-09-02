@@ -262,7 +262,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
   var dm = docMode(entry);
   var m = uiMode[f.path] || dm;
 
-  if (filter === "req" && !(f.required || entry)) return "";
+  if (filter === "req" && !(f.requiredChain || f.branch || entry)) return "";
   if (filter === "set" && !entry) return "";
 
   var wired = m === "w" && dm === "w" && !uiMode[f.path] && entry;
@@ -425,7 +425,21 @@ async function renderResource(res) {
     h += '<div class="empty">No schema found for kind ' + esc(res.kind) + ".</div>";
   } else {
     var params = paramsOf(doc);
-    var body = fields.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap); }).join("");
+    // Required branches (e.g. Deployment's spec.selector / spec.template):
+    // must-set objects with no chain-true leaves — surfaced as rows of their
+    // own so the Required view shows what a user actually has to fill.
+    var branches = (flds && flds.requiredBranches || []);
+    var branchRows = (filter === "req" || filter === "all")
+      ? branches.map(function (b) {
+          return '<div class="fld"><div class="fld-h">' +
+            '<span class="n">' + esc(b.path) + '</span>' +
+            '<span class="t">' + esc(b.type || "object") + '</span>' +
+            '<span class="rq">req</span></div>' +
+            '<div class="fld-d">required object \u2014 set its member fields (expand via All / search)</div></div>';
+        }).join("")
+      : "";
+    var body = branchRows +
+      fields.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap); }).join("");
     h += body || '<div class="empty">No fields match this filter.</div>';
 
     // Crossplane Envelope section (if this CRD defines envelope properties)

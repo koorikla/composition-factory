@@ -92,7 +92,14 @@ function schemaFor(resource) {
       const requiredPaths = [];
       (res.fields || []).forEach(function (f) {
         byPath[f.path] = f;
-        if (f.required) requiredPaths.push(f.path);
+        // effective requiredness: a leaf is a must-set only when its whole
+        // ancestor chain is required (requiredChain) — raw `required` floods
+        // native kinds with conditional members (EnvVar.name etc.)
+        if (f.requiredChain) requiredPaths.push(f.path);
+      });
+      (res.requiredBranches || []).forEach(function (b) {
+        requiredPaths.push(b.path);
+        byPath[b.path] = { path: b.path, type: b.type || "object", required: true, requiredChain: true, branch: true };
       });
       schemaCache.set(key, { byPath: byPath, requiredPaths: requiredPaths });
       render();
@@ -147,7 +154,7 @@ function xrCardHTML(d, sel) {
     h += portRow(XR_ID, name, {
       dir: "out",
       dotColor: n > 1 ? "var(--shared)" : COLORS.xrd,
-      req: !!p.required,
+      req: !!(p.requiredChain || (p.required && !p.branch)),
       ty: p.type || "",
       label: name,
       title: name + (p.description ? " — " + p.description : ""),

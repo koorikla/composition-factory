@@ -158,9 +158,15 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		// Conventions fill in matching fields the blueprint does NOT set
 		// explicitly; an explicit field always wins — that IS the override
 		// mechanism. The merge happens on a copy, never on r.Fields itself.
-		fields, err := conventionFields(r, b, crd)
-		if err != nil {
-			return nil, err
+		// Native resources are exempt by design: their top-level leaves are
+		// structural (Secret.type, ConfigMap.data), never convention targets.
+		fields := r.Fields
+		if r.Provider != blueprint.NativeProvider {
+			var cerr error
+			fields, cerr = conventionFields(r, b, crd)
+			if cerr != nil {
+				return nil, cerr
+			}
 		}
 		rc := r
 		rc.Fields = fields

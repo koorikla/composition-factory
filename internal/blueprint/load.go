@@ -618,21 +618,15 @@ func (b *Blueprint) Validate() error {
 			}
 		}
 		// Templates and conventions are forProvider-plan features in v1, and a
-		// native Kubernetes kind has no forProvider plan. A convention would
-		// have to match the native object's own top-level leaves — structural
-		// fields (a Secret's type, a ConfigMap's data) where a silently
-		// defaulted value changes workload semantics — and a template call's
-		// output re-indents to the fixed forProvider column
-		// (templateFieldNindent in internal/emit), which a native field at an
-		// arbitrary nesting depth breaks. Both are refused outright rather
-		// than guessed: relaxing either later is a feature, not a fix.
-		if r.Provider == NativeProvider && len(b.Spec.Conventions) > 0 {
-			return fmt.Errorf("spec.resources[%d] (%q): spec.conventions cannot be combined with a native "+
-				"Kubernetes resource (provider %q) in v1 -- a convention fills top-level forProvider "+
-				"fields, and a native object has no forProvider; its own top-level fields are structural, "+
-				"where a silently defaulted value would change workload semantics. Remove the conventions "+
-				"or set the native resource's fields explicitly", i, r.Name, NativeProvider)
-		}
+		// native Kubernetes kind has no forProvider plan. Conventions simply
+		// DO NOT APPLY to native resources (the emitter skips them — a
+		// native object's top-level leaves are structural fields, a Secret's
+		// type or a ConfigMap's data, where a silently defaulted value would
+		// change workload semantics), so a blueprint may freely mix
+		// conventions with native kinds. Only an explicit template: FIELD on
+		// a native resource stays refused: a template call's output
+		// re-indents to the fixed forProvider column (templateFieldNindent),
+		// which a native field at an arbitrary nesting depth breaks.
 		// forEach repeats the resource's whole rendered document N times, N
 		// read at render time from an integer XRD parameter
 		// (internal/emit/composition.go wraps the document in
