@@ -114,11 +114,14 @@
       embedded/sibling XRDs) into clean, deterministic blueprints. Exposed via
       `cf adopt` CLI, `POST /api/blueprint/adopt` HTTP API, and `adopt_composition`
       MCP tool. — completed 2026-09-02
-- [ ] go-templating FileSystem source export (user request 2026-09-02): an
-      export option that emits templates as a folder structure (one object
-      per yaml file, helm-chart-style readability), wired for `source:
-      FileSystem` + ConfigMap mounts, splitting across multiple ConfigMaps
-      to stay under the ~1MiB object limit for big compositions.
+- [x] go-templating FileSystem source export (user request 2026-09-02):
+      `spec.emit.templateSource: FileSystem` (also switchable in the GUI)
+      exports templates as a folder — 000-context + one file per object,
+      helm-chart-style — whose lexical "\n---\n" concatenation is
+      byte-identical to the inline body (the function's own reassembly
+      contract), packed into ConfigMap(s) under the ~1MiB limit and mounted
+      via a DeploymentRuntimeConfig; functions.yaml pins runtimeConfigRef.
+      — completed 2026-09-02
 - [x] Docs restructure (user request 2026-09-02): split README extras into
       /docs to keep the main README quick to read; make the gif-recorder
       flow part of it; use /docs content to GENERATE the in-app Guide tab(s)
