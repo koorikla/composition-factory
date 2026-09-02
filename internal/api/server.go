@@ -41,11 +41,11 @@ import (
 type Options struct {
 	// Version is the build version string the UI's wordmark shows
 	// (main.version via ldflags). Empty renders as "dev".
-	Version   string
-	Index     *index.Index
-	Store     *cache.Store
-	Blueprint string   // path to the blueprint file on disk
-	OutDir    string   // where generate writes
+	Version       string
+	Index         *index.Index
+	Store         *cache.Store
+	Blueprint     string          // path to the blueprint file on disk
+	OutDir        string          // where generate writes
 	Lock          string          // path to the lockfile POST /api/providers pins digests into
 	Providers     []string        // xpkg refs Index was built over, in blueprint-source order
 	ClusterClient *cluster.Client // optional live Kubernetes cluster client
