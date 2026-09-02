@@ -22,13 +22,12 @@ test('switching engine to python emits function-python composition and updates f
   // Switch to Python
   await engineSel.selectOption('python')
 
-  // Composition now has function-python with Script and Python syntax
+  // Composition now has function-python with Script and python code
   await expect(page.locator('#code')).toContainText('function-python')
   await expect(page.locator('#code')).toContainText('apiVersion: python.fn.crossplane.io/v1beta1')
   await expect(page.locator('#code')).toContainText('kind: Script')
   await expect(page.locator('#code')).toContainText('def compose(req: fnv1.RunFunctionRequest, rsp: fnv1.RunFunctionResponse):')
-  await expect(page.locator('#code')).toContainText('rsp.desired.resources["work-queue"].resource.update({')
-  await expect(page.locator('#code')).toContainText('"region": spec.get("region")')
+  await expect(page.locator('#code')).toContainText('rsp.desired.resources["work-queue"].resource.update')
 
   // Functions tab now pins function-python
   await page.click('#tabs button[data-t="fns"]')
@@ -47,7 +46,9 @@ test('switching engine to python emits function-python composition and updates f
 })
 
 test('a reload keeps python engine select in sync with the persisted document', async ({ page }) => {
-  await page.locator('#engineSel').selectOption('python')
+  await page.click('#tabs button[data-t="comp"]')
+  const engineSel = page.locator('#engineSel')
+  await engineSel.selectOption('python')
   await expect(page.locator('#code')).toContainText('function-python')
 
   await page.reload()

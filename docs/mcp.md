@@ -78,6 +78,4 @@ column names the route each tool bridges to.
 | `render_check` | `POST /api/render` | Run a real `crossplane composition render` against a sample XR; the outcome (`ok`/`error`/`unavailable`) is the payload. |
 | `adopt_composition` | `POST /api/blueprint/adopt` | Import an existing Crossplane Composition (and optional XRD) YAML manifest into a structured Blueprint; `persist: true` saves to the workspace blueprint file. |
 
-`GET /api/kinds/{apiVersion}/{kind}` (the envelope route) is the one HTTP
-route without a tool; the envelope is canvas furniture, and an agent gets the
-authoring-relevant fields from `get_kind_fields`.
+The 13 MCP tools above bridge the core Crossplane authoring, schema query, generation, validation, provider ingestion, and adoption workflows. Endpoints tailored specifically to the browser canvas (such as `/api/catalogue` for package browsing, `/api/examples` for starter templates, `/api/cluster` for live cluster discovery, `/api/package` for archive downloads, and canvas-specific resource routes) are served over HTTP (`cf serve`) directly to the web GUI.

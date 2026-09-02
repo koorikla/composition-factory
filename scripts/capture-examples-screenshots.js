@@ -10,7 +10,7 @@ async function main() {
   const testrunDir = path.resolve('.testrun');
   if (!fs.existsSync(testrunDir)) fs.mkdirSync(testrunDir, { recursive: true });
   fs.mkdirSync(path.join(testrunDir, 'out'), { recursive: true });
-  fs.copyFileSync('tests/fixtures/pristine-doc.yaml', path.join(testrunDir, 'doc.cf.yaml'));
+  fs.copyFileSync('tests/fixtures/pristine-doc.json', path.join(testrunDir, 'doc.cf.yaml'));
 
   const srv = spawn('./bin/cf', [
     'serve',

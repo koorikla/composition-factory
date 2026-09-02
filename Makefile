@@ -1,4 +1,4 @@
-.PHONY: build test test-race test-docker test-e2e lint serve dev clean
+.PHONY: build test test-race test-docker test-e2e lint serve clean
 
 BIN       := bin/cf
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -19,9 +19,8 @@ test-race:
 test-docker:
 	go test ./... -run Acceptance -v -count=1
 
-# Playwright behavior suite over web-proto/. It starts serve.py itself (see
-# playwright.config.js) but `cf serve` must already be listening on :8080 --
-# run `make serve` in another shell first (after one `provider add`).
+# Playwright behavior suite over web-proto/. Boots its own isolated engine
+# on 127.0.0.1:8081 with a scratch blueprint (see playwright.config.js).
 test-e2e:
 	npx playwright test
 
@@ -33,8 +32,5 @@ lint:
 serve: build
 	./$(BIN) serve --blueprint $(BLUEPRINT) --out $(OUT)
 
-dev:
-	python3 web-proto/serve.py
-
 clean:
-	rm -rf bin $(OUT)
+	rm -rf bin $(OUT) .testrun .demorun

@@ -13,6 +13,7 @@
  */
 import { store } from "./store.js";
 import * as api from "./api.js";
+import { esc } from "./dom.js";
 import { init as initPalette } from "./regions/palette.js";
 import { init as initCanvas } from "./regions/canvas.js";
 import { init as initInspector } from "./regions/inspector.js";
@@ -447,11 +448,6 @@ store.loadDoc();
     if (id === "s3-bucket") return { label: "S3", color: "#059669" };
     if (id === "sqs-queue") return { label: "SQS", color: "#e11d48" };
     return { label: "EX", color: "var(--wire-xrd)" };
-  }
-
-  function esc(s) {
-    return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
   function renderExamples(list) {

@@ -1,3 +1,4 @@
+import { esc } from "../dom.js";
 /**
  * Region: OUTPUT + TOPBAR behavior.
  *
@@ -317,11 +318,6 @@ export function init(rootEl, deps) {
   }
 
   /* ---------- rendering ---------- */
-
-  function esc(s) {
-    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
 
   /** Prototype-style YAML highlighting over plain text. */
   function highlight(text) {
