@@ -270,3 +270,8 @@ svg.wires .dim{opacity:.18}
 .port.status{justify-content:flex-end}
 .port.status .nm{text-align:right;color:var(--wire-status)}
 .port.status .ty{margin-left:0}
+
+/* card actions and resize grip exist in the DOM always; visible when selected
+   (selection is a class toggle, never a DOM rebuild) */
+.node:not(.sel) [data-act]{display:none}
+.node:not(.sel) [data-resize]{display:none}

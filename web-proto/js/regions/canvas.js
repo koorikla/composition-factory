@@ -173,15 +173,11 @@ function resourceCardHTML(d, r, sel) {
     '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
     '<span class="k">' + esc(r.kind) + '</span>' +
     '<span class="nm">' + esc(r.name) + '</span>' +
-    (sel === r.name
-      ? '<button class="del" data-act="duplicate" data-res="' + esc(r.name) + '" title="Duplicate (\u2318C \u2318V)">\u29c9</button>' +
-        '<button class="del" data-act="delete" data-res="' + esc(r.name) + '" title="Remove (Delete)">\u00d7</button>'
-      : "") + "</div>" +
-    (sel === r.name
-      ? '<span data-resize data-res="' + esc(r.name) + '" title="Drag to resize \u00b7 double-click to reset"' +
-        ' style="position:absolute;right:-2px;bottom:-2px;width:14px;height:14px;cursor:nwse-resize;' +
-        'border-right:2px solid var(--faint);border-bottom:2px solid var(--faint);border-radius:0 0 4px 0"></span>'
-      : "") +
+    '<button class="del" data-act="duplicate" data-res="' + esc(r.name) + '" title="Duplicate (\u2318C \u2318V)">\u29c9</button>' +
+    '<button class="del" data-act="delete" data-res="' + esc(r.name) + '" title="Remove (Delete)">\u00d7</button></div>' +
+    '<span data-resize data-res="' + esc(r.name) + '" title="Drag to resize \u00b7 double-click to reset"' +
+    ' style="position:absolute;right:-2px;bottom:-2px;width:14px;height:14px;cursor:nwse-resize;' +
+    'border-right:2px solid var(--faint);border-bottom:2px solid var(--faint);border-radius:0 0 4px 0"></span>' +
     '<div class="node-grp">' + esc(grp) + '</div>' +
     '<div class="ports">';
 
@@ -850,7 +846,22 @@ export function init(rootEl, deps) {
   }
 
   S.subscribe("doc", reloadKindsAndRender);
-  S.subscribe("selection", render);
+  // Selection must never rebuild the card DOM: a full innerHTML rebuild
+  // destroys the element a rapid second click is about to land on ("can't
+  // click anything" at human speed). Toggle classes in place instead.
+  S.subscribe("selection", function () {
+    const sel = S.state.selectedResource;
+    let found = false;
+    canvasEl.querySelectorAll(".node").forEach(function (el) {
+      const is = el.getAttribute("data-id") === sel;
+      el.classList.toggle("sel", is);
+      if (is) found = true;
+    });
+    drawWires();
+    // a selection naming a card that is not in the DOM yet (fresh add)
+    // still needs the full render path
+    if (sel && !found) render();
+  });
 
   reloadKindsAndRender();
 }
