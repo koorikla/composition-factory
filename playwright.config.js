@@ -11,6 +11,8 @@ module.exports = defineConfig({
     // the human's server on 8080 is never touched by tests.
     command: 'sh -c "rm -rf .testrun && mkdir -p .testrun/out && cp tests/fixtures/pristine-doc.yaml .testrun/doc.cf.yaml && ./bin/cf serve --addr 127.0.0.1:8081 --blueprint .testrun/doc.cf.yaml --out .testrun/out --lock .testrun/.cf.lock"',
     url: 'http://127.0.0.1:8081/healthz',
-    reuseExistingServer: false,
+    // a crashed run strands the engine on 8081 and blocks every later run;
+    // reusing is safe — the engine is ours by construction (scratch doc).
+    reuseExistingServer: true,
   },
 })
