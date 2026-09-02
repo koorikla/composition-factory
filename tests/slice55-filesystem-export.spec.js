@@ -69,8 +69,8 @@ test('switching back to inline drops the file tabs; the switch is one undo step'
   }).toBe('Inline')
 
   await page.click('#undoBtn')
-  await expect(page.locator('#tabs button[data-t="runtime"]')).toBeVisible()
   await expect(sel).toHaveValue('FileSystem')
+  await expect(page.locator('#tabs button[data-t="runtime"]')).toBeVisible()
 })
 
 test('a reload keeps the select in sync with the persisted document', async ({ page }) => {

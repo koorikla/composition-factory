@@ -188,11 +188,19 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .fld-h .n{font-family:var(--mono);font-size:11.5px;font-weight:500}
 .fld-h .t{font-family:var(--mono);font-size:9.5px;color:var(--faint)}
 .fld-h .rq{font-family:var(--cond);font-size:9px;font-weight:600;letter-spacing:.05em;color:var(--err);text-transform:uppercase}
-.modes{margin-left:auto;display:flex;gap:1.5px;background:var(--sunk);border-radius:4px;padding:1.5px}
-.modes button{width:20px;height:16px;border-radius:2.5px;font-family:var(--cond);font-size:9px;
-  font-weight:600;color:var(--faint);display:grid;place-items:center}
-.modes button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 1.5px rgba(0,0,0,.08)}
+.modes{margin-left:auto;display:inline-flex;gap:2px;background:var(--sunk);border-radius:4px;padding:2px}
+.modes button{min-width:24px;height:18px;padding:0 4px;border-radius:3px;font-family:var(--cond);font-size:9.5px;
+  font-weight:600;letter-spacing:.03em;color:var(--faint);display:inline-flex;align-items:center;justify-content:center;transition:all .12s}
+.modes button:hover{color:var(--ink);background:rgba(0,0,0,.04)}
+.modes button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12);font-weight:700}
+.modes button[data-m="w"][aria-pressed="true"]{background:var(--wire-xrd);color:#fff}
+.modes button[data-m="r"][aria-pressed="true"]{background:var(--wire-xrd-soft);color:var(--wire-xrd)}
 .fld-d{color:var(--muted);font-size:11px;line-height:1.42;margin-bottom:5px}
+.fld-d.trunc{position:relative}
+.fld-d.trunc .desc-text{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.fld-d.expanded .desc-text{display:block;-webkit-line-clamp:unset;overflow:visible}
+.desc-more-btn{all:unset;color:var(--wire-xrd);cursor:pointer;font-size:10px;font-weight:600;margin-left:4px;text-decoration:underline}
+.desc-more-btn:hover{color:var(--ink)}
 .val{width:100%;height:25px;padding:0 7px;border:1px solid var(--rule-2);border-radius:4px;
   background:var(--surface);color:var(--ink);font-family:var(--mono);font-size:11px}
 .val:focus{outline:none;border-color:var(--wire-xrd)}
@@ -693,3 +701,40 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .tour-card .tour-n { color: var(--faint, #8a8f98); font-size: 10.5px; margin-right: 8px; }
 .tour-card .tour-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
 .tour-card button { cursor: pointer; }
+
+/* canvas empty state */
+.canvas-empty-state{position:absolute;left:340px;top:48px;max-width:380px;background:var(--surface);
+  border:1.5px dashed var(--rule-2);border-radius:8px;padding:16px 20px;box-shadow:var(--shadow);pointer-events:auto;z-index:2}
+.canvas-empty-title{font-family:var(--cond);font-size:13px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--wire-xrd);margin-bottom:8px}
+.canvas-empty-steps{display:flex;flex-direction:column;gap:8px}
+.canvas-empty-step{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--ink-2);line-height:1.4}
+.canvas-empty-step strong{color:var(--ink)}
+.step-num{width:18px;height:18px;border-radius:50%;background:var(--wire-xrd-soft);color:var(--wire-xrd);
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10.5px;font-weight:700;flex:0 0 auto}
+
+/* spinner */
+.spinner{display:inline-block;width:9px;height:9px;border:2px solid currentColor;border-top-color:transparent;
+  border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* toast notification */
+.toast-bar{position:fixed;top:54px;left:50%;transform:translateX(-50%);background:var(--surface);
+  color:var(--ink);border:1px solid var(--rule-2);border-radius:6px;box-shadow:var(--shadow-lg);
+  padding:8px 14px;font-size:12px;display:flex;align-items:center;gap:10px;z-index:5000;
+  animation:toast-in .2s ease-out}
+@keyframes toast-in{from{top:40px;opacity:0}to{top:54px;opacity:1}}
+.toast-link{color:var(--wire-xrd);font-weight:600;text-decoration:underline;cursor:pointer}
+
+/* xr inline add */
+.xr-add-row{display:flex;gap:4px;align-items:center;padding:5px 8px;background:var(--surface-2);border-top:1px solid var(--rule)}
+.xr-add-input{height:22px;padding:0 6px;font-family:var(--mono);font-size:11px;flex:1;min-width:0;
+  border:1px solid var(--rule-2);border-radius:4px;background:var(--surface);color:var(--ink)}
+.xr-add-input:focus{outline:none;border-color:var(--wire-xrd)}
+
+/* wire picker mismatch pill */
+.wire-picker-mismatch{font-size:9.5px;padding:1px 5px;border-radius:3px;background:rgba(234,179,8,0.18);
+  color:#b45309;font-family:var(--mono);font-weight:500;margin-left:4px}
+:root[data-theme="dark"] .wire-picker-mismatch{color:#facc15;background:rgba(250,204,21,0.15)}
+
+svg.wires path:focus-visible{outline:none;stroke-width:4px !important;filter:drop-shadow(0 0 6px var(--wire-xrd))}

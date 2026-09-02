@@ -196,12 +196,23 @@ function warnHtml() {
     : "";
 }
 
+function formatDescHtml(desc, path) {
+  if (!desc) return "";
+  var isLong = desc.length > 90 || desc.indexOf("\n") !== -1;
+  if (!isLong) return '<div class="fld-d">' + esc(desc) + "</div>";
+  return '<div class="fld-d trunc" data-desc-path="' + esc(path) + '">' +
+    '<span class="desc-text">' + esc(desc) + "</span>" +
+    '<button type="button" class="desc-more-btn" data-toggle-desc="' + esc(path) + '">more</button>' +
+    "</div>";
+}
+
 function modeButtons(path, pressed, isEnv) {
   var titles = { v: "Literal value", w: "Wire from a parameter or resource status", r: "Raw go-template" };
+  var labels = { v: "Val", w: "Wire", r: "Raw" };
   var envAttr = isEnv ? ' data-env="1"' : "";
   return '<span class="modes">' + ["v", "w", "r"].map(function (x) {
     return '<button' + envAttr + ' data-m="' + x + '" data-path="' + esc(path) + '" aria-pressed="' +
-      (pressed === x) + '" title="' + titles[x] + '">' + x.toUpperCase() + "</button>";
+      (pressed === x) + '" title="' + titles[x] + '">' + labels[x] + "</button>";
   }).join("") + "</span>";
 }
 
@@ -308,7 +319,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
     '<div class="fld-h"><span class="n">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
     (f.required ? '<span class="rq">req</span>' : "") +
     modeButtons(f.path, m, false) +
-    '</div><div class="fld-d">' + esc(f.description) + "</div>";
+    '</div>' + formatDescHtml(f.description, f.path);
 
   if (isMap) {
     if (m === "w") {
@@ -410,11 +421,14 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
 
   var wired = m === "w" && dm === "w" && !uiMode[mKey] && entry;
   var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
-  var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
+  var isAuto = !entry && (f.path === "providerConfigRef.name" || f.path === "providerConfigRef.kind");
+  var showReq = f.required && !isAuto;
+
+  var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + (isAuto ? " auto-defaulted" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
     '<div class="fld-h"><span class="n">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
-    (f.required ? '<span class="rq">req</span>' : "") +
+    (showReq ? '<span class="rq">req</span>' : (isAuto ? '<span class="pill" style="font-size:9.5px;background:var(--wire-ref-soft);color:var(--wire-ref);padding:1px 4px;margin-left:2px" title="Filled automatically from providerName">auto</span>' : "")) +
     modeButtons(f.path, m, true) +
-    '</div><div class="fld-d">' + esc(f.description) + "</div>";
+    '</div>' + formatDescHtml(f.description, f.path);
 
   if (m === "w") {
     if (dm === "w" && !uiMode[mKey] && entry) {
@@ -431,9 +445,9 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
       esc((dm === "r" && entry) ? entry.raw : "") + "</textarea>";
   } else {
     var ph = f.path === "providerConfigRef.name"
-      ? "default: $spec.providerName"
+      ? "auto: ClusterProviderConfig / $spec.providerName"
       : (f.path === "providerConfigRef.kind"
-        ? "default: ClusterProviderConfig"
+        ? "auto: ClusterProviderConfig / $spec.providerName"
         : (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from envelope"));
     h += '<input class="val" data-env-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
       '" placeholder="' + ph + '">';
@@ -1118,6 +1132,15 @@ async function commitEnvelopeValue(path, kind, text) {
 }
 
 function onBoxClick(e) {
+  var toggleDesc = e.target.closest("[data-toggle-desc]");
+  if (toggleDesc) {
+    var descWrap = toggleDesc.closest(".fld-d");
+    if (descWrap) {
+      var exp = descWrap.classList.toggle("expanded");
+      toggleDesc.textContent = exp ? "less" : "more";
+    }
+    return;
+  }
   var annDel = e.target.closest("[data-ann-del]");
   if (annDel) {
     var adk = annDel.getAttribute("data-ann-del");

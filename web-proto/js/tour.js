@@ -154,16 +154,32 @@ function click(sel) {
     }
   }
 
+  var lastFocusedElement = null;
+
   function show(i) {
+    if (overlay.hidden) {
+      lastFocusedElement = document.activeElement;
+    }
     step = Math.max(0, Math.min(STEPS.length - 1, i));
     var s = STEPS[step];
     if (s.prep) { try { s.prep(); } catch (_) { /* the target check below copes */ } }
     // prep may re-render the rail; place after a frame so rects are fresh
-    requestAnimationFrame(function () { requestAnimationFrame(place); });
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        place();
+        var nextBtn = card.querySelector("#tour-next");
+        if (nextBtn) nextBtn.focus();
+      });
+    });
     overlay.hidden = false;
   }
 
-  function close() { overlay.hidden = true; }
+  function close() {
+    overlay.hidden = true;
+    if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+      lastFocusedElement.focus();
+    }
+  }
 
   btn.addEventListener("click", function () { show(0); });
   overlay.addEventListener("click", function (e) {
@@ -176,9 +192,22 @@ function click(sel) {
   });
   addEventListener("keydown", function (e) {
     if (overlay.hidden) return;
-    if (e.key === "Escape") close();
-    if (e.key === "ArrowRight") show(step + 1);
-    if (e.key === "ArrowLeft") show(step - 1);
+    if (e.key === "Escape") { close(); return; }
+    if (e.key === "ArrowRight") { show(step + 1); return; }
+    if (e.key === "ArrowLeft") { show(step - 1); return; }
+    if (e.key === "Tab") {
+      var focusables = card.querySelectorAll('button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+      if (!focusables || !focusables.length) return;
+      var first = focusables[0];
+      var last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
   });
   addEventListener("resize", function () { if (!overlay.hidden) place(); });
 })();

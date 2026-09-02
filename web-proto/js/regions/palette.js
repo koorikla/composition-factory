@@ -71,6 +71,42 @@ export function init(rootEl, deps) {
     return !!l && l.indexOf(kind + "|" + (apiVersion || "")) >= 0;
   }
 
+  let toastTimer = null;
+  function showToast(html, onLinkClick) {
+    var old = document.getElementById("palette-toast");
+    if (old) old.remove();
+    clearTimeout(toastTimer);
+    var t = document.createElement("div");
+    t.id = "palette-toast";
+    t.className = "toast-bar";
+    t.innerHTML = html;
+    document.body.appendChild(t);
+    if (onLinkClick) {
+      t.addEventListener("click", function (e) {
+        if (e.target.closest(".toast-link")) {
+          onLinkClick();
+          t.remove();
+        }
+      });
+    }
+    toastTimer = setTimeout(function () { if (t.parentNode) t.remove(); }, 6000);
+  }
+
+  function switchTab(r) {
+    rail = r;
+    if (tabsEl) {
+      [].forEach.call(tabsEl.children, function (c) {
+        c.setAttribute("aria-pressed", String(c.getAttribute("data-r") === rail));
+      });
+    }
+    if (rail === "kinds") loadKinds();
+    if (rail === "src") {
+      if (providers === null) loadProviders();
+      loadCluster();
+    }
+    drawRail();
+  }
+
   let kindsError = null;       // verbatim server message, or null
   let kindsLoaded = false;
   let searchSeq = 0;
@@ -368,10 +404,19 @@ export function init(rootEl, deps) {
       h += '<div class="empty">No catalogue matches.</div>';
     } else {
       catRows.slice(0, 20).forEach(function (c) {
+        var isInstalled = (sources || []).some(function (s) {
+          var sp = (s.provider || "").split(":")[0];
+          var cr = (c.ref || "").split(":")[0];
+          return s.provider === c.ref || (cr && sp && sp === cr);
+        });
+        var instInfo = (providers || []).find(function (p) { return p.ref === c.ref; });
+        var countLabel = instInfo && instInfo.kinds ? "Installed \u00b7 " + instInfo.kinds + " kinds" : "Installed";
         h += '<div class="cat-row src-row" style="cursor:default" title="' + esc(c.description || c.name) + '">' +
           '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(c.name) + "</span>" +
           '<span class="dg">' + esc(c.ref || "no published image \u2014 publishes elsewhere") + "</span></span>" +
-          (c.ref ? '<button class="btn sm cat-add" data-cat-ref="' + esc(c.ref) + '">Add</button>' : "") +
+          (isInstalled
+            ? '<span class="pill" style="font-size:9.5px;background:var(--wire-status-soft);color:var(--wire-status);align-self:center;flex:0 0 auto">' + esc(countLabel) + "</span>"
+            : (c.ref ? '<button class="btn sm cat-add" data-cat-ref="' + esc(c.ref) + '">Add</button>' : "")) +
           "</div>";
       });
     }
@@ -609,10 +654,22 @@ export function init(rootEl, deps) {
     }
     const catBtn = e.target.closest("button.cat-add");
     if (catBtn) {
+      const catRef = catBtn.getAttribute("data-cat-ref");
       catBtn.disabled = true;
+      catBtn.innerHTML = '<span class="spinner"></span> Adding\u2026';
       providersErr = null;
-      api.addProvider(catBtn.getAttribute("data-cat-ref")).then(function () {
-        loadProviders(); loadKinds();
+      api.addProvider(catRef).then(function () {
+        return Promise.all([
+          api.getProviders().then(function (r) { providers = r.providers || []; }),
+          api.getKinds().then(function (d) { kinds = d.kinds || []; kindsLoaded = true; })
+        ]);
+      }).then(function () {
+        const inst = (providers || []).find(function (p) { return p.ref === catRef; });
+        const kCount = inst && inst.kinds ? (inst.kinds + " kinds") : "schemas loaded";
+        showToast("Installed <strong>" + esc(catRef.split("/").pop()) + "</strong> (" + kCount + ") \u2014 <span class=\"toast-link\">Open KINDS</span>", function () {
+          switchTab("kinds");
+        });
+        drawRail();
       }).catch(function (err) {
         providersErr = err && err.message || String(err);
         drawRail();
