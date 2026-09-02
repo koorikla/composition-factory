@@ -75,6 +75,6 @@ func ParseFrom(s string) (FromRef, error) {
 		}
 		return FromRef{Resource: name, StatusPath: segs}, nil
 	}
-	return FromRef{}, fmt.Errorf("from must start with params.<name> or "+
-		"resources.<name>.status.<path> (got %q)", s)
+	return FromRef{}, fmt.Errorf("from must start with params.<name>, "+
+		"params.<name>.<member> or resources.<name>.status.<path> (got %q)", s)
 }

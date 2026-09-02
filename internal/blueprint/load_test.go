@@ -169,8 +169,8 @@ func TestValidateRejectsFieldWithZeroSources(t *testing.T) {
 func TestValidateRejectsFromWithoutParamsPrefix(t *testing.T) {
 	body := strings.Replace(valid, "maxMessageSize: {from: params.maxMessageSize}", "maxMessageSize: {from: maxMessageSize}", 1)
 	_, err := Load(write(t, body))
-	if err == nil || !strings.Contains(err.Error(), "params.<name> or resources.<name>.status.<path>") {
-		t.Fatalf("err = %v, want a complaint naming both accepted from grammars", err)
+	if err == nil || !strings.Contains(err.Error(), "params.<name>, params.<name>.<member> or resources.<name>.status.<path>") {
+		t.Fatalf("err = %v, want a complaint naming all three accepted from grammars", err)
 	}
 }
 

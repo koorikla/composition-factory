@@ -1,0 +1,9 @@
+# Omits the optional tuning object entirely: both member wires must be
+# absent from the rendered resource, cleanly — never "<no value>".
+apiVersion: platform.hooli.tech/v1alpha1
+kind: XTunedQueue
+metadata:
+  name: demo-untuned
+  namespace: default
+spec:
+  providerName: localstack
