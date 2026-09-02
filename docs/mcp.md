@@ -76,6 +76,7 @@ column names the route each tool bridges to.
 | `list_providers` | `GET /api/providers` | The providers being served, with digest and kind count. |
 | `generate` | `POST /api/generate` | Render XRD, Composition and functions.yaml through the same engine `cf gen` uses; `write:false` previews, `write:true` writes into `--out` only. |
 | `render_check` | `POST /api/render` | Run a real `crossplane composition render` against a sample XR; the outcome (`ok`/`error`/`unavailable`) is the payload. |
+| `adopt_composition` | `POST /api/blueprint/adopt` | Import an existing Crossplane Composition (and optional XRD) YAML manifest into a structured Blueprint; `persist: true` saves to the workspace blueprint file. |
 
 `GET /api/kinds/{apiVersion}/{kind}` (the envelope route) is the one HTTP
 route without a tool; the envelope is canvas furniture, and an agent gets the

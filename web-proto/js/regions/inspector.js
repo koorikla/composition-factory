@@ -1758,7 +1758,17 @@ export function init(rootEl, deps) {
   box.addEventListener("change", onBoxChange);
   if (fseg) fseg.addEventListener("click", onFsegClick);
 
-  store.subscribe("doc", function () { kindsPromise = null; render(); });
+  var lastSourcesSig = "";
+  store.subscribe("doc", function () {
+    var d = store.state.doc;
+    var sig = ((d && d.spec && d.spec.sources) || [])
+      .map(function (s) { return s.provider; }).join("|");
+    if (sig !== lastSourcesSig) {
+      lastSourcesSig = sig;
+      kindsPromise = null;
+    }
+    render();
+  });
   store.subscribe("selection", function () {
     uiMode = {};
     pendingNewParam = null;

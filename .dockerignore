@@ -5,7 +5,6 @@
 bin
 out
 node_modules
-web/node_modules
 playwright-report
 test-results
 .testrun

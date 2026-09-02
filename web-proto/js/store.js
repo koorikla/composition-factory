@@ -183,7 +183,6 @@ export const store = {
    */
   select(name) {
     if (this.state.selectedResource === name) return; // no-op reselects don't re-render
-    if (this.state.selectedResource === name) return;
     this.state.selectedResource = name;
     this.emit("selection", name);
   },

@@ -301,6 +301,6 @@ package's own tests.
   `q` filter, and participation in the shared ETag/gzip middleware.
 - `internal/api/contract_fixtures_test.go`'s
   `TestContractFixtureCatalogueRoundTripsKeySet` checks
-  `web/src/api/fixtures/catalogue.json` against the same
+  `internal/api/testdata/contract/catalogue.json` against the same
   `{"providers": [...]}` envelope the Go handler actually serves, the same
   cross-language contract check every other route in this API gets.

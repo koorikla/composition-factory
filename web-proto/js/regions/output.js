@@ -512,7 +512,6 @@ export function init(rootEl, deps) {
     el.valid.textContent = "ok · " + n + " file" + (n === 1 ? "" : "s");
     el.valid.title = "";
     el.valid.style.color = "";
-    el.valid.classList.remove("err");
   }
 
   function chipErr(message) {

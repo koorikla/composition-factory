@@ -890,38 +890,8 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 	return plan, nil
 }
 
-// memberGuard is the render-time condition for a typed object member wire
-// (params.<param>.<member>), mirroring the forProvider guard discipline
-// under options: ["missingkey=error"]:
-//
-//   - object optional: a hasKey chain on BOTH levels — the object key can be
-//     genuinely absent (an XR that never set it), and when present the
-//     member can still be absent, so each dereference is proven first. The
-//     conjunction short-circuits (text/template's and, since Go 1.18), so
-//     $spec.<param> is never indexed while the first link is false.
-//   - object required, member optional: hasKey on the member alone — the
-//     XRD's required gate makes $spec.<param> present on any admitted XR,
-//     so indexing it inside the hasKey argument is safe.
-//   - both required: no guard. Required within a required object means the
-//     API server admits no XR without the member, exactly the gate that
-//     makes a top-level required parameter's bare dereference safe.
-//
-// A defaulted member behind a present object is also injected by schema
-// defaulting, but the guard is kept for any non-required member — the same
-// consistency rule planFields applies to defaulted top-level parameters
-// (harmless when the key is present).
-func memberGuard(param, member string, paramRequired, memberRequired bool) string {
-	switch {
-	case !paramRequired:
-		return fmt.Sprintf("and (hasKey $spec %q) (hasKey $spec.%s %q)", param, param, member)
-	case !memberRequired:
-		return fmt.Sprintf("hasKey $spec.%s %q", param, member)
-	default:
-		return ""
-	}
-}
-
-// chainGuard generalizes memberGuard to arbitrary depth: from the first
+// chainGuard constructs the render-time condition for nested parameter wires
+// (params.<param>.<member>...) to arbitrary depth: from the first
 // non-required level onward every dereference is proven with hasKey (the
 // same conservative rule the two-level guard applies — once an ancestor is
 // optional, deeper required-ness is only meaningful when that ancestor is

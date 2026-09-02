@@ -242,24 +242,24 @@ clean, Playwright 115 passed / 1 skipped.
 - [ ] docs/catalogue.md:304 points at web/src/api/fixtures (see removal
       below); release.yml pins checkout@v4/setup-go@v5 while ci.yml and
       catalogue.yml use v5/v6.
-- [ ] No GEMINI.md / AGENTS.md: agents other than Claude get only the README.
+- [x] No GEMINI.md / AGENTS.md: agents other than Claude get only the README.
       Add a short AGENTS.md (engine truths, BDD loop, never `git add -A`,
       gofmt before commit) so the next non-Claude session inherits the rules.
 
 ### Dead weight
 
-- [ ] Delete web/ (41 tracked files, 159 MB with node_modules; nothing
+- [x] Delete web/ (41 tracked files, 159 MB with node_modules; nothing
       builds, serves or tests it). First move the nine JSON fixtures from
       web/src/api/fixtures into internal/api/testdata/contract/ and repoint
       internal/api/contract_fixtures_test.go (its "not present on this
       branch" skip comment is also stale). Local .claude/launch.json still
       launches `npm run dev --prefix web` on 5173.
-- [ ] web-proto/prototype-source.html is byte-identical to
+- [x] web-proto/prototype-source.html is byte-identical to
       docs/design/canvas-prototype.html and loaded by nothing (embed.go
       excludes it). Keep the docs/design copy.
-- [ ] scripts/record-demo.js requires gif-encoder-2 and playwright, neither
+- [x] scripts/record-demo.js requires gif-encoder-2 and playwright, neither
       installed; scripts/record-demos/ is the maintained twin.
-- [ ] Dead code: `emit.memberGuard` (no callers; chainGuard supersedes),
+- [x] Dead code: `emit.memberGuard` (no callers; chainGuard supersedes),
       `api.connectCluster()` in web-proto/js/api.js (no callers),
       `ensurePositions()` in canvas.js (empty body, still called with an
       argument), store.js:185-186 duplicate guard, output.js removes an
@@ -327,7 +327,7 @@ clean, Playwright 115 passed / 1 skipped.
 
 ### Unify — canvas (web-proto)
 
-- [ ] Inspector and palette refetch /api/kinds on every doc emit
+- [x] Inspector and palette refetch /api/kinds on every doc emit
       (inspector.js:1761 `kindsPromise = null`, palette.js:831 loadKinds()).
       canvas.js:1682-1693 already guards with a sources signature and
       documents why (async render cascade ate the next clicks). Apply the
