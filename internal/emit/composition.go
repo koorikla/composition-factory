@@ -665,10 +665,30 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint) ([]forProviderFiel
 				})
 				continue
 			}
-			param := strings.TrimPrefix(f.From, "params.")
+			param, member, _ := blueprint.ParamRef(f.From)
 			decl, ok := b.Spec.XRD.Parameters[param]
 			if !ok {
 				return nil, fmt.Errorf("resource %q field %q: unknown parameter %q", r.Name, p, param)
+			}
+			// A member wire (params.<name>.<member>) dereferences one level
+			// into a typed object parameter. Its guard shape follows the two
+			// requiredness gates (see memberGuard); the dereference itself is
+			// $spec.<param>.<member>, evaluated only where the guard chain has
+			// proven every key on the path. Enforced here as well as in
+			// blueprint.Validate because Composition is exported — an unknown
+			// member reaching the template would hard-fail every render.
+			if member != "" {
+				mdecl, ok := decl.Properties[member]
+				if !ok {
+					return nil, fmt.Errorf("resource %q field %q: references unknown member %q of "+
+						"parameter %q", r.Name, p, member, param)
+				}
+				plan = append(plan, forProviderField{
+					path:  p,
+					rhs:   fmt.Sprintf("{{ $spec.%s.%s }}", param, member),
+					guard: memberGuard(param, member, decl.Required, mdecl.Required),
+				})
+				continue
 			}
 			// A bare dereference, correct only because the value is a
 			// scalar. Go's template engine formats whatever it finds with
@@ -700,6 +720,37 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint) ([]forProviderFiel
 		}
 	}
 	return plan, nil
+}
+
+// memberGuard is the render-time condition for a typed object member wire
+// (params.<param>.<member>), mirroring the forProvider guard discipline
+// under options: ["missingkey=error"]:
+//
+//   - object optional: a hasKey chain on BOTH levels — the object key can be
+//     genuinely absent (an XR that never set it), and when present the
+//     member can still be absent, so each dereference is proven first. The
+//     conjunction short-circuits (text/template's and, since Go 1.18), so
+//     $spec.<param> is never indexed while the first link is false.
+//   - object required, member optional: hasKey on the member alone — the
+//     XRD's required gate makes $spec.<param> present on any admitted XR,
+//     so indexing it inside the hasKey argument is safe.
+//   - both required: no guard. Required within a required object means the
+//     API server admits no XR without the member, exactly the gate that
+//     makes a top-level required parameter's bare dereference safe.
+//
+// A defaulted member behind a present object is also injected by schema
+// defaulting, but the guard is kept for any non-required member — the same
+// consistency rule planFields applies to defaulted top-level parameters
+// (harmless when the key is present).
+func memberGuard(param, member string, paramRequired, memberRequired bool) string {
+	switch {
+	case !paramRequired:
+		return fmt.Sprintf("and (hasKey $spec %q) (hasKey $spec.%s %q)", param, param, member)
+	case !memberRequired:
+		return fmt.Sprintf("hasKey $spec.%s %q", param, member)
+	default:
+		return ""
+	}
 }
 
 // statusRefExpr is the dereference for resources.<target>.status.<path>:

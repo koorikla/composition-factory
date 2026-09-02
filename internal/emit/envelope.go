@@ -128,12 +128,14 @@ func walkEnvelopeNodes(nodes []*schema.Node, prefix string, out map[string]*sche
 
 // envField is one envelope entry resolved to a renderable form: the dotted
 // path split into segments, the right-hand side, and — for a wired optional
-// parameter — the hasKey guard it needs (same semantics as forProviderField).
+// parameter or object member — the guard expression it needs (same
+// semantics as forProviderField.guard: a hasKey for an optional parameter,
+// a memberGuard shape for a typed object member).
 type envField struct {
 	path     []string
 	rhs      string
 	optional bool
-	param    string
+	guard    string
 }
 
 // planEnvelope resolves r.Envelope into a deterministic, path-sorted plan,
@@ -181,10 +183,22 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 			}
 			e.rhs = rhs
 		case f.From != "":
-			param := strings.TrimPrefix(f.From, "params.")
+			param, member, _ := blueprint.ParamRef(f.From)
 			decl, ok := b.Spec.XRD.Parameters[param]
 			if !ok {
 				return nil, fmt.Errorf("resource %q envelope %q: unknown parameter %q", r.Name, p, param)
+			}
+			// wireDecl is the declaration whose type governs the wire — the
+			// member's for a params.<name>.<member> reference, the
+			// parameter's own otherwise. refName is how errors below name it.
+			wireDecl, refName, deref := decl, param, "$spec."+param
+			if member != "" {
+				mdecl, ok := decl.Properties[member]
+				if !ok {
+					return nil, fmt.Errorf("resource %q envelope %q: references unknown member %q of "+
+						"parameter %q", r.Name, p, member, param)
+				}
+				wireDecl, refName, deref = mdecl, param+"."+member, deref+"."+member
 			}
 			switch {
 			case n.Type == "array":
@@ -200,19 +214,27 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 				return nil, fmt.Errorf("resource %q: envelope %q is a map, and a from: wire cannot "+
 					"render one in v1. Set it with raw:", r.Name, p)
 			}
-			if !envelopeTypeCompatible(n.Type, decl.Type) {
+			if !envelopeTypeCompatible(n.Type, wireDecl.Type) {
 				return nil, fmt.Errorf("resource %q: envelope %q has type %q in the CRD schema, but "+
 					"parameter %q has type %q — the wire would render a YAML scalar of the wrong type, "+
-					"which the API server rejects on apply", r.Name, p, n.Type, param, decl.Type)
+					"which the API server rejects on apply", r.Name, p, n.Type, refName, wireDecl.Type)
 			}
-			e.rhs = fmt.Sprintf("{{ $spec.%s }}", param)
-			if !decl.Required {
+			e.rhs = fmt.Sprintf("{{ %s }}", deref)
+			switch {
+			case member != "":
+				// The three member guard shapes, exactly as forProvider member
+				// wires get them (see memberGuard in composition.go). A
+				// required-in-required member needs no guard at all.
+				if g := memberGuard(param, member, decl.Required, wireDecl.Required); g != "" {
+					e.optional, e.guard = true, g
+				}
+			case !decl.Required:
 				// Same guard rule as planFields: only the XRD's required gate
 				// makes an unguarded dereference safe under missingkey=error.
 				// (A defaulted parameter is also always present after schema
 				// defaulting, but the guard is kept for consistency with
 				// forProvider fields — harmless when the key is present.)
-				e.optional, e.param = true, param
+				e.optional, e.guard = true, fmt.Sprintf("hasKey $spec %q", param)
 			}
 		}
 		plan = append(plan, e)
@@ -377,20 +399,20 @@ func writeProviderConfigRef(d *Doc, ti int) {
 // passing does not imply this subtree's own parameters are present.
 func writeEnvelopeNode(d *Doc, level int, key string, entries []envField, inheritedGuard string) {
 	allOptional := true
-	var params []string
+	var guards []string
 	seen := map[string]bool{}
 	for _, e := range entries {
 		if !e.optional {
 			allOptional = false
-		} else if !seen[e.param] {
-			seen[e.param] = true
-			params = append(params, e.param)
+		} else if !seen[e.guard] {
+			seen[e.guard] = true
+			guards = append(guards, e.guard)
 		}
 	}
 
 	guard := ""
 	if allOptional {
-		guard = envGuardExpr(params)
+		guard = orGuards(guards)
 	}
 	wrap := guard != "" && guard != inheritedGuard
 	if wrap {
@@ -424,17 +446,21 @@ func writeEnvelopeNode(d *Doc, level int, key string, entries []envField, inheri
 	}
 }
 
-// envGuardExpr renders the presence condition for a set of optional
-// parameters: a single hasKey for one, an or-of-hasKeys for several — the
-// same hasKey idiom §8 mandates (never `with`, which hard-fails under
-// missingkey=error when the key is genuinely absent).
-func envGuardExpr(params []string) string {
-	if len(params) == 1 {
-		return fmt.Sprintf("hasKey $spec %q", params[0])
+// orGuards renders the presence condition for a set of distinct entry
+// guards: the guard itself for one, an or over each (parenthesized) for
+// several — the same hasKey idiom §8 mandates (never `with`, which
+// hard-fails under missingkey=error when the key is genuinely absent). A
+// guard is a whole boolean expression (a plain hasKey, or a memberGuard
+// conjunction), so the or-form parenthesizes each one; for plain
+// parameters the output is byte-identical to what the pre-member
+// or-of-hasKeys wrote.
+func orGuards(guards []string) string {
+	if len(guards) == 1 {
+		return guards[0]
 	}
-	conds := make([]string, len(params))
-	for i, p := range params {
-		conds[i] = fmt.Sprintf("(hasKey $spec %q)", p)
+	conds := make([]string, len(guards))
+	for i, g := range guards {
+		conds[i] = "(" + g + ")"
 	}
 	return "or " + strings.Join(conds, " ")
 }
