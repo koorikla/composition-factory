@@ -78,6 +78,10 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 
 	d.Line(ti, "{{- $spec := .observed.composite.resource.spec -}}")
 	d.Line(ti, "{{- $xr := .observed.composite.resource.metadata.name -}}")
+	// The XR's whole metadata, for template context: namespace (where the
+	// composed native objects land — a fact of the XR, never a parameter),
+	// labels, annotations, uid. Always present on an observed composite.
+	d.Line(ti, "{{- $xrMeta := .observed.composite.resource.metadata -}}")
 
 	for _, r := range b.Spec.Resources {
 		crd, err := resolveKind(crds, r, wantNamespaced)
@@ -419,7 +423,7 @@ const templateFieldNindent = 6
 // alike. resource is a validated DNS label and field a schema-checked path,
 // so the %q interpolations are exact.
 func templateCallRHS(name, resource, field string) string {
-	return fmt.Sprintf(`{{ include %q (dict "spec" $spec "xr" $xr "resource" %q "field" %q) | trim | nindent %d }}`,
+	return fmt.Sprintf(`{{ include %q (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "resource" %q "field" %q) | trim | nindent %d }}`,
 		name, resource, field, templateFieldNindent)
 }
 

@@ -258,6 +258,7 @@ func TestTypedParamGoldenTemplate(t *testing.T) {
 	}
 	want := `{{- $spec := .observed.composite.resource.spec -}}
 {{- $xr := .observed.composite.resource.metadata.name -}}
+{{- $xrMeta := .observed.composite.resource.metadata -}}
 ---
 apiVersion: sqs.aws.m.upbound.io/v1beta1
 kind: Queue

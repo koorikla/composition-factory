@@ -36,10 +36,18 @@ spec:
         type: string
         required: true
         description: ARN of the cluster's IAM OIDC provider (arn:aws:iam::<account>:oidc-provider/<issuer>).
-      namespace:
+      team:
         type: string
-        default: default
-        description: Namespace of the ServiceAccount the trust policy binds to.
+        default: platform
+        description: Owning team — lands in every object's tags via the cf.tags convention.
+      sessionSeconds:
+        type: integer
+        default: "3600"
+        description: Maximum session duration for the assumed role, in seconds.
+      automountToken:
+        type: boolean
+        default: "true"
+        description: Whether the ServiceAccount auto-mounts its API token.
   # The trust policy is a template so it stays ONE declaration: a real
   # AssumeRoleWithWebIdentity document, scoped to exactly one ServiceAccount
   # subject. Two mechanics worth naming:
@@ -52,15 +60,20 @@ spec:
   #     read the {...} as a mapping and the API server would reject it
   #     against the CRD's type: string.
   #
-  # .spec.namespace is safe to dereference bare: the parameter carries a
-  # default, so schema defaulting injects it into any XR that omits it. The
+  # The subject's namespace is the XR's OWN namespace (.xrMeta.namespace —
+  # composed native objects land there anyway), never a parameter; the
   # ServiceAccount subject is named after the XR (.xr is the composite's
   # metadata.name) — the convention this demo's SA resource follows too.
   templates:
     trust-policy: >-
-      '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ regexReplaceAll "^.*:oidc-provider/" .spec.oidcProviderArn "" }}:sub":"system:serviceaccount:{{ .spec.namespace }}:{{ .xr }}"}}}]}'
+      '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ regexReplaceAll "^.*:oidc-provider/" .spec.oidcProviderArn "" }}:sub":"system:serviceaccount:{{ .xrMeta.namespace }}:{{ .xr }}"}}}]}'
+    # The reusable tag map: applied by convention to every managed object
+    # that has a top-level `tags` and doesn't set it explicitly (native
+    # objects are structural and are skipped by design). The team input
+    # flows into every tagged object from ONE declaration.
     cf.tags: |
       managed-by: crossplane
+      team: {{ .spec.team | quote }}
       xr: {{ .xr | quote }}
   conventions:
     - {match: tags, template: cf.tags}
@@ -74,6 +87,7 @@ spec:
       fields:
         description: {value: IAM role assumed by a Kubernetes ServiceAccount via IRSA}
         assumeRolePolicy: {template: trust-policy}
+        maxSessionDuration: {from: params.sessionSeconds}
     - name: role-policy
       kind: RolePolicy
       provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
@@ -87,6 +101,6 @@ spec:
       kind: ServiceAccount
       provider: k8s
       fields:
-        automountServiceAccountToken: {raw: "true"}
+        automountServiceAccountToken: {from: params.automountToken}
       annotations:
         eks.amazonaws.com/role-arn: {from: resources.role.status.atProvider.arn}

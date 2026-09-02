@@ -113,6 +113,7 @@ xr: {{ .xr | quote }}
 {{- end }}
 {{- $spec := .observed.composite.resource.spec -}}
 {{- $xr := .observed.composite.resource.metadata.name -}}
+{{- $xrMeta := .observed.composite.resource.metadata -}}
 ---
 apiVersion: sqs.aws.m.upbound.io/v1beta1
 kind: Queue
@@ -121,9 +122,9 @@ metadata:
     {{ setResourceNameAnnotation "queue-a" }}
 spec:
   forProvider:
-    name: {{ include "cf.name" (dict "spec" $spec "xr" $xr "resource" "queue-a" "field" "name") | trim | nindent 6 }}
+    name: {{ include "cf.name" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "resource" "queue-a" "field" "name") | trim | nindent 6 }}
     region: 'eu-north-1'
-    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "resource" "queue-a" "field" "tags") | trim | nindent 6 }}
+    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "resource" "queue-a" "field" "tags") | trim | nindent 6 }}
   providerConfigRef:
     kind: ClusterProviderConfig
     name: {{ $spec.providerName }}
@@ -137,7 +138,7 @@ spec:
   forProvider:
     name: 'custom-b'
     region: 'eu-north-1'
-    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "resource" "queue-b" "field" "tags") | trim | nindent 6 }}
+    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "resource" "queue-b" "field" "tags") | trim | nindent 6 }}
   providerConfigRef:
     kind: ClusterProviderConfig
     name: {{ $spec.providerName }}
