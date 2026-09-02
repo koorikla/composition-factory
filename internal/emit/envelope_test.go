@@ -253,16 +253,19 @@ func TestDeletionPolicyOnNamespacedIsRejectedNamingTheVariantDifference(t *testi
 	}
 }
 
-// Validate refuses providerConfigRef envelope entries at the source, but
-// Composition is exported — the emitter enforces the same rule itself.
-func TestProviderConfigRefViaEnvelopeIsRejectedAtEmitToo(t *testing.T) {
+// providerConfigRef can be customized per resource in the envelope and emitted.
+func TestProviderConfigRefViaEnvelopeIsEmitted(t *testing.T) {
 	b := envelopeTestBlueprint()
 	b.Spec.Resources[0].Envelope = map[string]blueprint.Field{
-		"providerConfigRef.name": {Value: "other"},
+		"providerConfigRef.name": {Value: "custom-pc"},
 	}
-	_, err := Composition(b, envelopeTestCRDs(t))
-	if err == nil || !strings.Contains(err.Error(), "providerName") {
-		t.Fatalf("err = %v, want the one-source-of-truth refusal naming providerName", err)
+	got, err := Composition(b, envelopeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmpl := extractTemplate(t, got)
+	if !strings.Contains(tmpl, "name: 'custom-pc'") {
+		t.Errorf("template missing custom providerConfigRef name:\n%s", tmpl)
 	}
 }
 
@@ -357,6 +360,22 @@ func TestEnvelopeTypeRules(t *testing.T) {
 			envelope: map[string]blueprint.Field{"managementPolicies": {Raw: `["*"]`}},
 			wantLine: `  managementPolicies: ["*"]`,
 		},
+		{
+			name:     "providerConfigRef.name wired to custom parameter",
+			envelope: map[string]blueprint.Field{"providerConfigRef.name": {From: "params.customProvider"}},
+			params:   map[string]blueprint.Parameter{"customProvider": {Type: "string", Required: true}},
+			wantLine: `    name: {{ $spec.customProvider }}`,
+		},
+		{
+			name:     "providerConfigRef.name set to literal value",
+			envelope: map[string]blueprint.Field{"providerConfigRef.name": {Value: "dedicated-aws-pc"}},
+			wantLine: `    name: 'dedicated-aws-pc'`,
+		},
+		{
+			name:     "providerConfigRef.kind overridden to namespaced ProviderConfig",
+			envelope: map[string]blueprint.Field{"providerConfigRef.kind": {Value: "ProviderConfig"}},
+			wantLine: `    kind: 'ProviderConfig'`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -418,5 +437,59 @@ func TestEnvelopeEmitIsDeterministic(t *testing.T) {
 	}
 	if !bytes.Equal(first, second) {
 		t.Error("two runs over the same blueprint produced different bytes")
+	}
+}
+
+// TestMultipleResourcesDifferentProviderConfigs tests that in the same composition,
+// one resource can use the shared default providerName while another specifies a custom providerConfigRef.
+func TestMultipleResourcesDifferentProviderConfigs(t *testing.T) {
+	b := envelopeTestBlueprint()
+	b.Spec.XRD.Parameters["backupProviderName"] = blueprint.Parameter{Type: "string", Required: true}
+	b.Spec.Resources = []blueprint.Resource{
+		{
+			Name:   "primary-queue",
+			Kind:   "Queue",
+			Fields: map[string]blueprint.Field{"region": {Value: "eu-north-1"}},
+			// Uses default providerConfigRef (falls back to providerName)
+		},
+		{
+			Name:   "backup-queue",
+			Kind:   "Queue",
+			Fields: map[string]blueprint.Field{"region": {Value: "us-east-1"}},
+			Envelope: map[string]blueprint.Field{
+				"providerConfigRef.name": {From: "params.backupProviderName"},
+			},
+		},
+		{
+			Name:   "static-queue",
+			Kind:   "Queue",
+			Fields: map[string]blueprint.Field{"region": {Value: "ap-southeast-1"}},
+			Envelope: map[string]blueprint.Field{
+				"providerConfigRef.name": {Value: "dedicated-infra-pc"},
+				"providerConfigRef.kind": {Value: "ProviderConfig"},
+			},
+		},
+	}
+
+	got, err := Composition(b, envelopeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmpl := extractTemplate(t, got)
+
+	// primary-queue should have default providerName and ClusterProviderConfig
+	if !strings.Contains(tmpl, "name: {{ $spec.providerName }}") {
+		t.Errorf("template missing default providerName:\n%s", tmpl)
+	}
+	// backup-queue should have backupProviderName
+	if !strings.Contains(tmpl, "name: {{ $spec.backupProviderName }}") {
+		t.Errorf("template missing backupProviderName wire:\n%s", tmpl)
+	}
+	// static-queue should have dedicated-infra-pc and ProviderConfig
+	if !strings.Contains(tmpl, "name: 'dedicated-infra-pc'") {
+		t.Errorf("template missing static providerConfigRef name:\n%s", tmpl)
+	}
+	if !strings.Contains(tmpl, "kind: 'ProviderConfig'") {
+		t.Errorf("template missing custom providerConfigRef kind:\n%s", tmpl)
 	}
 }

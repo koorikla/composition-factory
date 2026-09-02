@@ -406,10 +406,6 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
 }
 
 function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
-  // providerConfigRef is derived from the providerName parameter — the
-  // engine refuses envelope entries for it, so offering rows would only
-  // manufacture 400s.
-  if (f.path.indexOf("providerConfigRef") === 0) return "";
   var entry = envelopeEntryOf(res, f.path);
   var dm = docMode(entry);
   var mKey = "env:" + f.path;
@@ -439,8 +435,13 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
     h += '<textarea class="val raw" data-env-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
       esc((dm === "r" && entry) ? entry.raw : "") + "</textarea>";
   } else {
+    var ph = f.path === "providerConfigRef.name"
+      ? "default: $spec.providerName"
+      : (f.path === "providerConfigRef.kind"
+        ? "default: ClusterProviderConfig"
+        : (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from envelope"));
     h += '<input class="val" data-env-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
-      '" placeholder="' + (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from envelope") + '">';
+      '" placeholder="' + ph + '">';
   }
   return h + "</div>";
 }

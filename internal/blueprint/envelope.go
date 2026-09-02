@@ -40,17 +40,7 @@ func validateResourceEnvelope(x XRD, r Resource) error {
 			}
 		}
 
-		// providerConfigRef is derived from the required providerName
-		// parameter — the Composition renders it for every composed resource
-		// (internal/emit/composition.go). An envelope entry for it would be a
-		// second source of truth that silently diverges from the one the XRD
-		// already gates, so it is refused at the source.
-		if first, _, _ := strings.Cut(p, "."); first == "providerConfigRef" {
-			return fmt.Errorf("resource %q envelope %q: providerConfigRef cannot be set via the "+
-				"envelope — it is derived from the required providerName parameter, which is the "+
-				"single source of truth for which ProviderConfig a composed resource binds to. "+
-				"Change the providerName parameter (or the XR's value for it) instead", r.Name, p)
-		}
+
 
 		f := r.Envelope[p]
 		set := 0

@@ -295,11 +295,11 @@ type Resource struct {
 	// not a managed resource — so the emitter refuses envelope entries on
 	// one outright (see internal/emit/envelope.go).
 	//
-	// Two further deliberate v1 rulings, enforced by Validate and the emitter:
+	// Rules enforced by Validate and the emitter:
 	//
-	//   - providerConfigRef cannot be set here. It is derived from the
-	//     required providerName parameter (one source of truth); an envelope
-	//     entry for it would be a second, silently-divergent one.
+	//   - providerConfigRef defaults to {kind: ClusterProviderConfig, name: {{ $spec.providerName }}}.
+	//     Any resource can override providerConfigRef.name (e.g. wired to another parameter
+	//     or set to a literal ProviderConfig name) or providerConfigRef.kind per resource in its envelope.
 	//   - An array-typed envelope leaf (e.g. managementPolicies, an array of
 	//     enum strings) takes `value` as a COMMA-SEPARATED list, rendered as a
 	//     YAML flow sequence of quoted strings ("Observe, Create" ->

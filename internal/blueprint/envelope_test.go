@@ -52,17 +52,15 @@ func TestValidateRejectsEnvelopeWithNoForm(t *testing.T) {
 	}
 }
 
-// providerConfigRef is derived from providerName — one source of truth. Both
-// the bare key and any child path are refused.
-func TestValidateRejectsProviderConfigRefViaEnvelope(t *testing.T) {
-	for _, path := range []string{"providerConfigRef", "providerConfigRef.name"} {
+// providerConfigRef can be customized per resource in the envelope.
+func TestValidateAllowsProviderConfigRefViaEnvelope(t *testing.T) {
+	for _, path := range []string{"providerConfigRef.name", "providerConfigRef.kind"} {
 		t.Run(path, func(t *testing.T) {
 			b := envelopeBlueprint(func(b *Blueprint) {
-				b.Spec.Resources[0].Envelope = map[string]Field{path: {Value: "other"}}
+				b.Spec.Resources[0].Envelope = map[string]Field{path: {Value: "custom-pc"}}
 			})
-			err := b.Validate()
-			if err == nil || !strings.Contains(err.Error(), "providerName") {
-				t.Fatalf("err = %v, want a refusal explaining providerConfigRef is derived from providerName", err)
+			if err := b.Validate(); err != nil {
+				t.Fatalf("Validate() failed: %v", err)
 			}
 		})
 	}

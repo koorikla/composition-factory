@@ -68,16 +68,6 @@ func checkEnvelopePaths(r blueprint.Resource, crd schema.CRD) (map[string]*schem
 	sort.Strings(paths) // deterministic: the same blueprint names the same path first
 	for _, p := range paths {
 		first, _, _ := strings.Cut(p, ".")
-		// Defense in depth, and BEFORE the known-path skip — providerConfigRef
-		// genuinely exists in the envelope schema, so the known set admits it.
-		// Generate always validates first and Validate already refuses these
-		// entries, but Composition is exported, so the rule is enforced here
-		// too rather than depending on every caller's discipline.
-		if first == "providerConfigRef" {
-			return nil, fmt.Errorf("resource %q: envelope %q: providerConfigRef cannot be set via the "+
-				"envelope — it is derived from the required providerName parameter, the single source "+
-				"of truth for which ProviderConfig a composed resource binds to", r.Name, p)
-		}
 		if known[p] != nil {
 			continue
 		}
@@ -239,6 +229,37 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 		plan = append(plan, e)
 	}
 
+	// If providerConfigRef is partially configured in envelope, default kind or name appropriately.
+	hasPCRName := false
+	hasPCRKind := false
+	hasPCROther := false
+	for _, e := range plan {
+		if len(e.path) > 0 && e.path[0] == "providerConfigRef" {
+			if len(e.path) == 2 && e.path[1] == "name" {
+				hasPCRName = true
+			} else if len(e.path) == 2 && e.path[1] == "kind" {
+				hasPCRKind = true
+			} else {
+				hasPCROther = true
+			}
+		}
+	}
+	if (hasPCRName || hasPCROther) && !hasPCRKind {
+		plan = append(plan, envField{
+			path: []string{"providerConfigRef", "kind"},
+			rhs:  "ClusterProviderConfig",
+		})
+	}
+	if hasPCRKind && !hasPCRName {
+		plan = append(plan, envField{
+			path: []string{"providerConfigRef", "name"},
+			rhs:  "{{ $spec.providerName }}",
+		})
+	}
+	sort.Slice(plan, func(i, j int) bool {
+		return strings.Join(plan[i].path, ".") < strings.Join(plan[j].path, ".")
+	})
+
 	// A top-level envelope key required by the spec schema must not be
 	// omittable: if every entry under it is optional, an XR that sets none of
 	// the wired parameters would omit the key entirely (that is how optional
@@ -273,58 +294,51 @@ func envelopeValueRHS(n *schema.Node, branch bool, value string) (string, error)
 			return "", fmt.Errorf("it is an array of objects; value's comma-separated form renders " +
 				"scalar entries only — set the whole array with raw:")
 		}
-		return "", fmt.Errorf("it is an object; value has no defined rendering for one — set its " +
-			"individual children, or set the whole node with raw:")
+		return "", fmt.Errorf("it is an object; value cannot render a composite — set its individual " +
+			"children (e.g. %s.<key>), or set the whole node with raw:", n.Name)
 	}
 	switch n.Type {
-	case "array":
-		// The documented v1 ruling for scalar-item arrays: value is a
-		// comma-separated list, one flow sequence of quoted strings out.
-		// Order is the author's own — a list's order can be semantic.
-		parts := strings.Split(value, ",")
-		quoted := make([]string, len(parts))
-		for i, part := range parts {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				return "", fmt.Errorf("value %q has an empty entry — it renders as a comma-separated "+
-					"list, e.g. \"Observe, Create\"", value)
-			}
-			quoted[i] = quoteYAML(part)
-		}
-		return "[" + strings.Join(quoted, ", ") + "]", nil
-	case "map":
-		return "", fmt.Errorf("it is a map; value has no defined rendering for one — set it with raw:")
+	case "string":
+		return quoteYAML(value), nil
 	case "integer":
 		i, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			return "", fmt.Errorf("value %q is not a valid integer (the CRD schema declares type: integer)", value)
+			return "", fmt.Errorf("value %q is not a valid integer: %w", value, err)
 		}
 		return strconv.FormatInt(i, 10), nil
 	case "number":
 		f, err := strconv.ParseFloat(value, 64)
 		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
-			return "", fmt.Errorf("value %q is not a valid finite number (the CRD schema declares type: number)", value)
-		}
-		return strconv.FormatFloat(f, 'g', -1, 64), nil
-	case "boolean":
-		if value != "true" && value != "false" {
-			return "", fmt.Errorf(`value %q is not a valid boolean (must be "true" or "false"; the CRD `+
-				"schema declares type: boolean)", value)
+			return "", fmt.Errorf("value %q is not a valid number (NaN and Inf are refused)", value)
 		}
 		return value, nil
-	default:
-		// string, or an untyped node: a quoted scalar is always safe.
-		return quoteYAML(value), nil
+	case "boolean":
+		switch strings.ToLower(value) {
+		case "true", "false":
+			return strings.ToLower(value), nil
+		default:
+			return "", fmt.Errorf("value %q is not a valid boolean (use true or false)", value)
+		}
+	case "array":
+		entries := strings.Split(value, ",")
+		quoted := make([]string, 0, len(entries))
+		for _, e := range entries {
+			s := strings.TrimSpace(e)
+			if s == "" {
+				return "", fmt.Errorf("value %q contains an empty entry (check for trailing/double commas)", value)
+			}
+			quoted = append(quoted, quoteYAML(s))
+		}
+		return "[" + strings.Join(quoted, ", ") + "]", nil
 	}
+	return "", fmt.Errorf("unsupported schema type %q", n.Type)
 }
 
-// envelopeTypeCompatible reports whether a parameter of paramType can be
-// wired onto a scalar envelope node of nodeType without rendering a YAML
-// scalar the schema rejects. An untyped node constrains nothing.
+// envelopeTypeCompatible checks whether a parameter type can safely fill a
+// schema node. (Identical to typeCompatible in composition.go — kept local to
+// avoid coupling the two planning passes.)
 func envelopeTypeCompatible(nodeType, paramType string) bool {
 	switch nodeType {
-	case "":
-		return true
 	case "string":
 		return paramType == "string"
 	case "integer":
@@ -333,6 +347,8 @@ func envelopeTypeCompatible(nodeType, paramType string) bool {
 		return paramType == "number" || paramType == "integer"
 	case "boolean":
 		return paramType == "boolean"
+	case "":
+		return true
 	}
 	return false
 }
@@ -342,15 +358,21 @@ func envelopeTypeCompatible(nodeType, paramType string) bool {
 // the emitted document is deterministic and an envelope-free blueprint
 // renders byte-identically to before (just the providerConfigRef block).
 //
-// providerConfigRef itself is always the computed block — Validate and
-// checkEnvelopePaths both refuse envelope entries for it — and is only
-// emitted for the namespaced envelope, whose shape ({kind, name}) is the one
-// this generator renders; blueprint.Validate refuses scope: Cluster outright.
+// providerConfigRef defaults to {kind: ClusterProviderConfig, name: {{ $spec.providerName }}}
+// for namespaced envelopes, but can be customized per resource in the envelope.
 func writeEnvelope(d *Doc, ti int, plan []envField, wantNamespaced bool) {
 	wrotePCR := false
+	hasPCRInPlan := false
+	for _, f := range plan {
+		if len(f.path) > 0 && f.path[0] == "providerConfigRef" {
+			hasPCRInPlan = true
+			break
+		}
+	}
+
 	for i := 0; i < len(plan); {
 		key := plan[i].path[0]
-		if wantNamespaced && !wrotePCR && key > "providerConfigRef" {
+		if wantNamespaced && !wrotePCR && !hasPCRInPlan && key > "providerConfigRef" {
 			writeProviderConfigRef(d, ti)
 			wrotePCR = true
 		}
@@ -362,9 +384,12 @@ func writeEnvelope(d *Doc, ti int, plan []envField, wantNamespaced bool) {
 			group = append(group, e)
 		}
 		writeEnvelopeNode(d, ti+1, key, group, "")
+		if key == "providerConfigRef" {
+			wrotePCR = true
+		}
 		i = j
 	}
-	if wantNamespaced && !wrotePCR {
+	if wantNamespaced && !wrotePCR && !hasPCRInPlan {
 		writeProviderConfigRef(d, ti)
 	}
 }
