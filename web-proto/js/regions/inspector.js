@@ -116,6 +116,15 @@ async function kindMeta(res) {
   var m = kinds.filter(function (k) { return k.kind === res.kind && k.provider === res.provider; })[0]
        || kinds.filter(function (k) { return k.kind === res.kind; })[0]
        || null;
+  if (!m) {
+    // Invalidate cached kinds and retry once in case a new provider was declared in doc
+    kindsPromise = null;
+    data = await getKindsCached().catch(function () { return null; });
+    kinds = data && data.kinds || [];
+    m = kinds.filter(function (k) { return k.kind === res.kind && k.provider === res.provider; })[0]
+     || kinds.filter(function (k) { return k.kind === res.kind; })[0]
+     || null;
+  }
   return m;
 }
 
@@ -775,7 +784,7 @@ export function init(rootEl, deps) {
   box.addEventListener("change", onBoxChange);
   if (fseg) fseg.addEventListener("click", onFsegClick);
 
-  store.subscribe("doc", function () { render(); });
+  store.subscribe("doc", function () { kindsPromise = null; render(); });
   store.subscribe("selection", function () {
     uiMode = {};
     pendingNewParam = null;

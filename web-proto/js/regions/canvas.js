@@ -628,12 +628,14 @@ function onPointerDown(e) {
   // button under the pointer (its click then never fires), and any micro-
   // movement during the press turns it into a card drag instead.
   if (e.target.closest("[data-act]") || e.target.closest("button")) return;
-  const h = e.target.closest(".node-h");
-  if (!h) return;
-  const nodeEl = h.closest(".node");
+
+  const nodeEl = e.target.closest(".node");
   if (!nodeEl) return;
   const name = nodeEl.getAttribute("data-id");
-  S.select(name); // may re-render; re-grab the element
+  if (name) S.select(name);
+
+  const h = e.target.closest(".node-h");
+  if (!h) return;
   const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(name) + '"]');
   if (!el) return;
   const start = S.getPosition(name) || { x: el.offsetLeft, y: el.offsetTop };
@@ -725,6 +727,7 @@ function onDrop(e) {
   const y = Math.max(4, pt.y - 16);
   const name = uniqueResourceName(d, entry.kind);
   S.setPosition(name, { x: x, y: y });
+  S.select(name);
   S.replaceDoc(function (next) {
     // sources is the dependency manifest the server loads providers from at
     // startup — a dropped kind's provider must be declared there or generate
@@ -782,14 +785,16 @@ export function init(rootEl, deps) {
   buildZoomControls();
   applyView();
 
-  S.subscribe("doc", render);
+  function reloadKindsAndRender() {
+    A.getKinds().then(function (res) {
+      kindsCache = res.kinds || [];
+      render();
+    }).catch(function () { render(); });
+  }
+
+  S.subscribe("doc", reloadKindsAndRender);
   S.subscribe("selection", render);
 
-  A.getKinds().then(function (res) {
-    kindsCache = res.kinds || [];
-    render();
-  }).catch(function () { kindsCache = []; });
-
-  render();
+  reloadKindsAndRender();
 }
 
