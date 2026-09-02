@@ -20,11 +20,16 @@ Run the recorder from the repository root:
 ./scripts/record-demos/run.sh
 ```
 
-Generated GIF assets are written to `docs/screenshots/`:
+Generated GIF and screenshot assets are written to `docs/screenshots/`:
 - `demo.gif`: Hero demo showing IRSA dependency tree auto-layout, status ARN wiring into ServiceAccount annotations, and live Crossplane render validation.
 - `compose.gif`: Dragging kinds from the schema palette and live composition YAML generation.
 - `catalogue.gif`: Discovering and adding packages from the 476+ OSS provider catalogue.
 - `wire.gif`: Click-and-drag variable mapping from XRD parameter dots onto resource cards.
+- `examples.gif`: Startup starter blueprints modal chooser (IRSA, RDS PostgreSQL, Full-Stack App) and instant canvas loading.
+- `tree.gif`: Artifacts & File Tree Explorer navigation with tab switching, collapsing, and clipboard copy.
+- `kcl.gif`: Real-time engine switching between `go-templating` and `kcl` (`function-kcl` KCLInput).
+- `floating.gif`: Floating the Inspector and Code Drawer, dragging across canvas, and docking back in place.
+- High-resolution screenshots: `canvas.png`, `inspector.png`, `catalogue.png`, `examples-modal.png`, `tree-explorer.png`, `kcl-engine.png`, `fs-export.png`.
 
 ---
 
@@ -33,3 +38,4 @@ Generated GIF assets are written to `docs/screenshots/`:
 - **Zero External Transcoding Dependencies**: Uses `gifenc` (NeuQuant color quantization) to produce small, high-fidelity GIFs directly from PNG frame buffers.
 - **True Engine Integration**: Tests run against the actual `cf` Go binary and live HTTP API rather than mocked frontends.
 - **Deterministic Playback**: Timing pauses and easing curves ensure animations remain smooth and readable in documentation.
+

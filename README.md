@@ -26,11 +26,37 @@
 <sub><b>Discover</b> — search the built-in catalogue of 476 OSS providers (upjet families included), one click pulls the schemas into your palette.</sub>
 
 </td>
-</tr></table>
+</tr><tr>
+<td width="50%">
 
 ![Wiring: drag a parameter dot onto a card, pick the target field, and the generated go-template binding appears in the Composition below](docs/screenshots/wire.gif)
+<sub><b>Drag-to-Wire</b> — drag parameter dots onto resource cards; choose spec fields, envelope, or annotations with auto-guarded bindings.</sub>
 
-*Click-and-drag variable mapping — drag `$team` from the XR onto the Role card, the type-aware picker offers the CRD's real fields (or a custom annotation), and the generated Composition gains the guarded `path: {{ $spec.team }}` binding the moment you click.*
+</td>
+<td width="50%">
+
+![Starter Blueprint Examples: choose curated IRSA, RDS, or microservice compositions and load instantly](docs/screenshots/examples.gif)
+<sub><b>Starter Blueprints</b> — launch and explore curated production composition templates (IRSA, RDS PostgreSQL, Full-Stack Microservice) in one click.</sub>
+
+</td>
+</tr><tr>
+<td width="50%">
+
+![Artifact & File Tree Explorer: browse XRDs, Compositions, Functions, and Blueprints with live copy and sync](docs/screenshots/tree.gif)
+<sub><b>File Tree Explorer</b> — hierarchical navigation across Compositions, Definitions, Functions, RBAC, and template files in the output drawer.</sub>
+
+</td>
+<td width="50%">
+
+![Alternative Emitters: switch seamlessly between Go-Templating and KCL engines](docs/screenshots/kcl.gif)
+<sub><b>KCL & Go-Templating</b> — real-time emission switcher for `function-kcl` (typed `KCLInput`, `oxr`, `ocds`) or `function-go-templating`.</sub>
+
+</td>
+</tr></table>
+
+![Floating panels and flexible docking](docs/screenshots/floating.gif)
+
+*Floating & Movable Panels — pop the Inspector or Code Editor into free-floating windows, drag them across large topologies, collapse to titlebars, and dock them back into place with keyboard shortcuts (`Ctrl+B`).*
 
 One engine, `internal/emit`, powers all interfaces: the **`cf gen` CLI**, the **`cf serve` visual canvas**, and the **`cf mcp` AI agent server** produce 100% byte-identical, deterministic YAML ready for GitOps.
 
