@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -86,5 +87,41 @@ func TestGetExampleByID(t *testing.T) {
 	rec404 := do(t, h, "GET", "/api/examples/unknown-xyz", "")
 	if rec404.Code != http.StatusNotFound {
 		t.Errorf("GET /api/examples/unknown-xyz code = %d, want %d", rec404.Code, http.StatusNotFound)
+	}
+}
+
+func TestLoadExampleWithProviderAutoSync(t *testing.T) {
+	h := testHandler(t)
+
+	// Load RDS example
+	rec := do(t, h, "POST", "/api/examples/rds-postgres/load", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/examples/rds-postgres/load code = %d, want %d (body: %s)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var loadedDoc struct {
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Spec struct {
+			Sources []struct {
+				Provider string `json:"provider"`
+			} `json:"sources"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &loadedDoc); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if loadedDoc.Metadata.Name != "xpostgres" {
+		t.Errorf("loadedDoc name = %q, want \"xpostgres\"", loadedDoc.Metadata.Name)
+	}
+
+	// Verify provider was registered in /api/providers
+	recProv := do(t, h, "GET", "/api/providers", "")
+	if recProv.Code != http.StatusOK {
+		t.Fatalf("GET /api/providers code = %d", recProv.Code)
+	}
+	if !strings.Contains(recProv.Body.String(), "provider-aws-rds") {
+		t.Errorf("GET /api/providers does not contain provider-aws-rds: %s", recProv.Body.String())
 	}
 }

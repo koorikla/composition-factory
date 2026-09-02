@@ -191,6 +191,7 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("GET /api/rbac", srv.handleRBAC)
 	mux.HandleFunc("GET /api/examples", srv.handleExamples)
 	mux.HandleFunc("GET /api/examples/{id}", srv.handleExample)
+	mux.HandleFunc("POST /api/examples/{id}/load", srv.handleLoadExample)
 	mux.HandleFunc("GET /api/catalogue", handleCatalogue)
 	mux.HandleFunc("GET /api/cluster", srv.handleGetCluster)
 	mux.HandleFunc("POST /api/cluster/sync", srv.handleSyncCluster)

@@ -322,3 +322,8 @@ export function getExample(id) {
   return request("GET", "/api/examples/" + encodeURIComponent(id));
 }
 
+/** POST /api/examples/{id}/load — load starter blueprint and import/cache required providers. */
+export function loadExample(id) {
+  return request("POST", "/api/examples/" + encodeURIComponent(id) + "/load");
+}
+

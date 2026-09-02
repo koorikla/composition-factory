@@ -508,12 +508,13 @@ export function init(rootEl, deps) {
     if (guideExBtn) {
       const exId = guideExBtn.getAttribute("data-guide-example");
       guideExBtn.disabled = true;
-      api.getExample(exId).then(function (res) {
-        if (res && res.example && res.example.yaml) {
-          return store.importBlueprint(res.example.yaml).then(function (doc) {
-            if (doc) store.select(null);
+      var loadP = (store.loadExample && typeof store.loadExample === "function")
+        ? store.loadExample(exId)
+        : api.getExample(exId).then(function (res) {
+            if (res && res.example && res.example.yaml) return store.importBlueprint(res.example.yaml);
           });
-        }
+      loadP.then(function (doc) {
+        if (doc) store.select(null);
       }).catch(function (err) {
         if (hintEl) hintEl.innerHTML = '<span style="color:var(--err)">Failed to load example: ' + esc(err.message) + '</span>';
       }).finally(function () {

@@ -255,6 +255,11 @@ export const store = {
     return this._paramOp("importBlueprint", function () { return api.importBlueprint(yamlText); });
   },
 
+  /** POST /api/examples/{id}/load — load starter blueprint and import/cache its providers. */
+  async loadExample(id) {
+    return this._paramOp("loadExample", function () { return api.loadExample(id); });
+  },
+
   /** POST /api/blueprint/resources/{name}/rename — same contract as the parameter ops. */
   async renameResource(name, to) {
     return this._paramOp("renameResource", function () { return api.renameResource(name, to); });

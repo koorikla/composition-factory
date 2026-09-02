@@ -520,13 +520,18 @@ store.loadDoc();
     if (!loadBtn) return;
     var id = loadBtn.getAttribute("data-load-id");
     var ex = (cachedExamples || []).find(function (item) { return item.id === id; });
-    if (!ex || !ex.yaml) return;
+    if (!ex) return;
 
     loadBtn.disabled = true;
     loadBtn.textContent = "Loading…";
-    store.importBlueprint(ex.yaml).then(function (doc) {
+    var p = (store.loadExample && typeof store.loadExample === "function")
+      ? store.loadExample(id)
+      : store.importBlueprint(ex.yaml);
+    p.then(function (doc) {
       if (doc) store.select(null);
       closeModal();
+    }).catch(function (err) {
+      alert("Failed to load example: " + (err && err.message || err));
     }).finally(function () {
       loadBtn.disabled = false;
       loadBtn.textContent = "Load Blueprint";
