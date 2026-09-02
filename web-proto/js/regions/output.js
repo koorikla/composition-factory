@@ -47,6 +47,7 @@ export function init(rootEl, deps) {
     themeBtn: document.getElementById("themeBtn"),
     validateBtn: document.getElementById("validateBtn"),
     generateBtn: document.getElementById("generateBtn"),
+    engineSel: document.getElementById("engineSel"),
     tplSource: document.getElementById("tplSource"),
     treeToggleBtn: document.getElementById("treeToggleBtn"),
     treeRoot: document.getElementById("tree-root"),
@@ -585,13 +586,34 @@ export function init(rootEl, deps) {
     }).finally(function () { el.validateBtn.disabled = false; });
   });
 
+  if (el.engineSel) {
+    el.engineSel.addEventListener("change", function () {
+      var val = el.engineSel.value;
+      store.replaceDoc(function (doc) {
+        doc.spec = doc.spec || {};
+        if (val === "kcl") {
+          doc.spec.emit = doc.spec.emit || {};
+          doc.spec.emit.engine = "kcl";
+        } else {
+          if (doc.spec.emit) {
+            delete doc.spec.emit.engine;
+            if (Object.keys(doc.spec.emit).length === 0) {
+              delete doc.spec.emit;
+            }
+          }
+        }
+      });
+    });
+  }
+
   if (el.tplSource) {
     el.tplSource.addEventListener("change", function () {
       var val = el.tplSource.value;
       store.replaceDoc(function (doc) {
         doc.spec = doc.spec || {};
         if (val === "FileSystem") {
-          doc.spec.emit = { templateSource: "FileSystem" };
+          doc.spec.emit = doc.spec.emit || {};
+          doc.spec.emit.templateSource = "FileSystem";
         } else {
           if (doc.spec.emit) {
             delete doc.spec.emit.templateSource;
@@ -607,6 +629,12 @@ export function init(rootEl, deps) {
   store.subscribe("doc", function (doc) {
     drawTopbar(doc);
     drawWarn(doc);
+    if (el.engineSel) {
+      var curEng = (doc && doc.spec && doc.spec.emit && doc.spec.emit.engine) || "go-templating";
+      if (el.engineSel.value !== curEng) {
+        el.engineSel.value = curEng;
+      }
+    }
     if (el.tplSource) {
       var curMode = (doc && doc.spec && doc.spec.emit && doc.spec.emit.templateSource) || "Inline";
       if (el.tplSource.value !== curMode) {
@@ -634,7 +662,13 @@ export function init(rootEl, deps) {
 
   function anchorLine(text, name) {
     var lines = text.split("\n");
-    var marks = ['setResourceNameAnnotation "' + name + '"', "- name: " + name];
+    var marks = [
+      'setResourceNameAnnotation "' + name + '"',
+      "- name: " + name,
+      '"krm.kcl.dev/composition-resource-name" = "' + name + '"',
+      '"krm.kcl.dev/composition-resource-name": "' + name + '"',
+      'krm.kcl.dev/composition-resource-name: ' + name
+    ];
     for (var m = 0; m < marks.length; m++) {
       for (var i = 0; i < lines.length; i++) {
         if (lines[i].indexOf(marks[m]) !== -1) return i;

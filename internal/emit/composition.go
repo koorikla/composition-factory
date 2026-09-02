@@ -48,40 +48,62 @@ func composition(b *blueprint.Blueprint, crds []schema.CRD, fsDir string) ([]byt
 		}
 	}
 
-	d.Line(1, "- step: %s", blueprint.TemplatingStepName)
-	d.Line(2, "functionRef:")
-	d.Line(3, "name: %s", blueprint.TemplatingFunctionName)
-	d.Line(2, "input:")
-	d.Line(3, "apiVersion: gotemplating.fn.crossplane.io/v1beta1")
-	d.Line(3, "kind: GoTemplate")
-	if fsDir != "" {
-		d.Line(3, "source: FileSystem")
-		// same missingkey discipline as inline — options is a sibling of the
-		// source stanza either way
-		d.Line(3, `options: ["missingkey=error"]`)
-		d.Line(3, "fileSystem:")
-		d.Line(4, "dirPath: %s", fsDir)
-		// the template body still gates emission: every resource is
-		// resolved and checked exactly as the inline form would be, the
-		// bytes just ship in the templates/ folder instead
-		if _, err := inlineTemplateBody(b, crds); err != nil {
+	if b.Engine() == blueprint.EngineKCL {
+		d.Line(1, "- step: %s", blueprint.TemplatingStepName)
+		d.Line(2, "functionRef:")
+		d.Line(3, "name: %s", blueprint.KCLFunctionName)
+		d.Line(2, "input:")
+		d.Line(3, "apiVersion: krm.kcl.dev/v1alpha1")
+		d.Line(3, "kind: KCLInput")
+		d.Line(3, "spec:")
+		d.Line(4, "source: |")
+		kclBody, err := kclTemplateBody(b, crds)
+		if err != nil {
 			return nil, err
 		}
+		for _, line := range strings.Split(strings.TrimRight(kclBody, "\n"), "\n") {
+			if line == "" {
+				d.Line(0, "")
+			} else {
+				d.Line(5, "%s", line)
+			}
+		}
 	} else {
-		d.Line(3, "source: Inline")
-		// options is a SIBLING of inline, not nested inside it. The function's own
-		// README shows it nested; that is a fatal runtime error. Without this
-		// option, a missing field renders the literal string "<no value>" into a
-		// live managed resource, and because that string is legal YAML the whole
-		// validate -> render -> validate pipeline still exits 0.
-		d.Line(3, `options: ["missingkey=error"]`)
-		d.Line(3, "inline:")
-		d.Line(4, "template: |")
+		d.Line(1, "- step: %s", blueprint.TemplatingStepName)
+		d.Line(2, "functionRef:")
+		d.Line(3, "name: %s", blueprint.TemplatingFunctionName)
+		d.Line(2, "input:")
+		d.Line(3, "apiVersion: gotemplating.fn.crossplane.io/v1beta1")
+		d.Line(3, "kind: GoTemplate")
+		if fsDir != "" {
+			d.Line(3, "source: FileSystem")
+			// same missingkey discipline as inline — options is a sibling of the
+			// source stanza either way
+			d.Line(3, `options: ["missingkey=error"]`)
+			d.Line(3, "fileSystem:")
+			d.Line(4, "dirPath: %s", fsDir)
+			// the template body still gates emission: every resource is
+			// resolved and checked exactly as the inline form would be, the
+			// bytes just ship in the templates/ folder instead
+			if _, err := inlineTemplateBody(b, crds); err != nil {
+				return nil, err
+			}
+		} else {
+			d.Line(3, "source: Inline")
+			// options is a SIBLING of inline, not nested inside it. The function's own
+			// README shows it nested; that is a fatal runtime error. Without this
+			// option, a missing field renders the literal string "<no value>" into a
+			// live managed resource, and because that string is legal YAML the whole
+			// validate -> render -> validate pipeline still exits 0.
+			d.Line(3, `options: ["missingkey=error"]`)
+			d.Line(3, "inline:")
+			d.Line(4, "template: |")
 
-		const ti = 5 // template body indent level
+			const ti = 5 // template body indent level
 
-		if err := writeTemplateBody(d, ti, b, crds, wantNamespaced); err != nil {
-			return nil, err
+			if err := writeTemplateBody(d, ti, b, crds, wantNamespaced); err != nil {
+				return nil, err
+			}
 		}
 	}
 

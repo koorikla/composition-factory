@@ -92,14 +92,21 @@
       <span class="lbl" id="drawer-drag-handle" style="cursor:default">Editor</span>
       <div class="tabs" id="tabs"></div>
       <span class="sp"></span>
-      <div class="tpl-source-wrap" style="display:inline-flex;align-items:center;gap:4px;margin-right:8px">
+      <div class="tpl-source-wrap" style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;flex-shrink:0">
+        <label for="engineSel" style="font-size:10px;color:var(--faint)">engine:</label>
+        <select id="engineSel" class="sel" style="padding:1px 4px;font-size:11px;height:20px">
+          <option value="go-templating">go-templating</option>
+          <option value="kcl">kcl</option>
+        </select>
+      </div>
+      <div class="tpl-source-wrap" style="display:inline-flex;align-items:center;gap:4px;margin-right:8px;flex-shrink:0">
         <label for="tplSource" style="font-size:10px;color:var(--faint)">templates:</label>
         <select id="tplSource" class="sel" style="padding:1px 4px;font-size:11px;height:20px">
           <option value="Inline">Inline</option>
           <option value="FileSystem">FileSystem</option>
         </select>
       </div>
-      <span class="mono" style="font-size:10px;color:var(--faint)" id="meta"></span>
+      <span class="mono" style="font-size:10px;color:var(--faint);flex-shrink:0" id="meta"></span>
       <button class="btn sm" id="drawer-float-btn" title="Float window / Lock in place" style="padding:0 5px;margin-left:6px">⛶</button>
       <button class="btn sm" id="drawer-min-btn" title="Collapse / Expand" style="padding:0 5px;margin-left:2px">▾</button>
     </div>

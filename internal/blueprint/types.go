@@ -90,11 +90,18 @@ type Spec struct {
 // Emit contains emission preferences for the blueprint.
 type Emit struct {
 	TemplateSource string `json:"templateSource,omitempty"`
+	Engine         string `json:"engine,omitempty"`
 }
 
 const (
 	TemplateSourceInline     = "Inline"
 	TemplateSourceFileSystem = "FileSystem"
+
+	EngineGoTemplating = "go-templating"
+	EngineKCL          = "kcl"
+
+	KCLFunctionName    = "function-kcl"
+	KCLFunctionPackage = "xpkg.upbound.io/crossplane-contrib/function-kcl:v0.11.2"
 )
 
 // TemplateSource returns the effective template source mode ("Inline" or "FileSystem").
@@ -103,6 +110,14 @@ func (b *Blueprint) TemplateSource() string {
 		return TemplateSourceFileSystem
 	}
 	return TemplateSourceInline
+}
+
+// Engine returns the effective composition render engine ("go-templating" or "kcl").
+func (b *Blueprint) Engine() string {
+	if b != nil && b.Spec.Emit != nil && strings.EqualFold(b.Spec.Emit.Engine, EngineKCL) {
+		return EngineKCL
+	}
+	return EngineGoTemplating
 }
 
 // Convention binds a template to every top-level forProvider leaf whose name

@@ -142,5 +142,11 @@
       playbookInline carries XR params). Recommended follow-ups when demand
       shows: an example/Guide section, then `cf adopt --ansible` lifting role
       vars into XRD parameters. Task transpilation ruled out. — 2026-09-02
-- [ ] (back-backlog) Generate compositions in other languages — KCL, Python
-      (function-kcl, function-python et al.) as alternative emitters.
+- [x] Alternative Composition Emitters — KCL (`function-kcl`):
+      `spec.emit.engine: kcl` (and GUI engine dropdown) generates idiomatic
+      KCL Compositions with typed `KCLInput` (`krm.kcl.dev/v1alpha1`), `oxr`,
+      `ocds`, status wires, loops, conditionals, and auto-ready annotations;
+      auto-pins `function-kcl` in `functions.yaml` and `package.yaml`.
+      CLI: `cf gen --engine=kcl`. — completed 2026-09-02
+- [ ] (back-backlog) Generate compositions in other languages — Python
+      (`function-python` et al.) as additional emitter.

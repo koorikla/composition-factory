@@ -12,8 +12,15 @@ import (
 // then one entry per DISTINCT functionRef in the effective pipeline, each
 // carrying its package exactly as the blueprint declared it.
 func functionList(b *blueprint.Blueprint) ([]fn, error) {
-	fns := []fn{templatingFunction}
-	declared := map[string]string{templatingFunction.name: templatingFunction.pkg}
+	primaryFn := templatingFunction
+	if b.Engine() == blueprint.EngineKCL {
+		primaryFn = fn{
+			blueprint.KCLFunctionName,
+			blueprint.KCLFunctionPackage,
+		}
+	}
+	fns := []fn{primaryFn}
+	declared := map[string]string{primaryFn.name: primaryFn.pkg}
 	for _, s := range effectivePipeline(b) {
 		if pkg, ok := declared[s.FunctionRef]; ok {
 			if pkg != s.Package {

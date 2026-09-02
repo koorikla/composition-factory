@@ -67,3 +67,38 @@ func TestValidateRejectsUnknownTemplateSource(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadBlueprintEmitEngineKCL(t *testing.T) {
+	doc := valid + "  emit:\n    engine: kcl\n"
+	b, err := Load(write(t, doc))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := b.Engine(); got != EngineKCL {
+		t.Errorf("Engine() = %q, want %q", got, EngineKCL)
+	}
+}
+
+func TestLoadBlueprintEmitEngineDefaultGoTemplating(t *testing.T) {
+	b, err := Load(write(t, valid))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := b.Engine(); got != EngineGoTemplating {
+		t.Errorf("Engine() = %q, want %q", got, EngineGoTemplating)
+	}
+}
+
+func TestValidateRejectsUnknownEngine(t *testing.T) {
+	doc := valid + "  emit:\n    engine: python\n"
+	_, err := Load(write(t, doc))
+	if err == nil {
+		t.Fatal("expected an error for engine: python")
+	}
+	for _, want := range []string{"spec.emit.engine", "python", "go-templating", "kcl"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err, want)
+		}
+	}
+}
+

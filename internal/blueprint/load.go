@@ -421,12 +421,22 @@ func (b *Blueprint) Validate() error {
 		return err
 	}
 
-	if b.Spec.Emit != nil && b.Spec.Emit.TemplateSource != "" {
-		switch b.Spec.Emit.TemplateSource {
-		case TemplateSourceInline, TemplateSourceFileSystem:
-		default:
-			return fmt.Errorf("spec.emit.templateSource: %q is not a valid template source (must be %q or %q)",
-				b.Spec.Emit.TemplateSource, TemplateSourceInline, TemplateSourceFileSystem)
+	if b.Spec.Emit != nil {
+		if b.Spec.Emit.TemplateSource != "" {
+			switch b.Spec.Emit.TemplateSource {
+			case TemplateSourceInline, TemplateSourceFileSystem:
+			default:
+				return fmt.Errorf("spec.emit.templateSource: %q is not a valid template source (must be %q or %q)",
+					b.Spec.Emit.TemplateSource, TemplateSourceInline, TemplateSourceFileSystem)
+			}
+		}
+		if b.Spec.Emit.Engine != "" {
+			switch strings.ToLower(b.Spec.Emit.Engine) {
+			case EngineGoTemplating, EngineKCL:
+			default:
+				return fmt.Errorf("spec.emit.engine: %q is not a valid engine (must be %q or %q)",
+					b.Spec.Emit.Engine, EngineGoTemplating, EngineKCL)
+			}
 		}
 	}
 
