@@ -307,7 +307,7 @@ svg.wires .dim{opacity:.18}
 @keyframes wire-dash{to{stroke-dashoffset:-9}}
 
 .wire-picker{
-  position:fixed;z-index:60;max-width:340px;width:92vw;max-height:420px;
+  position:fixed;z-index:60;max-width:360px;width:92vw;max-height:440px;
   background:var(--surface);border:1px solid var(--rule-2);border-radius:8px;
   box-shadow:var(--shadow-lg);display:flex;flex-direction:column;overflow:hidden;font-size:11px;
 }
@@ -315,15 +315,25 @@ svg.wires .dim{opacity:.18}
   padding:8px 12px;background:var(--surface-2);border-bottom:1px solid var(--rule);
   display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink);
 }
-.wire-picker-list{overflow-y:auto;flex:1;padding:4px 0}
+.wire-picker-list{overflow-y:auto;flex:1;padding:2px 0}
+.wire-picker-cat{
+  padding:4px 12px 2px;font-size:10px;font-weight:600;text-transform:uppercase;
+  letter-spacing:0.5px;color:var(--faint);background:var(--surface-2);
+  border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);
+}
 .wire-picker-item{
   padding:6px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;
   color:var(--ink-2);transition:background .1s;
 }
-.wire-picker-item:hover{background:var(--sunk);color:var(--ink)}
+.wire-picker-item:hover,.wire-picker-item.active{background:var(--sunk);color:var(--ink)}
 .wire-picker-item.match{background:var(--wire-xrd-soft)}
 .wire-picker-item .rq{
   font-family:var(--cond);font-size:9px;font-weight:600;letter-spacing:.05em;
   color:var(--err);text-transform:uppercase;margin-left:auto;
 }
+.wire-picker-item .desc{
+  margin-left:auto;font-size:10px;color:var(--faint);max-width:120px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
 

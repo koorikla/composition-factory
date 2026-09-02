@@ -757,24 +757,42 @@ function applyWire(srcOwner, srcPath, targetRes, targetPath) {
   });
 }
 
+let pickerJustOpened = false;
+
 function closeWirePicker() {
   const el = document.getElementById("wire-picker");
   if (el) el.remove();
 }
 
+async function resolveKindMetaAsync(resource) {
+  if (kindsCache && kindsCache.length) {
+    const m = kindMeta(resource);
+    if (m) return m;
+  }
+  try {
+    const res = await A.getKinds();
+    kindsCache = res.kinds || [];
+    return kindMeta(resource) || (kindsCache.find(function (k) { return k.kind === resource.kind; }) || null);
+  } catch (_) {
+    return null;
+  }
+}
+
 function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
   closeWirePicker();
+  pickerJustOpened = true;
+  setTimeout(function () { pickerJustOpened = false; }, 150);
   const d = doc();
   if (!d) return;
   const res = (d.spec.resources || []).find(function (r) { return r.name === targetRes; });
   if (!res) return;
-  const meta = kindMeta(res);
 
   const pop = document.createElement("div");
   pop.id = "wire-picker";
   pop.className = "wire-picker";
-  const left = Math.min(x, window.innerWidth - 350);
-  const top = Math.min(y, window.innerHeight - 380);
+
+  const left = Math.min(x, window.innerWidth - 370);
+  const top = Math.min(y, window.innerHeight - 450);
   pop.style.left = Math.max(10, left) + "px";
   pop.style.top = Math.max(10, top) + "px";
 
@@ -784,7 +802,7 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
     '<span>Wire <span style="color:var(--wire-xrd)">' + esc(srcLabel) + '</span> \u2192 ' + esc(targetRes) + '</span>' +
     '<button class="del" id="wire-picker-close" style="margin-left:auto;cursor:pointer">\u00d7</button></div>' +
     '<div style="padding:6px 10px;border-bottom:1px solid var(--rule)">' +
-    '<input id="wire-picker-search" class="search" style="width:100%" placeholder="Filter fields\u2026" autofocus>' +
+    '<input id="wire-picker-search" class="search" style="width:100%" placeholder="Search fields, envelope, annotations\u2026" autofocus>' +
     '</div>' +
     '<div class="wire-picker-list" id="wire-picker-list"><div class="empty">Loading fields\u2026</div></div>';
 
@@ -794,60 +812,255 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
   const listEl = pop.querySelector("#wire-picker-list");
   if (searchInput) setTimeout(function () { searchInput.focus(); }, 20);
 
-  function renderFieldList(fields, filter) {
-    const q = (filter || "").toLowerCase().trim();
-    let rows = fields.filter(function (f) {
-      return !q || f.path.toLowerCase().indexOf(q) >= 0 || (f.description && f.description.toLowerCase().indexOf(q) >= 0);
-    });
-    if (!rows.length && !q) {
-      listEl.innerHTML = '<div class="empty">No fields found for this kind.</div>';
+  let selectedIndex = 0;
+  let currentItems = [];
+
+  function renderItems(items) {
+    currentItems = items;
+    selectedIndex = Math.min(selectedIndex, Math.max(0, items.length - 1));
+    if (!items.length) {
+      listEl.innerHTML = '<div class="empty">No matching fields found.</div>';
       return;
     }
     let h = "";
-    if (q) {
-      h += '<div class="wire-picker-item" data-type="ann" data-path="' + esc(q) + '">' +
-        '<span style="font-family:var(--mono);color:var(--wire-status)">annotations.' + esc(q) + '</span>' +
-        '<span class="dg" style="margin-left:auto">annotation</span></div>';
-    }
-    rows.slice(0, 40).forEach(function (f) {
-      h += '<div class="wire-picker-item" data-type="field" data-path="' + esc(f.path) + '">' +
-        '<span style="font-family:var(--mono)">' + esc(f.path) + '</span>' +
-        '<span class="dg">' + esc(f.type || "") + '</span>' +
-        (f.requiredChain || f.required ? '<span class="rq">req</span>' : "") +
+    let lastCat = null;
+    items.forEach(function (item, idx) {
+      if (item.category !== lastCat) {
+        lastCat = item.category;
+        h += '<div class="wire-picker-cat">' + esc(lastCat) + '</div>';
+      }
+      h += '<div class="wire-picker-item' + (idx === selectedIndex ? ' active' : '') + (item.suggested ? ' match' : '') + '" data-idx="' + idx + '">' +
+        '<span style="font-family:var(--mono);color:' + (item.color || 'inherit') + '">' + esc(item.label || item.path) + '</span>' +
+        '<span class="dg">' + esc(item.type || "") + '</span>' +
+        (item.required ? '<span class="rq">req</span>' : '') +
+        (item.description ? '<span class="desc" title="' + esc(item.description) + '">' + esc(item.description) + '</span>' : '') +
         '</div>';
     });
     listEl.innerHTML = h;
   }
 
-  let allFields = [];
-  if (meta) {
-    A.getKindFields(meta.apiVersion, meta.kind).then(function (res) {
-      allFields = res.fields || [];
-      renderFieldList(allFields, searchInput ? searchInput.value : "");
-    }).catch(function () {
-      listEl.innerHTML = '<div class="empty">Failed to load fields.</div>';
+  function buildCandidateItems(specFields, envelopeFields, filter) {
+    const q = (filter || "").toLowerCase().trim();
+    const items = [];
+    const srcTerm = srcPath.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+    // 1. Spec / forProvider fields
+    (specFields || []).forEach(function (f) {
+      const p = f.path;
+      const pLower = p.toLowerCase();
+      const desc = f.description || "";
+      const descLower = desc.toLowerCase();
+      const pNorm = pLower.replace(/[^a-z0-9]/g, "");
+      if (q && pLower.indexOf(q) === -1 && descLower.indexOf(q) === -1) {
+        return;
+      }
+      const isReq = !!(f.requiredChain || f.required);
+      const isMatch = srcTerm && (pNorm.indexOf(srcTerm) >= 0 || srcTerm.indexOf(pNorm) >= 0);
+      let score = 20;
+      if (isReq) score += 40;
+      if (isMatch) score += 100;
+      if (q) {
+        if (pLower === q) score += 60;
+        else if (pLower.startsWith(q)) score += 40;
+        else if (pLower.indexOf(q) >= 0) score += 20;
+      }
+      items.push({
+        type: f.type || "string",
+        path: p,
+        label: p,
+        category: isMatch && !q ? "Suggested Matches" : "Spec Fields",
+        required: isReq,
+        suggested: isMatch,
+        description: desc,
+        applyType: "field",
+        score: score,
+      });
     });
-  } else {
-    listEl.innerHTML = '<div class="empty">Kind metadata not available.</div>';
+
+    // 2. Envelope fields
+    (envelopeFields || []).forEach(function (ef) {
+      const p = ef.path;
+      const pLower = p.toLowerCase();
+      const desc = ef.description || "";
+      if (q && pLower.indexOf(q) === -1 && desc.toLowerCase().indexOf(q) === -1) {
+        return;
+      }
+      const isReq = !!(ef.requiredChain || ef.required);
+      let score = 10;
+      if (isReq) score += 30;
+      if (q) {
+        if (pLower === q) score += 50;
+        else if (pLower.startsWith(q)) score += 30;
+        else if (pLower.indexOf(q) >= 0) score += 15;
+      }
+      items.push({
+        type: ef.type || "string",
+        path: p,
+        label: "envelope." + p,
+        category: "Envelope",
+        required: isReq,
+        suggested: false,
+        description: desc,
+        applyType: "envelope",
+        color: "var(--wire-ref)",
+        score: score,
+      });
+    });
+
+    // 3. Known annotations (if relevant)
+    const isK8sOrIAM = (res.provider && (res.provider.indexOf("aws") >= 0 || res.provider.indexOf("k8s") >= 0)) ||
+      res.kind === "ServiceAccount" || res.kind === "Role";
+    if (isK8sOrIAM) {
+      const knownAnns = [
+        { key: "eks.amazonaws.com/role-arn", desc: "EKS IAM Role ARN to assume" },
+        { key: "crossplane.io/external-name", desc: "Cloud resource name override" },
+      ];
+      knownAnns.forEach(function (ann) {
+        const kLower = ann.key.toLowerCase();
+        const dLower = ann.desc.toLowerCase();
+        if (!q || kLower.indexOf(q) >= 0 || dLower.indexOf(q) >= 0) {
+          const isMatch = srcTerm.indexOf("arn") >= 0 || srcTerm.indexOf("role") >= 0;
+          let score = 5;
+          if (isMatch) score += 80;
+          if (q && kLower.indexOf(q) >= 0) score += 25;
+          items.push({
+            type: "string",
+            path: ann.key,
+            label: "annotations." + ann.key,
+            category: isMatch && !q ? "Suggested Matches" : "Annotations",
+            required: false,
+            suggested: isMatch,
+            description: ann.desc,
+            applyType: "ann",
+            color: "var(--wire-status)",
+            score: score,
+          });
+        }
+      });
+    }
+
+    // 4. Custom query option if typed (always lower score than real schema fields)
+    if (q) {
+      if (!items.some(function (it) { return it.path === q && it.applyType === "ann"; })) {
+        items.push({
+          type: "string",
+          path: q,
+          label: "annotations." + q,
+          category: "Custom",
+          required: false,
+          suggested: false,
+          description: "Set as custom annotation",
+          applyType: "ann",
+          color: "var(--wire-status)",
+          score: -10,
+        });
+      }
+      if (!items.some(function (it) { return it.path === q && it.applyType === "field"; })) {
+        items.push({
+          type: "string",
+          path: q,
+          label: q,
+          category: "Custom",
+          required: false,
+          suggested: false,
+          description: "Set as custom field path",
+          applyType: "field",
+          score: -20,
+        });
+      }
+    }
+
+    items.sort(function (a, b) {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.label.localeCompare(b.label);
+    });
+
+    return items;
+  }
+
+  let cachedSpecFields = [];
+  let cachedEnvelopeFields = [];
+
+  function updateList(q) {
+    const items = buildCandidateItems(cachedSpecFields, cachedEnvelopeFields, q);
+    renderItems(items);
+  }
+
+  function selectItem(item) {
+    if (!item) return;
+    closeWirePicker();
+    if (item.applyType === "ann") {
+      applyWire(srcOwner, srcPath, targetRes, "annotations." + item.path);
+    } else if (item.applyType === "envelope") {
+      applyWire(srcOwner, srcPath, targetRes, "envelope." + item.path);
+    } else {
+      applyWire(srcOwner, srcPath, targetRes, item.path);
+    }
+  }
+
+  resolveKindMetaAsync(res).then(function (meta) {
+    if (!meta) {
+      // Fallback: check if the resource already has any fields
+      cachedSpecFields = Object.keys(res.fields || {}).map(function (k) {
+        return { path: k, type: "string" };
+      });
+      updateList(searchInput ? searchInput.value : "");
+      return;
+    }
+    Promise.all([
+      A.getKindFields(meta.apiVersion, meta.kind).catch(function () { return { fields: [] }; }),
+      A.getKind(meta.apiVersion, meta.kind).catch(function () { return { envelope: [] }; })
+    ]).then(function (results) {
+      cachedSpecFields = (results[0] && results[0].fields) || [];
+      cachedEnvelopeFields = (results[1] && results[1].envelope) || [];
+      updateList(searchInput ? searchInput.value : "");
+    }).catch(function (err) {
+      listEl.innerHTML = '<div class="empty">Failed to load fields: ' + esc(err && err.message || err) + '</div>';
+    });
+  });
+
+  function updateActiveItem() {
+    listEl.querySelectorAll(".wire-picker-item").forEach(function (el, idx) {
+      const isSel = idx === selectedIndex;
+      el.classList.toggle("active", isSel);
+      if (isSel) {
+        el.scrollIntoView({ block: "nearest" });
+      }
+    });
   }
 
   if (searchInput) {
     searchInput.addEventListener("input", function () {
-      renderFieldList(allFields, searchInput.value);
+      selectedIndex = 0;
+      updateList(searchInput.value);
+    });
+    searchInput.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (currentItems.length > 0) {
+          selectedIndex = (selectedIndex + 1) % currentItems.length;
+          updateActiveItem();
+        }
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (currentItems.length > 0) {
+          selectedIndex = (selectedIndex - 1 + currentItems.length) % currentItems.length;
+          updateActiveItem();
+        }
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        selectItem(currentItems[selectedIndex]);
+      } else if (e.key === "Escape") {
+        closeWirePicker();
+      }
     });
   }
 
   listEl.addEventListener("click", function (e) {
-    const item = e.target.closest(".wire-picker-item");
-    if (!item) return;
-    const path = item.getAttribute("data-path");
-    const type = item.getAttribute("data-type");
-    closeWirePicker();
-    if (type === "ann") {
-      applyWire(srcOwner, srcPath, targetRes, "annotations." + path);
-    } else {
-      applyWire(srcOwner, srcPath, targetRes, path);
-    }
+    const itemEl = e.target.closest(".wire-picker-item");
+    if (!itemEl) return;
+    const idx = parseInt(itemEl.getAttribute("data-idx"), 10);
+    selectItem(currentItems[idx]);
   });
 }
 
@@ -1129,8 +1342,13 @@ export function init(rootEl, deps) {
     if (el) { el.style.width = ""; el.style.maxWidth = ""; }
     scheduleWires();
   });
-  document.addEventListener("click", function (e) { if (!e.target.closest("#ctx-menu")) closeCtxMenu(); });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeCtxMenu(); });
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest("#ctx-menu")) closeCtxMenu();
+    if (!pickerJustOpened && !e.target.closest("#wire-picker")) closeWirePicker();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { closeCtxMenu(); closeWirePicker(); }
+  });
   cwEl.addEventListener("pointerdown", onPanDown);
   buildZoomControls();
   applyView();
