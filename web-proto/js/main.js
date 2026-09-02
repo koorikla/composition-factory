@@ -112,3 +112,24 @@ store.loadDoc();
   });
   sync();
 })();
+
+
+/* ---- narrow-screen drawers: panes slide over instead of vanishing ---- */
+(function () {
+  var l = document.querySelector(".pane.l");
+  var r = document.querySelector(".pane.r");
+  var toggleL = document.getElementById("pane-toggle-l");
+  var closeR = document.getElementById("pane-close-r");
+  if (toggleL && l) toggleL.addEventListener("click", function () {
+    l.classList.toggle("drawer-open");
+    if (r) r.classList.remove("drawer-open");
+  });
+  if (closeR && r) closeR.addEventListener("click", function () {
+    r.classList.remove("drawer-open");
+  });
+  // selecting something opens the inspector drawer on narrow screens
+  store.subscribe("selection", function (sel) {
+    if (!r || !window.matchMedia("(max-width:900px)").matches) return;
+    if (sel) { r.classList.add("drawer-open"); if (l) l.classList.remove("drawer-open"); }
+  });
+})();
