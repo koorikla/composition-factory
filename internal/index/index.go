@@ -107,10 +107,11 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 			leaves := schema.Leaves(nodes, "")
 			required := 0
 			for _, l := range leaves {
-				if l.Node.Required {
+				if l.Node.RequiredChain {
 					required++
 				}
 			}
+			required += len(schema.RequiredBranches(nodes, ""))
 
 			kind := Kind{
 				Kind:       c.Kind,

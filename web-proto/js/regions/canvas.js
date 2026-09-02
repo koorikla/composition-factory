@@ -726,6 +726,226 @@ function onResizeDown(e) {
   document.addEventListener("pointerup", up);
 }
 
+/* ---------- drag-to-wire (slice: drag-to-wire) ---------- */
+
+function applyWire(srcOwner, srcPath, targetRes, targetPath) {
+  let fromExpr = "";
+  if (srcOwner === XR_ID) {
+    fromExpr = "params." + srcPath;
+  } else {
+    fromExpr = "resources." + srcOwner + ".status." + srcPath.replace(/^status\./, "");
+  }
+  return S.replaceDoc(function (draft) {
+    const r = (draft.spec.resources || []).find(function (x) { return x.name === targetRes; });
+    if (!r) return;
+    if (targetPath.indexOf("envelope.") === 0) {
+      r.envelope = r.envelope || {};
+      r.envelope[targetPath.slice("envelope.".length)] = { from: fromExpr };
+    } else if (targetPath.indexOf("annotations.") === 0) {
+      r.annotations = r.annotations || {};
+      r.annotations[targetPath.slice("annotations.".length)] = { from: fromExpr };
+    } else {
+      r.fields = r.fields || {};
+      r.fields[targetPath] = { from: fromExpr };
+    }
+  });
+}
+
+function closeWirePicker() {
+  const el = document.getElementById("wire-picker");
+  if (el) el.remove();
+}
+
+function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
+  closeWirePicker();
+  const d = doc();
+  if (!d) return;
+  const res = (d.spec.resources || []).find(function (r) { return r.name === targetRes; });
+  if (!res) return;
+  const meta = kindMeta(res);
+
+  const pop = document.createElement("div");
+  pop.id = "wire-picker";
+  pop.className = "wire-picker";
+  const left = Math.min(x, window.innerWidth - 350);
+  const top = Math.min(y, window.innerHeight - 380);
+  pop.style.left = Math.max(10, left) + "px";
+  pop.style.top = Math.max(10, top) + "px";
+
+  const srcLabel = srcOwner === XR_ID ? "$" + srcPath : srcOwner + "." + srcPath.replace(/^status\./, "");
+  pop.innerHTML =
+    '<div class="wire-picker-h">' +
+    '<span>Wire <span style="color:var(--wire-xrd)">' + esc(srcLabel) + '</span> \u2192 ' + esc(targetRes) + '</span>' +
+    '<button class="del" id="wire-picker-close" style="margin-left:auto;cursor:pointer">\u00d7</button></div>' +
+    '<div style="padding:6px 10px;border-bottom:1px solid var(--rule)">' +
+    '<input id="wire-picker-search" class="search" style="width:100%" placeholder="Filter fields\u2026" autofocus>' +
+    '</div>' +
+    '<div class="wire-picker-list" id="wire-picker-list"><div class="empty">Loading fields\u2026</div></div>';
+
+  document.body.appendChild(pop);
+  pop.querySelector("#wire-picker-close").addEventListener("click", closeWirePicker);
+  const searchInput = pop.querySelector("#wire-picker-search");
+  const listEl = pop.querySelector("#wire-picker-list");
+  if (searchInput) setTimeout(function () { searchInput.focus(); }, 20);
+
+  function renderFieldList(fields, filter) {
+    const q = (filter || "").toLowerCase().trim();
+    let rows = fields.filter(function (f) {
+      return !q || f.path.toLowerCase().indexOf(q) >= 0 || (f.description && f.description.toLowerCase().indexOf(q) >= 0);
+    });
+    if (!rows.length && !q) {
+      listEl.innerHTML = '<div class="empty">No fields found for this kind.</div>';
+      return;
+    }
+    let h = "";
+    if (q) {
+      h += '<div class="wire-picker-item" data-type="ann" data-path="' + esc(q) + '">' +
+        '<span style="font-family:var(--mono);color:var(--wire-status)">annotations.' + esc(q) + '</span>' +
+        '<span class="dg" style="margin-left:auto">annotation</span></div>';
+    }
+    rows.slice(0, 40).forEach(function (f) {
+      h += '<div class="wire-picker-item" data-type="field" data-path="' + esc(f.path) + '">' +
+        '<span style="font-family:var(--mono)">' + esc(f.path) + '</span>' +
+        '<span class="dg">' + esc(f.type || "") + '</span>' +
+        (f.requiredChain || f.required ? '<span class="rq">req</span>' : "") +
+        '</div>';
+    });
+    listEl.innerHTML = h;
+  }
+
+  let allFields = [];
+  if (meta) {
+    A.getKindFields(meta.apiVersion, meta.kind).then(function (res) {
+      allFields = res.fields || [];
+      renderFieldList(allFields, searchInput ? searchInput.value : "");
+    }).catch(function () {
+      listEl.innerHTML = '<div class="empty">Failed to load fields.</div>';
+    });
+  } else {
+    listEl.innerHTML = '<div class="empty">Kind metadata not available.</div>';
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener("input", function () {
+      renderFieldList(allFields, searchInput.value);
+    });
+  }
+
+  listEl.addEventListener("click", function (e) {
+    const item = e.target.closest(".wire-picker-item");
+    if (!item) return;
+    const path = item.getAttribute("data-path");
+    const type = item.getAttribute("data-type");
+    closeWirePicker();
+    if (type === "ann") {
+      applyWire(srcOwner, srcPath, targetRes, "annotations." + path);
+    } else {
+      applyWire(srcOwner, srcPath, targetRes, path);
+    }
+  });
+}
+
+function onWireDragDown(e, portEl) {
+  const owner = portEl.getAttribute("data-owner");
+  const path = portEl.getAttribute("data-path");
+  const isOut = portEl.querySelector(".d.out") !== null || (e.target.classList && e.target.classList.contains("out"));
+  const dir = isOut ? "out" : "in";
+
+  const startPt = portPos(owner, path);
+  if (!startPt) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  let previewPath = wiresEl.querySelector("#wire-drag-preview");
+  if (!previewPath) {
+    previewPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    previewPath.id = "wire-drag-preview";
+    wiresEl.appendChild(previewPath);
+  }
+  const isStatus = path.indexOf("status.") === 0;
+  const strokeColor = owner === XR_ID ? COLORS.xrd : (isStatus ? "var(--wire-status)" : COLORS.xrd);
+  previewPath.setAttribute("stroke", strokeColor);
+  previewPath.setAttribute("fill", "none");
+  previewPath.setAttribute("stroke-width", "2.5");
+
+  let lastHoverNode = null;
+  let lastHoverPort = null;
+
+  function clearHovers() {
+    if (lastHoverNode) { lastHoverNode.classList.remove("wire-target-hover"); lastHoverNode = null; }
+    if (lastHoverPort) { lastHoverPort.classList.remove("wire-target-hover"); lastHoverPort = null; }
+  }
+
+  function mv(ev) {
+    if (!ev.buttons) { up(ev); return; }
+    const cw = cwEl.getBoundingClientRect();
+    const mousePt = { x: ev.clientX - cw.left, y: ev.clientY - cw.top };
+
+    let a = startPt, b = mousePt;
+    if (dir === "in") { a = mousePt; b = startPt; }
+    const dx = Math.max(30, Math.abs(b.x - a.x) * 0.45);
+    previewPath.setAttribute("d", "M" + a.x + "," + a.y + " C" + (a.x + dx) + "," + a.y + " " + (b.x - dx) + "," + b.y + " " + b.x + "," + b.y);
+
+    clearHovers();
+    const el = document.elementFromPoint(ev.clientX, ev.clientY);
+    if (!el) return;
+    const p = el.closest(".port");
+    if (p && p.getAttribute("data-owner") !== owner) {
+      lastHoverPort = p;
+      p.classList.add("wire-target-hover");
+    } else {
+      const n = el.closest(".node");
+      if (n && n.getAttribute("data-id") !== owner) {
+        lastHoverNode = n;
+        n.classList.add("wire-target-hover");
+      }
+    }
+  }
+
+  function up(ev) {
+    document.removeEventListener("pointermove", mv);
+    document.removeEventListener("pointerup", up);
+    document.removeEventListener("pointercancel", up);
+    if (previewPath) previewPath.remove();
+    clearHovers();
+    gestureEnd();
+
+    if (!ev) return;
+    const el = document.elementFromPoint(ev.clientX, ev.clientY);
+    if (!el) return;
+
+    const targetPort = el.closest(".port");
+    if (targetPort) {
+      const tOwner = targetPort.getAttribute("data-owner");
+      const tPath = targetPort.getAttribute("data-path");
+      if (tOwner && tOwner !== owner) {
+        if (dir === "out" && tOwner !== XR_ID) {
+          applyWire(owner, path, tOwner, tPath);
+        } else if (dir === "in" && (tOwner === XR_ID || tPath.indexOf("status.") === 0)) {
+          applyWire(tOwner, tPath, owner, path);
+        }
+        return;
+      }
+    }
+
+    const targetNode = el.closest(".node");
+    if (targetNode) {
+      const tId = targetNode.getAttribute("data-id");
+      if (tId && tId !== owner) {
+        if (dir === "out" && tId !== XR_ID) {
+          openFieldPicker(ev.clientX, ev.clientY, owner, path, tId);
+        }
+      }
+    }
+  }
+
+  gestureBegin(function () { if (previewPath) previewPath.remove(); clearHovers(); });
+  document.addEventListener("pointermove", mv);
+  document.addEventListener("pointerup", up);
+  document.addEventListener("pointercancel", up);
+}
+
 function onPointerDown(e) {
   if (e.target.closest("[data-resize]")) { onResizeDown(e); return; }
   if (e.button !== undefined && e.button !== 0) return;
@@ -734,6 +954,13 @@ function onPointerDown(e) {
   // button under the pointer (its click then never fires), and any micro-
   // movement during the press turns it into a card drag instead.
   if (e.target.closest("[data-act]") || e.target.closest("button")) return;
+
+  const portDot = e.target.closest(".port .d");
+  const portEl = e.target.closest(".port");
+  if (portDot || (portEl && e.target === portDot)) {
+    onWireDragDown(e, portEl);
+    return;
+  }
 
   const nodeEl = e.target.closest(".node");
   if (!nodeEl) return;

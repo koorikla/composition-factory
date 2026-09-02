@@ -80,9 +80,10 @@
 - [ ] Test isolation v2: the behavior suite gets its OWN cf serve (own port +
       scratch blueprint copy) so runs stop trampling the doc the user is
       looking at (today a suite run leaves test wires/doc state behind).
-- [ ] Palette required-count badges still show RAW counts (Deployment "250 req")
-      — adopt effective (chain+branch) counts; needs index.Kind or a cheap
-      per-kind fetch. — observed 2026-09-02
-- [ ] Drag-to-wire: drag a line from an XR parameter dot onto a card → popup
-      menu of type-compatible input fields to bind (params.X → chosen field).
-      — user request 2026-09-02
+- [x] Palette required-count badges adopt effective (chain+branch) counts:
+      Deployment shows "2 req" instead of "250 req" using RequiredChain and
+      RequiredBranches in index.Build. — completed 2026-09-02
+- [x] Drag-to-wire: drag a line from an XR parameter dot onto a card → popup
+      menu of type-compatible input fields to bind (params.X → chosen field),
+      or drop directly onto a target port. — completed 2026-09-02
+
