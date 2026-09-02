@@ -228,7 +228,10 @@ func sampleXR(b *blueprint.Blueprint) ([]byte, error) {
 
 // placeholderValue picks a value that satisfies p's declared type. An enum
 // wins over the type: its first value is, by the XRD's own schema, always
-// legal, where a generic placeholder might not be.
+// legal, where a generic placeholder might not be. A typed object (declared
+// properties) recurses into its REQUIRED members — an empty map would fail
+// the member schema's own required rule, and non-required members are
+// omitted for the same default-injection reason top-level ones are.
 func placeholderValue(p blueprint.Parameter) any {
 	if len(p.Enum) > 0 {
 		return p.Enum[0]
@@ -239,7 +242,13 @@ func placeholderValue(p blueprint.Parameter) any {
 	case "boolean":
 		return true
 	case "object":
-		return map[string]any{}
+		obj := map[string]any{}
+		for name, member := range p.Properties {
+			if member.Required {
+				obj[name] = placeholderValue(member)
+			}
+		}
+		return obj
 	default: // string
 		return "sample"
 	}
