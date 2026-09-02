@@ -266,14 +266,22 @@ export const store = {
    * @param {boolean} [write=false]
    * @returns {Promise<Object|null>} {outputs:[{path,bytes,body}], written}, or null.
    */
+  _generateSeq: 0,
+
   async generate(write) {
+    // latest-wins: a slow earlier generate must never overwrite a newer
+    // result (stale composition shown for a fresh doc — the ghost class).
+    const seq = ++this._generateSeq;
     try {
       const result = await api.generate(!!write);
+      if (seq !== this._generateSeq) return result; // superseded — drop silently
       this.state.lastGenerate = result;
       this.emit("generate", result);
       return result;
     } catch (e) {
-      this.emit("error", { status: e.status, message: e.message, source: "generate" });
+      if (seq === this._generateSeq) {
+        this.emit("error", { status: e.status, message: e.message, source: "generate" });
+      }
       return null;
     }
   },
