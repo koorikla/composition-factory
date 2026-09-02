@@ -1,7 +1,9 @@
-// Every test starts from the pristine xnotify doc — tests may mutate the live
-// blueprint freely; isolation is restored here, not by each test's manners.
+// Every test starts from the pristine xnotify doc — and the suite runs
+// against ITS OWN engine (127.0.0.1:8081, started by playwright.config's
+// webServer with a scratch blueprint), never the one a human is using on
+// 8080. Isolation is structural, not manners.
 const pristine = require('./fixtures/pristine-doc.json')
-const ENGINE = 'http://127.0.0.1:8080'
+const ENGINE = 'http://127.0.0.1:8081'
 
 async function resetDoc(request) {
   const r = await request.put(ENGINE + '/api/blueprint', { data: pristine })

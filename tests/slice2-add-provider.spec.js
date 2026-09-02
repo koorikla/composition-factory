@@ -2,7 +2,7 @@
 // its kinds appear in the palette; failures surface verbatim.
 const { test, expect } = require('@playwright/test')
 const { resetDoc } = require('./helpers')
-const ENGINE = 'http://127.0.0.1:8080'
+const ENGINE = 'http://127.0.0.1:8081'
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

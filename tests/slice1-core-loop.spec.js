@@ -9,7 +9,7 @@
 const { test, expect } = require('@playwright/test')
 const { resetDoc } = require('./helpers')
 
-const ENGINE = 'http://127.0.0.1:8080'
+const ENGINE = 'http://127.0.0.1:8081'
 let baseline = null
 
 test.beforeEach(async ({ request }) => {

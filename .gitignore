@@ -28,3 +28,4 @@ coverage/
 
 # Project lockfile (generated per-workspace by cf provider add)
 .cf.lock
+.testrun/

@@ -3,17 +3,16 @@
 // stale-page bug class: phantom cards, dead buttons).
 const { test, expect } = require('@playwright/test')
 
-test('serve.py sends Clear-Site-Data on the document only', async ({ request }) => {
-  const doc = await request.get('http://127.0.0.1:5180/')
+test('the UI server sends Clear-Site-Data on the document only', async ({ request }) => {
+  const doc = await request.get('http://127.0.0.1:8081/')
   expect(doc.headers()['clear-site-data']).toBe('"cache"')
-  const mod = await request.get('http://127.0.0.1:5180/js/main.js')
+  const mod = await request.get('http://127.0.0.1:8081/js/main.js')
   expect(mod.headers()['clear-site-data']).toBeUndefined()
   expect(mod.headers()['cache-control']).toBe('no-store')
 })
 
-test('the embedded UI sends it too', async ({ request }) => {
-  const doc = await request.get('http://127.0.0.1:8080/')
+test('the dev proxy sends it too when running', async ({ request }) => {
+  const doc = await request.get('http://127.0.0.1:5180/').catch(() => null)
+  test.skip(!doc, 'serve.py not running (dev-only proxy)')
   expect(doc.headers()['clear-site-data']).toBe('"cache"')
-  const mod = await request.get('http://127.0.0.1:8080/js/main.js')
-  expect(mod.headers()['clear-site-data']).toBeUndefined()
 })

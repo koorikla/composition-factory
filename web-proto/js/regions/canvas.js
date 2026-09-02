@@ -250,6 +250,26 @@ function resourceCardHTML(d, r, sel) {
     });
   });
 
+  // Annotations: authored metadata entries render as rows (wire dots teal
+  // when wired from status, xrd-blue from params)
+  const anns = r.annotations || {};
+  const annKeys = Object.keys(anns).sort();
+  if (annKeys.length) {
+    h += '<div class="node-grp">annotations</div>';
+    annKeys.forEach(function (k) {
+      const f = anns[k];
+      const wired = f && typeof f.from === "string";
+      h += portRow(r.name, "annotations." + k, {
+        dir: "in",
+        dotColor: wired && f.from.indexOf("resources.") === 0 ? "var(--wire-status)" : "var(--wire-xrd)",
+        req: false,
+        ty: wired ? "" : (f && f.raw !== undefined && f.raw !== "" ? "raw" : "value"),
+        label: shortPath(k),
+        title: k + (wired ? " \u2190 " + f.from : ""),
+      });
+    });
+  }
+
   // Status outputs: wired paths always, plus the top atProvider leaves from
   // the schema — displayed like inputs so "object depends on object" is
   // visible before any wire exists.

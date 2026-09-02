@@ -71,6 +71,23 @@ export function listWires(doc) {
     };
     checkDict(r.fields, false);
     checkDict(r.envelope, true);
+    // annotations carry the same {from} wires; their "path" is the
+    // annotation key namespaced so port lookups can't collide with fields
+    if (r.annotations) {
+      Object.keys(r.annotations).sort().forEach(function (key) {
+        const f = r.annotations[key];
+        if (!f || typeof f.from !== "string") return;
+        const parsed = parseFrom(f.from);
+        if (!parsed) return;
+        if (parsed.kind === "param") {
+          out.push({ kind: "param", param: parsed.param, resource: r.name,
+            path: "annotations." + key, from: f.from, isAnnotation: true });
+        } else if (parsed.kind === "status") {
+          out.push({ kind: "status", srcResource: parsed.resource, srcPath: parsed.statusPath,
+            resource: r.name, path: "annotations." + key, from: f.from, isAnnotation: true });
+        }
+      });
+    }
   });
   return out;
 }

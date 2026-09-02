@@ -468,6 +468,23 @@ async function renderResource(res) {
       }
     }
 
+    // Annotations section: authored metadata entries with the same forms
+    var anns = res.annotations || {};
+    var annKeys = Object.keys(anns).sort();
+    h += '<div class="insp-sec" style="margin-top:14px;padding:8px 12px;border-top:1px solid var(--rule);background:var(--surface)">' +
+      '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Annotations</div>' +
+      annKeys.map(function (k) {
+        var f = anns[k];
+        var val = f.from ? "\u2190 " + f.from : (f.raw ? "raw" : f.value);
+        return '<div class="frow" style="margin-bottom:2px"><span class="lbl" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">' + esc(k) + "</span>" +
+          '<span class="dg" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">' + esc(val) + "</span>" +
+          '<button class="del" data-ann-del="' + esc(k) + '" title="Remove annotation">\u00d7</button></div>';
+      }).join("") +
+      '<div class="frow" style="margin-top:4px;margin-bottom:0">' +
+      '<input class="tin" data-ann-key placeholder="prefix/name" style="flex:1;min-width:0">' +
+      '<input class="tin" data-ann-value placeholder="value" style="flex:1;min-width:0">' +
+      '<button class="btn sm" data-ann-add>Add</button></div></div>';
+
     // Status outputs section
     if (detail && detail.status && detail.status.length > 0) {
       h += '<div class="insp-sec" style="margin-top:14px;padding:8px 12px;border-top:1px solid var(--rule);background:var(--surface-2)">' +
@@ -657,6 +674,33 @@ async function commitEnvelopeValue(path, kind, text) {
 }
 
 function onBoxClick(e) {
+  var annDel = e.target.closest("[data-ann-del]");
+  if (annDel) {
+    var adk = annDel.getAttribute("data-ann-del");
+    var selRes = selectedResource();
+    if (!selRes) return;
+    store.replaceDoc(function (d) {
+      var r = d.spec.resources.find(function (x) { return x.name === selRes.name; });
+      if (r && r.annotations) { delete r.annotations[adk]; if (!Object.keys(r.annotations).length) delete r.annotations; }
+    });
+    return;
+  }
+  if (e.target.closest("[data-ann-add]")) {
+    var keyEl = box.querySelector("[data-ann-key]");
+    var valEl = box.querySelector("[data-ann-value]");
+    var selRes2 = selectedResource();
+    if (!selRes2 || !keyEl || !keyEl.value.trim()) return;
+    var annKey = keyEl.value.trim(), annVal = (valEl && valEl.value) || "";
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = d.spec.resources.find(function (x) { return x.name === selRes2.name; });
+        if (!r) return;
+        r.annotations = r.annotations || {};
+        r.annotations[annKey] = { value: annVal };
+      });
+    });
+    return;
+  }
   var doc = store.state.doc;
   if (!doc) return;
 
