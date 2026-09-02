@@ -186,29 +186,29 @@ clean, Playwright 115 passed / 1 skipped.
       whole expression (corrupts any param name containing true/false).
       Fix shape: planFields/planAnnotations/planEnvelope return a structured
       RHS (kind + param/resource + path + guard); each backend formats it.
-- [ ] `POST /api/cluster/sync` still carries its own inline index rebuild
+- [x] `POST /api/cluster/sync` still carries its own inline index rebuild
       (internal/api/cluster.go:104-124) that omits `crds:` sources — every
       scanned CRD kind disappears from /api/kinds after a sync. Replace with
       `srv.rebuildIndexLocked()`.
-- [ ] `rebuildIndexLocked` (internal/api/server.go:480) swallows six error
+- [x] `rebuildIndexLocked` (internal/api/server.go:480) swallows six error
       paths (`ReadFile`, `yaml.Unmarshal`, `Store.Load`, crds ReadFile /
       ParseCRDManifest, `k8s.Kinds`) with `if err == nil`; provider add /
       delete / crds-add / example-load lost their 500s. An evicted cache
       entry now stays listed in /api/providers with its kinds silently gone.
       Return the errors (keep the deliberate `continue` on missing sibling
       crds files); in delete, assign `srv.Providers` after a successful build.
-- [ ] `adopt.Adopt` never calls `bp.Validate()` (nor do cmd/cf/adopt.go or
+- [x] `adopt.Adopt` never calls `bp.Validate()` (nor do cmd/cf/adopt.go or
       the MCP tool) — `cf adopt` can write a blueprint `cf gen` refuses. Its
       `splitYAML` also swallows unmarshal errors with `continue`, so a
       malformed Composition reports "no Composition document found".
-- [ ] `cf package` / `GET /api/package` select output docs by a `"xrds/"` /
+- [x] `cf package` / `GET /api/package` select output docs by a `"xrds/"` /
       `"compositions/"` string prefix against `filepath.Join` paths — zero
       docs on Windows (cmd/cf/package.go:65, internal/api/package.go:44).
-- [ ] Kubeconfig sniff in internal/api/cluster.go:48 tests the first byte for
+- [x] Kubeconfig sniff in internal/api/cluster.go:48 tests the first byte for
       `'a'` twice, `{`/`k` arbitrarily, and overwrites the FromKubeconfig
       error with the NewClient fallback's. Replace with a YAML/JSON sniff and
       keep both errors.
-- [ ] `syncBlueprintSourcesLocked` (internal/api/blueprint.go:667-685) makes
+- [x] `syncBlueprintSourcesLocked` (internal/api/blueprint.go:667-685) makes
       the lockfile step best-effort and adds an already-cached ref to
       srv.Providers without pinning it — the exact "cached but unpinned"
       state cmd/cf/provider.go's comment forbids. Make it hard-fail like
@@ -278,11 +278,11 @@ clean, Playwright 115 passed / 1 skipped.
 - [ ] cmd/cf/options.go:35-106 still builds the same providers + crds +
       cluster + native union by hand — have it call the api package's
       rebuild (export a `BuildIndex(store, providers, blueprint, dir)`).
-- [ ] Six handlers in internal/api/blueprint.go (198, 285, 360, 417, 466,
+- [x] Six handlers in internal/api/blueprint.go (198, 285, 360, 417, 466,
       514) repeat decode → lock → load → edit → classify → persist → 200;
       the two rename handlers are line-identical. Add
       `srv.mutate(w, r, func(*Blueprint) (int, error))`.
-- [ ] internal/api/blueprint.go:570-617 re-implements four unexported scans
+- [x] internal/api/blueprint.go:570-617 re-implements four unexported scans
       from internal/blueprint/edit.go (statusReferencingResources,
       anyStatusFrom, referencingResources, anyFrom). Export them, or return
       a typed StillReferencedError so the API classifies 409 without

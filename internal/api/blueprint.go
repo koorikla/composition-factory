@@ -189,26 +189,10 @@ type addParameterRequest struct {
 	Parameter blueprint.Parameter `json:"parameter"`
 }
 
-// handleAddParameter serves POST /api/blueprint/parameters: declare a new
-// XRD parameter.
-//
-// Status classification does not string-match AddParameter's error text —
-// it instead checks, BEFORE calling AddParameter, whether the name was
-// already declared. AddParameter's own first action is exactly that same
-// check (see internal/blueprint/edit.go), and it leaves the receiver fully
-// unchanged on any failure, so "the name existed going in" and "AddParameter
-// failed because it was a duplicate" are one and the same fact, checkable
-// from outside the edit layer without depending on the wording of its error.
-func (srv *server) handleAddParameter(w http.ResponseWriter, r *http.Request) {
-	var req addParameterRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// load -> edit -> persist has to be atomic against the other mutating
-	// handlers, or two concurrent edits both start from the same document
-	// and the second write silently discards the first. See server.mu.
+// mutate loads the blueprint under lock, executes fn to perform the edit,
+// writes an error response if fn returns an error, persists the modified blueprint,
+// and responds with 200 OK and the updated blueprint.
+func (srv *server) mutate(w http.ResponseWriter, r *http.Request, fn func(*blueprint.Blueprint) (int, error)) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
@@ -217,12 +201,7 @@ func (srv *server) handleAddParameter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, existed := b.Spec.XRD.Parameters[req.Name]
-	if err := b.AddParameter(req.Name, req.Parameter); err != nil {
-		status := http.StatusBadRequest
-		if existed {
-			status = http.StatusConflict
-		}
+	if status, err := fn(b); err != nil {
 		writeJSONError(w, status, err.Error())
 		return
 	}
@@ -231,6 +210,28 @@ func (srv *server) handleAddParameter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, b)
+}
+
+// handleAddParameter serves POST /api/blueprint/parameters: declare a new
+// XRD parameter.
+func (srv *server) handleAddParameter(w http.ResponseWriter, r *http.Request) {
+	var req addParameterRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	srv.mutate(w, r, func(b *blueprint.Blueprint) (int, error) {
+		_, existed := b.Spec.XRD.Parameters[req.Name]
+		if err := b.AddParameter(req.Name, req.Parameter); err != nil {
+			status := http.StatusBadRequest
+			if existed {
+				status = http.StatusConflict
+			}
+			return status, err
+		}
+		return http.StatusOK, nil
+	})
 }
 
 // setParameterRequest is the PUT /api/blueprint/parameters/{name} body. The
@@ -266,26 +267,6 @@ var parameterKeys = []struct {
 // existing parameter's declaration in full (SetParameter is replace-only,
 // not a merge/patch). Unknown name -> 404, matching this API's general
 // unknown-name convention.
-//
-// Fix round 2 (Important): replace-only was silently destructive at the HTTP
-// boundary. blueprint.Parameter carries no omitempty and JSON has no notion
-// of an absent field on decode, so `PUT {"parameter":{"type":"string"}}`
-// against a required parameter with an enum decoded to Required:false,
-// Enum:nil and persisted that — a 200, and the enum and the required flag
-// gone, with nothing in the request or the response indicating a loss. A
-// caller sending what it believed was a partial update got a destructive one.
-//
-// The fix keeps replace-only semantics — a merge/patch would be a second,
-// divergent edit model over the same route — but makes the destruction
-// impossible to trigger by accident: a body that omits a key which currently
-// holds a value is refused with a 400 naming exactly those keys. Clearing a
-// value is still perfectly possible, it just has to be said out loud
-// (`"enum": null`, `"required": false`), which is the whole difference
-// between an edit and an accident.
-//
-// POST /api/blueprint/parameters deliberately does NOT get the same rule:
-// it declares a brand-new parameter, so an omitted key has no existing value
-// behind it to discard — omission there means "unset", unambiguously.
 func (srv *server) handleSetParameter(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
@@ -300,43 +281,25 @@ func (srv *server) handleSetParameter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// load -> edit -> persist has to be atomic against the other mutating
-	// handlers, or two concurrent edits both start from the same document
-	// and the second write silently discards the first. See server.mu.
-	srv.mu.Lock()
-	defer srv.mu.Unlock()
-
-	b, ok := srv.loadBlueprint(w)
-	if !ok {
-		return
-	}
-
-	// Only meaningful for a parameter that already exists; for an unknown
-	// name there is nothing to discard, and SetParameter's own failure below
-	// is reported as the 404 it is.
-	existing, existed := b.Spec.XRD.Parameters[name]
-	if dropped := silentlyDropped(existing, present); existed && len(dropped) > 0 {
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf(
-			"refusing a partial update of parameter %q: PUT replaces the whole parameter, so omitting "+
-				"%s would silently discard the value each of them currently holds. Send those keys "+
-				"explicitly — their zero values (false, null, \"\") are how you clear one.",
-			name, strings.Join(dropped, ", ")))
-		return
-	}
-
-	if err := b.SetParameter(name, param); err != nil {
-		status := http.StatusBadRequest
-		if !existed {
-			status = http.StatusNotFound
+	srv.mutate(w, r, func(b *blueprint.Blueprint) (int, error) {
+		existing, existed := b.Spec.XRD.Parameters[name]
+		if dropped := silentlyDropped(existing, present); existed && len(dropped) > 0 {
+			return http.StatusBadRequest, fmt.Errorf(
+				"refusing a partial update of parameter %q: PUT replaces the whole parameter, so omitting "+
+					"%s would silently discard the value each of them currently holds. Send those keys "+
+					"explicitly — their zero values (false, null, \"\") are how you clear one.",
+				name, strings.Join(dropped, ", "))
 		}
-		writeJSONError(w, status, err.Error())
-		return
-	}
 
-	if !srv.persistBlueprint(w, b) {
-		return
-	}
-	writeJSON(w, http.StatusOK, b)
+		if err := b.SetParameter(name, param); err != nil {
+			status := http.StatusBadRequest
+			if !existed {
+				status = http.StatusNotFound
+			}
+			return status, err
+		}
+		return http.StatusOK, nil
+	})
 }
 
 // renameParameterRequest is the POST /api/blueprint/parameters/{name}/rename
@@ -347,20 +310,6 @@ type renameParameterRequest struct {
 
 // handleRenameParameter serves POST /api/blueprint/parameters/{name}/rename:
 // rename a parameter and rewrite every resource field that references it.
-//
-// to == from succeeds as a no-op — RenameParameter already handles that (see
-// internal/blueprint/edit.go's doc comment: a blur-submit UI routinely
-// resubmits an unchanged name), so it is deliberately NOT special-cased
-// here. When to == from, RenameParameter returns a nil error and this
-// handler's error-classification branch below never runs.
-//
-// As with handleAddParameter, status classification reads the blueprint's
-// state from before the call rather than the error text: RenameParameter
-// checks "from declared" before "to == from" before "to already declared"
-// before validating, in that order and unconditionally on any prior check's
-// failure, so fromExists and toCollides (captured before the call, since a
-// failed call leaves the receiver untouched) reproduce the same branch the
-// edit layer took.
 func (srv *server) handleRenameParameter(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
@@ -370,87 +319,44 @@ func (srv *server) handleRenameParameter(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// load -> edit -> persist has to be atomic against the other mutating
-	// handlers, or two concurrent edits both start from the same document
-	// and the second write silently discards the first. See server.mu.
-	srv.mu.Lock()
-	defer srv.mu.Unlock()
+	srv.mutate(w, r, func(b *blueprint.Blueprint) (int, error) {
+		_, fromExists := b.Spec.XRD.Parameters[name]
+		_, toCollides := b.Spec.XRD.Parameters[req.To]
 
-	b, ok := srv.loadBlueprint(w)
-	if !ok {
-		return
-	}
-
-	_, fromExists := b.Spec.XRD.Parameters[name]
-	_, toCollides := b.Spec.XRD.Parameters[req.To]
-
-	if err := b.RenameParameter(name, req.To); err != nil {
-		switch {
-		case !fromExists:
-			writeJSONError(w, http.StatusNotFound, err.Error())
-		case toCollides:
-			writeJSONError(w, http.StatusConflict, err.Error())
-		default:
-			writeJSONError(w, http.StatusBadRequest, err.Error())
+		if err := b.RenameParameter(name, req.To); err != nil {
+			switch {
+			case !fromExists:
+				return http.StatusNotFound, err
+			case toCollides:
+				return http.StatusConflict, err
+			default:
+				return http.StatusBadRequest, err
+			}
 		}
-		return
-	}
-
-	if !srv.persistBlueprint(w, b) {
-		return
-	}
-	writeJSON(w, http.StatusOK, b)
+		return http.StatusOK, nil
+	})
 }
 
 // handleDeleteParameter serves DELETE /api/blueprint/parameters/{name}.
-//
-// DeleteParameter's own "still referenced" check lives on
-// *blueprint.Blueprint as an unexported method (referencingResources), so it
-// cannot be called from this package to classify the failure the way the
-// other three handlers do. referencingResources below is a small,
-// deliberate duplicate of that same read-only scan over exported fields
-// (Resource.Fields, Field.From) — not a reimplementation of any generation
-// or validation logic, just the presence check this HTTP layer needs to
-// choose 409 vs 400 without parsing DeleteParameter's error text. It cannot
-// be replaced by an "existed" check alone the way Add/Set/Rename's
-// classification is: deleting providerName from a Namespaced XRD is
-// existed==true, refs==0 (nothing sets it via a field's `from:`) and still
-// fails, via Validate rejecting the XRD afterwards — a genuine 400, not a
-// 409 — so "still referenced" has to be established independently of
-// "existed" and independently of "the delete failed".
 func (srv *server) handleDeleteParameter(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
-	// load -> edit -> persist has to be atomic against the other mutating
-	// handlers, or two concurrent edits both start from the same document
-	// and the second write silently discards the first. See server.mu.
-	srv.mu.Lock()
-	defer srv.mu.Unlock()
+	srv.mutate(w, r, func(b *blueprint.Blueprint) (int, error) {
+		_, existed := b.Spec.XRD.Parameters[name]
+		refs := b.ReferencingResources(name)
 
-	b, ok := srv.loadBlueprint(w)
-	if !ok {
-		return
-	}
-
-	_, existed := b.Spec.XRD.Parameters[name]
-	refs := referencingResources(b, name)
-
-	if err := b.DeleteParameter(name); err != nil {
-		switch {
-		case !existed:
-			writeJSONError(w, http.StatusNotFound, err.Error())
-		case len(refs) > 0:
-			writeJSONError(w, http.StatusConflict, err.Error())
-		default:
-			writeJSONError(w, http.StatusBadRequest, err.Error())
+		if err := b.DeleteParameter(name); err != nil {
+			switch {
+			case !existed:
+				return http.StatusNotFound, err
+			case len(refs) > 0:
+				return http.StatusConflict, err
+			default:
+				return http.StatusBadRequest, err
+			}
 		}
-		return
-	}
-
-	if !srv.persistBlueprint(w, b) {
-		return
-	}
-	writeJSON(w, http.StatusOK, b)
+		return http.StatusOK, nil
+	})
 }
 
 // renameResourceRequest is the POST /api/blueprint/resources/{name}/rename
@@ -461,12 +367,7 @@ type renameResourceRequest struct {
 
 // handleRenameResource serves POST /api/blueprint/resources/{name}/rename:
 // rename a composed resource and rewrite every cross-resource status
-// reference (resources.<name>.status.<path>) that points at it. The status
-// classification mirrors handleRenameParameter exactly, and for the same
-// reason: RenameResource checks "from declared" before "to == from" before
-// "to already declared" before validating, and a failed call leaves the
-// receiver untouched, so state captured before the call reproduces the
-// branch the edit layer took without parsing its error text.
+// reference (resources.<name>.status.<path>) that points at it.
 func (srv *server) handleRenameResource(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
@@ -476,162 +377,44 @@ func (srv *server) handleRenameResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// load -> edit -> persist has to be atomic against the other mutating
-	// handlers, or two concurrent edits both start from the same document
-	// and the second write silently discards the first. See server.mu.
-	srv.mu.Lock()
-	defer srv.mu.Unlock()
+	srv.mutate(w, r, func(b *blueprint.Blueprint) (int, error) {
+		fromExists := b.ResourceNamed(name) != nil
+		toCollides := b.ResourceNamed(req.To) != nil
 
-	b, ok := srv.loadBlueprint(w)
-	if !ok {
-		return
-	}
-
-	fromExists := resourceDeclared(b, name)
-	toCollides := resourceDeclared(b, req.To)
-
-	if err := b.RenameResource(name, req.To); err != nil {
-		switch {
-		case !fromExists:
-			writeJSONError(w, http.StatusNotFound, err.Error())
-		case toCollides:
-			writeJSONError(w, http.StatusConflict, err.Error())
-		default:
-			writeJSONError(w, http.StatusBadRequest, err.Error())
+		if err := b.RenameResource(name, req.To); err != nil {
+			switch {
+			case !fromExists:
+				return http.StatusNotFound, err
+			case toCollides:
+				return http.StatusConflict, err
+			default:
+				return http.StatusBadRequest, err
+			}
 		}
-		return
-	}
-
-	if !srv.persistBlueprint(w, b) {
-		return
-	}
-	writeJSON(w, http.StatusOK, b)
+		return http.StatusOK, nil
+	})
 }
 
 // handleDeleteResource serves DELETE /api/blueprint/resources/{name}.
-//
-// Like handleDeleteParameter, the "still referenced" check is re-run here
-// over exported data (statusReferencingResources below) so this HTTP layer
-// can choose 409 vs 400 without parsing DeleteResource's error text: 404 for
-// an unknown name, 409 when another resource still wires a field from this
-// one's status, 400 for anything else Validate refuses.
 func (srv *server) handleDeleteResource(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
-	// load -> edit -> persist has to be atomic against the other mutating
-	// handlers, or two concurrent edits both start from the same document
-	// and the second write silently discards the first. See server.mu.
-	srv.mu.Lock()
-	defer srv.mu.Unlock()
+	srv.mutate(w, r, func(b *blueprint.Blueprint) (int, error) {
+		existed := b.ResourceNamed(name) != nil
+		refs := b.StatusReferencingResources(name)
 
-	b, ok := srv.loadBlueprint(w)
-	if !ok {
-		return
-	}
-
-	existed := resourceDeclared(b, name)
-	refs := statusReferencingResources(b, name)
-
-	if err := b.DeleteResource(name); err != nil {
-		switch {
-		case !existed:
-			writeJSONError(w, http.StatusNotFound, err.Error())
-		case len(refs) > 0:
-			writeJSONError(w, http.StatusConflict, err.Error())
-		default:
-			writeJSONError(w, http.StatusBadRequest, err.Error())
+		if err := b.DeleteResource(name); err != nil {
+			switch {
+			case !existed:
+				return http.StatusNotFound, err
+			case len(refs) > 0:
+				return http.StatusConflict, err
+			default:
+				return http.StatusBadRequest, err
+			}
 		}
-		return
-	}
-
-	if !srv.persistBlueprint(w, b) {
-		return
-	}
-	writeJSON(w, http.StatusOK, b)
-}
-
-// resourceDeclared reports whether a composed resource with this name exists.
-func resourceDeclared(b *blueprint.Blueprint, name string) bool {
-	for _, res := range b.Spec.Resources {
-		if res.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-// statusReferencingResources returns the names of every resource that
-// references resources.<name>.status.<...> — through a field's or an
-// annotation's From, or through its own forEach loop bound — in resource
-// order. It mirrors blueprint.Blueprint's unexported
-// statusReferencingResources (see internal/blueprint/edit.go) exactly, over
-// the same exported Resource/Field data — the same one-check duplicate
-// referencingResources below is, for the same 409-classification reason.
-func statusReferencingResources(b *blueprint.Blueprint, name string) []string {
-	var refs []string
-	for _, res := range b.Spec.Resources {
-		if target, _, ok := blueprint.StatusRef(res.ForEach); ok && target == name {
-			refs = append(refs, res.Name)
-			continue
-		}
-		if anyStatusFrom(res.Fields, name) || anyStatusFrom(res.Annotations, name) {
-			refs = append(refs, res.Name)
-		}
-	}
-	return refs
-}
-
-// anyStatusFrom reports whether any entry in fields wires from resource
-// name's status.
-func anyStatusFrom(fields map[string]blueprint.Field, name string) bool {
-	for _, f := range fields {
-		if target, _, ok := blueprint.StatusRef(f.From); ok && target == name {
-			return true
-		}
-	}
-	return false
-}
-
-// referencingResources returns the names of every resource that references
-// params.<name> — through a field's From, an envelope entry's From, an
-// annotation entry's From, its own ForEach loop bound, or its When condition
-// — in resource order. It mirrors blueprint.Blueprint's unexported
-// referencingResources (see internal/blueprint/edit.go) exactly, over the
-// same exported Resource/Field data — see handleDeleteParameter's doc
-// comment for why this HTTP layer needs its own copy of this one check.
-func referencingResources(b *blueprint.Blueprint, name string) []string {
-	want := "params." + name
-	var refs []string
-	for _, res := range b.Spec.Resources {
-		if res.ForEach == want || whenReferences(res.When, name) ||
-			anyFrom(res.Fields, want) || anyFrom(res.Envelope, want) || anyFrom(res.Annotations, want) {
-			refs = append(refs, res.Name)
-		}
-	}
-	return refs
-}
-
-// anyFrom reports whether any entry in fields wires from want — exactly, or
-// through a member reference below it (want == "params.obj" matches
-// "params.obj.member"), mirroring the edit layer's own anyFrom.
-func anyFrom(fields map[string]blueprint.Field, want string) bool {
-	for _, f := range fields {
-		if f.From == want || strings.HasPrefix(f.From, want+".") {
-			return true
-		}
-	}
-	return false
-}
-
-// whenReferences reports whether a when expression references params.<name>.
-// Unparseable (never the case on a validated document) counts as no
-// reference, keeping the scan total.
-func whenReferences(when, name string) bool {
-	if when == "" {
-		return false
-	}
-	param, _, _, err := blueprint.ParseWhen(when)
-	return err == nil && param == name
+		return http.StatusOK, nil
+	})
 }
 
 // syncBlueprintSourcesLocked ensures all sources declared in b.Spec.Sources
@@ -663,8 +446,22 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 	}
 
 	for _, ref := range newProviders {
-		// If already in store cache, simply record it in srv.Providers
+		// If already in store cache, ensure it is pinned in lockfile and record in srv.Providers
 		if _, err := srv.Store.Load(ref); err == nil {
+			if srv.Lock != "" {
+				digest, err := srv.Store.LoadDigest(ref)
+				if err != nil {
+					return fmt.Errorf("load digest %s: %w", ref, err)
+				}
+				l, err := cache.ReadLock(srv.Lock)
+				if err != nil {
+					return fmt.Errorf("read lock: %w", err)
+				}
+				l.Set(ref, digest)
+				if err := l.Write(srv.Lock); err != nil {
+					return fmt.Errorf("write lock: %w", err)
+				}
+			}
 			srv.Providers = append(srv.Providers, ref)
 			continue
 		}
@@ -678,9 +475,13 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 			return fmt.Errorf("parse %s: %w", ref, err)
 		}
 		if srv.Lock != "" {
-			if l, err := cache.ReadLock(srv.Lock); err == nil {
-				l.Set(ref, pkg.Digest)
-				_ = l.Write(srv.Lock)
+			l, err := cache.ReadLock(srv.Lock)
+			if err != nil {
+				return fmt.Errorf("read lock: %w", err)
+			}
+			l.Set(ref, pkg.Digest)
+			if err := l.Write(srv.Lock); err != nil {
+				return fmt.Errorf("write lock: %w", err)
 			}
 		}
 		if err := srv.Store.Save(pkg, crds); err != nil {

@@ -288,8 +288,10 @@ func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) 
 			remaining = append(remaining, p)
 		}
 	}
+	oldProviders := srv.Providers
 	srv.Providers = remaining
 	if err := srv.rebuildIndexLocked(); err != nil {
+		srv.Providers = oldProviders
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

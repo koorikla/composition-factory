@@ -1009,13 +1009,7 @@ func (b *Blueprint) validateStatusRef(r Resource, what, from string) error {
 		return fmt.Errorf("resource %q %s: references its own status -- a resource cannot be "+
 			"wired to itself; the value it would read is the one its own document produces", r.Name, what)
 	}
-	var decl *Resource
-	for i := range b.Spec.Resources {
-		if b.Spec.Resources[i].Name == target {
-			decl = &b.Spec.Resources[i]
-			break
-		}
-	}
+	decl := b.ResourceNamed(target)
 	if decl == nil {
 		return fmt.Errorf("resource %q %s: references unknown resource %q", r.Name, what, target)
 	}
@@ -1103,13 +1097,7 @@ func (b *Blueprint) validateForEachStatusRef(r Resource) error {
 		return fmt.Errorf("resource %q: forEach references its own status -- a resource cannot fan "+
 			"out over a count only its own instances could report; reference another resource", r.Name)
 	}
-	var decl *Resource
-	for i := range b.Spec.Resources {
-		if b.Spec.Resources[i].Name == target {
-			decl = &b.Spec.Resources[i]
-			break
-		}
-	}
+	decl := b.ResourceNamed(target)
 	if decl == nil {
 		return fmt.Errorf("resource %q: forEach references unknown resource %q", r.Name, target)
 	}

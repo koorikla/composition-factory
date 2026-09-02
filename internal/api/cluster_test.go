@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/cache"
@@ -156,5 +157,38 @@ users:
 	}
 	if !found {
 		t.Errorf("expected Issuer from cluster in /api/kinds, got: %+v", kindsResp.Kinds)
+	}
+}
+
+func TestConnectClusterKubeconfigSniff(t *testing.T) {
+	// Test that invalid YAML kubeconfig returns FromKubeconfig error and does not mask it as a file path
+	tempDir := t.TempDir()
+	bpPath := filepath.Join(tempDir, "blueprint.yaml")
+	_ = os.WriteFile(bpPath, []byte("spec:\n  resources: []\n"), 0o644)
+	store := cache.New(filepath.Join(tempDir, "cache"))
+	idx, _ := index.Build(map[string][]schema.CRD{})
+
+	h, err := New(Options{
+		Blueprint: bpPath,
+		OutDir:    tempDir,
+		Lock:      filepath.Join(tempDir, ".cf.lock"),
+		Store:     store,
+		Index:     idx,
+	})
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	// 1. Send invalid YAML multi-line string
+	body := "{\"kubeconfig\":\"apiVersion: v1\\nclusters:\\n  - [broken\"}"
+	req := httptest.NewRequest(http.MethodPost, "/api/cluster/connect", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/cluster/connect code = %d, want 400", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "parse kubeconfig") {
+		t.Errorf("expected 'parse kubeconfig' error message, got: %s", rr.Body.String())
 	}
 }

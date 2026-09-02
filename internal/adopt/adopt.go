@@ -143,6 +143,10 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, error) {
 		return bp.Spec.Resources[i].Name < bp.Spec.Resources[j].Name
 	})
 
+	if err := bp.Validate(); err != nil {
+		return nil, fmt.Errorf("validate adopted blueprint: %w", err)
+	}
+
 	return bp, nil
 }
 
@@ -163,7 +167,7 @@ func splitYAML(data []byte) ([]map[string]any, error) {
 
 		var doc map[string]any
 		if err := yaml.Unmarshal(trimmed, &doc); err != nil {
-			continue
+			return nil, fmt.Errorf("unmarshal document: %w", err)
 		}
 		if len(doc) > 0 {
 			docs = append(docs, doc)
@@ -306,6 +310,13 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 					pkg = p
 				}
 			}
+			if pkg == "" {
+				if fnName == "function-auto-ready" {
+					pkg = "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0"
+				} else {
+					pkg = "xpkg.crossplane.io/crossplane-contrib/" + fnName + ":v0.1.0"
+				}
+			}
 			otherSteps = append(otherSteps, blueprint.PipelineStep{
 				Name:        stepName,
 				FunctionRef: fnName,
@@ -353,7 +364,10 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 	})
 
 	// 4. Parse YAML documents embedded in masked template
-	docs, _ := splitYAML([]byte(maskedTmpl))
+	docs, err := splitYAML([]byte(maskedTmpl))
+	if err != nil {
+		return fmt.Errorf("split masked template yaml: %w", err)
+	}
 	for _, doc := range docs {
 		res, err := resourceFromMap(doc, defaultProvider, placeholderTable)
 		if err != nil || res == nil {

@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -554,5 +555,96 @@ func TestHandlerJSONErrorsPassThroughUnnormalized(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "specific handler-authored message") {
 		t.Errorf("body = %q, want the handler's own message preserved verbatim", rec.Body.String())
+	}
+}
+
+func TestRebuildIndexLockedReturnsErrorOnMissingProvider(t *testing.T) {
+	tempDir := t.TempDir()
+	store := cache.New(filepath.Join(tempDir, "cache"))
+	srv := &server{
+		Options: Options{
+			Store:     store,
+			Providers: []string{"example.org/missing:v1"},
+		},
+	}
+	err := srv.rebuildIndexLocked()
+	if err == nil {
+		t.Fatalf("expected rebuildIndexLocked to fail for missing provider, got nil")
+	}
+	if !strings.Contains(err.Error(), "load provider schemas") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestRebuildIndexLockedReturnsErrorOnInvalidBlueprintYAML(t *testing.T) {
+	tempDir := t.TempDir()
+	bpPath := filepath.Join(tempDir, "blueprint.yaml")
+	_ = os.WriteFile(bpPath, []byte("invalid: yaml: [broken"), 0o644)
+	store := cache.New(filepath.Join(tempDir, "cache"))
+
+	srv := &server{
+		Options: Options{
+			Store:     store,
+			Blueprint: bpPath,
+		},
+	}
+	err := srv.rebuildIndexLocked()
+	if err == nil {
+		t.Fatalf("expected rebuildIndexLocked to fail for invalid blueprint yaml, got nil")
+	}
+	if !strings.Contains(err.Error(), "parse blueprint") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestSyncBlueprintSourcesLockedPinsCachedProvider(t *testing.T) {
+	tempDir := t.TempDir()
+	store := cache.New(filepath.Join(tempDir, "cache"))
+	lockPath := filepath.Join(tempDir, ".cf.lock")
+
+	// Pre-populate store with a provider
+	pkg := &xpkg.Package{
+		Ref:    "example.org/cached-provider:v1",
+		Digest: "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+	}
+	crds := []schema.CRD{}
+	if err := store.Save(pkg, crds); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	bp := &blueprint.Blueprint{
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{
+				{Provider: "example.org/cached-provider:v1"},
+			},
+		},
+	}
+
+	srv := &server{
+		Options: Options{
+			Store: store,
+			Lock:  lockPath,
+		},
+	}
+
+	// syncBlueprintSourcesLocked should pin the cached provider to lockfile
+	err := srv.syncBlueprintSourcesLocked(context.Background(), bp)
+	if err != nil {
+		t.Fatalf("syncBlueprintSourcesLocked failed: %v", err)
+	}
+
+	l, err := cache.ReadLock(lockPath)
+	if err != nil {
+		t.Fatalf("ReadLock failed: %v", err)
+	}
+	found := false
+	for _, p := range l.Providers {
+		if p.Ref == "example.org/cached-provider:v1" && p.Digest == pkg.Digest {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("lock entry not found or mismatch in: %+v", l.Providers)
 	}
 }

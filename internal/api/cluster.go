@@ -3,12 +3,9 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
-	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cluster"
-	"github.com/koorikla/compositionfactory/internal/index"
-	"github.com/koorikla/compositionfactory/internal/schema"
-	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
 // handleGetCluster serves GET /api/cluster: returns current cluster connection info.
@@ -35,6 +32,28 @@ type connectClusterRequest struct {
 	Context    string `json:"context,omitempty"`
 }
 
+func isKubeconfigYAMLOrJSON(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return false
+	}
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "---") {
+		return true
+	}
+	if strings.Contains(trimmed, "\n") {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "apiVersion:") ||
+		strings.HasPrefix(trimmed, "kind:") ||
+		strings.HasPrefix(trimmed, "clusters:") ||
+		strings.HasPrefix(trimmed, "contexts:") ||
+		strings.HasPrefix(trimmed, "current-context:") ||
+		strings.HasPrefix(trimmed, "users:") {
+		return true
+	}
+	return false
+}
+
 // handleConnectCluster serves POST /api/cluster/connect.
 func (srv *server) handleConnectCluster(w http.ResponseWriter, r *http.Request) {
 	var req connectClusterRequest
@@ -45,11 +64,9 @@ func (srv *server) handleConnectCluster(w http.ResponseWriter, r *http.Request) 
 
 	var cl *cluster.Client
 	var err error
-	if len(req.Kubeconfig) > 0 && req.Kubeconfig[0] == 'a' || req.Kubeconfig != "" && (req.Kubeconfig[0] == '{' || req.Kubeconfig[0] == 'a' || req.Kubeconfig[0] == 'k') {
-		// Could be YAML string
+	if isKubeconfigYAMLOrJSON(req.Kubeconfig) {
 		cl, err = cluster.FromKubeconfig([]byte(req.Kubeconfig), req.Context)
-	}
-	if cl == nil {
+	} else {
 		cl, err = cluster.NewClient(req.Kubeconfig, req.Context)
 	}
 	if err != nil {
@@ -101,27 +118,10 @@ func (srv *server) handleSyncCluster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Rebuild index
-	byProvider := make(map[string][]schema.CRD, len(srv.Providers)+1)
-	for _, ref := range srv.Providers {
-		c, err := srv.Store.Load(ref)
-		if err != nil {
-			continue
-		}
-		byProvider[ref] = c
-	}
-
-	native, err := k8s.Kinds()
-	if err == nil {
-		byProvider[blueprint.NativeProvider] = native
-	}
-
-	newIdx, err := index.Build(byProvider)
-	if err != nil {
+	if err := srv.rebuildIndexLocked(); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "failed to build index: "+err.Error())
 		return
 	}
-
-	srv.Index = newIdx
 
 	writeJSON(w, http.StatusOK, cluster.ClusterInfo{
 		Connected: true,

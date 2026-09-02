@@ -1,6 +1,7 @@
 package adopt
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
@@ -287,5 +288,57 @@ spec:
 	ann := sa.Annotations["eks.amazonaws.com/role-arn"]
 	if ann.From != "resources.app-role.status.arn" {
 		t.Errorf("annotation wire = %+v, want From: resources.app-role.status.arn", ann)
+	}
+}
+
+func TestAdoptMalformedYAMLReportsUnmarshalError(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: broken
+spec:
+  [unclosed yaml
+`
+	_, err := Adopt([]byte(manifest), Options{})
+	if err == nil {
+		t.Fatalf("expected error for malformed YAML, got nil")
+	}
+	if !strings.Contains(err.Error(), "unmarshal document") && !strings.Contains(err.Error(), "yaml") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestAdoptInvalidBlueprintFailsValidation(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: bad_name_with_underscores
+`
+	_, err := Adopt([]byte(manifest), Options{})
+	if err == nil {
+		t.Fatalf("expected validation error for invalid resource name, got nil")
+	}
+	if !strings.Contains(err.Error(), "validate adopted blueprint") {
+		t.Errorf("expected validate error prefix, got: %v", err)
 	}
 }
