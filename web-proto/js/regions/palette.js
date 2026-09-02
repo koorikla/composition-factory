@@ -60,6 +60,7 @@ export function init(rootEl, deps) {
   // per-provider kind visibility, persisted: { "<providerRef>": ["Kind",...] }
   // lists the HIDDEN kinds; a provider absent from the map hides nothing.
   let hiddenKinds = {};
+  let collapsedGroups = {};
   try { hiddenKinds = JSON.parse(localStorage.getItem("cf-hidden-kinds")) || {}; } catch (_) { /* fresh */ }
   function saveHidden() {
     try { localStorage.setItem("cf-hidden-kinds", JSON.stringify(hiddenKinds)); } catch (_) { /* private mode */ }
@@ -148,34 +149,46 @@ export function init(rootEl, deps) {
     const xrdScope = (doc && doc.spec && doc.spec.xrd && doc.spec.xrd.scope) || "Namespaced";
     const isNamespacedXRD = xrdScope !== "Cluster";
 
+    const q = (searchEl && searchEl.value || "").trim();
     let h = "";
     order.forEach(function (g) {
       const items = byGroup[g];
       items.sort(function (a, b) { return (a.kind || "").localeCompare(b.kind || ""); });
 
       const isClusterGroup = isNamespacedXRD && items.length > 0 && items.every(function (k) {
-        return k.scope === "Cluster" || k.namespaced === false;
+        return k.scope === "Cluster" || k.namespaced === false || (!/\.m\./.test(k.apiVersion || "") && !/\.m\./.test(k.group || "") && k.provider !== "k8s");
       });
       const clusterTag = isClusterGroup
         ? '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:rgba(255,255,255,0.06);color:var(--faint);border-radius:3px;margin-left:6px">cluster-scoped</span>'
         : "";
 
-      h += '<div class="grp"><span class="lbl">' + esc(g) + '</span>' + clusterTag + '<span class="n">' + items.length + "</span></div>";
-      items.forEach(function (k) {
-        const fam = famOf(k);
-        const kClusterTag = k.provider === "cluster"
-          ? '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:rgba(6,182,212,0.12);color:#06b6d4;border-radius:3px;margin-right:4px">cluster</span>'
-          : "";
-        h += '<div class="kind" draggable="true"' +
-          ' data-kind="' + esc(k.kind) + '"' +
-          ' data-av="' + esc(k.apiVersion) + '"' +
-          ' data-provider="' + esc(k.provider || "") + '"' +
-          ' data-fam="' + esc(fam) + '">' +
-          '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
-          '<span class="nm" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(k.kind) + '">' + esc(k.kind) + '</span>' +
-          kClusterTag +
-          '<span class="req">' + (k.required | 0) + " req</span></div>";
-      });
+      const isCollapsed = isClusterGroup && collapsedGroups[g] !== false && !q;
+      const arrow = isClusterGroup
+        ? '<span class="grp-toggle" style="font-size:9px;color:var(--faint);margin-right:4px;user-select:none">' + (isCollapsed ? '▶' : '▼') + '</span>'
+        : '';
+      const cursorStyle = isClusterGroup ? 'cursor:pointer;' : '';
+
+      h += '<div class="grp' + (isClusterGroup ? ' grp-cluster' : '') + '"' +
+        (isClusterGroup ? ' data-grp-toggle="' + esc(g) + '"' : '') +
+        ' style="' + cursorStyle + '">' + arrow + '<span class="lbl">' + esc(g) + '</span>' + clusterTag + '<span class="n">' + items.length + "</span></div>";
+
+      if (!isCollapsed) {
+        items.forEach(function (k) {
+          const fam = famOf(k);
+          const kClusterTag = k.provider === "cluster"
+            ? '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:rgba(6,182,212,0.12);color:#06b6d4;border-radius:3px;margin-right:4px">cluster</span>'
+            : "";
+          h += '<div class="kind" draggable="true"' +
+            ' data-kind="' + esc(k.kind) + '"' +
+            ' data-av="' + esc(k.apiVersion) + '"' +
+            ' data-provider="' + esc(k.provider || "") + '"' +
+            ' data-fam="' + esc(fam) + '">' +
+            '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
+            '<span class="nm" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(k.kind) + '">' + esc(k.kind) + '</span>' +
+            kClusterTag +
+            '<span class="req">' + (k.required | 0) + " req</span></div>";
+        });
+      }
     });
     return h;
   }
@@ -603,6 +616,15 @@ export function init(rootEl, deps) {
   });
 
   railEl.addEventListener("click", function (e) {
+    const grpToggle = e.target.closest("[data-grp-toggle]");
+    if (grpToggle) {
+      const g = grpToggle.getAttribute("data-grp-toggle");
+      if (g) {
+        collapsedGroups[g] = collapsedGroups[g] === false ? true : false;
+        drawRail();
+        return;
+      }
+    }
     if (e.target.id === "addCrdsBtn") {
       var fi = document.getElementById("addCrdsFile");
       if (fi) fi.click();

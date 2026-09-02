@@ -650,8 +650,8 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 		return fmt.Errorf("split masked template yaml: %w", err)
 	}
 	for _, doc := range docs {
-		res, err := resourceFromMap(doc, defaultProvider, placeholderTable, report, nameMapping)
-		if err != nil || res == nil {
+		res := resourceFromMap(doc, defaultProvider, placeholderTable, report, nameMapping)
+		if res == nil {
 			continue
 		}
 		bp.Spec.Resources = append(bp.Spec.Resources, *res)
@@ -672,8 +672,8 @@ func parseClassicComposition(resources []any, bp *blueprint.Blueprint, defaultPr
 			continue
 		}
 
-		res, err := resourceFromMap(base, defaultProvider, nil, report, nameMapping)
-		if err != nil || res == nil {
+		res := resourceFromMap(base, defaultProvider, nil, report, nameMapping)
+		if res == nil {
 			continue
 		}
 		if resName != "" {
@@ -792,10 +792,10 @@ func ensureParamDeclared(bp *blueprint.Blueprint, paramPath string) {
 	bp.Spec.XRD.Parameters[root] = rootParam
 }
 
-func resourceFromMap(m map[string]any, defaultProvider string, placeholders []string, report *LossReport, nameMapping map[string]string) (*blueprint.Resource, error) {
+func resourceFromMap(m map[string]any, defaultProvider string, placeholders []string, report *LossReport, nameMapping map[string]string) *blueprint.Resource {
 	kind, _ := m["kind"].(string)
 	if kind == "" {
-		return nil, nil
+		return nil
 	}
 	apiVersion, _ := m["apiVersion"].(string)
 
@@ -867,7 +867,7 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 		extractFields("", targetProps, res.Fields, placeholders, res.Name, report, nameMapping)
 	}
 
-	return res, nil
+	return res
 }
 
 func extractFields(prefix string, obj map[string]any, out map[string]blueprint.Field, placeholders []string, resName string, report *LossReport, nameMapping map[string]string) {

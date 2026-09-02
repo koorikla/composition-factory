@@ -577,14 +577,19 @@ export function init(rootEl, deps) {
       api.getVersion().then(function (r) {
         el.ver.textContent = r.version;
         el.ver.title = "compositionfactory build " + r.version;
-        if (el.engineSel && el.engineSel.options.length === 0 && Array.isArray(r.engines) && r.engines.length > 0) {
+        if (el.engineSel && Array.isArray(r.engines) && r.engines.length > 0) {
           var curDocEngine = (store.state.doc && store.state.doc.spec && store.state.doc.spec.emit && store.state.doc.spec.emit.engine) || "go-templating";
           el.engineSel.innerHTML = r.engines.map(function (eng) {
             return '<option value="' + esc(eng) + '">' + esc(eng) + '</option>';
           }).join("");
           el.engineSel.value = curDocEngine;
         }
-      }).catch(function () { el.ver.textContent = ""; });
+      }).catch(function () {
+        el.ver.textContent = "";
+        if (el.engineSel && el.engineSel.options.length === 0) {
+          el.engineSel.innerHTML = '<option value="go-templating">go-templating</option><option value="kcl">kcl</option><option value="python">python</option>';
+        }
+      });
     }
     var bp = el.tabs.querySelector('[data-t="bp"]');
     if (bp) bp.textContent = bpTabLabel(doc);

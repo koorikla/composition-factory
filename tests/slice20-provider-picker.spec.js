@@ -30,6 +30,7 @@ test('unchecking a kind hides it from KINDS and survives reload', async ({ page 
   const nsGroup = page.locator('#lrail')
   await expect(nsGroup.locator('.kind[data-kind="Queue"]').first()).toBeVisible()
   await expect(nsGroup.locator('.kind[data-kind="QueuePolicy"][data-av*=".m."]')).toHaveCount(0)
+  await page.click('#lrail [data-grp-toggle="sqs.aws.upbound.io"]')
   await expect(nsGroup.locator('.kind[data-kind="QueuePolicy"]:not([data-av*=".m."])').first()).toBeVisible() // cluster variant untouched
   await page.reload()
   await expect(page.locator('#lrail .kind[data-kind="Queue"]').first()).toBeVisible()

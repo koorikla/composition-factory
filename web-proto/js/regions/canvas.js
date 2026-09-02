@@ -625,6 +625,8 @@ function onWheel(e) {
 }
 
 function onPanDown(e) {
+  // Touch gestures are handled separately via touchstart/touchmove to avoid double-panning
+  if (e.pointerType === "touch") return;
   // drag on empty canvas ground pans the view
   if (e.button !== 0) return;
   if (e.target.closest(".node") || e.target.closest("button") || e.target.closest("svg path")) return;
