@@ -28,6 +28,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +39,11 @@ import (
 	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/index"
+	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
+	"github.com/koorikla/compositionfactory/internal/xpkg"
 	"sigs.k8s.io/yaml"
 )
 
@@ -630,6 +636,93 @@ func whenReferences(when, name string) bool {
 	return err == nil && param == name
 }
 
+// syncBlueprintSourcesLocked ensures all sources declared in b.Spec.Sources
+// are present in srv.Store and indexed in srv.Index.
+func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.Blueprint) error {
+	if srv.Store == nil || b == nil {
+		return nil
+	}
+	existing := make(map[string]bool, len(srv.Providers))
+	for _, p := range srv.Providers {
+		existing[p] = true
+	}
+	var newProviders []string
+	for _, s := range b.Spec.Sources {
+		if s.Provider != "" && s.Provider != blueprint.NativeProvider && !existing[s.Provider] {
+			newProviders = append(newProviders, s.Provider)
+			existing[s.Provider] = true
+		}
+	}
+	if len(newProviders) == 0 {
+		return nil
+	}
+
+	fetch := srv.fetch
+	if fetch == nil {
+		fetch = func(ref string) (*xpkg.Package, error) {
+			return xpkg.Fetch(ctx, ref)
+		}
+	}
+
+	for _, ref := range newProviders {
+		// If already in store cache, simply record it in srv.Providers
+		if _, err := srv.Store.Load(ref); err == nil {
+			srv.Providers = append(srv.Providers, ref)
+			continue
+		}
+		// Otherwise fetch from remote registry
+		pkg, err := fetch(ref)
+		if err != nil {
+			return fmt.Errorf("fetch %s: %w", ref, err)
+		}
+		crds, err := schema.ParseCRDs(pkg.Docs)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", ref, err)
+		}
+		if srv.Lock != "" {
+			if l, err := cache.ReadLock(srv.Lock); err == nil {
+				l.Set(ref, pkg.Digest)
+				_ = l.Write(srv.Lock)
+			}
+		}
+		if err := srv.Store.Save(pkg, crds); err != nil {
+			return fmt.Errorf("save %s: %w", ref, err)
+		}
+		srv.Providers = append(srv.Providers, ref)
+	}
+
+	// Rebuild index
+	byProvider := make(map[string][]schema.CRD, len(srv.Providers)+2)
+	for _, ref := range srv.Providers {
+		if crds, err := srv.Store.Load(ref); err == nil {
+			byProvider[ref] = crds
+		}
+	}
+	if srv.Blueprint != "" {
+		dir := filepath.Dir(srv.Blueprint)
+		for _, s := range b.Spec.Sources {
+			if s.CRDs != "" {
+				p := s.CRDs
+				if !filepath.IsAbs(p) {
+					p = filepath.Join(dir, p)
+				}
+				if data, err := os.ReadFile(p); err == nil {
+					if scanned, err := schema.ParseCRDManifest(data); err == nil {
+						byProvider[s.CRDs] = scanned
+					}
+				}
+			}
+		}
+	}
+	if native, err := k8s.Kinds(); err == nil {
+		byProvider[blueprint.NativeProvider] = native
+	}
+	if idx, err := index.Build(byProvider); err == nil {
+		srv.Index = idx
+	}
+	return nil
+}
+
 // persistBlueprint writes b to srv.Blueprint, deterministically and only if
 // the result would itself load back. On failure it writes the 500 response
 // itself and returns false, so callers can just `if !srv.persistBlueprint(w,
@@ -640,6 +733,7 @@ func (srv *server) persistBlueprint(w http.ResponseWriter, b *blueprint.Blueprin
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return false
 	}
+	_ = srv.syncBlueprintSourcesLocked(context.Background(), b)
 	return true
 }
 

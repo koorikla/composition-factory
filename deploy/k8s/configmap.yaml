@@ -112,3 +112,134 @@ data:
             automountServiceAccountToken: {from: params.automountToken}
           annotations:
             eks.amazonaws.com/role-arn: {from: resources.role.status.atProvider.arn}
+
+  rds.cf.yaml: |
+    apiVersion: factory.crossplane.io/v1alpha1
+    kind: Blueprint
+    metadata:
+      name: xpostgres
+    spec:
+      sources:
+        - provider: ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0
+      xrd:
+        group: database.sparky.ee
+        kind: XPostgresInstance
+        plural: xpostgresinstances
+        version: v1alpha1
+        scope: Namespaced
+        parameters:
+          providerName:
+            type: string
+            required: true
+            description: ProviderConfig reference to reconcile against.
+          region:
+            type: string
+            default: eu-north-1
+            description: AWS region where the database is provisioned.
+          dbName:
+            type: string
+            required: true
+            description: PostgreSQL database name.
+          instanceClass:
+            type: string
+            default: db.t4g.micro
+            description: RDS DB compute and memory capacity class.
+          allocatedStorage:
+            type: integer
+            default: "20"
+            description: Storage amount to allocate in gigabytes (GB).
+          multiAz:
+            type: boolean
+            default: "false"
+            description: Specifies if the RDS instance is a multi-AZ deployment.
+      resources:
+        - name: db-instance
+          kind: Instance
+          provider: ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0
+          envelope:
+            writeConnectionSecretToRef.name: {from: params.dbName}
+            writeConnectionSecretToRef.namespace: {value: "default"}
+          fields:
+            region: {from: params.region}
+            dbName: {from: params.dbName}
+            instanceClass: {from: params.instanceClass}
+            allocatedStorage: {from: params.allocatedStorage}
+            engine: {value: "postgres"}
+            engineVersion: {value: "15.4"}
+            multiAz: {from: params.multiAz}
+            skipFinalSnapshot: {value: "true"}
+
+  k8s-app.cf.yaml: |
+    apiVersion: factory.crossplane.io/v1alpha1
+    kind: Blueprint
+    metadata:
+      name: xapp
+    spec:
+      sources:
+        - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+        - provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+      xrd:
+        group: apps.sparky.ee
+        kind: XApp
+        plural: xapps
+        version: v1alpha1
+        scope: Namespaced
+        parameters:
+          providerName:
+            type: string
+            required: true
+            description: ProviderConfig for AWS resources.
+          oidcProviderArn:
+            type: string
+            required: true
+            description: EKS cluster OIDC provider ARN for IAM Role trust policy.
+          image:
+            type: string
+            default: ghcr.io/org/worker:v1.0.0
+            description: Container image for the application deployment.
+          replicas:
+            type: integer
+            default: "2"
+            description: Number of application pod replicas.
+          region:
+            type: string
+            default: eu-north-1
+            description: AWS region for SQS queue.
+      templates:
+        trust-policy: >-
+          '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ regexReplaceAll "^.*:oidc-provider/" .spec.oidcProviderArn "" }}:sub":"system:serviceaccount:{{ .xrMeta.namespace }}:{{ .xr }}"}}}]}'
+      resources:
+        - name: queue
+          kind: Queue
+          provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+          fields:
+            region: {from: params.region}
+        - name: role
+          kind: Role
+          provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+          fields:
+            description: {value: IAM role for app service account}
+            assumeRolePolicy: {template: trust-policy}
+        - name: sa
+          kind: ServiceAccount
+          provider: k8s
+          fields:
+            automountServiceAccountToken: {value: "true"}
+          annotations:
+            eks.amazonaws.com/role-arn: {from: resources.role.status.atProvider.arn}
+        - name: app-deploy
+          kind: Deployment
+          provider: k8s
+          fields:
+            spec.replicas: {from: params.replicas}
+            spec.selector.matchLabels: {raw: "{app: worker}"}
+            spec.template.metadata.labels: {raw: "{app: worker}"}
+            spec.template.spec.serviceAccountName: {value: sa}
+            spec.template.spec.containers[0].name: {value: worker}
+            spec.template.spec.containers[0].image: {from: params.image}
+        - name: app-svc
+          kind: Service
+          provider: k8s
+          fields:
+            spec.selector: {raw: "{app: worker}"}
+            spec.ports[0].port: {raw: "8080"}

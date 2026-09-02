@@ -3,8 +3,11 @@
 package blueprint
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -157,6 +160,50 @@ type Parameter struct {
 	Default     string               `json:"default"`
 	Description string               `json:"description"`
 	Properties  map[string]Parameter `json:"properties,omitempty"`
+}
+
+// UnmarshalJSON permits scalar values (booleans, numbers, strings) for Default.
+func (p *Parameter) UnmarshalJSON(data []byte) error {
+	type rawParam struct {
+		Type        string               `json:"type"`
+		Required    bool                 `json:"required"`
+		Enum        []string             `json:"enum"`
+		Default     any                  `json:"default"`
+		Description string               `json:"description"`
+		Properties  map[string]Parameter `json:"properties,omitempty"`
+	}
+	var raw rawParam
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&raw); err != nil {
+		return err
+	}
+	p.Type = raw.Type
+	p.Required = raw.Required
+	p.Enum = raw.Enum
+	p.Description = raw.Description
+	p.Properties = raw.Properties
+	if raw.Default != nil {
+		switch val := raw.Default.(type) {
+		case string:
+			p.Default = val
+		case bool:
+			if val {
+				p.Default = "true"
+			} else {
+				p.Default = "false"
+			}
+		case float64:
+			if val == float64(int64(val)) {
+				p.Default = strconv.FormatInt(int64(val), 10)
+			} else {
+				p.Default = strconv.FormatFloat(val, 'f', -1, 64)
+			}
+		default:
+			p.Default = fmt.Sprintf("%v", val)
+		}
+	}
+	return nil
 }
 
 // PipelineStep is one blueprint-declared Composition pipeline step, placed
@@ -337,6 +384,48 @@ type Field struct {
 	Value    string `json:"value"`
 	Raw      string `json:"raw"`
 	Template string `json:"template"`
+}
+
+// UnmarshalJSON permits scalar values (booleans, numbers, strings) for Value, From, Raw, Template.
+func (f *Field) UnmarshalJSON(data []byte) error {
+	type rawField struct {
+		From     any `json:"from"`
+		Value    any `json:"value"`
+		Raw      any `json:"raw"`
+		Template any `json:"template"`
+	}
+	var raw rawField
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&raw); err != nil {
+		return err
+	}
+	toString := func(v any) string {
+		if v == nil {
+			return ""
+		}
+		switch val := v.(type) {
+		case string:
+			return val
+		case bool:
+			if val {
+				return "true"
+			}
+			return "false"
+		case float64:
+			if val == float64(int64(val)) {
+				return strconv.FormatInt(int64(val), 10)
+			}
+			return strconv.FormatFloat(val, 'f', -1, 64)
+		default:
+			return fmt.Sprintf("%v", val)
+		}
+	}
+	f.From = toString(raw.From)
+	f.Value = toString(raw.Value)
+	f.Raw = toString(raw.Raw)
+	f.Template = toString(raw.Template)
+	return nil
 }
 
 // ParamRef splits a params.<name>[.<member>] reference into its parameter

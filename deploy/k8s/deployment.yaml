@@ -25,6 +25,8 @@ spec:
             - |
               cp /workspace/blueprints-config/* /workspace/blueprints/
               cf provider add ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0 --cache-dir /home/cf/.cache/compositionfactory
+              cf provider add ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0 --cache-dir /home/cf/.cache/compositionfactory
+              cf provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0 --cache-dir /home/cf/.cache/compositionfactory
           volumeMounts:
             - name: blueprints-config
               mountPath: /workspace/blueprints-config
