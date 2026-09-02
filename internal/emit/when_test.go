@@ -181,3 +181,19 @@ func TestWhenEmitIsDeterministic(t *testing.T) {
 		t.Error("two runs over the same blueprint produced different bytes")
 	}
 }
+
+// TestFieldLevelWhenRejectionHint tests that placing when: under fields: produces
+// an explicit hint that when: is a resource-level field.
+func TestFieldLevelWhenRejectionHint(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Resources[0].Fields["when"] = blueprint.Field{Value: "true"}
+
+	_, err := Composition(b, testCRDs(t))
+	if err == nil {
+		t.Fatal("Composition: expected error for field-level when, got nil")
+	}
+	wantSubstr := "when: is a resource-level field"
+	if !strings.Contains(err.Error(), wantSubstr) {
+		t.Errorf("error = %q, want substring %q", err.Error(), wantSubstr)
+	}
+}

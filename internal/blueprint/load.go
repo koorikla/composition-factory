@@ -1,16 +1,14 @@
 package blueprint
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode"
-
-	"sigs.k8s.io/yaml"
 )
 
 // validTypes are the parameter types M1 accepts.
@@ -353,8 +351,12 @@ func Load(path string) (*Blueprint, error) {
 // on a file, exposed for callers that hold the bytes themselves (the HTTP
 // import endpoint, tests).
 func Parse(body []byte) (*Blueprint, error) {
+	jsonBytes, err := yamlToJSON(body)
+	if err != nil {
+		return nil, fmt.Errorf("parse blueprint: %w", err)
+	}
 	var b Blueprint
-	if err := yaml.Unmarshal(body, &b); err != nil {
+	if err := json.Unmarshal(jsonBytes, &b); err != nil {
 		return nil, fmt.Errorf("parse blueprint: %w", err)
 	}
 	if err := b.Validate(); err != nil {
@@ -377,14 +379,15 @@ func ParseAny(body []byte) (*Blueprint, error) {
 	if perr == nil {
 		return b, nil
 	}
-	for _, doc := range splitDocs(body) {
+	for _, doc := range SplitDocs(body) {
 		var meta struct {
 			Kind     string `json:"kind"`
 			Metadata struct {
 				Annotations map[string]string `json:"annotations"`
 			} `json:"metadata"`
 		}
-		if yaml.Unmarshal(doc, &meta) != nil || meta.Kind != "Configuration" {
+		jsonDoc, err := yamlToJSON(doc)
+		if err != nil || json.Unmarshal(jsonDoc, &meta) != nil || meta.Kind != "Configuration" {
 			continue
 		}
 		src, ok := meta.Metadata.Annotations[BlueprintAnnotation]
@@ -400,623 +403,29 @@ func ParseAny(body []byte) (*Blueprint, error) {
 	return nil, perr
 }
 
-// splitDocs splits a multi-document YAML stream on "---" at column zero.
-func splitDocs(in []byte) [][]byte {
-	return SplitDocs(in)
-}
-
 // Validate reports the first structural problem, naming the offending field.
 func (b *Blueprint) Validate() error {
-	if b.APIVersion != APIVersion {
-		return fmt.Errorf("apiVersion: %q is not valid (must be %q)", b.APIVersion, APIVersion)
-	}
-	if b.Kind != Kind {
-		return fmt.Errorf("kind: %q is not valid (must be %q)", b.Kind, Kind)
-	}
-
-	// metadata.name reaches every generated file's provenance header
-	// (emit.header writes "# Source: blueprints/<name>.cf.yaml"). A newline
-	// there ends the comment and puts whatever follows at column 0 of a
-	// document that otherwise parses fine.
-	if err := checkScalar("metadata.name", b.Metadata.Name); err != nil {
+	if err := b.validateRoot(); err != nil {
 		return err
 	}
-
-	if b.Spec.Emit != nil {
-		if b.Spec.Emit.TemplateSource != "" {
-			switch b.Spec.Emit.TemplateSource {
-			case TemplateSourceInline, TemplateSourceFileSystem:
-			default:
-				return fmt.Errorf("spec.emit.templateSource: %q is not a valid template source (must be %q or %q)",
-					b.Spec.Emit.TemplateSource, TemplateSourceInline, TemplateSourceFileSystem)
-			}
-		}
-		if b.Spec.Emit.Engine != "" {
-			switch strings.ToLower(b.Spec.Emit.Engine) {
-			case EngineGoTemplating, EngineKCL, EnginePython:
-			default:
-				return fmt.Errorf("spec.emit.engine: %q is not a valid engine (must be %q, %q, or %q)",
-					b.Spec.Emit.Engine, EngineGoTemplating, EngineKCL, EnginePython)
-			}
-		}
+	if err := validateSources(b.Spec.Sources); err != nil {
+		return err
 	}
-
-	// spec.sources[*].provider was never checked here before PUT
-	// /api/blueprint existed: no route made the full document
-	// client-writable, so an operator hand-editing the file was the only
-	// path in, and a typo'd provider ref just failed loudly at `cf provider
-	// add` / cache.Store.Load time. PUT changes that -- the whole document,
-	// sources included, is now client-writable -- so the same three checks
-	// applied to every other user-controlled scalar apply here too: it must
-	// be present, free of control characters (see checkScalar; a source
-	// reference does not currently reach emitted YAML the way a resource
-	// field does, but it is persisted verbatim by writeBlueprintFile and
-	// re-read on the next request, so a stray newline would still corrupt
-	// the stored document), and shaped like a reference cache.Store.Load can
-	// actually use.
-	for i, s := range b.Spec.Sources {
-		// A crds: source is a CRD manifest file, not a package — its own
-		// checks and nothing from the provider branch below.
-		if s.CRDs != "" {
-			if s.Provider != "" {
-				return fmt.Errorf("spec.sources[%d]: provider and crds are mutually exclusive — "+
-					"a source is either a provider package or a CRD manifest file", i)
-			}
-			if err := checkScalar(fmt.Sprintf("spec.sources[%d].crds", i), s.CRDs); err != nil {
-				return err
-			}
-			// The .yaml suffix is the family marker: emit's resolveKind
-			// routes resources whose provider ends in .yaml/.yml down the
-			// object-rooted path, and no OCI package ref can carry it.
-			if !strings.HasSuffix(s.CRDs, ".yaml") && !strings.HasSuffix(s.CRDs, ".yml") {
-				return fmt.Errorf("spec.sources[%d].crds: %q must be a .yaml/.yml file path", i, s.CRDs)
-			}
-			continue
-		}
-		if s.Provider == "" {
-			return fmt.Errorf("spec.sources[%d]: one of provider (a package ref) or crds (a CRD manifest file) is required", i)
-		}
-		// "k8s" is a label, not a package: every loader treats a source entry
-		// as something to pull from the schema cache (cache.Store.Load), so a
-		// source named "k8s" would fail there with a misleading "run: cf
-		// provider add k8s". Refuse it here with the real explanation instead.
-		if s.Provider == NativeProvider {
-			return fmt.Errorf("spec.sources[%d].provider: %q is not a package source -- native Kubernetes "+
-				"kinds are vendored into cf itself and always available. Delete this source entry and set "+
-				"provider: %s on the resources that compose native kinds", i, s.Provider, NativeProvider)
-		}
-		if err := checkScalar(fmt.Sprintf("spec.sources[%d].provider", i), s.Provider); err != nil {
-			return err
-		}
-		if !providerRefRE.MatchString(s.Provider) {
-			return fmt.Errorf("spec.sources[%d].provider: %q is not a valid provider reference "+
-				"(e.g. ghcr.io/org/provider-name:v1.2.3, or ...@sha256:<digest>)", i, s.Provider)
-		}
+	if err := validateXRD(b.Spec.XRD); err != nil {
+		return err
 	}
-
-	x := b.Spec.XRD
-	required := []struct{ name, val string }{
-		{"group", x.Group}, {"kind", x.Kind}, {"plural", x.Plural}, {"version", x.Version},
+	if err := b.validateParameters(); err != nil {
+		return err
 	}
-	var missing []string
-	for _, f := range required {
-		if f.val == "" {
-			missing = append(missing, f.name)
-		}
-	}
-	if len(missing) == 1 {
-		return fmt.Errorf("spec.xrd.%s is required", missing[0])
-	}
-	if len(missing) > 1 {
-		return fmt.Errorf("spec.xrd needs %s", strings.Join(missing, ", "))
-	}
-
-	if !groupRE.MatchString(x.Group) || groupIsBareKeyword(x.Group) {
-		return fmt.Errorf("spec.xrd.group: %q is not a valid DNS subdomain "+
-			"(e.g. platform.example.com), or is a bare YAML keyword like yes/no/true/false", x.Group)
-	}
-	if !kindRE.MatchString(x.Kind) {
-		return fmt.Errorf("spec.xrd.kind: %q is not a valid Kind (must start with an uppercase letter, e.g. XQueue)", x.Kind)
-	}
-	if !pluralRE.MatchString(x.Plural) || yamlKeywords[strings.ToLower(x.Plural)] {
-		return fmt.Errorf("spec.xrd.plural: %q is not a valid plural name "+
-			"(must be all lowercase, e.g. xqueues, and not a YAML keyword like yes/no/true/false)", x.Plural)
-	}
-	if !versionRE.MatchString(x.Version) {
-		return fmt.Errorf("spec.xrd.version: %q is not a valid API version (e.g. v1, v1beta1, v1alpha1)", x.Version)
-	}
-
-	switch x.Scope {
-	case "Namespaced":
-	case "Cluster":
-		// Accepted by an earlier version of this function, which was a
-		// half-composition: internal/emit/composition.go only emits a
-		// providerConfigRef for the namespaced envelope, so a Cluster
-		// blueprint generated a Composition whose every managed resource
-		// silently landed on the ProviderConfig named "default" -- a legal,
-		// rendering, exit-0 artifact pointed at the wrong credentials. The
-		// cluster-scoped envelope is genuinely different ({name, policy}
-		// rather than {kind, name}, plus deletionPolicy) and inventing it
-		// here without a rendered test would be guessing. M1 is Namespaced
-		// only, deliberately; Cluster scope is planned future work.
-		return fmt.Errorf("spec.xrd.scope: Cluster is not supported in M1 -- use Namespaced. " +
-			"The cluster-scoped managed-resource envelope differs from the namespaced one " +
-			"(providerConfigRef is {name, policy}, not {kind, name}, and deletionPolicy exists) " +
-			"and the Composition emitter does not yet render it; emitting it untested would " +
-			"silently bind every composed resource to the ProviderConfig named \"default\". " +
-			"Cluster scope is planned work, not a permanent restriction")
-	case "LegacyCluster":
-		return fmt.Errorf("spec.xrd.scope: LegacyCluster is not valid in apiextensions.crossplane.io/v2")
-	case "":
-		return fmt.Errorf("spec.xrd.scope must be set explicitly to Namespaced or Cluster; " +
-			"the server and the crossplane CLI default it differently")
-	default:
-		return fmt.Errorf("spec.xrd.scope: unknown scope %q", x.Scope)
-	}
-
-	names := make([]string, 0, len(x.Parameters))
-	for n := range x.Parameters {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		if !paramNameRE.MatchString(n) || yamlKeywords[strings.ToLower(n)] {
-			return fmt.Errorf("spec.xrd.parameters.%s: invalid parameter name "+
-				"(must be camelCase, e.g. maxMessageSize, and not a YAML keyword like yes/no/true/false)", n)
-		}
-		p := x.Parameters[n]
-		// type: array has two exits and M1 gets both wrong, so it is refused
-		// at the source rather than emitted broken.
-		//
-		//  1. internal/emit/xrd.go writes `type: array` with no `items:`.
-		//     A structural schema (which is what an XRD's openAPIV3Schema
-		//     is) requires items on an array; the API server rejects it.
-		//     Loud, but still a generated artifact that cannot be applied.
-		//  2. internal/emit/composition.go renders a `from:` mapping as a
-		//     bare `{{ $spec.zones }}`, and Go's template engine formats a
-		//     []any with fmt: `[a b c]`. That IS valid YAML, and a
-		//     `type: array, items: {type: string}` schema accepts it as a
-		//     ONE-element list whose single member is the string "a b c".
-		//     Silent, which is worse.
-		//
-		// The proper fix for both is M2 work, not a validation rule: render
-		// composite values as `{{ $spec.x | toYaml | nindent N }}` and emit a
-		// real `items:` schema derived from the parameter declaration. Until
-		// that exists, refusing the type is the honest option.
-		if p.Type == "array" {
-			return fmt.Errorf("spec.xrd.parameters.%s: type \"array\" is not supported in M1. "+
-				"The XRD emitter cannot write the required items: schema for it, and a from: "+
-				"mapping would render Go's fmt of the slice (\"[a b c]\") -- valid YAML, silently "+
-				"wrong. Use a scalar parameter, or a raw: field for a literal list", n)
-		}
-		if !validTypes[p.Type] {
-			return fmt.Errorf("spec.xrd.parameters.%s: unknown type %q", n, p.Type)
-		}
-		// Description, default and enum are validated by the same helper an
-		// object member's are — one set of rules, one code path.
-		if err := validateParameterScalars("spec.xrd.parameters."+n, p); err != nil {
-			return err
-		}
-		// properties turns an object parameter into a typed one; on any other
-		// type there is no member schema for it to describe, so it is a
-		// mistake to refuse loudly rather than a declaration to ignore.
-		if len(p.Properties) > 0 {
-			if p.Type != "object" {
-				return fmt.Errorf("spec.xrd.parameters.%s: properties is only valid on type \"object\" "+
-					"(got type %q) — only an object parameter has members to declare", n, p.Type)
-			}
-			if err := validateParameterMembers("spec.xrd.parameters."+n, p); err != nil {
-				return err
-			}
-		}
-	}
-
-	// internal/emit/composition.go emits, for every composed resource in a
-	// Namespaced blueprint:
-	//
-	//	providerConfigRef:
-	//	  kind: ClusterProviderConfig
-	//	  name: {{ $spec.providerName }}
-	//
-	// That dereference is hard-coded there and unconditional, but nothing
-	// used to require the blueprint to declare the parameter it reads. A
-	// blueprint without it validated, generated, and produced a Composition
-	// that can never render: under options: ["missingkey=error"] the
-	// dereference is a hard render failure, and without that option it would
-	// be worse -- the literal string "<no value>" as a ProviderConfig name.
-	// Required (not merely declared) because the guard the Composition gives
-	// optional parameters (hasKey) is not applied to this one; the XRD gate
-	// is what makes the bare dereference safe.
-	hasManaged := false
-	for _, r := range b.Spec.Resources {
-		if r.Provider != NativeProvider {
-			hasManaged = true
-			break
-		}
-	}
-
-	if x.Scope == "Namespaced" && hasManaged {
-		p, ok := x.Parameters["providerName"]
-		switch {
-		case !ok:
-			return fmt.Errorf("spec.xrd.parameters.providerName is required for a Namespaced XRD: " +
-				"run cf serve without --blueprint to scaffold one, or add: providerName: {type: string, required: true}")
-		case p.Type != "string":
-			return fmt.Errorf("spec.xrd.parameters.providerName: type must be string, got %q -- "+
-				"it is rendered into providerConfigRef.name, which is a Kubernetes object name", p.Type)
-		case !p.Required:
-			return fmt.Errorf("spec.xrd.parameters.providerName: must be required: true -- " +
-				"the Composition dereferences it unguarded for every composed resource, and only " +
-				"the XRD's required gate makes that dereference safe")
-		}
-	}
-
-	// Templates and conventions are validated before the resources loop:
-	// a field's template: <name> reference below is checked against the set
-	// this call has already accepted.
 	if err := b.validateTemplates(); err != nil {
 		return err
 	}
-
-	// The full resource-name set is built before the per-resource loop
-	// because a status wire may legally reference a resource declared LATER
-	// in the list (observed.resources is keyed by name at render time, so
-	// declaration order carries no meaning), and the existence check below
-	// needs every name up front. Uniqueness is enforced here too: a
-	// resources.<name> reference must be unambiguous, and the name is also
-	// the composition-resource-name annotation — node identity (spec §7) —
-	// so two resources sharing one name would silently collapse into one
-	// composed resource.
-	resourceNames := make(map[string]bool, len(b.Spec.Resources))
-	for i, r := range b.Spec.Resources {
-		if resourceNames[r.Name] {
-			return fmt.Errorf("spec.resources[%d]: duplicate resource name %q -- the name is the "+
-				"composition-resource-name annotation (node identity) and the key status wires "+
-				"reference, so it must be unique", i, r.Name)
-		}
-		if r.Name != "" {
-			resourceNames[r.Name] = true
-		}
+	if err := b.validateResources(); err != nil {
+		return err
 	}
-	for i, r := range b.Spec.Resources {
-		if r.Name == "" || r.Kind == "" {
-			switch {
-			case r.Name == "" && r.Kind == "":
-				return fmt.Errorf("spec.resources[%d]: needs a name and a kind", i)
-			case r.Name == "":
-				return fmt.Errorf("spec.resources[%d] (kind %q): needs a name", i, r.Kind)
-			default:
-				return fmt.Errorf("spec.resources[%d] %q: needs a kind", i, r.Name)
-			}
-		}
-		if !resourceNameRE.MatchString(r.Name) {
-			return fmt.Errorf("spec.resources[%d] %q: invalid resource name (must be a DNS label, e.g. main-queue)", i, r.Name)
-		}
-		// r.Kind is looked up against resolveKind's list of cached CRDs by
-		// exact string equality (internal/emit/composition.go), so a bogus
-		// value fails loudly there ("kind %q not found in any cached
-		// provider") rather than reaching emitted output -- but it still
-		// isn't checkScalar-clean the way r.Name and every field value are,
-		// and every real Kubernetes Kind it could ever legitimately match
-		// satisfies kindRE (see spec.xrd.kind above), so enforcing the same
-		// shape here is free and catches a typo before the cache lookup
-		// even runs.
-		if err := checkScalar(fmt.Sprintf("spec.resources[%d].kind", i), r.Kind); err != nil {
-			return err
-		}
-		if !kindRE.MatchString(r.Kind) {
-			return fmt.Errorf("spec.resources[%d].kind: %q is not a valid Kind (must start with an uppercase letter, e.g. Queue)", i, r.Kind)
-		}
-		// r.Provider is optional (M1 resolves a resource's kind against
-		// every cached source, not just one), but when set it reaches
-		// cache.Store.Load exactly the way spec.sources[*].provider does --
-		// see the providerRefRE comment above -- so it gets the same checks.
-		if r.Provider != "" {
-			if err := checkScalar(fmt.Sprintf("spec.resources[%d].provider", i), r.Provider); err != nil {
-				return err
-			}
-			// A resource may reference a crds: source by its path — those
-			// refs skip the OCI shape check (they are file paths).
-			crdsSource := false
-			for _, src := range b.Spec.Sources {
-				if src.CRDs != "" && src.CRDs == r.Provider {
-					crdsSource = true
-					break
-				}
-			}
-			isSpecial := r.Provider == NativeProvider || r.Provider == "cluster" || crdsSource
-			if !isSpecial && !providerRefRE.MatchString(r.Provider) {
-				return fmt.Errorf("spec.resources[%d].provider: %q is not a valid provider reference "+
-					"(e.g. ghcr.io/org/provider-name:v1.2.3, or ...@sha256:<digest>)", i, r.Provider)
-			}
-			// spec.sources is the dependency manifest: startup and generate
-			// load provider schemas from it alone, so a resource pinned to a
-			// provider nobody declared works on a warm server (the runtime
-			// add extended the index) and then fails hours later, after a
-			// restart, as "kind not found in any cached provider". Native
-			// and cluster kinds are exempt.
-			if !isSpecial {
-				declared := false
-				for _, src := range b.Spec.Sources {
-					if src.Provider == r.Provider {
-						declared = true
-						break
-					}
-				}
-				if !declared {
-					return fmt.Errorf("spec.resources[%d] (%q): provider %q is not declared in "+
-						"spec.sources; add it there so generation can load its schemas after a restart",
-						i, r.Name, r.Provider)
-				}
-			}
-		}
-		// Templates and conventions are forProvider-plan features in v1, and a
-		// native Kubernetes kind has no forProvider plan. Conventions simply
-		// DO NOT APPLY to native resources (the emitter skips them — a
-		// native object's top-level leaves are structural fields, a Secret's
-		// type or a ConfigMap's data, where a silently defaulted value would
-		// change workload semantics), so a blueprint may freely mix
-		// conventions with native kinds. Only an explicit template: FIELD on
-		// a native resource stays refused: a template call's output
-		// re-indents to the fixed forProvider column (templateFieldNindent),
-		// which a native field at an arbitrary nesting depth breaks.
-		// forEach repeats the resource's whole rendered document N times, N
-		// read at render time from an integer XRD parameter
-		// (internal/emit/composition.go wraps the document in
-		// `{{- range $i := until (int $spec.<name>) }}`). That is a bare,
-		// unguarded dereference of the loop bound, and under
-		// options: ["missingkey=error"] an absent key is a hard render
-		// failure — so the parameter must be one whose presence in the
-		// observed composite's spec is unconditional. Two XRD gates provide
-		// that, and only those two: a required parameter is present on any
-		// XR the API server admits, and a defaulted parameter is injected
-		// into the XR's spec by schema defaulting before the composition
-		// function ever sees it. A parameter that is neither can be
-		// genuinely absent at render time, so it cannot be a loop bound.
-		// A second forEach form reads the loop bound from another resource's
-		// OBSERVED status (resources.<name>.status.<path>) — the same
-		// reference grammar as a field's from:, with the CRD-schema half (the
-		// path names an integer/number status leaf) checked in internal/emit,
-		// which holds the CRDs. The observed bound needs none of the
-		// required-or-default machinery below: it is dereferenced BEHIND the
-		// same hasKey guard chain a status wire uses, so an unobserved source
-		// renders zero instances instead of hard-failing (see
-		// internal/emit/composition.go).
-		if r.ForEach != "" {
-			if err := checkScalar(fmt.Sprintf("spec.resources[%d].forEach", i), r.ForEach); err != nil {
-				return err
-			}
-			if strings.HasPrefix(r.ForEach, statusRefPrefix) {
-				// The parameter rules below are the params form's alone.
-				if err := b.validateForEachStatusRef(r); err != nil {
-					return err
-				}
-			} else if err := validateForEachParamRef(x, r); err != nil {
-				return err
-			}
-		}
-		// when wraps the resource's whole rendered document in a template
-		// conditional that dereferences its parameter unguarded, so the
-		// parameter gets exactly forEach's required-or-default rule, for
-		// exactly forEach's reason. The grammar is pinned by ParseWhen; the
-		// type rules here keep the condition honest: a bare form on a
-		// non-boolean would test Go-template truthiness of an arbitrary
-		// value, and a comparison on a non-string would compare against a
-		// value the schema says can never be a string. Both are conditions
-		// that "work" and are silently wrong.
-		if r.When != "" {
-			if err := checkScalar(fmt.Sprintf("spec.resources[%d].when", i), r.When); err != nil {
-				return err
-			}
-			// Conditions stay top-level in v1, like loop bounds. ParseWhen's
-			// grammar already refuses a dotted parameter, but its generic
-			// grammar error would send the author to the wrong fix — the
-			// member-shaped case gets the ruling named instead.
-			if head, _, _ := strings.Cut(r.When, " "); strings.HasPrefix(head, "params.") &&
-				strings.Contains(strings.TrimPrefix(head, "params."), ".") {
-				return fmt.Errorf("resource %q: when cannot reference an object member (got %q) — "+
-					"conditions reference top-level parameters only in v1", r.Name, head)
-			}
-			param, op, literal, err := ParseWhen(r.When)
-			if err != nil {
-				return fmt.Errorf("resource %q: %w", r.Name, err)
-			}
-			decl, exists := x.Parameters[param]
-			if !exists {
-				return fmt.Errorf("resource %q: when references unknown parameter %q", r.Name, param)
-			}
-			if !decl.Required && decl.Default == "" {
-				return fmt.Errorf("resource %q: when parameter %q must be required or carry a default -- "+
-					`the condition dereferences it unguarded, and under options: ["missingkey=error"] `+
-					"an absent key hard-fails the whole render; only the XRD's required gate or its "+
-					"schema default makes the key's presence unconditional", r.Name, param)
-			}
-			switch op {
-			case "":
-				if decl.Type != "boolean" {
-					return fmt.Errorf("resource %q: when parameter %q has type %q, want boolean -- "+
-						"the bare form renders {{- if $spec.%s }}, a truthiness test; compare a string "+
-						`parameter explicitly: when: params.%s == "<literal>"`,
-						r.Name, param, decl.Type, param, param)
-				}
-			default: // "==" or "!=", ParseWhen admits nothing else
-				if decl.Type != "string" {
-					return fmt.Errorf("resource %q: when parameter %q has type %q, want string -- "+
-						"the %s form compares against a string literal", r.Name, param, decl.Type, op)
-				}
-				if len(decl.Enum) > 0 && !slices.Contains(decl.Enum, literal) {
-					return fmt.Errorf("resource %q: when literal %q is not among parameter %q's enum values %v -- "+
-						"the XRD schema admits no XR carrying it, so the condition would be constant: "+
-						"a resource that silently never (or always) exists", r.Name, literal, param, decl.Enum)
-				}
-			}
-		}
-		paths := make([]string, 0, len(r.Fields))
-		for p := range r.Fields {
-			paths = append(paths, p)
-		}
-		sort.Strings(paths)
-		for _, p := range paths {
-			basePath, mapKey, isMap := ParseFieldPath(p)
-			if isMap {
-				if mapKey == "" {
-					return fmt.Errorf("resource %q field %q: empty map key inside brackets", r.Name, p)
-				}
-				if err := checkScalar(fmt.Sprintf("resource %q field %q: map key", r.Name, p), mapKey); err != nil {
-					return err
-				}
-				if _, hasWhole := r.Fields[basePath]; hasWhole {
-					return fmt.Errorf("resource %q field %q conflicts with field %q, which sets the whole map; "+
-						"set the whole map or set individual keys, not both", r.Name, p, basePath)
-				}
-			}
-			f := r.Fields[p]
-			set := 0
-			for _, v := range []string{f.From, f.Value, f.Raw, f.Template} {
-				if v != "" {
-					set++
-				}
-			}
-			if set != 1 {
-				return fmt.Errorf("resource %q field %q: set exactly one of from, value, raw or template (got %d)",
-					r.Name, p, set)
-			}
-			// value is written into the rendered inner document as a
-			// single-quoted scalar; raw is written verbatim. Both are
-			// single-line constructs (see checkScalar), and both sit inside
-			// the Composition's `template: |` block scalar, so a newline in
-			// either terminates that block scalar and turns the rest of the
-			// value into top-level keys of the Composition document.
-			//
-			// raw is NOT exempt, though it is the raw-YAML escape hatch and a
-			// multi-line template body is a plausible thing to want. The
-			// emitter writes it with a single `d.Line(indent, "%s: %s", ...)`
-			// and has no machinery to re-indent continuation lines to the
-			// block scalar's column; exempting raw would therefore hand the
-			// user a documented way to corrupt the document structure, which
-			// is precisely the class this check exists to close. A multi-line
-			// raw form needs an emitter that indents each line -- that is the
-			// feature to build, not a hole to leave open.
-			// A slice, not a map: Validate reports the FIRST problem, so the
-			// order it inspects these in is part of its contract.
-			for _, src := range []struct{ label, val string }{
-				{"from", f.From}, {"raw", f.Raw}, {"template", f.Template}, {"value", f.Value},
-			} {
-				if err := checkScalar(fmt.Sprintf("resource %q field %q: %s", r.Name, p, src.label), src.val); err != nil {
-					return err
-				}
-			}
-
-			if f.Raw != "" && b.Engine() != EngineGoTemplating && strings.Contains(f.Raw, "{{") {
-				return fmt.Errorf("resource %q field %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)",
-					r.Name, p, f.Raw, b.Engine())
-			}
-			if f.Template != "" {
-				if _, ok := b.Spec.Templates[f.Template]; !ok {
-					return fmt.Errorf("resource %q field %q: references unknown template %q "+
-						"(declare it under spec.templates)", r.Name, p, f.Template)
-				}
-				// Same v1 ruling as conventions above, for the mechanical half
-				// of the reason: a template call's output is re-indented to the
-				// fixed forProvider field column (templateFieldNindent in
-				// internal/emit), and a native field at any deeper nesting level
-				// would take that output at the wrong column — structurally
-				// broken YAML in the rendered document.
-				if r.Provider == NativeProvider {
-					return fmt.Errorf("resource %q field %q: template: fields are not supported on a native "+
-						"Kubernetes resource (provider %q) in v1 -- a template call's output re-indents to "+
-						"the fixed forProvider column, which a native field at an arbitrary nesting depth "+
-						"breaks. Set the field with value:, raw: or from:", r.Name, p, NativeProvider)
-				}
-			}
-			if f.From != "" {
-				ref, err := ParseFrom(f.From)
-				if err != nil {
-					return fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
-				}
-				if ref.Resource != "" {
-					if ref.IsMetadataName() {
-						if err := b.validateMetadataRef(r, fmt.Sprintf("field %q", p), f.From); err != nil {
-							return err
-						}
-					} else {
-						if err := b.validateStatusRef(r, fmt.Sprintf("field %q", p), f.From); err != nil {
-							return err
-						}
-					}
-					continue
-				}
-				// resolveParamRef returns the governing declaration: the
-				// member's for a params.<name>.<member> reference (always a
-				// scalar, by member validation above), the parameter's own
-				// otherwise — so the composite check below applies to exactly
-				// the type the wire would render. ref.Param carries everything
-				// after the params. prefix, member half included — ParseFrom
-				// is the single grammar entry point, resolveParamRef the
-				// member-aware resolver behind it.
-				decl, err := resolveParamRef(x, fmt.Sprintf("resource %q field %q", r.Name, p), ref.Param)
-				if err != nil {
-					return err
-				}
-				// A from: mapping becomes a bare `{{ $spec.<param> }}` in the
-				// template body, which Go's template engine renders with fmt.
-				// For a composite value that means `map[env:prod]` or
-				// `[a b c]` -- and `[a b c]` is valid YAML that a
-				// `type: array, items: {type: string}` schema happily accepts
-				// as a one-element list containing "a b c". Legal, applied,
-				// wrong. See the type: array branch above; the M2 fix for
-				// both is `{{ $spec.x | toYaml | nindent N }}`.
-				if compositeTypes[decl.Type] {
-					param, _, _ := ParamRef(f.From)
-					// A typed object has a working alternative — say so
-					// instead of dead-ending at the generic composite ruling.
-					if decl.Type == "object" && len(decl.Properties) > 0 {
-						return fmt.Errorf("resource %q field %q: parameter %q is a typed object — a from: "+
-							"mapping cannot render the whole object; wire one of its declared members "+
-							"instead (params.%s.<member>; declared members: %s)",
-							r.Name, p, param, param, strings.Join(sortedMemberNames(decl), ", "))
-					}
-					return fmt.Errorf("resource %q field %q: parameter %q has type %q, and a from: "+
-						"mapping cannot render a composite value in M1 -- it emits a bare "+
-						"{{ $spec.%s }}, which Go's template engine formats with fmt "+
-						"(an object renders as \"map[k:v]\", an array as \"[a b c]\"). Both are valid "+
-						"YAML and silently wrong. Use a scalar parameter, or set the field with raw:",
-						r.Name, p, param, decl.Type, param)
-				}
-			}
-		}
-		// Envelope entries get the same structural discipline as fields (see
-		// envelope.go); schema-aware checks live in internal/emit, which
-		// holds the resolved CRD.
-		if err := validateResourceEnvelope(b, r); err != nil {
-			return err
-		}
-		// Annotations too (see annotations.go): key grammar and value forms
-		// here, status-schema checks at emit time.
-		if err := b.validateResourceAnnotations(r); err != nil {
-			return err
-		}
-	}
-
-	// spec.pipeline last: its checks are self-contained (see pipeline.go), so
-	// putting them after the resource checks keeps the first-error contract of
-	// every existing case unchanged.
 	return b.validatePipeline()
 }
 
-// validateStatusRef checks the blueprint-level half of a cross-resource
-// status reference (resources.<name>.status.<path>): grammar, that the
-// referenced resource is declared, that the reference is not to the
-// resource's own status, that the target is not looped, and that every path
-// segment is a clean identifier (each one reaches emitted template text
-// inside hasKey guards and a dereference expression, so the identifier check
-// is a structural requirement, not a style rule). The CRD-schema half — does
-// <path> name a scalar leaf in the referenced kind's declared status —
-// belongs to internal/emit, which holds the CRDs.
-//
-// what names where the reference sits on r, preformatted (`field "podSpec"`,
-// `annotation "eks.amazonaws.com/role-arn"`), so one checker serves both wire
-// surfaces without the field messages changing a byte.
 func (b *Blueprint) validateMetadataRef(r Resource, what, from string) error {
 	target, path, ok := MetadataRef(from)
 	if !ok || path != "name" {

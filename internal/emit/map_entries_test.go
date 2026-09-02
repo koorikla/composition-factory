@@ -176,3 +176,93 @@ spec:
 		t.Errorf("expected tags: {} fallback, got:\n%s", s)
 	}
 }
+
+func TestObjectParamIntoMapLeafWithExplicitMerging(t *testing.T) {
+	crdYAML := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                properties:
+                  tags:
+                    type: object
+                    additionalProperties:
+                      type: string
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+	crds, err := schema.ParseCRDs([][]byte{crdYAML})
+	if err != nil {
+		t.Fatalf("ParseCRDs failed: %v", err)
+	}
+
+	b := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "test-map-obj"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+					"customTags": {
+						Type: "object",
+						Properties: map[string]blueprint.Parameter{
+							"project": {Type: "string"},
+							"owner":   {Type: "string"},
+						},
+					},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "queue",
+					Kind: "Queue",
+					Fields: map[string]blueprint.Field{
+						"tags":        {From: "params.customTags"},
+						"tags[env]":   {Value: "production"},
+						"tags[owner]": {Value: "team-platform"},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := emit.Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition emit failed: %v", err)
+	}
+
+	s := string(out)
+	t.Logf("Emitted Composition:\n%s", s)
+
+	// Explicit tags[owner] overrides object property; tags[env] is merged; tags[project] comes from customTags
+	if !strings.Contains(s, "env: 'production'") {
+		t.Errorf("expected explicit env tag, got:\n%s", s)
+	}
+	if !strings.Contains(s, "owner: 'team-platform'") {
+		t.Errorf("expected explicit owner override tag, got:\n%s", s)
+	}
+	if !strings.Contains(s, "{{ $spec.customTags.project | quote }}") {
+		t.Errorf("expected wired project tag from customTags, got:\n%s", s)
+	}
+}

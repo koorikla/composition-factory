@@ -122,9 +122,9 @@ metadata:
     {{ setResourceNameAnnotation "queue-a" }}
 spec:
   forProvider:
-    name: {{ include "cf.name" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "resource" "queue-a" "field" "name") | trim | nindent 6 }}
+    name: {{ include "cf.name" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-a" "field" "name") | trim | nindent 6 }}
     region: 'eu-north-1'
-    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "resource" "queue-a" "field" "tags") | trim | nindent 6 }}
+    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-a" "field" "tags") | trim | nindent 6 }}
   providerConfigRef:
     kind: ClusterProviderConfig
     name: {{ $spec.providerName }}
@@ -138,7 +138,7 @@ spec:
   forProvider:
     name: 'custom-b'
     region: 'eu-north-1'
-    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "resource" "queue-b" "field" "tags") | trim | nindent 6 }}
+    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-b" "field" "tags") | trim | nindent 6 }}
   providerConfigRef:
     kind: ClusterProviderConfig
     name: {{ $spec.providerName }}
@@ -412,5 +412,22 @@ func TestTemplateFieldsAreRefusedOnNativeKinds(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
+	}
+}
+
+// TestTemplateObservedContextAccess proves that a template can access .observed
+// to read composed resource status cleanly.
+func TestTemplateObservedContextAccess(t *testing.T) {
+	bp := conventionTestBlueprint()
+	bp.Spec.Templates["cf.statusPolicy"] = `{{ if hasKey .observed "resources" }}arn: {{ (index .observed.resources "queue-a").resource.status.atProvider.arn }}{{ end }}`
+	bp.Spec.Resources[1].Fields["name"] = blueprint.Field{Template: "cf.statusPolicy"}
+
+	got, err := Composition(bp, conventionCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmpl := extractTemplate(t, got)
+	if !strings.Contains(tmpl, `include "cf.statusPolicy"`) {
+		t.Fatalf("emitted template does not include cf.statusPolicy: %s", tmpl)
 	}
 }

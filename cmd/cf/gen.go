@@ -153,12 +153,28 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 
 	if c.Check {
 		drift := false
+		expected := make(map[string]bool, len(outputs))
 		for _, o := range outputs {
+			cleanPath := filepath.Clean(o.Path)
+			expected[cleanPath] = true
 			existing, err := os.ReadFile(o.Path)
 			if err != nil || !bytes.Equal(existing, o.Body) {
 				fmt.Fprintf(out, "drift: %s\n", o.Path)
 				drift = true
 			}
+		}
+		if _, err := os.Stat(c.Out); err == nil {
+			_ = filepath.Walk(c.Out, func(path string, info os.FileInfo, err error) error {
+				if err != nil || info.IsDir() {
+					return nil
+				}
+				cleanPath := filepath.Clean(path)
+				if !expected[cleanPath] {
+					fmt.Fprintf(out, "drift: %s\n", path)
+					drift = true
+				}
+				return nil
+			})
 		}
 		if drift {
 			fmt.Fprintln(out, "generated output is stale; run: cf gen")

@@ -306,7 +306,7 @@ func TestValidateRejectsInvalidParameterNames(t *testing.T) {
 		{"colon-space breaks YAML as an unquoted key", "foo: bar"},
 		{"leading hash is read as a comment", "#lead"},
 		{"empty string is not valid YAML key content", ""},
-		{"yes is a YAML 1.1 boolean keyword", "yes"},
+		{"true is a YAML boolean keyword", "true"},
 		{"1.0 is a YAML number, not a string key", "1.0"},
 		{"internal space -- rejected by policy, see (b) above", "a b"},
 	}
@@ -725,15 +725,25 @@ func TestValidateRejectsArrayParameterType(t *testing.T) {
 func TestValidateRejectsFromOnCompositeParameter(t *testing.T) {
 	b := scalarBlueprint(func(b *Blueprint) {
 		b.Spec.XRD.Parameters["tags"] = Parameter{Type: "object"}
-		b.Spec.Resources[0].Fields["tags"] = Field{From: "params.tags"}
+		b.Spec.Resources[0].Fields["region"] = Field{From: "params.tags"}
 	})
 	err := b.Validate()
 	if err == nil {
-		t.Fatal(`Validate() = nil, want a from: mapping onto an object parameter to be refused: ` +
-			`it renders Go's fmt of the map ("map[env:prod]"), which is valid YAML and silently wrong`)
+		t.Fatal(`Validate() = nil, want a from: mapping onto an object parameter to be refused on scalar field`)
 	}
-	if !strings.Contains(err.Error(), "tags") || !strings.Contains(err.Error(), "object") {
+	if !strings.Contains(err.Error(), "region") || !strings.Contains(err.Error(), "object") {
 		t.Errorf("err = %v, want it to name the field, the parameter and its type", err)
+	}
+}
+
+func TestValidateAcceptsObjectParameterIntoMapLeaf(t *testing.T) {
+	b := scalarBlueprint(func(b *Blueprint) {
+		b.Spec.XRD.Parameters["customTags"] = Parameter{Type: "object"}
+		b.Spec.Resources[0].Fields["tags"] = Field{From: "params.customTags"}
+		b.Spec.Resources[0].Fields["tags[env]"] = Field{Value: "production"}
+	})
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate failed for object parameter into map leaf and explicit merge: %v", err)
 	}
 }
 
