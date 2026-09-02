@@ -1,7 +1,7 @@
 /**
  * api.js — fetch wrappers for every live endpoint.
  *
- * All paths are RELATIVE (/api/...): serve.py proxies them to the engine at
+ * All paths are RELATIVE (/api/...): cf serve hosts them at
  * http://127.0.0.1:8080, so every call is same-origin.
  *
  * Every wrapper returns the parsed JSON body on success. On any non-2xx
@@ -18,9 +18,7 @@
  */
 
 /**
- * @typedef {Object} ApiError
- * @property {number} status  HTTP status (0 = network failure)
- * @property {string} message Server error text, verbatim
+ * @typedef {Error & {status: number}} ApiError
  */
 
 /**
@@ -47,7 +45,9 @@ async function request(method, path, body, opts) {
   try {
     res = await fetch(path, fetchOpts);
   } catch (e) {
-    throw { status: 0, message: "network error: " + (e && e.message || e) };
+    const err = new Error("network error: " + (e && e.message || e));
+    err.status = 0;
+    throw err;
   }
   const text = await res.text();
   let data = null;
@@ -58,8 +58,10 @@ async function request(method, path, body, opts) {
     const message = (data && typeof data.error === "string" && data.error)
       || text || (res.status + " " + res.statusText);
     console.warn("[API ERROR]", res.status, path, message);
-    throw { status: res.status, message };
-  }
+    const err = new Error(message);
+    err.status = res.status;
+    throw err;
+  } 
   if (options.responseType === "text") {
     return text;
   }

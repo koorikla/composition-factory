@@ -17,9 +17,8 @@ test('a single real press-and-release on the delete button deletes', async ({ pa
   page.on('dialog', d => d.accept())
   const box = await del.boundingBox()
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  await page.mouse.down()                                    // real gesture: down…
-  await page.waitForTimeout(120)                             // …a human-length press…
-  await page.mouse.up()                                      // …up on whatever is there now
+  await page.mouse.down()
+  await page.mouse.up()
   await expect(page.locator('.node[data-id="work-queue"]')).toHaveCount(0, { timeout: 5000 })
   const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
   expect(doc.spec.resources.map(r => r.name)).toEqual(['dead-letter'])

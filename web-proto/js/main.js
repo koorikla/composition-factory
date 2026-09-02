@@ -61,7 +61,11 @@ store.loadDoc();
     if (saved && saved.l && saved.r) widths = saved;
   } catch (_) { /* private mode */ }
 
-  function apply() {
+  function save() {
+    try { localStorage.setItem("cf-col-widths", JSON.stringify(widths)); } catch (_) { /* ok */ }
+  }
+
+  function apply(persist) {
     var total = cols.getBoundingClientRect().width;
     var l = Math.min(MAX_L, Math.max(MIN_L, widths.l));
     var r = Math.min(MAX_R, Math.max(MIN_R, widths.r));
@@ -71,7 +75,9 @@ store.loadDoc();
     }
     widths.l = l; widths.r = r;
     cols.style.gridTemplateColumns = l + "px 1fr " + r + "px";
-    try { localStorage.setItem("cf-col-widths", JSON.stringify(widths)); } catch (_) { /* ok */ }
+    if (persist) {
+      save();
+    }
   }
 
   function makeHandle(id, side) {
@@ -87,7 +93,9 @@ store.loadDoc();
       startDrag(e, function (ev) {
         var d = ev.clientX - sx;
         if (side === "l") widths.l = start + d; else widths.r = start - d;
-        apply(); place();
+        apply(false); place();
+      }, function () {
+        save();
       });
     });
     cols.style.position = "relative";
@@ -101,8 +109,8 @@ store.loadDoc();
     hl.style.left = (widths.l - 3) + "px";
     hr.style.right = (widths.r - 3) + "px";
   }
-  apply(); place();
-  addEventListener("resize", function () { apply(); place(); });
+  apply(false); place();
+  addEventListener("resize", function () { apply(true); place(); });
 })();
 
 

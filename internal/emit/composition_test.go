@@ -13,63 +13,12 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/testfixture"
 	"sigs.k8s.io/yaml"
 )
 
 func testCRDs(t *testing.T) []schema.CRD {
-	t.Helper()
-	docs := [][]byte{[]byte(`
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata: {name: queues.sqs.aws.m.upbound.io}
-spec:
-  group: sqs.aws.m.upbound.io
-  scope: Namespaced
-  names: {kind: Queue, plural: queues, categories: [managed]}
-  versions:
-  - name: v1beta1
-    served: true
-    storage: true
-    schema:
-      openAPIV3Schema:
-        properties:
-          spec:
-            properties:
-              forProvider:
-                required: [region]
-                properties:
-                  region: {type: string}
-                  maxMessageSize: {type: integer}
-              providerConfigRef:
-                type: object
-                required: [kind, name]
-                properties: {kind: {type: string}, name: {type: string}}
-`), []byte(`
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata: {name: queues.sqs.aws.upbound.io}
-spec:
-  group: sqs.aws.upbound.io
-  scope: Cluster
-  names: {kind: Queue, plural: queues, categories: [managed]}
-  versions:
-  - name: v1beta1
-    served: true
-    storage: true
-    schema:
-      openAPIV3Schema:
-        properties:
-          spec:
-            properties:
-              forProvider:
-                properties: {region: {type: string}}
-              deletionPolicy: {type: string}
-`)}
-	crds, err := schema.ParseCRDs(docs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return crds
+	return testfixture.QueueBothCRDs(t)
 }
 
 func TestCompositionSelectsNamespacedVariant(t *testing.T) {

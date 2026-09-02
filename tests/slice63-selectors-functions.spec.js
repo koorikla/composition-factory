@@ -34,7 +34,6 @@ test('Functions catalogue search & 1-click pipeline addition', async ({ page }) 
 
   // Search for auto-ready
   await fnSearch.fill('auto-ready')
-  await page.waitForTimeout(300)
 
   // Verify auto-ready function card appears
   const autoReadyCard = page.locator('.cat-row:has-text("function-auto-ready")')
@@ -58,7 +57,6 @@ test('Kubernetes workload selectors auto-match & pod spec helper', async ({ page
   const guideTab = page.locator('#rtabs button[data-r="guide"]')
   await guideTab.click()
   await page.locator('button[data-guide-example="k8s-app"]').click()
-  await page.waitForTimeout(600)
 
   // Select deployment node
   const depNode = page.locator('.node[data-id="app-deploy"] .node-h')
@@ -76,7 +74,6 @@ test('Kubernetes workload selectors auto-match & pod spec helper', async ({ page
 
   const syncBtn = wlCard.locator('button[data-wl-sync-app]')
   await syncBtn.click()
-  await page.waitForTimeout(400)
 
   // Verify selector alignment badge
   await expect(wlCard.locator('.chip-ok')).toContainText('Selectors Aligned')
@@ -85,13 +82,11 @@ test('Kubernetes workload selectors auto-match & pod spec helper', async ({ page
   const stdLblBtn = page.locator('button[data-apply-std-labels]')
   await expect(stdLblBtn).toBeVisible()
   await stdLblBtn.click()
-  await page.waitForTimeout(400)
 
   // Click External Name preset
   const extNameBtn = page.locator('button[data-apply-ext-name]')
   await expect(extNameBtn).toBeVisible()
   await extNameBtn.click()
-  await page.waitForTimeout(400)
 
   // Verify generated Composition YAML output reflects changes
   await page.click('#tabs button[data-t="comp"]')

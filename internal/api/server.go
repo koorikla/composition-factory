@@ -167,7 +167,6 @@ func New(o Options) (http.Handler, error) {
 	// request would always find the catch-all "matching" before ServeMux
 	// ever notices the method mismatch. Leaving unmatched paths to
 	// ServeMux's own default 404/405 handling (normalized to JSON below)
-	// is what actually gives 405-vs-404 "for free", per this task's brief.
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /api/version", srv.handleVersion)
 	mux.HandleFunc("GET /api/kinds", srv.handleKinds)
