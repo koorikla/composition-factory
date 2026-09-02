@@ -623,13 +623,7 @@ func checkStatusRefs(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 		if !ok {
 			continue
 		}
-		var targetRes *blueprint.Resource
-		for i := range b.Spec.Resources {
-			if b.Spec.Resources[i].Name == target {
-				targetRes = &b.Spec.Resources[i]
-				break
-			}
-		}
+		targetRes := b.ResourceNamed(target)
 		if targetRes == nil {
 			// Validate already refuses this; Generate validates before
 			// emitting. Kept as a real error, not a panic, because
@@ -980,13 +974,7 @@ var scalarStatusTypes = map[string]bool{
 // `annotation "eks.amazonaws.com/role-arn"`), so one resolver serves both
 // surfaces without the field messages changing a byte.
 func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) (guard, expr string, err error) {
-	var src *blueprint.Resource
-	for i := range b.Spec.Resources {
-		if b.Spec.Resources[i].Name == ref.Resource {
-			src = &b.Spec.Resources[i]
-			break
-		}
-	}
+	src := b.ResourceNamed(ref.Resource)
 	if src == nil {
 		// Validate refuses this before any emitter runs; kept as a defensive
 		// error because planFields is reachable from in-memory blueprints.
@@ -1072,13 +1060,7 @@ var forEachCountTypes = map[string]bool{
 // deliberate and documented at the emit site: an unobserved source fans out
 // to ZERO instances.
 func forEachStatusBound(ref blueprint.FromRef, r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) (guard, expr string, err error) {
-	var src *blueprint.Resource
-	for i := range b.Spec.Resources {
-		if b.Spec.Resources[i].Name == ref.Resource {
-			src = &b.Spec.Resources[i]
-			break
-		}
-	}
+	src := b.ResourceNamed(ref.Resource)
 	if src == nil {
 		// Validate refuses this before any emitter runs; kept as a defensive
 		// error because Composition is exported and callable on its own.

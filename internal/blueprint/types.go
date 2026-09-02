@@ -128,6 +128,20 @@ func (b *Blueprint) Engine() string {
 	return EngineGoTemplating
 }
 
+// ResourceNamed returns a pointer to the composed resource with the given name,
+// or nil if no such resource exists.
+func (b *Blueprint) ResourceNamed(name string) *Resource {
+	if b == nil {
+		return nil
+	}
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Name == name {
+			return &b.Spec.Resources[i]
+		}
+	}
+	return nil
+}
+
 // Convention binds a template to every top-level forProvider leaf whose name
 // ends with Match, on every resource that does not set that field itself.
 type Convention struct {

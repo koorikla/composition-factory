@@ -64,7 +64,7 @@ func (c *PackageCmd) Run(out io.Writer) error {
 	var docs [][]byte
 	for _, prefix := range []string{"xrds/", "compositions/"} {
 		for _, o := range outputs {
-			if strings.HasPrefix(o.Path, prefix) {
+			if strings.HasPrefix(filepath.ToSlash(o.Path), prefix) {
 				docs = append(docs, o.Body)
 			}
 		}

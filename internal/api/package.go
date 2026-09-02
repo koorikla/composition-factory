@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -43,7 +44,7 @@ func (srv *server) handlePackage(w http.ResponseWriter, r *http.Request) {
 	var docs [][]byte
 	for _, prefix := range []string{"xrds/", "compositions/"} {
 		for _, o := range outputs {
-			if strings.HasPrefix(o.Path, prefix) {
+			if strings.HasPrefix(filepath.ToSlash(o.Path), prefix) {
 				docs = append(docs, o.Body)
 			}
 		}

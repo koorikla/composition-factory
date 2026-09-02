@@ -96,11 +96,11 @@ func whenParam(when string) string {
 	return param
 }
 
-// referencingResources returns the names of every resource that references
+// ReferencingResources returns the names of every resource that references
 // params.<name> — through a field's From, an envelope entry's From, an
 // annotation entry's From, its own ForEach loop bound, or its When condition
 // — in resource order, each resource named at most once.
-func (b *Blueprint) referencingResources(name string) []string {
+func (b *Blueprint) ReferencingResources(name string) []string {
 	want := "params." + name
 	var refs []string
 	for _, r := range b.Spec.Resources {
@@ -125,16 +125,16 @@ func anyFrom(fields map[string]Field, want string) bool {
 	return false
 }
 
-// statusReferencingResources returns the names of every resource that
+// StatusReferencingResources returns the names of every resource that
 // references resources.<name>'s status — through a field's or annotation's
 // From, or through its own forEach loop bound
 // (forEach: resources.<name>.status.<path>) — in resource order. It is the
-// resources.<name>.status.* counterpart of referencingResources, and matches
+// resources.<name>.status.* counterpart of ReferencingResources, and matches
 // by parsing each reference with the same
 // grammar the validator uses rather than by substring, so a params reference
 // (a different namespace) or a name that merely shares a prefix can never
 // match.
-func (b *Blueprint) statusReferencingResources(name string) []string {
+func (b *Blueprint) StatusReferencingResources(name string) []string {
 	var refs []string
 	for _, r := range b.Spec.Resources {
 		// An observed-count loop bound references the target's status as
@@ -260,7 +260,7 @@ func (b *Blueprint) DeleteResource(name string) error {
 	if idx < 0 {
 		return fmt.Errorf("delete resource: %q is not declared", name)
 	}
-	if refs := b.statusReferencingResources(name); len(refs) > 0 {
+	if refs := b.StatusReferencingResources(name); len(refs) > 0 {
 		quoted := make([]string, len(refs))
 		for i, r := range refs {
 			quoted[i] = fmt.Sprintf("%q", r)
@@ -416,7 +416,7 @@ func (b *Blueprint) DeleteParameter(name string) error {
 	if _, exists := b.Spec.XRD.Parameters[name]; !exists {
 		return fmt.Errorf("delete parameter: %q is not declared", name)
 	}
-	if refs := b.referencingResources(name); len(refs) > 0 {
+	if refs := b.ReferencingResources(name); len(refs) > 0 {
 		quoted := make([]string, len(refs))
 		for i, r := range refs {
 			quoted[i] = fmt.Sprintf("%q", r)

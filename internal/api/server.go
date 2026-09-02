@@ -482,20 +482,28 @@ func (srv *server) rebuildIndexLocked(optB ...*blueprint.Blueprint) error {
 	if len(optB) > 0 && optB[0] != nil {
 		b = optB[0]
 	} else if srv.Blueprint != "" {
-		if data, err := os.ReadFile(srv.Blueprint); err == nil {
-			var parsed blueprint.Blueprint
-			if err := yaml.Unmarshal(data, &parsed); err == nil {
-				b = &parsed
+		data, err := os.ReadFile(srv.Blueprint)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("read blueprint: %w", err)
 			}
+		} else {
+			var parsed blueprint.Blueprint
+			if err := yaml.Unmarshal(data, &parsed); err != nil {
+				return fmt.Errorf("parse blueprint: %w", err)
+			}
+			b = &parsed
 		}
 	}
 
 	byProvider := make(map[string][]schema.CRD, len(srv.Providers)+2)
 	if srv.Store != nil {
 		for _, ref := range srv.Providers {
-			if crds, err := srv.Store.Load(ref); err == nil {
-				byProvider[ref] = crds
+			crds, err := srv.Store.Load(ref)
+			if err != nil {
+				return fmt.Errorf("load provider schemas %s: %w", ref, err)
 			}
+			byProvider[ref] = crds
 		}
 	}
 	if b != nil {
@@ -509,17 +517,27 @@ func (srv *server) rebuildIndexLocked(optB ...*blueprint.Blueprint) error {
 				if !filepath.IsAbs(p) && dir != "" {
 					p = filepath.Join(dir, p)
 				}
-				if crdData, err := os.ReadFile(p); err == nil {
-					if scanned, err := schema.ParseCRDManifest(crdData); err == nil {
-						byProvider[s.CRDs] = scanned
+				crdData, err := os.ReadFile(p)
+				if err != nil {
+					if os.IsNotExist(err) {
+						continue
 					}
+					return fmt.Errorf("read crds %s: %w", p, err)
 				}
+				scanned, err := schema.ParseCRDManifest(crdData)
+				if err != nil {
+					return fmt.Errorf("parse crd manifest %s: %w", p, err)
+				}
+				byProvider[s.CRDs] = scanned
 			}
 		}
 	}
-	if native, err := k8s.Kinds(); err == nil {
-		byProvider[blueprint.NativeProvider] = native
+	native, err := k8s.Kinds()
+	if err != nil {
+		return fmt.Errorf("load native kubernetes kinds: %w", err)
 	}
+	byProvider[blueprint.NativeProvider] = native
+
 	idx, err := index.Build(byProvider)
 	if err != nil {
 		return err
