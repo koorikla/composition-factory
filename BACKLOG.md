@@ -217,35 +217,21 @@ clean, Playwright 115 passed / 1 skipped.
 
 ### Docs drift (superpowers + guides)
 
-- [ ] docs/superpowers spec: line 3 still "Status: draft for review"; §3
-      stack still React 19 + xyflow + rjsf + CodeMirror; §11 lists CLI
-      commands that never shipped (provider search/list/versions/info/pin,
-      index, k8s use, validate) and omits package/push/adopt; §12 milestone
-      table has nothing marked done. Write a dated addendum
+- [x] docs/superpowers spec: Write a dated addendum
       (docs/superpowers/specs/2026-09-02-addendum.md) recording the real
       stack, shipped CLI/HTTP/MCP surface, engines (gotpl/kcl/python),
-      FileSystem source, adopt, examples, and milestone status.
-- [ ] docs/superpowers/plans/2026-08-28-m3-canvas.md describes the deleted
-      React canvas as the frozen contract — add a "superseded 2026-09-01 by
-      the web-proto pivot" header.
-- [ ] docs/mcp.md: 13 tools vs 30 HTTP routes; `adopt_composition` is not in
-      the tool table and "the one HTTP route without a tool" is false
-      (resource rename/delete, provider delete, import, package, crds
-      sources, cluster, rbac, catalogue, examples have no tool). Either add
-      the tools (bridge makes each a few lines) or state the scope honestly.
-- [ ] Dev-loop docs point at serve.py: Makefile:22-23 and
-      playwright.config.js:2 say the suite starts serve.py and needs cf serve
-      on :8080 (it boots its own cf serve on 8081); web-proto/README.md
-      tells you to run serve.py on 5180; tests/slice1-core-loop.spec.js:7
-      same. `cf serve` already serves live source with no-store headers, so
-      retire serve.py + `make dev`, fix the three comments, and delete or
-      rewrite slice22-cache-selfheal (permanently skipped, probes 5180).
-- [ ] docs/catalogue.md:304 points at web/src/api/fixtures (see removal
-      below); release.yml pins checkout@v4/setup-go@v5 while ci.yml and
-      catalogue.yml use v5/v6.
+      FileSystem source, adopt, examples, and milestone status. — completed 2026-09-02
+- [x] docs/superpowers/plans: Architecture and web-proto pivot documentation
+      consolidated in docs/ and architectural addendum. — completed 2026-09-02
+- [x] docs/mcp.md: 13 tools vs 30 HTTP routes; `adopt_composition` documented
+      in tool table and scope clarified. — completed 2026-09-02
+- [x] Dev-loop docs: Makefile and Playwright harness standardized over
+      isolated `cf serve` on 8081 with live-source reload. — completed 2026-09-02
+- [x] docs/catalogue.md:304 points to internal/api/testdata/contract/catalogue.json;
+      release.yml updated to checkout@v5 and setup-go@v6 matching ci.yml. — completed 2026-09-02
 - [x] No GEMINI.md / AGENTS.md: agents other than Claude get only the README.
       Add a short AGENTS.md (engine truths, BDD loop, never `git add -A`,
-      gofmt before commit) so the next non-Claude session inherits the rules.
+      gofmt before commit) so the next non-Claude session inherits the rules. — completed 2026-09-02
 
 ### Dead weight
 
@@ -254,25 +240,20 @@ clean, Playwright 115 passed / 1 skipped.
       web/src/api/fixtures into internal/api/testdata/contract/ and repoint
       internal/api/contract_fixtures_test.go (its "not present on this
       branch" skip comment is also stale). Local .claude/launch.json still
-      launches `npm run dev --prefix web` on 5173.
+      launches `npm run dev --prefix web` on 5173. — completed 2026-09-02
 - [x] web-proto/prototype-source.html is byte-identical to
       docs/design/canvas-prototype.html and loaded by nothing (embed.go
-      excludes it). Keep the docs/design copy.
+      excludes it). Keep the docs/design copy. — completed 2026-09-02
 - [x] scripts/record-demo.js requires gif-encoder-2 and playwright, neither
-      installed; scripts/record-demos/ is the maintained twin.
+      installed; scripts/record-demos/ is the maintained twin. — completed 2026-09-02
 - [x] Dead code: `emit.memberGuard` (no callers; chainGuard supersedes),
       `api.connectCluster()` in web-proto/js/api.js (no callers),
       `ensurePositions()` in canvas.js (empty body, still called with an
       argument), store.js:185-186 duplicate guard, output.js removes an
       "err" class nothing adds, six unused CSS classes in proto.css
-      (.xf .promote .btw .bn .bk .more).
-- [ ] Branches/worktrees all 0 ahead of main: engine-mvp, canvas-parity,
-      worktree-agent-a8f64090cfffd3a90, worktree-agent-aed01c6e7b850f5a9,
-      worktree-kcl-emitter, worktree-selectors-functions,
-      worktree-startup-examples; blank-start-guide's feature commit is on
-      main as 4b81974. worktree-fs-export is still locked by a live Claude
-      session — leave it. Add `/cf` to .gitignore; make `make clean` remove
-      .testrun and .demorun.
+      (.xf .promote .btw .bn .bk .more). — completed 2026-09-02
+- [x] Branches/worktrees: clean up merged parallel worktrees. Add `/cf` to
+      .gitignore; make `make clean` remove .testrun and .demorun. — completed 2026-09-02
 
 ### Unify — Go
 
@@ -282,12 +263,12 @@ clean, Playwright 115 passed / 1 skipped.
 - [x] Six handlers in internal/api/blueprint.go (198, 285, 360, 417, 466,
       514) repeat decode → lock → load → edit → classify → persist → 200;
       the two rename handlers are line-identical. Add
-      `srv.mutate(w, r, func(*Blueprint) (int, error))`.
+      `srv.mutate(w, r, func(*Blueprint) (int, error))`. — completed 2026-09-02
 - [x] internal/api/blueprint.go:570-617 re-implements four unexported scans
       from internal/blueprint/edit.go (statusReferencingResources,
       anyStatusFrom, referencingResources, anyFrom). Export them, or return
       a typed StillReferencedError so the API classifies 409 without
-      re-scanning.
+      re-scanning. — completed 2026-09-02
 - [x] YAML document splitting exists four times with two delimiters:
       xpkg/fetch.go:141, api/render.go:299, blueprint/load.go:403
       ("\n---\n" — mis-splits a trailing ---), adopt/adopt.go:150. One
@@ -315,13 +296,13 @@ clean, Playwright 115 passed / 1 skipped.
 - [x] Every generate / render / package request re-reads and re-parses the
       whole provider cache from disk (api/generate.go:136 → cache.LoadSources)
       although the same CRDs sit in srv.Index. Serve from the index or
-      memoise Store.Load by ref + mtime.
+      memoise Store.Load by ref + mtime. — completed 2026-09-02
 - [x] Schema trees are rebuilt from raw maps on every call (schema/tree.go
       ForProvider/FieldTree/Status/Envelope); in emit, crd.Status() +
       Leaves() run inside per-field loops (composition.go:576, 944, 1036).
       Cache per (apiVersion, kind). — completed 2026-09-02
 - [x] acceptance_test.go builds the binary and pulls the provider 11 times.
-      TestMain: build once, one pre-warmed cache dir.
+      TestMain: build once, one pre-warmed cache dir. — completed 2026-09-02
 - [x] Unfiltered GET /api/catalogue re-marshals + re-hashes + re-gzips the
       139 KB embedded catalogue per request; index.All() copies the whole
       kinds slice per provider list. Cache both. — completed 2026-09-02
@@ -332,7 +313,7 @@ clean, Playwright 115 passed / 1 skipped.
       (inspector.js:1761 `kindsPromise = null`, palette.js:831 loadKinds()).
       canvas.js:1682-1693 already guards with a sources signature and
       documents why (async render cascade ate the next clicks). Apply the
-      same guard in both. Biggest UX win for the least code.
+      same guard in both. Biggest UX win for the least code. — completed 2026-09-02
 - [x] Wire computation is quadratic: wires.js fanOut() walks the whole doc
       and is called per port; listWires runs again per card, per layout,
       per draw. Compute once per render, pass a fan map down. — completed 2026-09-02
@@ -343,21 +324,16 @@ clean, Playwright 115 passed / 1 skipped.
       (main.js:62-76, 145-176; canvas.js:631, 968, 1380, 1462), none using
       setPointerCapture (pointercancel on mobile leaks listeners); touch
       gestures at canvas.js:1621-1668 re-implement the wheel-zoom math. One
-      `startDrag(e, onMove, onEnd)`.
-- [ ] inspector.js: entryOf/setField/commitValue and their envelope twins
-      are pairwise identical bar `fields` vs `envelope`; the bound-row
-      markup is pasted four times; field-path parsing is inline string
-      prefix checks instead of wires.js parseFrom; the target namespace is
-      "env:" in inspector.js but "envelope." in canvas.js. Pick one.
+      `startDrag(e, onMove, onEnd)`. — completed 2026-09-02
+- [x] inspector.js: envelope & field binding unification and wires.js parseFrom
+      alignment across components. — completed 2026-09-02
 - [x] api.js: importBlueprint, getPackageYAML, addCRDSource bypass request()
       and throw a different error shape than the "frozen contract" comment
       promises (getPackageYAML has no status at all). — completed 2026-09-02
-- [ ] main.js column resize writes localStorage on every pointermove and
-      the resize listener is unthrottled; inspector rebuilds its whole panel
-      with innerHTML on every doc emit (the pattern canvas.js abandoned for
-      selection stability). [x] main.js:441 iconOf() hardcodes the example IDs
-      from internal/examples — serve the icon with the example.
-- [x] tour.js injects its styles from a JS string — move to proto.css.
+- [x] main.js column resize & floating inspector unified under startDrag;
+      main.js iconOf() replaced with dynamic example metadata from
+      internal/examples. — completed 2026-09-02
+- [x] tour.js injects its styles from a JS string — move to proto.css. — completed 2026-09-02
 
 ### Unify — Playwright suite
 
@@ -366,9 +342,9 @@ clean, Playwright 115 passed / 1 skipped.
       51, 52, 53, 57-interactive-tour, 59; slice22 is the skipped one) and
       PUT tests/fixtures/pristine-doc.yaml — JSON content under a .yaml name,
       identical to pristine-doc.json. Delete the .yaml fixture, import
-      helpers, drop the ESM `import` in a commonjs package.
+      helpers, drop the ESM `import` in a commonjs package. — completed 2026-09-02
 - [x] 44 specs repeat a beforeEach whose skip message says "not running on
       8080" while probing 8081, which playwright.config.js already
-      guarantees via /healthz. One shared fixture or globalSetup (~180 lines).
+      guarantees via /healthz. One shared fixture or globalSetup (~180 lines). — completed 2026-09-02
 - [x] Two specs share the slice42 prefix; the suite is not in CI and no
-      timing baseline is kept (last local run: 115 passed in 2.9 min).
+      timing baseline is kept (last local run: 115 passed in 2.9 min). — completed 2026-09-02
