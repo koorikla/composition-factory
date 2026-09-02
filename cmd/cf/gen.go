@@ -26,7 +26,7 @@ type GenCmd struct {
 	// rendered documents are byte-identical to the inline form: the
 	// function concatenates the folder exactly back into the inline body.
 	TemplateSource string `help:"Where the Composition's go-template body lives: inline (default) or filesystem (templates/ folder + ConfigMaps + DeploymentRuntimeConfig)." enum:"inline,filesystem" default:"inline"`
-	Engine         string `help:"Composition rendering engine: go-templating or kcl (defaults to blueprint setting)."`
+	Engine         string `help:"Composition rendering engine: go-templating, kcl, or python (defaults to blueprint setting)."`
 }
 
 func (c *GenCmd) Run(out io.Writer) error {
@@ -67,8 +67,8 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 		b.Spec.Emit.TemplateSource = blueprint.TemplateSourceFileSystem
 	}
 	if c.Engine != "" {
-		if c.Engine != blueprint.EngineGoTemplating && c.Engine != blueprint.EngineKCL {
-			return 1, fmt.Errorf("--engine must be %q or %q, got %q", blueprint.EngineGoTemplating, blueprint.EngineKCL, c.Engine)
+		if c.Engine != blueprint.EngineGoTemplating && c.Engine != blueprint.EngineKCL && c.Engine != blueprint.EnginePython {
+			return 1, fmt.Errorf("--engine must be %q, %q, or %q, got %q", blueprint.EngineGoTemplating, blueprint.EngineKCL, blueprint.EnginePython, c.Engine)
 		}
 		if b.Spec.Emit == nil {
 			b.Spec.Emit = &blueprint.Emit{}

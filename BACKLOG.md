@@ -153,5 +153,10 @@
       YAML via GUI / API dynamically fetches, caches, digest-pins and indexes all
       declared provider dependencies into the local schema cache and `/api/kinds`.
       — user request 2026-09-02
-- [ ] (back-backlog) Generate compositions in other languages — Python
-      (`function-python` et al.) as additional emitter.
+- [x] Alternative Composition Emitters — Python (`function-python`):
+      `spec.emit.engine: python` (and GUI engine dropdown) generates native
+      Python Compositions using `python.fn.crossplane.io/v1beta1` `Script` with
+      typed `req: fnv1.RunFunctionRequest, rsp: fnv1.RunFunctionResponse`, desired
+      resource updates, field parameter bindings, status wires, loops, conditionals,
+      and `fnv1.READY_TRUE`; auto-pins `function-python` in `functions.yaml` and `package.yaml`.
+      CLI: `cf gen --engine=python`. — completed 2026-09-02

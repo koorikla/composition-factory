@@ -68,6 +68,25 @@ func composition(b *blueprint.Blueprint, crds []schema.CRD, fsDir string) ([]byt
 				d.Line(5, "%s", line)
 			}
 		}
+	} else if b.Engine() == blueprint.EnginePython {
+		d.Line(1, "- step: %s", blueprint.TemplatingStepName)
+		d.Line(2, "functionRef:")
+		d.Line(3, "name: %s", blueprint.PythonFunctionName)
+		d.Line(2, "input:")
+		d.Line(3, "apiVersion: python.fn.crossplane.io/v1beta1")
+		d.Line(3, "kind: Script")
+		d.Line(3, "script: |")
+		pyBody, err := pythonTemplateBody(b, crds)
+		if err != nil {
+			return nil, err
+		}
+		for _, line := range strings.Split(strings.TrimRight(pyBody, "\n"), "\n") {
+			if line == "" {
+				d.Line(0, "")
+			} else {
+				d.Line(4, "%s", line)
+			}
+		}
 	} else {
 		d.Line(1, "- step: %s", blueprint.TemplatingStepName)
 		d.Line(2, "functionRef:")

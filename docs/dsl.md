@@ -166,11 +166,12 @@ The blueprint controls the generator output engine and structure via `spec.emit`
 ```yaml
 spec:
   emit:
-    engine: go-templating    # "go-templating" (default) or "kcl" (function-kcl)
+    engine: go-templating    # "go-templating" (default), "kcl" (function-kcl), or "python" (function-python)
     templateSource: Inline   # "Inline" (default) or "FileSystem"
 ```
 
 - **`engine: go-templating`**: Generates `function-go-templating` pipeline step with Go template expressions and `missingkey=error`.
 - **`engine: kcl`**: Generates `function-kcl` (`krm.kcl.dev/v1alpha1` `KCLInput`) pipeline step with typed KCL expressions (`oxr`, `_spec`, `ocds`, `items = _items`), automatically configured in `functions.yaml` and `package.yaml`.
+- **`engine: python`**: Generates `function-python` (`python.fn.crossplane.io/v1beta1` `Script`) pipeline step with native Python composition logic (`req: fnv1.RunFunctionRequest, rsp: fnv1.RunFunctionResponse`), desired resource mappings, and readiness signals, automatically configured in `functions.yaml` and `package.yaml`.
 - **`templateSource: FileSystem`**: Emits one template file per object in a `templates/` folder packed into ConfigMaps and mounted via a `DeploymentRuntimeConfig`.
 

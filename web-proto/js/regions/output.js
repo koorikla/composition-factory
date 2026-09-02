@@ -591,9 +591,9 @@ export function init(rootEl, deps) {
       var val = el.engineSel.value;
       store.replaceDoc(function (doc) {
         doc.spec = doc.spec || {};
-        if (val === "kcl") {
+        if (val === "kcl" || val === "python") {
           doc.spec.emit = doc.spec.emit || {};
-          doc.spec.emit.engine = "kcl";
+          doc.spec.emit.engine = val;
         } else {
           if (doc.spec.emit) {
             delete doc.spec.emit.engine;

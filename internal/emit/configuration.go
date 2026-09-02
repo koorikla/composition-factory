@@ -18,6 +18,11 @@ func functionList(b *blueprint.Blueprint) ([]fn, error) {
 			blueprint.KCLFunctionName,
 			blueprint.KCLFunctionPackage,
 		}
+	} else if b.Engine() == blueprint.EnginePython {
+		primaryFn = fn{
+			blueprint.PythonFunctionName,
+			blueprint.PythonFunctionPackage,
+		}
 	}
 	fns := []fn{primaryFn}
 	declared := map[string]string{primaryFn.name: primaryFn.pkg}

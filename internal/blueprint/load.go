@@ -432,10 +432,10 @@ func (b *Blueprint) Validate() error {
 		}
 		if b.Spec.Emit.Engine != "" {
 			switch strings.ToLower(b.Spec.Emit.Engine) {
-			case EngineGoTemplating, EngineKCL:
+			case EngineGoTemplating, EngineKCL, EnginePython:
 			default:
-				return fmt.Errorf("spec.emit.engine: %q is not a valid engine (must be %q or %q)",
-					b.Spec.Emit.Engine, EngineGoTemplating, EngineKCL)
+				return fmt.Errorf("spec.emit.engine: %q is not a valid engine (must be %q, %q, or %q)",
+					b.Spec.Emit.Engine, EngineGoTemplating, EngineKCL, EnginePython)
 			}
 		}
 	}

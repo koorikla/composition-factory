@@ -99,9 +99,12 @@ const (
 
 	EngineGoTemplating = "go-templating"
 	EngineKCL          = "kcl"
+	EnginePython       = "python"
 
-	KCLFunctionName    = "function-kcl"
-	KCLFunctionPackage = "xpkg.upbound.io/crossplane-contrib/function-kcl:v0.11.2"
+	KCLFunctionName       = "function-kcl"
+	KCLFunctionPackage    = "xpkg.upbound.io/crossplane-contrib/function-kcl:v0.11.2"
+	PythonFunctionName    = "function-python"
+	PythonFunctionPackage = "xpkg.upbound.io/crossplane-contrib/function-python:v0.5.0"
 )
 
 // TemplateSource returns the effective template source mode ("Inline" or "FileSystem").
@@ -112,10 +115,15 @@ func (b *Blueprint) TemplateSource() string {
 	return TemplateSourceInline
 }
 
-// Engine returns the effective composition render engine ("go-templating" or "kcl").
+// Engine returns the effective composition render engine ("go-templating", "kcl", or "python").
 func (b *Blueprint) Engine() string {
-	if b != nil && b.Spec.Emit != nil && strings.EqualFold(b.Spec.Emit.Engine, EngineKCL) {
-		return EngineKCL
+	if b != nil && b.Spec.Emit != nil {
+		if strings.EqualFold(b.Spec.Emit.Engine, EngineKCL) {
+			return EngineKCL
+		}
+		if strings.EqualFold(b.Spec.Emit.Engine, EnginePython) {
+			return EnginePython
+		}
 	}
 	return EngineGoTemplating
 }
