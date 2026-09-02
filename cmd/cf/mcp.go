@@ -65,6 +65,10 @@ func (c *MCPCmd) run(ctx context.Context) error {
 		return err
 	}
 
+	if _, err := ensureBlueprint(blueprintPath); err != nil {
+		return err
+	}
+
 	o, err := buildAPIOptions(blueprintPath, c.CacheDir, outDir, c.Lock, nil, false)
 	if err != nil {
 		return err

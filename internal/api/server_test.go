@@ -227,6 +227,12 @@ spec:
                 type: object
                 properties:
                   name: {type: string}
+          status:
+            properties:
+              atProvider:
+                properties:
+                  arn: {type: string}
+                  url: {type: string}
 `)})
 	if err != nil {
 		t.Fatalf("ParseCRDs: %v", err)

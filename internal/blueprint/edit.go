@@ -145,21 +145,54 @@ func (b *Blueprint) StatusReferencingResources(name string) []string {
 			refs = append(refs, r.Name)
 			continue
 		}
-		if anyStatusFrom(r.Fields, name) || anyStatusFrom(r.Annotations, name) {
+		if anyStatusFrom(r.Fields, name) || anyStatusFrom(r.Annotations, name) || anyStatusFrom(r.Envelope, name) {
 			refs = append(refs, r.Name)
 		}
 	}
 	return refs
 }
 
+// rawReferencesResource checks whether a raw template/expression string contains
+// references to the given resource name.
+func rawReferencesResource(raw, name string) bool {
+	if raw == "" || name == "" {
+		return false
+	}
+	return strings.Contains(raw, `"`+name+`"`) ||
+		strings.Contains(raw, `'`+name+`'`) ||
+		strings.Contains(raw, "`"+name+"`") ||
+		strings.Contains(raw, "resources."+name+".") ||
+		strings.Contains(raw, "resources."+name+" ") ||
+		strings.Contains(raw, "resources."+name+"}") ||
+		strings.Contains(raw, ".observed.resources."+name) ||
+		strings.Contains(raw, "$observed.resources."+name)
+}
+
+// rewriteRawResource replaces references to from with to in a raw template/expression.
+func rewriteRawResource(raw, from, to string) string {
+	if raw == "" || from == "" || to == "" || from == to {
+		return raw
+	}
+	r := raw
+	r = strings.ReplaceAll(r, `"`+from+`"`, `"`+to+`"`)
+	r = strings.ReplaceAll(r, `'`+from+`'`, `'`+to+`'`)
+	r = strings.ReplaceAll(r, "`"+from+"`", "`"+to+"`")
+	r = strings.ReplaceAll(r, "resources."+from+".", "resources."+to+".")
+	r = strings.ReplaceAll(r, ".observed.resources."+from, ".observed.resources."+to)
+	r = strings.ReplaceAll(r, "$observed.resources."+from, "$observed.resources."+to)
+	return r
+}
+
 // anyStatusFrom reports whether any entry in fields wires from resource
-// name's status.
+// name's status or references it in raw text.
 func anyStatusFrom(fields map[string]Field, name string) bool {
 	for _, f := range fields {
-		if f.From == "" {
-			continue
+		if f.From != "" {
+			if ref, err := ParseFrom(f.From); err == nil && ref.Resource == name {
+				return true
+			}
 		}
-		if ref, err := ParseFrom(f.From); err == nil && ref.Resource == name {
+		if f.Raw != "" && rawReferencesResource(f.Raw, name) {
 			return true
 		}
 	}
@@ -225,6 +258,23 @@ func (b *Blueprint) RenameResource(from, to string) error {
 				f.From = newMetaRef
 				cp.Spec.Resources[i].Fields[path] = f
 			}
+			if f.Raw != "" && rawReferencesResource(f.Raw, from) {
+				f.Raw = rewriteRawResource(f.Raw, from, to)
+				cp.Spec.Resources[i].Fields[path] = f
+			}
+		}
+		for path, f := range r.Envelope {
+			if rest, ok := strings.CutPrefix(f.From, oldPrefix); ok {
+				f.From = newPrefix + rest
+				cp.Spec.Resources[i].Envelope[path] = f
+			} else if f.From == oldMetaRef {
+				f.From = newMetaRef
+				cp.Spec.Resources[i].Envelope[path] = f
+			}
+			if f.Raw != "" && rawReferencesResource(f.Raw, from) {
+				f.Raw = rewriteRawResource(f.Raw, from, to)
+				cp.Spec.Resources[i].Envelope[path] = f
+			}
 		}
 		// An annotation wire is the same reference shape and gets the same
 		// rewrite: a dangling one would leave a guard chain that indexes an
@@ -238,6 +288,10 @@ func (b *Blueprint) RenameResource(from, to string) error {
 				f.From = newMetaRef
 				cp.Spec.Resources[i].Annotations[key] = f
 			}
+			if f.Raw != "" && rawReferencesResource(f.Raw, from) {
+				f.Raw = rewriteRawResource(f.Raw, from, to)
+				cp.Spec.Resources[i].Annotations[key] = f
+			}
 		}
 		// An observed-count loop bound (forEach:
 		// resources.<from>.status.<path>) references the renamed resource
@@ -247,6 +301,11 @@ func (b *Blueprint) RenameResource(from, to string) error {
 		// params.<name> forEach is never touched.
 		if rest, ok := strings.CutPrefix(r.ForEach, oldPrefix); ok {
 			cp.Spec.Resources[i].ForEach = newPrefix + rest
+		}
+	}
+	for tName, body := range cp.Spec.Templates {
+		if rawReferencesResource(body, from) {
+			cp.Spec.Templates[tName] = rewriteRawResource(body, from, to)
 		}
 	}
 
@@ -273,8 +332,13 @@ func (b *Blueprint) DeleteResource(name string) error {
 		for i, r := range refs {
 			quoted[i] = fmt.Sprintf("%q", r)
 		}
-		return fmt.Errorf("delete resource %q: its status or metadata is still wired into resources %s",
+		return fmt.Errorf("delete resource %q: its status, metadata, or raw reference is still wired into resources %s",
 			name, strings.Join(quoted, ", "))
+	}
+	for tName, body := range b.Spec.Templates {
+		if rawReferencesResource(body, name) {
+			return fmt.Errorf("delete resource %q: still referenced by template %q", name, tName)
+		}
 	}
 
 	cp := b.deepCopy()

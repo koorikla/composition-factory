@@ -579,3 +579,31 @@ func TestConcurrentDeleteAndGet(t *testing.T) {
 		t.Errorf("providers after concurrent delete = %+v, want only the original", provs.Providers)
 	}
 }
+
+func TestAddProviderDeclaresSourceInBlueprintIdempotently(t *testing.T) {
+	h, o := testProviderServer(t, func(ref string) (*xpkg.Package, error) {
+		return &xpkg.Package{Ref: ref, Digest: "sha256:added", Docs: [][]byte{
+			managedCRDDoc("sns.aws.m.upbound.io", "Topic", "topics"),
+		}}, nil
+	})
+
+	rec := do(t, h, "POST", "/api/providers", `{"ref":"`+addedProviderRef+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	b, err := blueprint.Load(o.Blueprint)
+	if err != nil {
+		t.Fatalf("load blueprint: %v", err)
+	}
+	found := false
+	for _, s := range b.Spec.Sources {
+		if s.Provider == addedProviderRef {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("blueprint sources %+v does not declare added provider %s", b.Spec.Sources, addedProviderRef)
+	}
+}

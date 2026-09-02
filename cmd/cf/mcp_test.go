@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/alecthomas/kong"
@@ -47,17 +48,17 @@ func TestMCPDefaultsMatchServe(t *testing.T) {
 	}
 }
 
-// TestMCPRunReportsAMissingBlueprint pins startup failure shape: a
-// blueprint path that cannot be read fails before any transport is opened,
-// with blueprint.Load's own error — the same message `cf serve` and `cf gen`
-// give for the same mistake.
-func TestMCPRunReportsAMissingBlueprint(t *testing.T) {
-	c := &MCPCmd{Blueprint: "does-not-exist.cf.yaml", Out: t.TempDir(), CacheDir: t.TempDir(), Lock: ".cf.lock"}
-	err := c.run(context.Background())
-	if err == nil {
-		t.Fatal("run succeeded with a missing blueprint")
-	}
-	if !strings.Contains(err.Error(), "read blueprint") {
-		t.Errorf("error = %q, want blueprint.Load's own read failure", err)
+// TestMCPRunScaffoldsMissingBlueprint pins that a missing blueprint path
+// is scaffolded automatically on startup, matching `cf serve` behavior.
+func TestMCPRunScaffoldsMissingBlueprint(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately so stdio transport does not block
+
+	bpPath := filepath.Join(t.TempDir(), "missing.cf.yaml")
+	c := &MCPCmd{Blueprint: bpPath, Out: t.TempDir(), CacheDir: t.TempDir(), Lock: filepath.Join(t.TempDir(), ".cf.lock")}
+	_ = c.run(ctx)
+
+	if _, err := os.Stat(bpPath); err != nil {
+		t.Fatalf("expected missing blueprint to be scaffolded on startup: %v", err)
 	}
 }

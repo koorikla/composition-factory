@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/koorikla/compositionfactory/internal/index"
+	"github.com/koorikla/compositionfactory/internal/schema"
 )
 
 // handleKinds serves GET /api/kinds?q=&limit=. With no q, index.Search("",
@@ -28,6 +29,10 @@ import (
 // deliberately and on both sides at once.
 func (srv *server) handleKinds(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	if err := validateQueryParams(q, "q", "search", "limit"); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	limit, err := parseIntParam(q, "limit")
 	if err != nil {
@@ -35,8 +40,13 @@ func (srv *server) handleKinds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	searchQuery := q.Get("q")
+	if searchQuery == "" {
+		searchQuery = q.Get("search")
+	}
+
 	// One snapshot of the index for the whole response — see server.index.
-	kinds := srv.index().Search(q.Get("q"), limit)
+	kinds := srv.index().Search(searchQuery, limit)
 	if kinds == nil {
 		kinds = []index.Kind{}
 	}
@@ -58,6 +68,10 @@ func (srv *server) handleKinds(w http.ResponseWriter, r *http.Request) {
 // reads the real CRD, so a namespaced Queue and a cluster-scoped Queue each
 // get the envelope their own schema actually has.
 func (srv *server) handleKind(w http.ResponseWriter, r *http.Request) {
+	if err := validateQueryParams(r.URL.Query()); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	apiVersion, err := pathAPIVersion(r)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -111,6 +125,10 @@ func (srv *server) handleKind(w http.ResponseWriter, r *http.Request) {
 // /api/kinds/{apiVersion}/{kind}/fields?required_only=&max_depth=&prefix=&q=&limit=:
 // the forProvider fields for one kind, filtered by index.FieldQuery.
 func (srv *server) handleKindFields(w http.ResponseWriter, r *http.Request) {
+	if err := validateQueryParams(r.URL.Query(), "prefix", "max_depth", "q", "search", "required_only", "limit", "status"); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	apiVersion, err := pathAPIVersion(r)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -130,16 +148,30 @@ func (srv *server) handleKindFields(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// FieldTree serves both composable families from one call: the
-	// forProvider subtree for a managed resource, and for a native kind the
-	// object's own settable tree, whose paths read exactly like a manifest
-	// (spec.template.spec.containers[0].image on a Deployment). See
-	// handleKind: a CRD version with no schema block makes FieldTree fail;
-	// that is zero fields, not a server error (index.Build treats it
-	// identically when building Kind.Fields/Kind.Required).
-	nodes, err := crd.FieldTree()
+	isStatus, err := parseBoolParam(r.URL.Query(), "status")
 	if err != nil {
-		nodes = nil
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var nodes []*schema.Node
+	if isStatus {
+		nodes, err = crd.Status()
+		if err != nil {
+			nodes = nil
+		}
+	} else {
+		// FieldTree serves both composable families from one call: the
+		// forProvider subtree for a managed resource, and for a native kind the
+		// object's own settable tree, whose paths read exactly like a manifest
+		// (spec.template.spec.containers[0].image on a Deployment). See
+		// handleKind: a CRD version with no schema block makes FieldTree fail;
+		// that is zero fields, not a server error (index.Build treats it
+		// identically when building Kind.Fields/Kind.Required).
+		nodes, err = crd.FieldTree()
+		if err != nil {
+			nodes = nil
+		}
 	}
 
 	// total must count the filtered set BEFORE limit truncates it, so a
@@ -233,6 +265,9 @@ func parseFieldQuery(q url.Values) (index.FieldQuery, error) {
 	}
 	fq.Prefix = q.Get("prefix")
 	fq.Search = q.Get("q")
+	if fq.Search == "" {
+		fq.Search = q.Get("search")
+	}
 	return fq, nil
 }
 

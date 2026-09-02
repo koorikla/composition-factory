@@ -18,8 +18,13 @@ type Field struct {
 	// RAW schema flag (EnvVar.name is raw-required but only binds once an
 	// optional env entry exists); RequiredChain is what a "must actually set
 	// this" filter runs on. False on trees the CRD methods did not annotate.
-	RequiredChain bool `json:"requiredChain"`
-	Depth         int  `json:"depth"` // 0 for a top-level field
+	RequiredChain bool     `json:"requiredChain"`
+	Depth         int      `json:"depth"` // 0 for a top-level field
+	Enum          []string `json:"enum,omitempty"`
+	Default       any      `json:"default,omitempty"`
+	Minimum       *float64 `json:"minimum,omitempty"`
+	Maximum       *float64 `json:"maximum,omitempty"`
+	Format        string   `json:"format,omitempty"`
 }
 
 // FieldQuery narrows the field list Fields returns. The zero value returns
@@ -56,7 +61,12 @@ func Fields(nodes []*schema.Node, q FieldQuery) []Field {
 			// before a field one level down, and so on; an array index is
 			// part of its own segment rather than adding a separator, so
 			// counting "." characters gives depth-from-zero directly.
-			Depth: strings.Count(l.Path, "."),
+			Depth:   strings.Count(l.Path, "."),
+			Enum:    l.Node.Enum,
+			Default: l.Node.Default,
+			Minimum: l.Node.Minimum,
+			Maximum: l.Node.Maximum,
+			Format:  l.Node.Format,
 		})
 	}
 
@@ -137,6 +147,11 @@ func RequiredBranches(nodes []*schema.Node) []Field {
 			Required:      b.Node.Required,
 			RequiredChain: b.Node.RequiredChain,
 			Depth:         strings.Count(b.Path, "."),
+			Enum:          b.Node.Enum,
+			Default:       b.Node.Default,
+			Minimum:       b.Node.Minimum,
+			Maximum:       b.Node.Maximum,
+			Format:        b.Node.Format,
 		})
 	}
 	return out

@@ -28,6 +28,12 @@ type Node struct {
 	// Only trees handed out by the CRD methods (FieldTree, ForProvider,
 	// Envelope, Status) are annotated.
 	RequiredChain bool
+
+	Enum    []string
+	Default any
+	Minimum *float64
+	Maximum *float64
+	Format  string
 }
 
 // ComputeRequiredChain annotates every node's RequiredChain over an already
@@ -168,10 +174,34 @@ func BuildTree(props map[string]any, required []string) []*Node {
 	return out
 }
 
+func parseNumberPtr(v any) *float64 {
+	switch num := v.(type) {
+	case float64:
+		return &num
+	case int:
+		f := float64(num)
+		return &f
+	case int64:
+		f := float64(num)
+		return &f
+	default:
+		return nil
+	}
+}
+
 func buildNode(name string, raw map[string]any, required bool) *Node {
 	n := &Node{Name: name, Required: required}
 	n.Type, _ = raw["type"].(string)
 	n.Description, _ = raw["description"].(string)
+	n.Format, _ = raw["format"].(string)
+	if def, ok := raw["default"]; ok {
+		n.Default = def
+	}
+	n.Minimum = parseNumberPtr(raw["minimum"])
+	n.Maximum = parseNumberPtr(raw["maximum"])
+	if enumRaw, ok := raw["enum"].([]any); ok {
+		n.Enum = stringSlice(enumRaw)
+	}
 
 	switch n.Type {
 	case "object":

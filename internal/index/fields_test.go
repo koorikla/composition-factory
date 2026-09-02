@@ -250,3 +250,49 @@ func TestOutputIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestFieldsMetadataExposed(t *testing.T) {
+	minVal := 1.0
+	maxVal := 100.0
+	props := map[string]any{
+		"env": map[string]any{
+			"type":    "string",
+			"enum":    []any{"dev", "prod"},
+			"default": "dev",
+		},
+		"port": map[string]any{
+			"type":    "integer",
+			"minimum": minVal,
+			"maximum": maxVal,
+			"format":  "int32",
+		},
+	}
+	nodes := schema.BuildTree(props, nil)
+	fields := Fields(nodes, FieldQuery{})
+
+	if len(fields) != 2 {
+		t.Fatalf("len(fields) = %d, want 2", len(fields))
+	}
+
+	for _, f := range fields {
+		if f.Path == "env" {
+			if len(f.Enum) != 2 || f.Enum[0] != "dev" || f.Enum[1] != "prod" {
+				t.Errorf("env Enum = %+v, want [dev, prod]", f.Enum)
+			}
+			if f.Default != "dev" {
+				t.Errorf("env Default = %v, want dev", f.Default)
+			}
+		}
+		if f.Path == "port" {
+			if f.Minimum == nil || *f.Minimum != 1.0 {
+				t.Errorf("port Minimum = %v, want 1.0", f.Minimum)
+			}
+			if f.Maximum == nil || *f.Maximum != 100.0 {
+				t.Errorf("port Maximum = %v, want 100.0", f.Maximum)
+			}
+			if f.Format != "int32" {
+				t.Errorf("port Format = %q, want int32", f.Format)
+			}
+		}
+	}
+}

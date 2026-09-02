@@ -252,10 +252,11 @@ type kindFieldsInput struct {
 	Search       string `json:"search,omitempty" jsonschema:"Case-insensitive substring matched against each field's path and description."`
 	RequiredOnly bool   `json:"required_only,omitempty" jsonschema:"Only effectively required fields: required along their whole ancestor chain, not merely required within an optional parent object. The response's requiredBranches list carries required subtrees with no such leaf (e.g. a Deployment's spec.selector and spec.template)."`
 	Limit        int    `json:"limit,omitempty" jsonschema:"Maximum number of fields to return; total still counts the whole filtered set. Omit or 0 for unlimited."`
+	Status       bool   `json:"status,omitempty" jsonschema:"When true, returns the kind's status schema fields (for wiring status references) instead of forProvider spec fields."`
 }
 
 // kindFields mirrors GET
-// /api/kinds/{apiVersion}/{kind}/fields?prefix=&max_depth=&q=&required_only=&limit=.
+// /api/kinds/{apiVersion}/{kind}/fields?prefix=&max_depth=&q=&required_only=&limit=&status=.
 func (s *server) kindFields(_ context.Context, _ *sdk.CallToolRequest, in kindFieldsInput) (*sdk.CallToolResult, any, error) {
 	q := url.Values{}
 	if in.Prefix != "" {
@@ -272,6 +273,9 @@ func (s *server) kindFields(_ context.Context, _ *sdk.CallToolRequest, in kindFi
 	}
 	if in.Limit != 0 {
 		q.Set("limit", strconv.Itoa(in.Limit))
+	}
+	if in.Status {
+		q.Set("status", "true")
 	}
 	path := "/api/kinds/" + url.PathEscape(in.APIVersion) + "/" + url.PathEscape(in.Kind) + "/fields"
 	return s.bridge(http.MethodGet, withQuery(path, q), nil)

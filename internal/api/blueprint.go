@@ -148,7 +148,23 @@ func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !srv.persistBlueprint(w, r, &b) {
+	ctx := r.Context()
+	if err := srv.syncBlueprintSourcesLocked(ctx, &b); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("failed to sync sources: %v", err))
+		return
+	}
+	crds, err := srv.loadSourceCRDs(&b)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := srv.validateBlueprintAgainstCRDs(&b, crds); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := writeBlueprintFile(srv.Blueprint, &b); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, &b)
@@ -441,20 +457,24 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 		}
 	}
 
+	origProviders := append([]string(nil), srv.Providers...)
 	for _, ref := range newProviders {
 		// If already in store cache, ensure it is pinned in lockfile and record in srv.Providers
 		if _, err := srv.Store.Load(ref); err == nil {
 			if srv.Lock != "" {
 				digest, err := srv.Store.LoadDigest(ref)
 				if err != nil {
+					srv.Providers = origProviders
 					return fmt.Errorf("load digest %s: %w", ref, err)
 				}
 				l, err := cache.ReadLock(srv.Lock)
 				if err != nil {
+					srv.Providers = origProviders
 					return fmt.Errorf("read lock: %w", err)
 				}
 				l.Set(ref, digest)
 				if err := l.Write(srv.Lock); err != nil {
+					srv.Providers = origProviders
 					return fmt.Errorf("write lock: %w", err)
 				}
 			}
@@ -464,29 +484,38 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 		// Otherwise fetch from remote registry
 		pkg, err := fetch(ref)
 		if err != nil {
+			srv.Providers = origProviders
 			return fmt.Errorf("fetch %s: %w", ref, err)
 		}
 		crds, err := schema.ParseCRDs(pkg.Docs)
 		if err != nil {
+			srv.Providers = origProviders
 			return fmt.Errorf("parse %s: %w", ref, err)
 		}
 		if srv.Lock != "" {
 			l, err := cache.ReadLock(srv.Lock)
 			if err != nil {
+				srv.Providers = origProviders
 				return fmt.Errorf("read lock: %w", err)
 			}
 			l.Set(ref, pkg.Digest)
 			if err := l.Write(srv.Lock); err != nil {
+				srv.Providers = origProviders
 				return fmt.Errorf("write lock: %w", err)
 			}
 		}
 		if err := srv.Store.Save(pkg, crds); err != nil {
+			srv.Providers = origProviders
 			return fmt.Errorf("save %s: %w", ref, err)
 		}
 		srv.Providers = append(srv.Providers, ref)
 	}
 
-	return srv.rebuildIndexLocked(b)
+	if err := srv.rebuildIndexLocked(b); err != nil {
+		srv.Providers = origProviders
+		return err
+	}
+	return nil
 }
 
 // persistBlueprint writes b to srv.Blueprint, deterministically and only if
@@ -495,16 +524,16 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 // r, b) { return }`; a failure here means the write was refused, not attempted
 // half-done, so the file on disk is left exactly as it was before the call.
 func (srv *server) persistBlueprint(w http.ResponseWriter, r *http.Request, b *blueprint.Blueprint) bool {
-	if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return false
-	}
 	ctx := context.Background()
 	if r != nil {
 		ctx = r.Context()
 	}
 	if err := srv.syncBlueprintSourcesLocked(ctx, b); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to sync sources: %v", err))
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("failed to sync sources: %v", err))
+		return false
+	}
+	if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return false
 	}
 	return true
