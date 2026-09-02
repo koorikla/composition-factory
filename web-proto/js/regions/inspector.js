@@ -294,6 +294,10 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
 }
 
 function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
+  // providerConfigRef is derived from the providerName parameter — the
+  // engine refuses envelope entries for it, so offering rows would only
+  // manufacture 400s.
+  if (f.path.indexOf("providerConfigRef") === 0) return "";
   var entry = envelopeEntryOf(res, f.path);
   var dm = docMode(entry);
   var mKey = "env:" + f.path;
