@@ -12,6 +12,22 @@ import (
 
 // pythonTemplateBody generates idiomatic Python code for function-python (python.fn.crossplane.io/v1beta1 Script).
 func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) {
+	if len(b.Spec.Conventions) > 0 {
+		return "", fmt.Errorf("spec.conventions: engine %q does not support template: conventions", b.Engine())
+	}
+	for _, r := range b.Spec.Resources {
+		for k, f := range r.Fields {
+			if f.Template != "" {
+				return "", fmt.Errorf("resource %q field %q: engine %q does not support template: fields", r.Name, k, b.Engine())
+			}
+		}
+		for k, a := range r.Annotations {
+			if a.Template != "" {
+				return "", fmt.Errorf("resource %q annotation %q: engine %q does not support template: fields", r.Name, k, b.Engine())
+			}
+		}
+	}
+
 	x := b.Spec.XRD
 	wantNamespaced := x.Scope == "Namespaced"
 
@@ -128,24 +144,27 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 			writePythonMapEntries(&sb, specInner+"    ", plan)
 			sb.WriteString(fmt.Sprintf("%s}),\n", specInner))
 
-			// providerConfigRef
-			providerNameRef := "spec.get(\"providerName\", \"default\")"
-			if p, ok := b.Spec.XRD.Parameters["providerName"]; ok && p.Default != "" {
-				providerNameRef = fmt.Sprintf("spec.get(\"providerName\", %q)", p.Default)
-			}
-			sb.WriteString(fmt.Sprintf("%s\"providerConfigRef\": {\n", specInner))
-			if wantNamespaced {
-				sb.WriteString(fmt.Sprintf("%s    \"kind\": \"ProviderConfig\",\n", specInner))
-			}
-			sb.WriteString(fmt.Sprintf("%s    \"name\": %s,\n", specInner, providerNameRef))
-			sb.WriteString(fmt.Sprintf("%s},\n", specInner))
-
-			// envelope fields
+			hasPCRInPlan := false
 			for _, ef := range envPlan {
-				rhs := pythonStructuredRHS(ef.structured, ef.rhs)
-				pathKey := strings.Join(ef.path, ".")
-				sb.WriteString(fmt.Sprintf("%s%q: %s,\n", specInner, pathKey, rhs))
+				if len(ef.path) > 0 && ef.path[0] == "providerConfigRef" {
+					hasPCRInPlan = true
+					break
+				}
 			}
+			if !hasPCRInPlan && wantNamespaced {
+				providerNameRef := "spec.get(\"providerName\", \"default\")"
+				if p, ok := b.Spec.XRD.Parameters["providerName"]; ok && p.Default != "" {
+					providerNameRef = fmt.Sprintf("spec.get(\"providerName\", %q)", p.Default)
+				}
+				sb.WriteString(fmt.Sprintf("%s\"providerConfigRef\": {\n", specInner))
+				sb.WriteString(fmt.Sprintf("%s    \"kind\": \"ClusterProviderConfig\",\n", specInner))
+				sb.WriteString(fmt.Sprintf("%s    \"name\": %s,\n", specInner, providerNameRef))
+				sb.WriteString(fmt.Sprintf("%s},\n", specInner))
+			}
+
+			// envelope fields (nested objects)
+			envTree := buildEnvTree(envPlan)
+			writePythonEnvelopeNodes(&sb, specInner, envTree)
 
 			sb.WriteString(fmt.Sprintf("%s}),\n", inner))
 		}
@@ -354,4 +373,17 @@ func pythonFormatLiteral(val string) string {
 		return string(b)
 	}
 	return fmt.Sprintf("%q", val)
+}
+
+func writePythonEnvelopeNodes(sb *strings.Builder, indent string, nodes []*envTreeNode) {
+	for _, n := range nodes {
+		if len(n.children) > 0 {
+			sb.WriteString(fmt.Sprintf("%s%q: _present({\n", indent, n.name))
+			writePythonEnvelopeNodes(sb, indent+"    ", n.children)
+			sb.WriteString(fmt.Sprintf("%s}),\n", indent))
+		} else if n.field != nil {
+			rhs := pythonStructuredRHS(n.field.structured, n.field.rhs)
+			sb.WriteString(fmt.Sprintf("%s%q: %s,\n", indent, n.name, rhs))
+		}
+	}
 }

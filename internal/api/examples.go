@@ -51,11 +51,11 @@ func (srv *server) handleLoadExample(w http.ResponseWriter, r *http.Request) {
 
 	// Ensure all required providers in the example are fetched, cached, and indexed
 	if err := srv.syncBlueprintSourcesLocked(r.Context(), b); err != nil {
-		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("failed to cache provider: %v", err))
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to cache provider: %v", err))
 		return
 	}
 
-	if !srv.persistBlueprint(w, b) {
+	if !srv.persistBlueprint(w, r, b) {
 		return
 	}
 	writeJSON(w, http.StatusOK, b)

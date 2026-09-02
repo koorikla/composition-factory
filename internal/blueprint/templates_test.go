@@ -13,7 +13,9 @@ import (
 // Mutations build every rejection case from this known-good baseline.
 func templatedBlueprint(mutate func(*Blueprint)) *Blueprint {
 	b := &Blueprint{
-		Metadata: Metadata{Name: "xqueue"},
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
 				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",

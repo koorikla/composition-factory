@@ -12,7 +12,7 @@ import (
 
 func TestEmitKCLComposition(t *testing.T) {
 	bpYAML := `
-apiVersion: compositionfactory.io/v1alpha1
+apiVersion: factory.crossplane.io/v1alpha1
 kind: Blueprint
 metadata:
   name: xqueue
@@ -166,9 +166,6 @@ func TestTranslateWhenToKCL_BooleanSubstrings(t *testing.T) {
 	}
 }
 
-// A status wire's StructuredRHS.StatusPath already starts at the status
-// root ("atProvider.arn"), so the KCL dereference must not add its own
-// atProvider segment on top.
 func TestKCLStatusWireReadsStatusPathOnce(t *testing.T) {
 	got := kclStructuredRHS(StructuredRHS{Kind: RHSStatus, Resource: "role", StatusPath: "atProvider.arn"}, "")
 	want := `ocds?["role"]?.Resource?.status?.atProvider?.arn`
@@ -196,6 +193,186 @@ func TestTranslateForEachToKCL_StatusBoundReadsPathOnce(t *testing.T) {
 	want := `range(0, int(ocds?["main-queue"]?.Resource?.status?.atProvider?.nodeCount or 0))`
 	if got != want {
 		t.Errorf("translateForEachToKCL = %q, want %q", got, want)
+	}
+}
+
+func TestKCLEnvelopeNesting(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-env
+spec:
+  emit:
+    engine: kcl
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XQueue
+    plural: xqueues
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+      secretName:
+        type: string
+        required: true
+  resources:
+    - name: work-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      fields:
+        region:
+          value: us-east-1
+      envelope:
+        writeConnectionSecretToRef.name:
+          from: params.secretName
+        writeConnectionSecretToRef.namespace:
+          value: crossplane-system
+        managementPolicies:
+          value: "*"
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	_ = os.WriteFile(p, []byte(bpYAML), 0600)
+	b, err := blueprint.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+              writeConnectionSecretToRef:
+                type: object
+                required: [name, namespace]
+                properties: {name: {type: string}, namespace: {type: string}}
+              managementPolicies:
+                type: array
+                items: {type: string}
+`)
+	crds, err := schema.ParseCRDs([][]byte{crdDoc})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(out)
+	if strings.Contains(s, "writeConnectionSecretToRef.name") {
+		t.Errorf("flattened dot path found in KCL output:\n%s", s)
+	}
+	if !strings.Contains(s, "writeConnectionSecretToRef = {\n") {
+		t.Errorf("expected nested writeConnectionSecretToRef object in KCL:\n%s", s)
+	}
+	if !strings.Contains(s, "name = _spec?.secretName") {
+		t.Errorf("expected name child in KCL:\n%s", s)
+	}
+	if !strings.Contains(s, `namespace = "crossplane-system"`) {
+		t.Errorf("expected namespace child in KCL:\n%s", s)
+	}
+}
+
+func TestKCLRefusesTemplateConventions(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-conv
+spec:
+  emit:
+    engine: kcl
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XQueue
+    plural: xqueues
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+  templates:
+    cf.name: "{{ .xr }}-{{ .resource }}"
+  conventions:
+    - match: name
+      template: cf.name
+  resources:
+    - name: work-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      fields:
+        region:
+          value: us-east-1
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	_ = os.WriteFile(p, []byte(bpYAML), 0600)
+	b, err := blueprint.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+	crds, _ := schema.ParseCRDs([][]byte{crdDoc})
+	_, err = Composition(b, crds)
+	if err == nil {
+		t.Fatal("expected error on KCL with conventions, got nil")
+	}
+	if !strings.Contains(err.Error(), "conventions") {
+		t.Errorf("expected error to mention conventions, got: %v", err)
 	}
 }
 

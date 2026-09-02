@@ -7,7 +7,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
-        with: { go-version: '1.25' }
+        with: { go-version: "1.25" }
       - run: make lint
       - run: make test
 
@@ -17,21 +17,28 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
-        with: { go-version: '1.25' }
+        with: { go-version: "1.25" }
       - name: Install crossplane CLI
         run: |
           curl -sL https://raw.githubusercontent.com/crossplane/crossplane/main/install.sh | sh
           sudo mv crossplane /usr/local/bin/
-      # CF_REQUIRE_ACCEPTANCE=1 turns every prerequisite skip in
-      # acceptance_test.go into a hard failure. Without it this job goes
-      # green whether or not the acceptance test actually ran: a skip is
-      # reported as a pass, so a silently-failed crossplane CLI install or an
-      # unavailable Docker daemon would leave the one gate that proves the
-      # generated YAML renders quietly doing nothing. This is Lane B's
-      # assertion that it RAN, not merely that it did not fail.
       - run: make test-docker
         env:
-          CF_REQUIRE_ACCEPTANCE: '1'
+          CF_REQUIRE_ACCEPTANCE: "1"
+
+  # Lane C: Playwright behavior suite over web-proto/ with isolated cf serve.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.25" }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: make test-e2e
 
   docker-build:
     runs-on: ubuntu-latest
@@ -39,4 +46,3 @@ jobs:
       - uses: actions/checkout@v5
       - name: Verify Docker build
         run: docker build .
-

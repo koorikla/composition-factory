@@ -19,7 +19,11 @@ import (
 // version) and are always available, so nothing ever fetches, caches or
 // digest-pins a source named "k8s" — which is why Validate refuses it in
 // spec.sources.
-const NativeProvider = "k8s"
+const (
+	NativeProvider = "k8s"
+	APIVersion     = "factory.crossplane.io/v1alpha1"
+	Kind           = "Blueprint"
+)
 
 // Blueprint is the root document.
 type Blueprint struct {

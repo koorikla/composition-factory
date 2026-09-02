@@ -334,3 +334,54 @@ spec:
 		t.Errorf("expected validate error prefix, got: %v", err)
 	}
 }
+
+func TestAdoptIgnoresCustomResourceDefinition(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  group: aws.example.org
+  names:
+    kind: XQueue
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: aws.example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+`
+	bp, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if bp.APIVersion != "factory.crossplane.io/v1alpha1" {
+		t.Errorf("APIVersion = %q, want factory.crossplane.io/v1alpha1", bp.APIVersion)
+	}
+	if bp.Kind != "Blueprint" {
+		t.Errorf("Kind = %q, want Blueprint", bp.Kind)
+	}
+}

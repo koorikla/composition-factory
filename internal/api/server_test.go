@@ -613,6 +613,8 @@ func TestSyncBlueprintSourcesLockedPinsCachedProvider(t *testing.T) {
 	}
 
 	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
 		Spec: blueprint.Spec{
 			Sources: []blueprint.Source{
 				{Provider: "example.org/cached-provider:v1"},

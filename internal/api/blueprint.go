@@ -148,7 +148,7 @@ func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !srv.persistBlueprint(w, &b) {
+	if !srv.persistBlueprint(w, r, &b) {
 		return
 	}
 	writeJSON(w, http.StatusOK, &b)
@@ -177,7 +177,7 @@ func (srv *server) handleImportBlueprint(w http.ResponseWriter, r *http.Request)
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
-	if !srv.persistBlueprint(w, b) {
+	if !srv.persistBlueprint(w, r, b) {
 		return
 	}
 	writeJSON(w, http.StatusOK, b)
@@ -206,7 +206,7 @@ func (srv *server) mutate(w http.ResponseWriter, r *http.Request, fn func(*bluep
 		return
 	}
 
-	if !srv.persistBlueprint(w, b) {
+	if !srv.persistBlueprint(w, r, b) {
 		return
 	}
 	writeJSON(w, http.StatusOK, b)
@@ -434,10 +434,6 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 			existing[s.Provider] = true
 		}
 	}
-	if len(newProviders) == 0 {
-		return nil
-	}
-
 	fetch := srv.fetch
 	if fetch == nil {
 		fetch = func(ref string) (*xpkg.Package, error) {
@@ -496,14 +492,21 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 // persistBlueprint writes b to srv.Blueprint, deterministically and only if
 // the result would itself load back. On failure it writes the 500 response
 // itself and returns false, so callers can just `if !srv.persistBlueprint(w,
-// b) { return }`; a failure here means the write was refused, not attempted
+// r, b) { return }`; a failure here means the write was refused, not attempted
 // half-done, so the file on disk is left exactly as it was before the call.
-func (srv *server) persistBlueprint(w http.ResponseWriter, b *blueprint.Blueprint) bool {
+func (srv *server) persistBlueprint(w http.ResponseWriter, r *http.Request, b *blueprint.Blueprint) bool {
 	if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return false
 	}
-	_ = srv.syncBlueprintSourcesLocked(context.Background(), b)
+	ctx := context.Background()
+	if r != nil {
+		ctx = r.Context()
+	}
+	if err := srv.syncBlueprintSourcesLocked(ctx, b); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to sync sources: %v", err))
+		return false
+	}
 	return true
 }
 

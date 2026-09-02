@@ -12,7 +12,7 @@ import (
 
 func TestEmitPythonComposition(t *testing.T) {
 	bpYAML := `
-apiVersion: compositionfactory.io/v1alpha1
+apiVersion: factory.crossplane.io/v1alpha1
 kind: Blueprint
 metadata:
   name: xqueue
@@ -169,10 +169,6 @@ func TestTranslateWhenToPython_BooleanSubstrings(t *testing.T) {
 	}
 }
 
-// The observed object sits under .resource, and its status under
-// .resource.status — the Python wire must walk status before atProvider,
-// and must not default the leaf to "" (an unobserved value is None, which
-// _present drops, mirroring the go-templating hasKey guard).
 func TestPythonStatusWireWalksResourceStatus(t *testing.T) {
 	got := pythonStructuredRHS(StructuredRHS{Kind: RHSStatus, Resource: "role", StatusPath: "atProvider.arn"}, "")
 	want := `ocds.get("role", {}).get("resource", {}).get("status", {}).get("atProvider", {}).get("arn")`
@@ -200,9 +196,6 @@ func TestTranslateForEachToPython_StatusBoundReadsPathOnce(t *testing.T) {
 	}
 }
 
-// An optional parameter (not required, no default) the XR omits must not
-// land as null in the desired object: the field dicts are passed through a
-// single _present helper that drops None values.
 func TestPythonOptionalParamIsDroppedWhenAbsent(t *testing.T) {
 	b := wireBlueprint()
 	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
@@ -220,5 +213,185 @@ func TestPythonOptionalParamIsDroppedWhenAbsent(t *testing.T) {
 	}
 	if !strings.Contains(s, `"maxMessageSize": spec.get("maxMessageSize"),`) {
 		t.Errorf("optional param must read without a default:\n%s", s)
+	}
+}
+
+func TestPythonEnvelopeNesting(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-env
+spec:
+  emit:
+    engine: python
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XQueue
+    plural: xqueues
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+      secretName:
+        type: string
+        required: true
+  resources:
+    - name: work-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      fields:
+        region:
+          value: us-east-1
+      envelope:
+        writeConnectionSecretToRef.name:
+          from: params.secretName
+        writeConnectionSecretToRef.namespace:
+          value: crossplane-system
+        managementPolicies:
+          value: "*"
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	_ = os.WriteFile(p, []byte(bpYAML), 0600)
+	b, err := blueprint.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+              writeConnectionSecretToRef:
+                type: object
+                required: [name, namespace]
+                properties: {name: {type: string}, namespace: {type: string}}
+              managementPolicies:
+                type: array
+                items: {type: string}
+`)
+	crds, err := schema.ParseCRDs([][]byte{crdDoc})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(out)
+	if strings.Contains(s, `"writeConnectionSecretToRef.name":`) {
+		t.Errorf("flattened dot path found in Python output:\n%s", s)
+	}
+	if !strings.Contains(s, `"writeConnectionSecretToRef": _present({`) {
+		t.Errorf("expected nested writeConnectionSecretToRef object in Python:\n%s", s)
+	}
+	if !strings.Contains(s, `"name": spec.get("secretName")`) {
+		t.Errorf("expected name child in Python:\n%s", s)
+	}
+	if !strings.Contains(s, `"namespace": "crossplane-system"`) {
+		t.Errorf("expected namespace child in Python:\n%s", s)
+	}
+}
+
+func TestPythonRefusesTemplateConventions(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-conv
+spec:
+  emit:
+    engine: python
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XQueue
+    plural: xqueues
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+  templates:
+    cf.name: "{{ .xr }}-{{ .resource }}"
+  conventions:
+    - match: name
+      template: cf.name
+  resources:
+    - name: work-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      fields:
+        region:
+          value: us-east-1
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	_ = os.WriteFile(p, []byte(bpYAML), 0600)
+	b, err := blueprint.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+	crds, _ := schema.ParseCRDs([][]byte{crdDoc})
+	_, err = Composition(b, crds)
+	if err == nil {
+		t.Fatal("expected error on Python with conventions, got nil")
+	}
+	if !strings.Contains(err.Error(), "conventions") {
+		t.Errorf("expected error to mention conventions, got: %v", err)
 	}
 }

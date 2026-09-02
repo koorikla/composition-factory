@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/adopt"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
@@ -28,8 +29,14 @@ func (srv *server) handleAdoptBlueprint(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req adoptRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		// Also allow raw YAML manifest in request body
+	trimmed := strings.TrimSpace(string(body))
+	if strings.HasPrefix(trimmed, "{") {
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid JSON request: "+err.Error())
+			return
+		}
+	} else {
+		// Allow raw YAML manifest in request body
 		req.Manifest = string(body)
 	}
 
@@ -48,9 +55,12 @@ func (srv *server) handleAdoptBlueprint(w http.ResponseWriter, r *http.Request) 
 
 	persisted := false
 	if req.Persist && srv.Blueprint != "" {
-		if !srv.persistBlueprint(w, bp) {
+		srv.mu.Lock()
+		if !srv.persistBlueprint(w, r, bp) {
+			srv.mu.Unlock()
 			return
 		}
+		srv.mu.Unlock()
 		persisted = true
 	}
 

@@ -73,7 +73,7 @@ func (srv *server) handleAddCRDSource(w http.ResponseWriter, r *http.Request) {
 	}
 	if !declared {
 		b.Spec.Sources = append(b.Spec.Sources, blueprint.Source{CRDs: rel})
-		if !srv.persistBlueprint(w, b) {
+		if !srv.persistBlueprint(w, r, b) {
 			return
 		}
 	}

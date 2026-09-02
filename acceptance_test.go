@@ -97,7 +97,6 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
 		os.Exit(1)
 	}
-	defer os.RemoveAll(dir)
 
 	testBin = filepath.Join(dir, "cf")
 	out, err := exec.Command("go", "build", "-buildvcs=false", "-o", testBin, "./cmd/cf").CombinedOutput()
@@ -116,12 +115,15 @@ func TestMain(m *testing.M) {
 	for _, p := range providers {
 		out, err := exec.Command(testBin, "provider", "add", p, "--cache-dir", testCacheDir, "--lock", testLockFile).CombinedOutput()
 		if err != nil {
+			os.RemoveAll(dir)
 			fmt.Fprintf(os.Stderr, "cf provider add %s: %v\n%s\n", p, err, out)
 			os.Exit(1)
 		}
 	}
 
-	os.Exit(m.Run())
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 func TestAcceptanceXQueueRenders(t *testing.T) {

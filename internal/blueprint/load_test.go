@@ -271,6 +271,8 @@ func validParamBlueprint(paramName string) *Blueprint {
 	params := map[string]Parameter{paramName: {Type: "string"}}
 	params["providerName"] = Parameter{Type: "string", Required: true}
 	return &Blueprint{
+		APIVersion: APIVersion,
+		Kind:       Kind,
 		Spec: Spec{
 			XRD: XRD{
 				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
@@ -486,6 +488,8 @@ func TestValidateGroupAndPluralKeywordCheck(t *testing.T) {
 // validParamBlueprint above, which only varies the parameter's name.
 func blueprintWithParam(p Parameter) *Blueprint {
 	return &Blueprint{
+		APIVersion: APIVersion,
+		Kind:       Kind,
 		Spec: Spec{
 			XRD: XRD{
 				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
@@ -601,7 +605,9 @@ func TestValidateIntegerDefaultRejectsFraction(t *testing.T) {
 // which mutate then poisons in exactly one place.
 func scalarBlueprint(mutate func(*Blueprint)) *Blueprint {
 	b := &Blueprint{
-		Metadata: Metadata{Name: "xqueue"},
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
 				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
@@ -980,7 +986,9 @@ func TestValidateStillAcceptsTheOnDiskFixtureWithSourcesAndProvider(t *testing.T
 // one rule.
 func forEachBlueprint(mutate func(*Blueprint)) *Blueprint {
 	b := &Blueprint{
-		Metadata: Metadata{Name: "xqueue"},
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
 				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
@@ -1205,7 +1213,9 @@ func TestValidateRejectsUndeclaredResourceProvider(t *testing.T) {
 // every rejection case from this known-good baseline.
 func whenBlueprint(mutate func(*Blueprint)) *Blueprint {
 	b := &Blueprint{
-		Metadata: Metadata{Name: "xqueue"},
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
 				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
@@ -1379,7 +1389,9 @@ func TestWhenRoundTripsExactly(t *testing.T) {
 // one rule.
 func statusRefBlueprint(mutate func(*Blueprint)) *Blueprint {
 	b := &Blueprint{
-		Metadata: Metadata{Name: "xqueue"},
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
 				Group: "platform.sparky.ee", Kind: "XQueuePair", Plural: "xqueuepairs",
@@ -1514,5 +1526,31 @@ func TestValidateAcceptsForwardStatusReference(t *testing.T) {
 	})
 	if err := b.Validate(); err != nil {
 		t.Fatalf("Validate() = %v, want a forward reference to be accepted", err)
+	}
+}
+
+func TestValidateAPIVersionAndKind(t *testing.T) {
+	b := &Blueprint{
+		APIVersion: "bogus/v1",
+		Kind:       "Blueprint",
+		Metadata:   Metadata{Name: "xqueue"},
+		Spec: Spec{
+			XRD: XRD{
+				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "apiVersion") {
+		t.Errorf("expected apiVersion validation error, got: %v", err)
+	}
+
+	b.APIVersion = APIVersion
+	b.Kind = "OtherKind"
+	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "kind") {
+		t.Errorf("expected kind validation error, got: %v", err)
 	}
 }
