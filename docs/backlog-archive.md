@@ -10,6 +10,16 @@ git — `git log -p BACKLOG.md`.
 
 ## Canvas slice backlog (BDD loop: spec → GUI → backend → verify)
 
+- [x] `lifecycleRule[0].action.type` is accepted by the validator (it even suggests it) and
+      listed by /api/kinds/…/fields, then emitted as the literal key
+      `'lifecycleRule[0].action.type'`. Implement array-element emission or refuse the grammar
+      for provider kinds. Found by C.
+      — completed 2026-09-03
+- [x] `spec.emit.templateSource: FileSystem` cannot be packaged (`cannot package a blueprint
+      with … FileSystem`) and cannot be rendered locally (`cannot read tmpl from the folder
+      /templates`) with no hint that only in-cluster works; the `when:` guard is split across
+      two files (`{{- if }}` ends 005-ingress.yaml, `{{- end }}` ends 006-hpa.yaml). Found by B.
+      — completed 2026-09-03
 - [x] Every composed native object gets `generateName: <xr>-`, so sibling references by name
       dangle: `serviceAccountName: web`, HPA `scaleTargetRef.name: web`, Ingress backend
       `web` — on the cluster: `error looking up service account default/web: serviceaccount

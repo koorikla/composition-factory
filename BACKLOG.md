@@ -82,21 +82,10 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
 
 ### P0 — generated output is wrong at apply time; render does not catch it
 
-- [ ] `lifecycleRule[0].action.type` is accepted by the validator (it even suggests it) and
-      listed by /api/kinds/…/fields, then emitted as the literal key
-      `'lifecycleRule[0].action.type'`. Implement array-element emission or refuse the grammar
-      for provider kinds. Found by C.
 - [ ] `crossplane composition render` and POST /api/render report ok on output the API server
       would reject (all of the above). Add schema validation of the rendered composed
       resources against the cached CRDs in `cf gen`, `/api/render` and the Validate chip; agent
       A's typecheck.py against `crossplane xpkg extract` output is the reference.
-
-### P0 — native Kubernetes kinds do not work on a real cluster (agent B, verified in kind)
-
-- [ ] `spec.emit.templateSource: FileSystem` cannot be packaged (`cannot package a blueprint
-      with … FileSystem`) and cannot be rendered locally (`cannot read tmpl from the folder
-      /templates`) with no hint that only in-cluster works; the `when:` guard is split across
-      two files (`{{- if }}` ends 005-ingress.yaml, `{{- end }}` ends 006-hpa.yaml). Found by B.
 
 ### P1 — alternative engines are broken for real blueprints
 
