@@ -70,7 +70,7 @@ func ConfigurationMeta(b *blueprint.Blueprint, source []byte) ([]byte, error) {
 	}
 
 	d := NewDoc()
-	header(d, "blueprints/"+b.Metadata.Name+".cf.yaml")
+	header(d, blueprintSource(b))
 	d.Line(0, "apiVersion: meta.pkg.crossplane.io/v1")
 	d.Line(0, "kind: Configuration")
 	d.Line(0, "metadata:")

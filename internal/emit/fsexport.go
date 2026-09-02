@@ -127,7 +127,7 @@ func RuntimeDoc(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 	}
 
 	d := NewDoc()
-	header(d, "blueprints/"+b.Metadata.Name+".cf.yaml")
+	header(d, blueprintSource(b))
 	d.Comment("ConfigMap(s) carrying the FileSystem template files, followed by")
 	d.Comment("the DeploymentRuntimeConfig that mounts them into the function pod.")
 

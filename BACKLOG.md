@@ -89,13 +89,6 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
       Build the same tree for provider kinds (composition.go planFields → writer) with the
       hasKey guards moved to the leaf. Golden: DatabaseInstance settings.tier +
       settings.ipConfiguration.ipv4Enabled renders as a nested map. Found by A and C.
-- [ ] `value:` is always a quoted string (structured.go:43 quoteYAML) regardless of the CRD
-      leaf type: `enableDnsHostnames: "true"`, `allocatedStorage: "20"`; and string params are
-      emitted bare so `engineVersion: 16.3` becomes a float. Emit typed literals from the leaf
-      type (bool/number unquoted, strings `| quote`), refuse `value: notabool` on a boolean,
-      refuse a scalar `from:` into an array leaf (envelope already does, envelope.go:176) or
-      wrap it. Add a param-type vs leaf-type check with a clear error. KCL already emits typed
-      literals, so the engines currently disagree. Found by A and C.
 - [ ] `resolveKind` ignores `provider:` (composition.go:1263 matches Kind only): `kind: Instance`
       with provider-aws-rds silently resolves to ec2 Instance because ec2 was listed first.
       Match on the resource's declared provider, error on ambiguity. Found by A.
@@ -107,8 +100,6 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
       would reject (all of the above). Add schema validation of the rendered composed
       resources against the cached CRDs in `cf gen`, `/api/render` and the Validate chip; agent
       A's typecheck.py against `crossplane xpkg extract` output is the reference.
-- [ ] Header `# Source: blueprints/<name>.cf.yaml` is fabricated — it prints a hardcoded
-      prefix, not the path given. Found by A, C and E.
 
 ### P0 — native Kubernetes kinds do not work on a real cluster (agent B, verified in kind)
 
@@ -119,12 +110,6 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
       deterministic `metadata.name` for native kinds (or `<xr>-<resource>`), make
       `metadata.name`, `metadata.labels`, `metadata.annotations` settable, and support
       `from: resources.<n>.metadata.name` so references resolve. Found by B.
-- [ ] String parameters are emitted unquoted, so YAML retypes them: `"0x1F"` → `31`, `"1e3"`
-      → `1000` (an Ingress host!), `"null"` → null, `"on"` → true; the API server then
-      rejects the Deployment (`cannot unmarshal bool into … EnvVar.value`). Only annotations
-      get `| quote`. Same root cause as the typed-literal item above; `data[PORT]: {from:
-      params.port}` on a ConfigMap likewise needs stringification into string-typed
-      targets. Found by B.
 - [ ] Only nine kinds are vendored (Deployment, Service, ConfigMap, Secret, ServiceAccount,
       StatefulSet, Job, CronJob, DaemonSet); Ingress, HPA, PVC, NetworkPolicy, PDB, Role and
       RoleBinding are refused and the refusal does not list the set. Workaround was

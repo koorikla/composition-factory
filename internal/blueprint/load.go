@@ -345,6 +345,7 @@ func Load(path string) (*Blueprint, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	b.SetSourcePath(path)
 	return b, nil
 }
 

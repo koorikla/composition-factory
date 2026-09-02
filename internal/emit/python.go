@@ -193,7 +193,7 @@ func writePythonMapEntries(sb *strings.Builder, indent string, fields []forProvi
 func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 	switch s.kind {
 	case rhsLiteral:
-		return pythonFormatLiteral(s.value)
+		return pythonFormatLiteral(s.value, s.targetType)
 	case rhsRaw:
 		return s.value
 	case rhsTemplate:
@@ -231,14 +231,16 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 		}
 		return sb.String()
 	default:
-		return pythonRHS(fallbackRHS)
+		return pythonRHS(fallbackRHS, s.targetType)
 	}
 }
 
-func pythonRHS(rhs string) string {
+func pythonRHS(rhs string, targetType string) string {
 	rhs = strings.TrimSpace(rhs)
 	if strings.HasPrefix(rhs, "{{") && strings.HasSuffix(rhs, "}}") {
 		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(rhs, "{{"), "}}"))
+		inner = strings.TrimSuffix(inner, "| quote")
+		inner = strings.TrimSpace(inner)
 		if strings.HasPrefix(inner, "$spec.") {
 			param := strings.TrimPrefix(inner, "$spec.")
 			return translateParamAccessToPython(param)
@@ -247,7 +249,7 @@ func pythonRHS(rhs string) string {
 			return translateObservedAccessToPython(inner)
 		}
 	}
-	return pythonFormatLiteral(rhs)
+	return pythonFormatLiteral(rhs, targetType)
 }
 
 func translateParamAccessToPython(param string) string {
@@ -310,7 +312,7 @@ func translateWhenToPython(when string) string {
 			if val == "false" {
 				return fmt.Sprintf("bool(spec.get(%q)) is False", param)
 			}
-			return fmt.Sprintf("spec.get(%q) == %s", param, pythonFormatLiteral(val))
+			return fmt.Sprintf("spec.get(%q) == %s", param, pythonFormatLiteral(val, ""))
 		}
 		if strings.Contains(when, "!=") {
 			parts := strings.SplitN(when, "!=", 2)
@@ -322,7 +324,7 @@ func translateWhenToPython(when string) string {
 			if val == "false" {
 				return fmt.Sprintf("bool(spec.get(%q)) is not False", param)
 			}
-			return fmt.Sprintf("spec.get(%q) != %s", param, pythonFormatLiteral(val))
+			return fmt.Sprintf("spec.get(%q) != %s", param, pythonFormatLiteral(val, ""))
 		}
 		return fmt.Sprintf("bool(spec.get(%q))", p)
 	}
@@ -355,7 +357,38 @@ func translateForEachToPython(forEach string) string {
 	return "range(0)"
 }
 
-func pythonFormatLiteral(val string) string {
+func pythonFormatLiteral(val string, targetType string) string {
+	switch targetType {
+	case "boolean":
+		if strings.ToLower(val) == "true" {
+			return "True"
+		}
+		if strings.ToLower(val) == "false" {
+			return "False"
+		}
+	case "integer":
+		if i, err := strconv.ParseInt(val, 10, 64); err == nil {
+			return strconv.FormatInt(i, 10)
+		}
+	case "number":
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return strconv.FormatFloat(f, 'f', -1, 64)
+		}
+	case "string":
+		b, err := json.Marshal(val)
+		if err == nil {
+			return string(b)
+		}
+		return fmt.Sprintf("%q", val)
+	case "array":
+		entries := strings.Split(val, ",")
+		quoted := make([]string, 0, len(entries))
+		for _, e := range entries {
+			b, _ := json.Marshal(strings.TrimSpace(e))
+			quoted = append(quoted, string(b))
+		}
+		return "[" + strings.Join(quoted, ", ") + "]"
+	}
 	if val == "true" {
 		return "True"
 	}

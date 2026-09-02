@@ -94,7 +94,7 @@ func TestNestedMemberWireRendersGuardedChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(got)
-	if !strings.Contains(s, "{{ $spec.network.nat.gatewayRegion }}") {
+	if !strings.Contains(s, "{{ $spec.network.nat.gatewayRegion | quote }}") {
 		t.Errorf("nested member dereference missing:\n%s", s)
 	}
 	// network is required, nat is optional: the guard chain starts at nat

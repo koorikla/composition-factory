@@ -273,7 +273,7 @@ spec:
     {{- if and (hasKey $spec "tuning") (hasKey $spec.tuning "maxSize") }}
     maxMessageSize: {{ $spec.tuning.maxSize }}
     {{- end }}
-    name: {{ $spec.settings.queueName }}
+    name: {{ $spec.settings.queueName | quote }}
     region: 'eu-north-1'
   providerConfigRef:
     kind: ClusterProviderConfig

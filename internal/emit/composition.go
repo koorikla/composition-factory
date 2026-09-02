@@ -26,7 +26,7 @@ func composition(b *blueprint.Blueprint, crds []schema.CRD, fsDir string) ([]byt
 	wantNamespaced := x.Scope == "Namespaced"
 
 	d := NewDoc()
-	header(d, "blueprints/"+b.Metadata.Name+".cf.yaml")
+	header(d, blueprintSource(b))
 	d.Line(0, "apiVersion: apiextensions.crossplane.io/v1")
 	d.Line(0, "kind: Composition")
 	d.Line(0, "metadata:")
@@ -782,6 +782,17 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 	}
 	sort.Strings(paths)
 
+	crd, err := resolveKind(crds, r, wantNamespaced)
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := crd.FieldTree()
+	if err != nil {
+		return nil, fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
+	}
+	knownNodes := make(map[string]*schema.Node)
+	walkNodes(nodes, "", knownNodes)
+
 	type leafItem struct {
 		basePath   string
 		key        string
@@ -795,7 +806,12 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 	for _, p := range paths {
 		f := r.Fields[p]
 		basePath, mapKey, isMap := blueprint.ParseFieldPath(p)
-		sRHS, rhs, guard, err := resolveFieldRHS(p, f, r, b, crds, wantNamespaced)
+		lookup := arrayIdxRE.ReplaceAllString(p, "[0]")
+		if isMap {
+			lookup = arrayIdxRE.ReplaceAllString(basePath, "[0]")
+		}
+		targetNode := knownNodes[lookup]
+		sRHS, rhs, guard, err := resolveFieldRHS(p, f, r, b, crds, wantNamespaced, targetNode, isMap)
 		if err != nil {
 			return nil, err
 		}

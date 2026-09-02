@@ -39,7 +39,7 @@ func functionsDoc(b *blueprint.Blueprint, runtimeConfigName string) ([]byte, err
 	}
 
 	d := NewDoc()
-	header(d, "blueprints/"+b.Metadata.Name+".cf.yaml")
+	header(d, blueprintSource(b))
 	d.Comment("Required by: crossplane composition render <xr> <composition> functions.yaml")
 	d.Comment("No render.crossplane.io/runtime annotation is needed to render; the")
 	d.Comment("docker-name annotation below only makes renders reuse one container")

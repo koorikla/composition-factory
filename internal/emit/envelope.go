@@ -98,7 +98,7 @@ func checkEnvelopePaths(r blueprint.Resource, crd schema.CRD) (map[string]*schem
 // path. Array-of-object children get the same "[0]" element addressing
 // schema.Leaves uses; blueprint validation rejects bracketed envelope
 // segments, so those paths exist only for parity, never to be matched.
-func walkEnvelopeNodes(nodes []*schema.Node, prefix string, out map[string]*schema.Node) {
+func walkNodes(nodes []*schema.Node, prefix string, out map[string]*schema.Node) {
 	for _, n := range nodes {
 		path := n.Name
 		if prefix != "" {
@@ -112,8 +112,12 @@ func walkEnvelopeNodes(nodes []*schema.Node, prefix string, out map[string]*sche
 		if n.Type == "array" {
 			childPrefix += "[0]"
 		}
-		walkEnvelopeNodes(n.Children, childPrefix, out)
+		walkNodes(n.Children, childPrefix, out)
 	}
+}
+
+func walkEnvelopeNodes(nodes []*schema.Node, prefix string, out map[string]*schema.Node) {
+	walkNodes(nodes, prefix, out)
 }
 
 // envField is one envelope entry resolved to a renderable form: the dotted
@@ -156,7 +160,7 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 				return nil, fmt.Errorf("resource %q: envelope %q: %w", r.Name, p, err)
 			}
 			e.rhs = rhs
-			e.structured = structuredRHS{kind: rhsLiteral, value: f.Value}
+			e.structured = structuredRHS{kind: rhsLiteral, value: f.Value, targetType: n.Type}
 		case f.From != "":
 			param, member, _ := blueprint.ParamRef(f.From)
 			chainRef := param
@@ -190,12 +194,17 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 					"parameter %q has type %q — the wire would render a YAML scalar of the wrong type, "+
 					"which the API server rejects on apply", r.Name, p, n.Type, refName, wireDecl.Type)
 			}
-			e.rhs = fmt.Sprintf("{{ %s }}", deref)
+			if n.Type == "string" {
+				e.rhs = fmt.Sprintf("{{ %s | quote }}", deref)
+			} else {
+				e.rhs = fmt.Sprintf("{{ %s }}", deref)
+			}
 			e.structured = structuredRHS{
-				kind:      rhsParam,
-				param:     chainRef,
-				paramSegs: segs,
-				rawExpr:   deref,
+				kind:       rhsParam,
+				param:      chainRef,
+				paramSegs:  segs,
+				rawExpr:    deref,
+				targetType: n.Type,
 			}
 			switch {
 			case member != "":

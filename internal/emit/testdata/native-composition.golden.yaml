@@ -53,7 +53,7 @@ spec:
                 labels: {app: web}
               spec:
                 containers:
-                  - image: {{ $spec.image }}
+                  - image: {{ $spec.image | quote }}
                     name: 'web'
           ---
           apiVersion: v1

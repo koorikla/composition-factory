@@ -13,6 +13,24 @@ git — `git log -p BACKLOG.md`.
 The original slice queue, worked from 2026-09-01. Every item shipped with a
 Playwright behavior.
 
+- [x] `value:` is always a quoted string (structured.go:43 quoteYAML) regardless of the CRD
+      leaf type: `enableDnsHostnames: "true"`, `allocatedStorage: "20"`; and string params are
+      emitted bare so `engineVersion: 16.3` becomes a float. Emit typed literals from the leaf
+      type (bool/number unquoted, strings `| quote`), refuse `value: notabool` on a boolean,
+      refuse a scalar `from:` into an array leaf (envelope already does, envelope.go:176) or
+      wrap it. Add a param-type vs leaf-type check with a clear error. KCL already emits typed
+      literals, so the engines currently disagree. Found by A and C.
+      — completed 2026-09-03
+- [x] Header `# Source: blueprints/<name>.cf.yaml` is fabricated — it prints a hardcoded
+      prefix, not the path given. Found by A, C and E.
+      — completed 2026-09-03
+- [x] String parameters are emitted unquoted, so YAML retypes them: `"0x1F"` → `31`, `"1e3"`
+      → `1000` (an Ingress host!), `"null"` → null, `"on"` → true; the API server then
+      rejects the Deployment (`cannot unmarshal bool into … EnvVar.value`). Only annotations
+      get `| quote`. Same root cause as the typed-literal item above; `data[PORT]: {from:
+      params.port}` on a ConfigMap likewise needs stringification into string-typed
+      targets. Found by B.
+      — completed 2026-09-03
 - [x] Remove + copy objects through the GUI: duplicate a resource via copy/paste
       (Cmd/Ctrl+C on a selected card, Cmd/Ctrl+V pastes a deep copy with a unique
       name and all field values/wires), plus an explicit duplicate action and

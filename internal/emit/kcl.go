@@ -205,7 +205,7 @@ func quoteKCLKey(k string) string {
 func kclStructuredRHS(s structuredRHS, fallbackRHS string) string {
 	switch s.kind {
 	case rhsLiteral:
-		return kclFormatLiteral(s.value)
+		return kclFormatLiteral(s.value, s.targetType)
 	case rhsRaw:
 		return s.value
 	case rhsTemplate:
@@ -218,14 +218,16 @@ func kclStructuredRHS(s structuredRHS, fallbackRHS string) string {
 	case rhsStatus:
 		return fmt.Sprintf("ocds?[%q]?.Resource?.status?.%s", s.resource, strings.ReplaceAll(s.statusPath, ".", "?."))
 	default:
-		return kclRHS(fallbackRHS)
+		return kclRHS(fallbackRHS, s.targetType)
 	}
 }
 
-func kclRHS(rhs string) string {
+func kclRHS(rhs string, targetType string) string {
 	rhs = strings.TrimSpace(rhs)
 	if strings.HasPrefix(rhs, "{{") && strings.HasSuffix(rhs, "}}") {
 		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(rhs, "{{"), "}}"))
+		inner = strings.TrimSuffix(inner, "| quote")
+		inner = strings.TrimSpace(inner)
 		if strings.HasPrefix(inner, "$spec.") {
 			param := strings.TrimPrefix(inner, "$spec.")
 			return translateParamAccessToKCL(param)
@@ -234,7 +236,7 @@ func kclRHS(rhs string) string {
 			return translateObservedAccessToKCL(inner)
 		}
 	}
-	return kclFormatLiteral(rhs)
+	return kclFormatLiteral(rhs, targetType)
 }
 
 func translateParamAccessToKCL(param string) string {
@@ -266,7 +268,38 @@ func translateForEachToKCL(forEach string) string {
 	return "range(0, 0)"
 }
 
-func kclFormatLiteral(val string) string {
+func kclFormatLiteral(val string, targetType string) string {
+	switch targetType {
+	case "boolean":
+		if strings.ToLower(val) == "true" {
+			return "True"
+		}
+		if strings.ToLower(val) == "false" {
+			return "False"
+		}
+	case "integer":
+		if _, err := strconv.ParseInt(val, 10, 64); err == nil {
+			return val
+		}
+	case "number":
+		if _, err := strconv.ParseFloat(val, 64); err == nil {
+			return val
+		}
+	case "string":
+		b, err := json.Marshal(val)
+		if err == nil {
+			return string(b)
+		}
+		return fmt.Sprintf("%q", val)
+	case "array":
+		entries := strings.Split(val, ",")
+		quoted := make([]string, 0, len(entries))
+		for _, e := range entries {
+			b, _ := json.Marshal(strings.TrimSpace(e))
+			quoted = append(quoted, string(b))
+		}
+		return "[" + strings.Join(quoted, ", ") + "]"
+	}
 	if val == "true" {
 		return "True"
 	}

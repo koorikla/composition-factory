@@ -15,7 +15,7 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 		return nil, fmt.Errorf("scope LegacyCluster is not valid in apiextensions.crossplane.io/v2")
 	}
 	d := NewDoc()
-	header(d, "blueprints/"+b.Metadata.Name+".cf.yaml")
+	header(d, blueprintSource(b))
 	d.Line(0, "apiVersion: apiextensions.crossplane.io/v2")
 	d.Line(0, "kind: CompositeResourceDefinition")
 	d.Line(0, "metadata:")
