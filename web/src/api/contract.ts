@@ -36,7 +36,12 @@ export interface Field {
   /** string number integer boolean object array map */
   type: string
   description: string
+  /** the RAW schema flag: required WITHIN its parent object, even when that
+   * parent is optional (EnvVar.name on ~30% of a Deployment's leaves) */
   required: boolean
+  /** EFFECTIVE requiredness: required along the whole ancestor chain — what
+   * "must actually be set" filters run on; required_only filters on this */
+  requiredChain: boolean
   /** 0 for a top-level field */
   depth: number
 }
@@ -207,7 +212,16 @@ export const api = {
     return request(`/kinds/${encodeURIComponent(apiVersion)}/${encodeURIComponent(kind)}`)
   },
 
-  fields(apiVersion: string, kind: string, q: FieldQuery = {}): Promise<{ fields: Field[]; total: number }> {
+  /** requiredBranches carries the chain-required BRANCH nodes with no
+   * chain-true leaves beneath them — required subtrees the flat leaf list
+   * structurally drops (a Deployment's spec.selector and spec.template). It
+   * is served whole on every response, unfiltered by the query; "required
+   * only" means fields (filtered to requiredChain) plus this list. */
+  fields(
+    apiVersion: string,
+    kind: string,
+    q: FieldQuery = {},
+  ): Promise<{ fields: Field[]; total: number; requiredBranches: Field[] }> {
     const qs = query({
       required_only: q.requiredOnly,
       max_depth: q.maxDepth,

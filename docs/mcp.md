@@ -65,7 +65,7 @@ column names the route each tool bridges to.
 | Tool | HTTP equivalent | What it does |
 |---|---|---|
 | `list_kinds` | `GET /api/kinds` | Search the cached providers' managed-resource kinds (`search`, `limit`). |
-| `get_kind_fields` | `GET /api/kinds/{apiVersion}/{kind}/fields` | One kind's settable `forProvider` fields, filterable by `prefix`, `max_depth`, `search`, `required_only`, `limit`; `total` counts the pre-`limit` set. |
+| `get_kind_fields` | `GET /api/kinds/{apiVersion}/{kind}/fields` | One kind's settable `forProvider` fields, filterable by `prefix`, `max_depth`, `search`, `required_only` (effectively required: `requiredChain`, the whole ancestor chain, not the raw per-object flag), `limit`; `total` counts the pre-`limit` set, and `requiredBranches` lists required subtrees with no effectively-required leaf (a Deployment's `spec.selector`/`spec.template`). |
 | `get_blueprint` | `GET /api/blueprint` | The whole blueprint document as JSON. |
 | `replace_blueprint` | `PUT /api/blueprint` | Replace the whole document (full replace, not a merge; unknown keys rejected). |
 | `add_parameter` | `POST /api/blueprint/parameters` | Declare a new XRD parameter; duplicates refused. |

@@ -26,6 +26,10 @@ import generateFixture from "./fixtures/generate.json"
 // Envelope() for the specific CRD variant you are fixturing.
 const KINDS: Kind[] = kindsFixture.kinds as Kind[]
 const QUEUE_FIELDS: Field[] = queueFieldsFixture.fields as Field[]
+// Chain-required branch rows with no chain-true leaves beneath (none for the
+// Queue) — served whole on every /fields response, unfiltered by the query,
+// exactly as internal/api's handleKindFields does.
+const QUEUE_REQUIRED_BRANCHES: Field[] = queueFieldsFixture.requiredBranches as Field[]
 
 function errorJSON(status: number, message: string) {
   return HttpResponse.json({ error: message }, { status })
@@ -171,7 +175,10 @@ function filterFields(all: Field[], url: URL): { fields: Field[]; total: number 
     out = out.filter(f => f.depth <= maxDepth.value)
   }
   if (requiredOnly.value) {
-    out = out.filter(f => f.required)
+    // The server filters on the required CHAIN (effectively required — the
+    // whole ancestor chain holds), not the raw per-object flag: see
+    // internal/index.filterRequiredOnly.
+    out = out.filter(f => f.requiredChain)
   }
   if (search) {
     out = out.filter(
@@ -244,7 +251,11 @@ export const handlers = [
     if ("error" in result) {
       return errorJSON(400, result.error)
     }
-    return HttpResponse.json({ fields: result.fields, total: result.total })
+    return HttpResponse.json({
+      fields: result.fields,
+      total: result.total,
+      requiredBranches: QUEUE_REQUIRED_BRANCHES,
+    })
   }),
 
   http.get("/api/blueprint", () => HttpResponse.json(blueprintState)),

@@ -17,6 +17,7 @@
       "type": "array",
       "description": "Actions the provider may take. Defaults to [\"*\"].",
       "required": false,
+      "requiredChain": false,
       "depth": 0
     },
     {
@@ -24,6 +25,7 @@
       "type": "string",
       "description": "ProviderConfig or ClusterProviderConfig.",
       "required": true,
+      "requiredChain": false,
       "depth": 1
     },
     {
@@ -31,6 +33,7 @@
       "type": "string",
       "description": "Name of the provider config.",
       "required": true,
+      "requiredChain": false,
       "depth": 1
     },
     {
@@ -38,6 +41,7 @@
       "type": "string",
       "description": "Name of the secret.",
       "required": true,
+      "requiredChain": false,
       "depth": 1
     }
   ]

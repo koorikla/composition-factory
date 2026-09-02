@@ -69,6 +69,9 @@ type kindsResponse struct {
 type kindFieldsResponse struct {
 	Fields []index.Field `json:"fields"`
 	Total  int           `json:"total"`
+	// requiredBranches: chain-required branch nodes with no chain-true
+	// leaves beneath (see handleKindFields) — same row shape as fields.
+	RequiredBranches []index.Field `json:"requiredBranches"`
 }
 
 type generateResponse struct {
