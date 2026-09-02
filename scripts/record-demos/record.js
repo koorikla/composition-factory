@@ -5,8 +5,23 @@ const { GIFEncoder, quantize, applyPalette } = require('gifenc')
 const { PNG } = require('pngjs')
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
+const { execSync } = require('child_process')
 
-const BASE = 'http://127.0.0.1:8086'
+function getBaseURL() {
+  if (process.env.CF_DEMO_PORT) {
+    return `http://127.0.0.1:${process.env.CF_DEMO_PORT}`
+  }
+  let toplevel = process.cwd()
+  try {
+    toplevel = execSync('git rev-parse --show-toplevel', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+  } catch (_) {}
+  const hash = crypto.createHash('sha256').update(toplevel).digest('hex').slice(0, 8)
+  const port = 28000 + (parseInt(hash, 16) % 10000)
+  return `http://127.0.0.1:${port}`
+}
+
+const BASE = getBaseURL()
 const OUT = 'docs/screenshots'
 const W = 1000, H = 640, FPS = 5
 

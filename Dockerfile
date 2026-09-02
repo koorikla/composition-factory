@@ -1,6 +1,9 @@
 # Multi-stage build for compositionfactory (cf)
 # Build on native host platform using Go cross-compilation (avoids slow QEMU emulation)
-FROM --platform=$BUILDPLATFORM golang:alpine AS builder
+# The toolchain is pinned to the minor the module declares: this project's
+# contract is byte-identical output for the same inputs, so the compiler is
+# an input worth naming.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 WORKDIR /src
 

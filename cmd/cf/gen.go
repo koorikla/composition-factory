@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
@@ -26,7 +27,10 @@ type GenCmd struct {
 	// rendered documents are byte-identical to the inline form: the
 	// function concatenates the folder exactly back into the inline body.
 	TemplateSource string `help:"Where the Composition's go-template body lives: inline (default) or filesystem (templates/ folder + ConfigMaps + DeploymentRuntimeConfig)." enum:"inline,filesystem" default:"inline"`
-	Engine         string `help:"Composition rendering engine: go-templating, kcl, or python (defaults to blueprint setting)."`
+	// Engine rendering engine: go-templating, kcl, or python.
+	Engine string `help:"Composition rendering engine: go-templating, kcl, or python (defaults to blueprint setting)."`
+	// GroupSuffix appends a workspace isolation suffix to the XRD group.
+	GroupSuffix string `help:"Suffix to append to the XRD group (e.g. .cf-slug for workspace isolation in a shared cluster)."`
 }
 
 func (c *GenCmd) Run(out io.Writer) error {
@@ -74,6 +78,13 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 			b.Spec.Emit = &blueprint.Emit{}
 		}
 		b.Spec.Emit.Engine = c.Engine
+	}
+	if c.GroupSuffix != "" {
+		suffix := c.GroupSuffix
+		if !strings.HasPrefix(suffix, ".") {
+			suffix = "." + suffix
+		}
+		b.Spec.XRD.Group = b.Spec.XRD.Group + suffix
 	}
 	outputs, err := emit.Generate(b, crds, c.Out)
 	if err != nil {

@@ -294,8 +294,7 @@ type envTreeNode struct {
 
 func buildEnvTree(plan []envField) []*envTreeNode {
 	var roots []*envTreeNode
-	var findOrCreate func(list *[]*envTreeNode, name string) *envTreeNode
-	findOrCreate = func(list *[]*envTreeNode, name string) *envTreeNode {
+	findOrCreate := func(list *[]*envTreeNode, name string) *envTreeNode {
 		for _, n := range *list {
 			if n.name == name {
 				return n

@@ -145,3 +145,22 @@ server-side fields, takes one field edit, and `crossplane composition render` of
 equals the original's render except for that field; (c) a hand-added label on the Composition,
 an extra pipeline step, and a hand-added `{{ range }}` block inside the template all survive
 three consecutive open-edit-save cycles byte-for-byte.
+
+## 7. Phase 0 Spike Results & Architectural Decisions (2026-09-02)
+
+1. **Gate Results**:
+   - **(a) 100% Golden Round-Trip**: Verified across `native-composition.golden.yaml`, `pipeline_composition.golden.yaml`, and `xqueue-pipeline.composition.golden.yaml`. Zero edits produce 100% byte-identical output.
+   - **(b) Single-Field Splice Edits**: Literal and wire edits mutate only the targeted byte ranges while preserving surrounding comments, indentation, and pipeline structures.
+   - **(c) Multi-Cycle Preservation**: Custom top-level comments, resource labels, custom pipeline steps, inline template comments, and custom `{{ range }}` blocks survive three consecutive parse-edit-save cycles byte-for-byte.
+   - **(d) Kubectl Export Scrubbing**: Automated stripping of server-side metadata (`managedFields`, `resourceVersion`, `uid`, `creationTimestamp`, `status`, `kubectl.kubernetes.io/last-applied-configuration`) successfully verified.
+
+2. **Layout Storage Decision**:
+   - Store UI card coordinates, viewport transforms, and hidden kind filters in `.cf/layout.yaml` sidecar.
+   - **Rationale**: Keeps Kubernetes manifests completely standard and clean for GitOps/ArgoCD workflows without polluting Crossplane resources with visual canvas metadata annotations.
+
+3. **XRD First-Save Canonicalisation Policy**:
+   - Preserve comments and structure via `yaml.v3` node trees.
+   - Inform users on first save of a `kubectl get` export that server-side fields were pruned and document keys formatted cleanly.
+
+4. **Phase 0 Status**: **GO** (Spike verified and tested in `internal/manifest`).
+

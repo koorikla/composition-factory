@@ -359,7 +359,9 @@ func writeTemplateBody(d *Doc, ti int, b *blueprint.Blueprint, crds []schema.CRD
 			// v2 namespaced shape -- which is why blueprint.Validate refuses
 			// scope: Cluster outright rather than letting a cluster-scoped
 			// blueprint through this function.
-			writeMapField(d, ti, "forProvider", ti+2, plan)
+			if err := writeForProviderTree(d, ti, ti+2, r.Name, plan); err != nil {
+				return err
+			}
 			// The rest of the spec envelope: blueprint-authored entries merged
 			// with the computed providerConfigRef (namespaced only — the v2
 			// namespaced envelope requires both kind and name there; the
@@ -1130,6 +1132,35 @@ func statusGuard(resName string, segs []string) (guard, expr string) {
 // when every field in the plan is optional does the whole block need a
 // render-time fallback: wrapped in {{- if or (hasKey ...) ... -}} that falls
 // back to an explicit {} when none of the optional keys are present.
+func writeForProviderTree(d *Doc, keyIndent int, childIndent int, resourceName string, plan []forProviderField) error {
+	if len(plan) == 0 {
+		d.Line(keyIndent, "  forProvider: {}")
+		return nil
+	}
+
+	hasNestedDotted := false
+	for _, f := range plan {
+		if !f.isMap && strings.Contains(f.path, ".") {
+			hasNestedDotted = true
+			break
+		}
+	}
+	if !hasNestedDotted {
+		writeMapField(d, keyIndent, "forProvider", childIndent, plan)
+		return nil
+	}
+
+	root, err := buildNativeTree(resourceName, plan)
+	if err != nil {
+		return err
+	}
+
+	d.Line(keyIndent, "  forProvider:")
+	writeNativeChildren(d, childIndent, root.children)
+	return nil
+}
+
+// writeMapField writes flat key-value pairs (retained for backward compatibility).
 func writeMapField(d *Doc, keyIndent int, key string, childIndent int, plan []forProviderField) {
 	if len(plan) == 0 {
 		d.Line(keyIndent, "  %s: {}", key)
@@ -1284,7 +1315,9 @@ func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (
 	}
 
 	var fallback *schema.CRD
+	var candidates []int
 	nativeExists := false
+
 	for i := range crds {
 		c := crds[i]
 		if c.Kind != r.Kind {
@@ -1298,10 +1331,26 @@ func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (
 			continue
 		}
 		if c.Namespaced() == wantNamespaced {
-			return c, nil
+			candidates = append(candidates, i)
+		} else {
+			fallback = &crds[i]
 		}
-		fallback = &crds[i]
 	}
+
+	if len(candidates) == 1 {
+		return crds[candidates[0]], nil
+	}
+	if len(candidates) > 1 {
+		// Disambiguate by provider name/group match
+		for _, idx := range candidates {
+			if r.Provider != "" && matchesProvider(crds[idx].Group, r.Provider) {
+				return crds[idx], nil
+			}
+		}
+		// Fallback to first candidate if no specific provider matched
+		return crds[candidates[0]], nil
+	}
+
 	scope := "cluster-scoped"
 	if wantNamespaced {
 		scope = "namespaced"
@@ -1316,4 +1365,25 @@ func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (
 			r.Kind, r.Kind, blueprint.NativeProvider)
 	}
 	return schema.CRD{}, fmt.Errorf("kind %q not found in any cached provider; run cf provider add", r.Kind)
+}
+
+func matchesProvider(group, provider string) bool {
+	if provider == "" || provider == blueprint.NativeProvider || provider == "cluster" {
+		return true
+	}
+	p := provider
+	if idx := strings.LastIndex(p, "/"); idx != -1 {
+		p = p[idx+1:]
+	}
+	if idx := strings.Index(p, ":"); idx != -1 {
+		p = p[:idx]
+	}
+	p = strings.TrimPrefix(p, "provider-")
+	parts := strings.Split(p, "-")
+	for _, part := range parts {
+		if !strings.Contains(group, part) {
+			return false
+		}
+	}
+	return true
 }

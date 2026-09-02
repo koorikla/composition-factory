@@ -4,9 +4,17 @@
 .superpowers
 bin
 out
-node_modules
+# `node_modules` on its own matches only the context root; web/node_modules
+# (159 MB) and any other nested copy need the ** form.
+**/node_modules
 playwright-report
 test-results
 .testrun
+.demorun
+# Agent worktrees: full checkouts of other branches, ~145 MB, and nothing the
+# image build reads.
+.worktrees
+# The retired React tree. Untracked, still on some working copies.
+web
 docs/screenshots
 .cf.lock

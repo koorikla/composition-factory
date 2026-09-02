@@ -9,6 +9,7 @@ jobs:
       - uses: actions/setup-go@v6
         with: { go-version: "1.25" }
       - run: make lint
+      - run: make lint-strict
       - run: make test
 
   # Lane B needs a Docker daemon; crossplane render runs the engine in containers.
@@ -50,3 +51,21 @@ jobs:
       - uses: actions/checkout@v5
       - name: Verify Docker build
         run: docker build .
+
+  # Lane C: in-cluster verification on real kind + Crossplane.
+  cluster:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.25" }
+      - uses: azure/setup-helm@v4
+      - name: Install kind
+        uses: helm/kind-action@v1.10.0
+        with:
+          install_only: true
+      - name: Create cluster with Crossplane and functions
+        run: make cluster
+      - name: Run in-cluster test
+        run: make test-cluster
+

@@ -1,0 +1,221 @@
+# Code audit — 2026-09-02
+
+Tree audited: `main` at `ee61f82`, clean and level with `origin/main`.
+
+This is a whole-tree audit run after the consolidation backlog and Backlog v2
+closed, so it deliberately does not restate their items. Every finding below
+was measured on this tree; the command that produced each number is given so a
+later run is comparable rather than impressionistic.
+
+## Method
+
+```bash
+gofmt -l $(git ls-files '*.go')                       # formatting
+go vet ./...                                          # vet
+go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...  # deeper analysis
+go run golang.org/x/tools/cmd/deadcode@latest ./cmd/... # reachability
+go test ./... -short -count=1 -cover                  # tests + coverage
+go test ./... -short -race -count=1                   # data races
+npm audit --omit=dev                                  # JS dependency CVEs
+```
+
+Plus a read of the largest units by line count (Go functions, JS functions,
+files), the CI workflows, the Dockerfile and deploy manifests, and a scan for
+committed secrets.
+
+## Scorecard
+
+| Area | Grade | Basis |
+|---|---|---|
+| Correctness tooling | A | vet, staticcheck and the race detector are all clean; nothing suppressed |
+| Tests | A | 724 Go test functions + 150 Playwright behaviors; 25 398 test LOC against 16 458 production LOC |
+| Coverage | A− | 80–100 % across the packages that matter; two soft spots (below) |
+| Dead code | A | four "unreachable" hits from `deadcode`, all four test-only helpers or a second `main` — no dead production code |
+| Security | A− | no committed secrets, non-root image, loopback-only bind guard; one documented, deliberate exception in the k8s manifest |
+| Dependencies | A | 5 direct Go modules; 3 npm devDependencies; `npm audit` reports 0 vulnerabilities |
+| Structure | B | five functions carry disproportionate complexity (below) |
+| Reproducibility | B+ | strong in the engine, weaker in the build image (now fixed) |
+| Workspace hygiene | C | 731 MB working copy, of which ~625 MB is stale agent worktrees |
+
+Overall: **A−**. This is a well-kept codebase. The remaining work is structural
+(a handful of oversized units) and janitorial (workspace state), not
+correctness.
+
+## What is already healthy — and worth not regressing
+
+Stated because an audit that only lists problems misrepresents the tree.
+
+- **No dead production code.** `deadcode ./cmd/...` reports exactly four
+  unreachable functions: `catalogue.Validate` (reached from the
+  `scripts/build-catalogue` main, not the `cf` main), `xpkg.PackageStream` and
+  `cache.Store.Clear` (test-only), and `cmd/cf.defaults` (a documented test
+  seam onto kong's own default resolution). Nothing to delete.
+- **The test pyramid is real.** 1.54 lines of test per line of production code,
+  and the acceptance lane renders through the actual `crossplane composition
+  render` rather than asserting on strings.
+- **Errors are written for the person who has to fix the blueprint** — they
+  name the bad path, the nearest match, and the YAML to write instead. That is
+  a deliberate style, and it is why this audit configures staticcheck's ST1005
+  off rather than reflowing them.
+- **The bind guard is right.** `cf serve` refuses a non-loopback `--addr`
+  unless the operator passes `--i-know-this-is-unauthenticated`, and the error
+  says what is wrong *and* why it matters.
+
+## Findings
+
+### 1. `(*Blueprint).Validate` is 592 lines — Medium
+
+`internal/blueprint/load.go:408-1000`. The single largest unit in the
+repository, and the one place every authoring mistake has to be caught. It
+validates the XRD, parameters, resources, fields, `when`, `forEach`, envelope,
+annotations, pipeline and templates in one pass.
+
+Its neighbours show the shape the split should take: `validateStatusRef`,
+`validateForEachParamRef` and `validateForEachStatusRef` already sit beside it
+as separate functions. Extracting `validateXRD`, `validateParameters`,
+`validateResources` and `validateFields` in the same style is mechanical, and
+each becomes directly testable rather than reachable only through a whole
+blueprint.
+
+Effort: half a day. Risk: low — `internal/blueprint` is at 90.3 % coverage,
+and the error strings are pinned by tests, so a behaviour change shows up
+immediately.
+
+### 2. The three emitters triplicate one walk — Medium
+
+`internal/emit/composition.go:writeTemplateBody` (279 lines),
+`python.go:pythonTemplateBody` (165), `kcl.go:kclTemplateBody` (164).
+
+Diffing the KCL and Python bodies gives 99 changed lines out of ~165: the two
+functions are the same traversal — refuse conventions, resolve the kind, plan
+fields/envelope/annotations, open a `when`, open a `forEach`, write
+apiVersion/kind/metadata/spec/forProvider — differing only in the syntax
+tokens each language needs. `composition.go` runs the same traversal a third
+time.
+
+The consolidation backlog already did the hard half of this by making the plan
+structured (`structuredRHS` carries kind, param, path and guard, so KCL and
+Python no longer re-parse Go-template text). What remains is to lift the walk
+itself: one `walkResources` driving a small backend interface
+(`openResource`, `writeKey`, `openMap`, `formatLiteral`, `condition`, `loop`),
+with the three current bodies becoming the three backends.
+
+Effort: two days. Risk: medium, but bounded — every emitter path has a
+byte-pinned golden, so a walk that changes one byte fails immediately. Do not
+start it without the goldens green first.
+
+### 3. Two JS modules are one closure each — Medium
+
+`web-proto/js/regions/palette.js:init` is 882 lines and
+`web-proto/js/regions/output.js:init` is 830 — each module's entire body lives
+inside its `init`, so nothing in it can be reached, reasoned about or tested in
+isolation. Three more functions are oversized for the same reason they grew:
+they dispatch on an action attribute through a long `if/else` chain.
+
+| Unit | Lines |
+|---|---|
+| `palette.js` `init` | 882 |
+| `output.js` `init` | 830 |
+| `canvas.js` `openFieldPicker` | 317 |
+| `inspector.js` `onBoxClick` | 316 |
+| `inspector.js` `onBoxChange` | 295 |
+
+The dispatch chains have an obvious replacement: a `const actions = { … }` map
+keyed by the `data-a` value, one small named function per action. That is a
+mechanical change with 150 Playwright behaviors underneath it, and it is the
+single biggest legibility win available in the canvas.
+
+Effort: one day for the three dispatchers; the two `init` closures are a
+larger, separate job. Risk: low for the dispatchers *provided* the Playwright
+suite runs — note that it does not run on a shared port safely while another
+agent session is live (see AGENTS.md §2).
+
+### 4. Coverage thins exactly where the tree touches the outside world — Low
+
+`internal/cluster` at 55.0 % and `internal/cache` at 64.3 % are the two lowest,
+and `internal/cluster` is both the newest package and the only one that talks
+to a live API server. `cmd/cf` (71.9 %) and `internal/xpkg` (72.6 %) follow.
+
+The gap is not alarming in isolation, but the live-cluster schema source is on
+the backlog to be re-pointed at a real kind cluster; that work should bring
+`internal/cluster`'s error paths (unreadable kubeconfig, unreachable server,
+partial CRD listings) up with it rather than after it.
+
+### 5. Working copy is 731 MB, ~85 % of it stale — Low, but immediate
+
+| Path | Size | State |
+|---|---|---|
+| `.claude/worktrees/` | 321 MB | 7 worktrees; 4 fully merged into main |
+| `.worktrees/` | 145 MB | 4 worktrees, all fully merged into main |
+| `web/` | 159 MB | the retired React canvas; already removed from git, still on disk |
+| `bin/`, `node_modules/` | 40 MB | build products, correctly ignored |
+
+Of the 20 local branches besides `main`, **15 are fully merged** (zero commits
+ahead) and exist only as worktree anchors. Five carry unmerged commits and need
+a decision, not a delete:
+
+| Branch | Ahead |
+|---|---|
+| `subagent-DX--Client---Test-Suite-Polish-Engineer-self-37c2a470` | 12 |
+| `worktree-agent-a5a7710927acd2ff7` | 12 |
+| `worktree-agent-a7f7485202bdacadb` | 4 |
+| `subagent-Canvas---UX-Authoring-Engineer-self-84d324ac` | 1 |
+| `worktree-agent-a247d77332728f705` | 1 |
+
+This one is listed as a finding rather than fixed in this pass because
+deleting another session's worktree is not a call an audit gets to make on its
+own — and the `~/.gemini/antigravity/…` worktrees belong to a *live* parallel
+agent.
+
+### 6. Smaller items
+
+- **`make lint` walked ten times the tree it lints.** `gofmt -l .` visited
+  1701 `.go` files against the 163 this tree owns, because the agent worktrees
+  are full checkouts of other branches. An unformatted file on an abandoned
+  branch could fail the lint of the tree you are editing. *Fixed below.*
+- **The build image floated its toolchain.** `FROM golang:alpine` on a project
+  whose contract is byte-identical output for identical input. *Fixed below.*
+- **The Docker build context carried ~300 MB it never reads** —
+  `.dockerignore`'s bare `node_modules` matches only the context root, so
+  `web/node_modules` went in, as did `.worktrees/`. *Fixed below.*
+- **CI never ran the race detector.** `make test-race` exists and passes, but
+  no lane invokes it. Worth adding to lane A or a nightly, given the API
+  server's shared index and memoised schema trees.
+- **Three `# TODO:` markers** in `internal/emit/providerconfigs.go:200-202` are
+  intentional: they are emitted *into* the generated ProviderConfig scaffold as
+  instructions to the operator, not left-behind notes.
+
+## Fixed in this pass
+
+Each verified with `make lint`, `make lint-strict` and `go test ./... -short`.
+
+1. `internal/emit/kcl.go` — `buildEnvTree`'s `findOrCreate` was split into a
+   declaration and an assignment, the shape needed only by a self-recursive
+   closure. It never recurses. Collapsed to `:=` (staticcheck S1021).
+2. `catalogue/catalogue.go` — a package-doc line began with `go:embed`, which
+   the toolchain reads as a malformed compiler directive (SA9009). Reworded.
+3. `staticcheck.conf` — staticcheck's default check set minus ST1005, with the
+   reasoning in the file. With it, staticcheck is clean at zero findings.
+4. `make lint-strict` — staticcheck pinned to v0.8.1 and run via `go run`, so
+   it needs no install and cannot drift between a laptop and CI. Added to CI
+   lane A and documented in AGENTS.md §3.
+5. `make lint` — gofmt now runs over `git ls-files '*.go'`. Verified both ways:
+   an unformatted tracked file still fails the gate.
+6. `Dockerfile` — builder pinned to `golang:1.25-alpine`, the minor `go.mod`
+   declares. Image rebuilt and smoke-tested.
+7. `.dockerignore` — `**/node_modules`, `.worktrees`, `web` and `.demorun`
+   excluded from the build context.
+8. `CHANGELOG.md` — the repo had 13 tags and no changelog. Backfilled from the
+   tag history, with an Unreleased section carrying the above.
+
+## Recommended order
+
+1. The workspace prune (finding 5) — needs a decision, then it is one command.
+2. `Validate` split (finding 1) — highest complexity-per-risk return.
+3. The three JS dispatch chains (finding 3) — biggest legibility win in the
+   canvas; needs the Playwright suite on an unshared port.
+4. Race detector in CI (finding 6).
+5. Emitter walk unification (finding 2) — most valuable and most invasive;
+   worth doing only with the goldens green and nothing else in flight.
+6. `internal/cluster` error paths (finding 4), alongside the kind-cluster work
+   already on the backlog.

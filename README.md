@@ -196,6 +196,8 @@ crossplane composition render testdata/xr.yaml \
 - 🤖 **[MCP Server Guide](docs/mcp.md)** — Setting up `cf mcp` with Claude Code, Antigravity, and AI assistant workflows.
 - 📦 **[Provider Catalogue](docs/catalogue.md)** — Curated list of 476+ installable OSS Crossplane packages and upjet families.
 - 🎥 **[Demo GIF Recorder](docs/record-demos.md)** — Headless recording harness for automated doc animations without ffmpeg.
+- 🧾 **[Changelog](CHANGELOG.md)** — What changed in each release, and what is queued for the next one.
+- 🔍 **[Code Audit](docs/code-audit.md)** — Dated whole-tree audit: metrics, method, and the ranked structural findings.
 
 ---
 

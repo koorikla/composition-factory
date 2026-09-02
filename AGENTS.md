@@ -26,8 +26,9 @@ This document records the foundational architecture rules, testing loops, and co
 To prevent concurrent processes and test runners from trampling each other or the developer's live workspace:
 
 - **Port 8080**: Human developer default (`cf serve` with default `--addr 127.0.0.1:8080`).
-- **Port 8081**: Automated Playwright e2e test suite (`make test-e2e`, managed via `playwright.config.js` with isolated scratch blueprints).
-- **Port 8086**: Headless demo GIF recorder instance (`scripts/record-demos/`).
+- **Dynamic Worktree Port (18000–27999)**: Automated Playwright e2e test suite (`make test-e2e`, managed via `playwright.config.js` and `tests/helpers.js` hashing the git worktree path; overridable via `CF_E2E_PORT`).
+- **Dynamic Demo Port (28000–37999)**: Headless demo GIF recorder instance (`scripts/record-demos/`; overridable via `CF_DEMO_PORT`).
+- **Cluster Namespace & Group Isolation**: When running in a shared kind cluster, each workspace uses namespace `cf-<slug>` and appends `--group-suffix=.<slug>.cf-test` to XRD groups (`platform.<slug>.cf-test`) to prevent cluster-scoped CRD/XRD collisions.
 
 Never run test suites or recording harnesses against port 8080.
 
@@ -41,10 +42,19 @@ The standard developer and CI workflows are encapsulated in `Makefile`:
 - `make test`: Fast unit tests (`go test ./... -short -count=1`).
 - `make test-race`: Fast unit tests with race detector enabled (`go test ./... -short -race -count=1`).
 - `make test-docker`: Acceptance tests requiring Docker and `crossplane` CLI (`go test ./... -run Acceptance -v -count=1`).
-- `make test-e2e`: Playwright browser test suite against isolated port 8081 (`npx playwright test`).
-- `make lint`: Code formatting verification (`gofmt`) and Go vet analysis (`go vet ./...`).
+- `make test-e2e`: Playwright browser test suite against workspace-isolated engine (`npx playwright test`).
+- `make cluster`: Idempotently create local kind cluster with Crossplane and required functions.
+- `make cluster-down`: Tear down local kind cluster.
+- `make deploy`: Deploy canvas to workspace namespace in the kind cluster via Skaffold.
+- `make undeploy`: Delete workspace namespace and resources from kind cluster.
+- `make test-cluster`: Lane C in-cluster verification testing XRD, Composition, and Function reconciliation.
+- `make lint`: Code formatting verification (`gofmt`, over tracked files only) and Go vet
+  analysis (`go vet ./...`).
+- `make lint-strict`: staticcheck over the whole module at the version pinned in the
+  `Makefile`, configured by `staticcheck.conf`. CI runs it alongside `make lint`;
+  it must be clean before a merge.
 - `make serve`: Launch local visual canvas server (`./bin/cf serve --blueprint $(BLUEPRINT) --out $(OUT)`).
-- `make clean`: Clean up build artifacts and test outputs (`bin`, `out`, `.testrun`, `.demorun`, `test-results`, `playwright-report`).
+- `make clean`: Clean up build artifacts and test outputs (`bin`, `out`, `.testrun*`, `.demorun*`, `test-results`, `playwright-report`).
 
 ---
 

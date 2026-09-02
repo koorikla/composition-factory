@@ -241,3 +241,37 @@ func TestGenCheckMissingOneFileNamesOnlyThatFile(t *testing.T) {
 		}
 	}
 }
+
+func TestGenGroupSuffix(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	out := filepath.Join(dir, "out")
+
+	var genBuf bytes.Buffer
+	cmd := &GenCmd{
+		Blueprint:   bp,
+		Out:         out,
+		CacheDir:    cacheDir,
+		GroupSuffix: "cf-testworktree",
+	}
+	if err := cmd.Run(&genBuf); err != nil {
+		t.Fatal(err)
+	}
+
+	xrdPath := filepath.Join(out, "xrds", "xqueues.platform.sparky.ee.cf-testworktree.yaml")
+	data, err := os.ReadFile(xrdPath)
+	if err != nil {
+		t.Fatalf("expected XRD at %s, got err: %v", xrdPath, err)
+	}
+	if !strings.Contains(string(data), "group: platform.sparky.ee.cf-testworktree") {
+		t.Errorf("XRD group mismatch in output: %s", string(data))
+	}
+
+	compPath := filepath.Join(out, "compositions", "xqueues.platform.sparky.ee.cf-testworktree.yaml")
+	compData, err := os.ReadFile(compPath)
+	if err != nil {
+		t.Fatalf("expected Composition at %s, got err: %v", compPath, err)
+	}
+	if !strings.Contains(string(compData), "apiVersion: platform.sparky.ee.cf-testworktree/v1alpha1") {
+		t.Errorf("Composition compositeTypeRef mismatch in output: %s", string(compData))
+	}
+}

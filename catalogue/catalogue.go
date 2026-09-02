@@ -16,8 +16,8 @@
 // providers.json lives in this directory (rather than a top-level
 // catalogue/ data directory read at runtime) because go:embed patterns
 // cannot reach outside the embedding file's own directory tree — colocating
-// the Go code that serves the data with the data itself is what makes
-// go:embed usable here at all, not just tidy.
+// the Go code that serves the data with the data itself is what makes the
+// embed directive usable here at all, not just tidy.
 package catalogue
 
 import (
