@@ -1,0 +1,29 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-typedobj
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.hooli.tech
+    kind: XTunedQueue
+    plural: xtunedqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+      tuning:
+        type: object
+        description: Typed queue tuning knobs, wired member by member.
+        properties:
+          maxSize:   {type: integer, default: "2048"}
+          retention: {type: integer, required: true}
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region:                  {value: "eu-north-1"}
+        maxMessageSize:          {from: params.tuning.maxSize}
+        messageRetentionSeconds: {from: params.tuning.retention}

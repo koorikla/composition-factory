@@ -1001,6 +1001,138 @@ func TestAcceptanceEnvelopeRenders(t *testing.T) {
 	}
 }
 
+// TestAcceptanceTypedObjectParamRenders is the typed-object-parameter gate:
+// a blueprint whose tuning parameter declares typed members (maxSize with a
+// schema default, retention required) wired as params.tuning.<member>,
+// generated and rendered through the real crossplane composition render —
+// the real XRD member-level schema defaulting, the real
+// function-go-templating hasKey semantics. Proven on the rendered ARTIFACT
+// both ways:
+//
+//   - an XR setting tuning.retention alone flows retention into the
+//     composed Queue AND picks up maxSize=2048 from the member's own XRD
+//     default (defaults inject into a PRESENT object);
+//   - an XR omitting the optional tuning object entirely renders cleanly
+//     with both wires absent — the two-level hasKey chain under
+//     missingkey=error, never "<no value>".
+func TestAcceptanceTypedObjectParamRenders(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+
+	// Build to bin/cf for the same test-what-you-ship reason
+	// TestAcceptanceXQueueRenders documents.
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	bin := filepath.Join(repoRoot, "bin", "cf")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
+		t.Fatalf("build cf: %v\n%s", err, out)
+	}
+
+	cacheDir := filepath.Join(dir, "cache")
+	lock := filepath.Join(dir, ".cf.lock")
+
+	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("cf provider add: %v\n%s", err, out)
+	}
+
+	// Generate twice into separate directories: determinism is a correctness
+	// requirement, so the two runs must agree byte for byte.
+	outDir := filepath.Join(dir, "out")
+	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
+		gen := exec.Command(bin, "gen", "testdata/xqueue-typedobj.cf.yaml", "-o", o, "--cache-dir", cacheDir)
+		if out, err := gen.CombinedOutput(); err != nil {
+			t.Fatalf("cf gen into %s: %v\n%s", o, err, out)
+		}
+	}
+	for _, rel := range []string{
+		filepath.Join("compositions", "xtunedqueues.platform.hooli.tech.yaml"),
+		filepath.Join("xrds", "xtunedqueues.platform.hooli.tech.yaml"),
+		"functions.yaml",
+	} {
+		first, err := os.ReadFile(filepath.Join(outDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		second, err := os.ReadFile(filepath.Join(dir, "out2", rel))
+		if err != nil {
+			t.Fatalf("read second-run %s: %v", rel, err)
+		}
+		if !bytes.Equal(first, second) {
+			t.Errorf("%s: two generate runs over the same blueprint produced different bytes", rel)
+		}
+	}
+
+	comp := filepath.Join(outDir, "compositions", "xtunedqueues.platform.hooli.tech.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xtunedqueues.platform.hooli.tech.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+
+	t.Run("XR-set member flows and the member default injects", func(t *testing.T) {
+		rendered, err := renderComposition(t, "testdata/xr-typedobj.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
+		if err != nil {
+			t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+		}
+		docs := decodeRenderedDocs(t, rendered)
+		queue, ok := docs["Queue"]
+		if !ok {
+			t.Fatalf("no Queue among rendered documents\n---\n%s", rendered)
+		}
+		// The XR-set member, through the wire.
+		if got := digAny(queue, "spec", "forProvider", "messageRetentionSeconds"); got != float64(345600) {
+			t.Errorf("Queue forProvider.messageRetentionSeconds = %v, want the XR's tuning.retention 345600\n---\n%s",
+				got, rendered)
+		}
+		// The member the XR never set: the XRD's member-level schema default
+		// must have injected it into the present tuning object.
+		if got := digAny(queue, "spec", "forProvider", "maxMessageSize"); got != float64(2048) {
+			t.Errorf("Queue forProvider.maxMessageSize = %v, want the member default 2048\n---\n%s",
+				got, rendered)
+		}
+		for _, bad := range []string{"<no value>", "<nil>"} {
+			if strings.Contains(string(rendered), bad) {
+				t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+			}
+		}
+	})
+
+	t.Run("optional object absent omits both wires cleanly", func(t *testing.T) {
+		rendered, err := renderComposition(t, "testdata/xr-typedobj-absent.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
+		if err != nil {
+			t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+		}
+		docs := decodeRenderedDocs(t, rendered)
+		queue, ok := docs["Queue"]
+		if !ok {
+			t.Fatalf("no Queue among rendered documents\n---\n%s", rendered)
+		}
+		fp, ok := digAny(queue, "spec", "forProvider").(map[string]any)
+		if !ok {
+			t.Fatalf("Queue spec.forProvider = %v, want a map\n---\n%s", digAny(queue, "spec", "forProvider"), rendered)
+		}
+		for _, absent := range []string{"maxMessageSize", "messageRetentionSeconds"} {
+			if v, present := fp[absent]; present {
+				t.Errorf("forProvider.%s = %v, want the wire omitted when the tuning object is absent\n---\n%s",
+					absent, v, rendered)
+			}
+		}
+		if fp["region"] != "eu-north-1" {
+			t.Errorf("forProvider.region = %v, want the unconditional value eu-north-1", fp["region"])
+		}
+		for _, bad := range []string{"<no value>", "<nil>"} {
+			if strings.Contains(string(rendered), bad) {
+				t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+			}
+		}
+	})
+}
+
 // renderComposition runs `crossplane composition render` under the
 // machine-wide render lock (internal/rendertest), retrying exactly once on
 // the CLI's known pinned-container race: generated functions.yaml pins

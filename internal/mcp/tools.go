@@ -98,8 +98,11 @@ func (s *server) register(srv *sdk.Server) {
 		Description: "Declare a new XRD parameter on the blueprint and persist it. The name must be " +
 			"camelCase and not already declared (a duplicate is refused). The parameter object's keys " +
 			"are type (string|integer|number|boolean|object — required), required (boolean), enum " +
-			"(array of strings), default (string; also used as the template default) and description; " +
-			"omitted keys mean unset, unknown keys are rejected. Returns the updated document.",
+			"(array of strings), default (string; also used as the template default), description, " +
+			"and — on type object only — properties (a map of member name to the same declaration " +
+			"shape, scalar member types only, one level deep; members are wired as " +
+			"params.<name>.<member>); omitted keys mean unset, unknown keys are rejected. Returns " +
+			"the updated document.",
 	}
 	addParameter.InputSchema = mustSchemaJSON(`{
 		"type": "object",
@@ -124,7 +127,9 @@ func (s *server) register(srv *sdk.Server) {
 			"is not a patch. Omitting a key the parameter currently holds a value for is refused " +
 			"rather than silently discarding that value: to clear a key, send it explicitly with its " +
 			"zero value (false, null, \"\"). The parameter object's keys are type, required, enum, " +
-			"default and description; an unknown name is an error. Returns the updated document.",
+			"default, description and (type object only) properties — typed members, refused as a " +
+			"silent drop when omitted while declared; an unknown name is an error. Returns the " +
+			"updated document.",
 	}
 	updateParameter.InputSchema = mustSchemaJSON(`{
 		"type": "object",

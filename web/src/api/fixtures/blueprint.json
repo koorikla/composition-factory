@@ -30,6 +30,22 @@
           "enum": [],
           "default": "",
           "description": "Maximum message size in bytes, forwarded to the queue's forProvider.maxMessageSize."
+        },
+        "tuning": {
+          "type": "object",
+          "required": false,
+          "enum": [],
+          "default": "",
+          "description": "Typed queue tuning knobs; members are wired as params.tuning.<member>.",
+          "properties": {
+            "delaySeconds": {
+              "type": "integer",
+              "required": false,
+              "enum": [],
+              "default": "0",
+              "description": "Seconds a delivery is delayed."
+            }
+          }
         }
       }
     },

@@ -68,9 +68,50 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 				d.Line(8, "- %s", quoteYAML(e))
 			}
 		}
-		if p.Type == "object" {
+		if p.Type == "object" && len(p.Properties) == 0 {
+			// The v1 free-form map. Byte-identical to what this emitter
+			// wrote before typed members existed — a propertyless object
+			// parameter keeps additionalProperties: string exactly.
 			d.Line(8, "additionalProperties:")
 			d.Line(9, "type: string")
+		}
+		if p.Type == "object" && len(p.Properties) > 0 {
+			// Typed members render as a real nested schema: properties,
+			// per-member description/default/enum, a required list — and NO
+			// additionalProperties, because the members ARE the schema.
+			// Sorted throughout: determinism is a correctness requirement.
+			d.Line(8, "properties:")
+			members := make([]string, 0, len(p.Properties))
+			for m := range p.Properties {
+				members = append(members, m)
+			}
+			sort.Strings(members)
+			var requiredMembers []string
+			for _, m := range members {
+				mp := p.Properties[m]
+				if mp.Required {
+					requiredMembers = append(requiredMembers, m)
+				}
+				d.Line(9, "%s:", m)
+				d.Line(10, "type: %s", mp.Type)
+				if mp.Description != "" {
+					// Same quoting rule as a top-level description: ": " and
+					// " #" in free text change the document's meaning unquoted.
+					d.Line(10, "description: %s", quoteYAML(mp.Description))
+				}
+				if mp.Default != "" {
+					d.Line(10, "default: %s", defaultYAML(mp.Type, mp.Default))
+				}
+				if len(mp.Enum) > 0 {
+					d.Line(10, "enum:")
+					for _, e := range mp.Enum {
+						d.Line(10, "- %s", quoteYAML(e))
+					}
+				}
+			}
+			if len(requiredMembers) > 0 {
+				d.Line(8, "required: [%s]", strings.Join(requiredMembers, ", "))
+			}
 		}
 	}
 	if req := requiredParams(x); len(req) > 0 {

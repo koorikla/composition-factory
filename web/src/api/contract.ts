@@ -52,13 +52,16 @@ export interface FieldQuery {
   limit?: number
 }
 
-/** Mirrors internal/blueprint.Parameter. */
+/** Mirrors internal/blueprint.Parameter. properties, valid only on
+ * type: "object", declares typed scalar members (one level deep in v1);
+ * members are wired as from: "params.<name>.<member>". */
 export interface Parameter {
   type: string
   required?: boolean
   enum?: string[]
   default?: string
   description?: string
+  properties?: Record<string, Parameter>
 }
 
 /** Mirrors internal/blueprint.Field (a resource's field assignment). Exactly

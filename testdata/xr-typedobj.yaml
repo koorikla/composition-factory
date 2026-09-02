@@ -1,0 +1,12 @@
+# Sets tuning with only its required member: the XRD's member-level schema
+# default must inject maxSize=2048 into the present object before the
+# composition function runs.
+apiVersion: platform.hooli.tech/v1alpha1
+kind: XTunedQueue
+metadata:
+  name: demo-tuned
+  namespace: default
+spec:
+  providerName: localstack
+  tuning:
+    retention: 345600

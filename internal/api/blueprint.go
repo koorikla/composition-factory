@@ -225,6 +225,7 @@ var parameterKeys = []struct {
 	{"enum", func(p blueprint.Parameter) bool { return len(p.Enum) > 0 }},
 	{"default", func(p blueprint.Parameter) bool { return p.Default != "" }},
 	{"description", func(p blueprint.Parameter) bool { return p.Description != "" }},
+	{"properties", func(p blueprint.Parameter) bool { return len(p.Properties) > 0 }},
 }
 
 // handleSetParameter serves PUT /api/blueprint/parameters/{name}: replace an
@@ -563,10 +564,12 @@ func referencingResources(b *blueprint.Blueprint, name string) []string {
 	return refs
 }
 
-// anyFrom reports whether any entry in fields wires from want.
+// anyFrom reports whether any entry in fields wires from want — exactly, or
+// through a member reference below it (want == "params.obj" matches
+// "params.obj.member"), mirroring the edit layer's own anyFrom.
 func anyFrom(fields map[string]blueprint.Field, want string) bool {
 	for _, f := range fields {
-		if f.From == want {
+		if f.From == want || strings.HasPrefix(f.From, want+".") {
 			return true
 		}
 	}
