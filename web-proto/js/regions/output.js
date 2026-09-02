@@ -28,7 +28,6 @@ import { esc } from "../dom.js";
  *    untouched.
  */
 
-import { esc } from "../dom.js";
 
 var DEBOUNCE_MS = 300;
 var MIN_DRAWER = 64;   // px — keep the header + a few code lines reachable

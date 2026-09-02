@@ -2,7 +2,8 @@
 // provider not yet declared adds that provider to sources, so generate never
 // sees a kind whose CRDs it can't load (the BucketVersioning red-chip bug).
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request) // pristine doc: sources = [provider-aws-sqs] only

@@ -2,7 +2,8 @@
 // hierarchical tree view on the left of the text editor, clickable files with
 // icons and line counts, breadcrumbs bar, copy button, and sidebar collapse toggle.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request, page }) => {
   await resetDoc(request)

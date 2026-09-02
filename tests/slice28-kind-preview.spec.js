@@ -1,7 +1,8 @@
 // Slice 28 — hovering a KINDS row shows a preview card: scope, field counts,
 // and the required fields with their types/descriptions.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

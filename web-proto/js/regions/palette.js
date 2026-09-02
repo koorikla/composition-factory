@@ -17,7 +17,6 @@ import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
 import { fanOut } from "../wires.js";
-import { esc } from "../dom.js";
 
 /* Node color families, exactly as the prototype's COLORS map. */
 const COLORS = { aws: "var(--wire-ref)", k8s: "var(--wire-status)", cluster: "#06b6d4" };
@@ -723,15 +722,6 @@ export function init(rootEl, deps) {
       });
       return;
     }
-
-    providersErr = null;
-    api.addProvider(ref).then(function () {
-      loadProviders();
-      loadKinds();             // new kinds must appear in the KINDS tab
-    }).catch(function (err) {
-      providersErr = err && err.message || String(err);
-      drawRail();
-    });
   });
 
   railEl.addEventListener("input", function (e) {

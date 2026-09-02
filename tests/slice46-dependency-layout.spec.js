@@ -2,7 +2,8 @@
 // consumes another's status sits to its right (it cannot exist first), the
 // XR leftmost, and no cards overlap.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

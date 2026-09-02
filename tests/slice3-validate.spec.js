@@ -1,7 +1,8 @@
 // Slice 3 — Validate: a real `crossplane composition render` of the current
 // blueprint against a synthesized sample XR, result in the topbar chip.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

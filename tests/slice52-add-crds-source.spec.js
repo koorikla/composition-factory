@@ -1,6 +1,7 @@
 const { test, expect } = require('@playwright/test')
 const fs = require('fs')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 const xrCRD = `apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition

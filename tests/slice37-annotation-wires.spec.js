@@ -2,7 +2,8 @@
 // ServiceAccount annotation must be VISIBLE (teal, like status wires) and
 // editable from the inspector's new annotations section.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 
 

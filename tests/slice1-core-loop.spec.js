@@ -6,7 +6,8 @@
 // The suite runs against its own isolated engine on 127.0.0.1:8081. Every test restores
 // the live blueprint to the exact doc it found, so the suite is idempotent.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 let baseline = null
 

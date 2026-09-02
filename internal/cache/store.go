@@ -147,6 +147,14 @@ func (s *Store) loadEntry(ref string) (*Entry, error) {
 	if err := json.Unmarshal(body, &entry); err != nil {
 		return nil, fmt.Errorf("decode cached entry for %q: %w", ref, err)
 	}
+	// The tree memo lives in an unexported field, so a CRD decoded from
+	// crds.json arrives without one and every ForProvider/Status/Envelope
+	// call would rebuild its tree from the raw map. Attach the memo here,
+	// once per process, so the server path is memoised exactly like CRDs
+	// that came straight out of ParseCRDs.
+	for i := range entry.CRDs {
+		entry.CRDs[i] = entry.CRDs[i].Cached()
+	}
 
 	s.mu.Lock()
 	if s.memo == nil {

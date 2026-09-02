@@ -227,3 +227,40 @@ func TestReadLockMissingFileIsEmptyNotAnError(t *testing.T) {
 		t.Errorf("got %d providers, want 0", len(l.Providers))
 	}
 }
+
+// TestLoadedCRDsCarryTheTreeMemo pins the server path: a CRD decoded from
+// crds.json must memoise its schema trees like one built by ParseCRDs,
+// otherwise every palette and inspector request rebuilds the tree.
+func TestLoadedCRDsCarryTheTreeMemo(t *testing.T) {
+	s := &Store{Root: t.TempDir()}
+	crds := []schema.CRD{{
+		Group: "sqs.aws.m.upbound.io", Kind: "Queue", Plural: "queues", Scope: "Namespaced",
+		Versions: []schema.Version{{
+			Name: "v1beta1", Served: true, Storage: true,
+			Properties: map[string]any{"spec": map[string]any{"properties": map[string]any{
+				"forProvider": map[string]any{"properties": map[string]any{
+					"region": map[string]any{"type": "string"},
+				}},
+			}}},
+		}},
+	}}
+	const ref = "ghcr.io/example/provider-x:v1.0.0"
+	if err := s.SaveCRDs(ref, "sha256:0000", crds); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := (&Store{Root: s.Root}).Load(ref) // fresh Store: no memo, real decode
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := loaded[0].ForProvider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := loaded[0].ForProvider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) == 0 || first[0] != second[0] {
+		t.Fatalf("ForProvider() on a cache-loaded CRD rebuilt its tree; want the memoised graph")
+	}
+}

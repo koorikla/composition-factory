@@ -1,7 +1,8 @@
 // Slice 2 — the Add-provider button: SOURCES tab adds a real provider by ref,
 // its kinds appear in the palette; failures surface verbatim.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

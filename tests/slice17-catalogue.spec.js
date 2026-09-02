@@ -1,7 +1,8 @@
 // Slice 17 — catalogue browser in SOURCES: search the static index, one-click
 // add anything with a resolvable image; unpublishable entries labeled, not hidden.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

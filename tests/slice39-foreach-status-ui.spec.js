@@ -1,7 +1,8 @@
 // Slice 39 — the for-each control offers observed counts: an unlooped
 // sibling's integer/number status leaf can drive the fan-out.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

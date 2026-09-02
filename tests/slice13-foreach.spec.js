@@ -1,7 +1,8 @@
 // Slice 13 — forEach: a resource repeated N times, N from an integer
 // parameter (RDS cluster + N instances pattern), proven through a real render.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

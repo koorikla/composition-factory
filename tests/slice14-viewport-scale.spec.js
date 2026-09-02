@@ -1,7 +1,8 @@
 // Slice 14 — the app scales to the window: no dead band under the output
 // drawer on tall screens, no overflow on short ones.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

@@ -1,6 +1,7 @@
 // Slice 36 — the wordmark shows the real build version, not schema versions.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test('the topbar wordmark shows the server build version', async ({ page, request }) => {
   await resetDoc(request)

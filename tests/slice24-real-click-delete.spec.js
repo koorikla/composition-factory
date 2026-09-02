@@ -2,7 +2,8 @@
 // to enter the drag/select path, re-render the card mid-press, and destroy
 // the very button being clicked (click never fired — "still cannot delete").
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

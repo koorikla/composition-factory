@@ -2,7 +2,8 @@
 // resource (unique name, values and wires carried), Delete removes it with a
 // confirm that lists wired fields; text editing is never hijacked.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

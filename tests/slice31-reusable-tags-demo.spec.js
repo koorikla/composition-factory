@@ -2,7 +2,8 @@
 // template applied by convention to every resource that doesn't set tags,
 // with dead-letter's explicit raw tags overriding it.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

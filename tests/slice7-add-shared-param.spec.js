@@ -1,7 +1,8 @@
 // Slice 7 — add a shared parameter from the SHARED rail: name/type/required
 // form, persisted to the XRD, visible as $param and on the XR card.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

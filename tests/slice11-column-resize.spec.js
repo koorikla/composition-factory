@@ -1,7 +1,8 @@
 // Slice 11 — resizable side columns: drag handles on the palette and
 // inspector edges, widths clamped and persisted per browser.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

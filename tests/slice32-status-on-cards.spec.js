@@ -1,7 +1,8 @@
 // Slice 32 — status.atProvider outputs display on cards like inputs do, and
 // other objects can wire from them (object-depends-on-object).
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

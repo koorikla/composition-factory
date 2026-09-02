@@ -1,6 +1,7 @@
 const { test, expect } = require('@playwright/test')
 const fs = require('fs')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test('the Package button downloads <name>.xpkg', async ({ page, request }) => {
   await resetDoc(request);

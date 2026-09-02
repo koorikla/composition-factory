@@ -3,9 +3,9 @@
   "configurations": [
     {
       "name": "canvas",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "web"],
-      "port": 5173
+      "runtimeExecutable": "./bin/cf",
+      "runtimeArgs": ["serve", "--addr", "127.0.0.1:8090", "--blueprint", "/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/19dc6636-0f72-42c1-9e7b-a14fbd946541/scratchpad/ux/blank.cf.yaml", "--out", "/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/19dc6636-0f72-42c1-9e7b-a14fbd946541/scratchpad/ux/out", "--lock", "/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/19dc6636-0f72-42c1-9e7b-a14fbd946541/scratchpad/ux/.cf.lock"],
+      "port": 8090
     }
   ]
 }

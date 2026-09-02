@@ -1,7 +1,8 @@
 // Slice 47 — an Import button loads a dsl .yaml from disk: through the
 // server's YAML gate, doc replaced, undoable; bad files show verbatim errors.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 const path = require('path')
 
 test.beforeEach(async ({ request }) => {

@@ -1,7 +1,8 @@
 // Slice 12 — undo/redo: topbar buttons + Cmd/Ctrl+Z / Shift+Cmd/Ctrl+Z over a
 // server-backed doc history; text inputs keep their native undo.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

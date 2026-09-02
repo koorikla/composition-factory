@@ -4,7 +4,8 @@
 //  - Clicking Load Blueprint loads the blueprint into the canvas, replaces the doc (undoable)
 //  - Guide tab in the left rail also offers quick-launch buttons for starter examples
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

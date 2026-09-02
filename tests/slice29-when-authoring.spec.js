@@ -1,7 +1,8 @@
 // Slice 29 — author `when:` from the inspector: a condition builder writing
 // the engine's exact grammar, badge on the card, loop proven by render count.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

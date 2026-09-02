@@ -1,5 +1,6 @@
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.describe('Interactive tour', () => {
   test.beforeEach(async ({ request }) => {

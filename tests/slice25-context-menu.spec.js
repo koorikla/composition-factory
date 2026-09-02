@@ -1,7 +1,8 @@
 // Slice 25 — right-click menu on canvas objects: duplicate, rename (via the
 // server's rename route so wires re-point), delete; Escape/click-away closes.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

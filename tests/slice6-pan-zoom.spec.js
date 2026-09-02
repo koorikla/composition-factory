@@ -1,7 +1,8 @@
 // Slice 6 — canvas pan/zoom: ctrl/cmd+wheel zooms to the cursor, plain wheel
 // pans, +/- and reset controls, wires and drops track the transform.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

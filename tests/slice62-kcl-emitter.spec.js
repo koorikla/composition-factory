@@ -1,6 +1,7 @@
 // Slice 57 — Alternative composition emission engine: KCL (function-kcl)
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request, page }) => {
   await resetDoc(request)

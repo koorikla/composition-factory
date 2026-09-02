@@ -2,7 +2,8 @@
 // string maps (no default/enum, an explanatory hint), booleans get true/false,
 // and "array" (engine-rejected) is not offered anywhere.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

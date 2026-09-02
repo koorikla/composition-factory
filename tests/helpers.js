@@ -16,3 +16,22 @@ async function resetDoc(request) {
 }
 
 module.exports = { resetDoc, ENGINE }
+
+// Any uncaught error in the page fails the test that produced it. Without
+// this, a broken module import or a ReferenceError inside an event handler
+// leaves the suite green while the canvas is dead — which is exactly how a
+// duplicate `import { esc }` and a missing `startDrag` import shipped.
+function guardPageErrors() {
+  const errors = []
+  test.beforeEach(async ({ page }) => {
+    errors.length = 0
+    page.on('pageerror', (e) => errors.push(e))
+  })
+  test.afterEach(async () => {
+    if (errors.length) {
+      throw new Error('uncaught page error(s):\n' + errors.map((e) => '  ' + (e.message || String(e))).join('\n'))
+    }
+  })
+}
+
+module.exports.guardPageErrors = guardPageErrors

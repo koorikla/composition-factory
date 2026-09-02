@@ -2,7 +2,8 @@
 // right after another click used to hit a destroyed element (innerHTML
 // rebuild), which read as "can't click anything" at human speed.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

@@ -2,7 +2,8 @@
 // alone, even while focus sits in an inspector field (the keyboard-only path
 // is guarded there by design, which read as "can't delete" — user report).
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

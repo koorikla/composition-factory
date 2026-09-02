@@ -2,7 +2,8 @@
 // never lose each other's changes (the ghost-resurrection bug: a delete
 // undone by a concurrent edit cloned from the pre-delete doc).
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

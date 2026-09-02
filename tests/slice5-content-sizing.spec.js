@@ -1,7 +1,8 @@
 // Slice 5 — names size their boxes: no clipped field names on cards, no
 // mangled long kind names in the palette.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

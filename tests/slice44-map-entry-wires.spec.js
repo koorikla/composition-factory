@@ -1,5 +1,6 @@
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.describe('First-Class Map-Entry Wires in Fields', () => {
   test.beforeEach(async ({ request }) => {

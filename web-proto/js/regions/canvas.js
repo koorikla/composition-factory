@@ -16,8 +16,8 @@
 import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
+import { startDrag } from "../drag.js";
 import { listWires, fanOut, parseFrom } from "../wires.js";
-import { esc } from "../dom.js";
 
 const XR_ID = "xrd"; // store.selectedResource / positions key for the composite node
 

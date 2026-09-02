@@ -348,3 +348,234 @@ clean, Playwright 115 passed / 1 skipped.
       guarantees via /healthz. One shared fixture or globalSetup (~180 lines). — completed 2026-09-02
 - [x] Two specs share the slice42 prefix; the suite is not in CI and no
       timing baseline is kept (last local run: 115 passed in 2.9 min). — completed 2026-09-02
+
+## Backlog v2 — full audit + first-author UX walkthrough (2026-09-02, main @ 6785e91)
+
+Method: three read-only audits (engine/API, canvas + suite, docs/DX) against
+the code after the consolidation backlog was closed, plus a hands-on
+walkthrough of "I have nothing, I want a Bucket composition" in the real
+canvas on a blank blueprint. Every item below was verified in code or in the
+browser; the P0s were fixed in the same push as this section.
+
+### P0 — shipped broken (fixed in this push, listed so the cause is not lost)
+
+- [x] main @ 6785e91 did not boot: canvas/inspector/palette/output each had
+      `import { esc }` twice (31fd147) → SyntaxError, whole module graph dead;
+      canvas.js called startDrag with no import (card drag, wire drag, resize
+      all threw); palette.js's click handler fell through to a deleted-variable
+      `api.addProvider(ref)` on every unmatched click (b9f70b5). The Playwright
+      suite was GREEN through all of it because nothing failed a test on an
+      uncaught page error. Fixed: imports restored, dead tail removed,
+      tests/helpers.js guardPageErrors() fails any test whose page throws,
+      called from every spec.
+- [x] The schema-tree memo never fired on the server path: CRDs decoded from
+      crds.json lose the unexported cache field, so every palette/inspector
+      request rebuilt the tree. Store.loadEntry now attaches it
+      (TestLoadedCRDsCarryTheTreeMemo).
+- [ ] Run the Playwright suite in CI. .github/workflows/ci.yml runs lint, unit,
+      acceptance and docker build only; `make test-e2e` is never invoked. This
+      is the single reason the P0 above reached origin/main. Add a job:
+      setup-node, `npm ci`, `npx playwright install --with-deps chromium`,
+      `make test-e2e` (the config boots its own engine on 8081).
+- [ ] Two automation drivers on one branch produced every regression above
+      and three duplicate implementations in one evening. Rule for AGENTS.md:
+      one driver merges to main; every other agent works on a branch and
+      hands over a PR; `git fetch && git log main..origin/main` before any
+      merge; never tick a backlog item without a test that fails without it.
+
+### Correctness — engine and API (from code, not ticked items)
+
+- [ ] internal/api/blueprint.go:506 `_ = srv.syncBlueprintSourcesLocked(...)`:
+      persistBlueprint discards the sync error, so PUT/import/adopt/crds-add
+      that reference an uncached provider return 200 with the fetch/lockfile
+      failure invisible and the index unchanged. Also uses context.Background()
+      instead of the request context. Return the error → 502/500.
+- [ ] internal/api/blueprint.go:437 early `return nil` when no new providers:
+      a PUT/import that only changes `crds:` sources or removes a provider never
+      rebuilds the index — /api/kinds stale until restart.
+- [ ] internal/api/adopt.go:50-55 calls persistBlueprint WITHOUT srv.mu; it
+      mutates srv.Providers/srv.Index concurrently with list handlers. Take the
+      lock like every other mutating handler; add a -race test with a
+      concurrent adopt + list.
+- [ ] internal/emit/structured.go:15 RHSLiteral is the zero RHSKind, so a plan
+      entry that forgets `structured` silently formats as an empty literal; the
+      `default:` branches in kcl.go:201 / python.go:214 are unreachable. Live
+      instance: envelope.go:232-243 auto-defaulted providerConfigRef.kind/name
+      set only `rhs`, so KCL/Python emit "" instead of ClusterProviderConfig /
+      the providerName wire. Add an RHSUnset sentinel and populate both.
+- [ ] KCL/Python flatten envelope paths: kcl.go:149, python.go:146 emit
+      "writeConnectionSecretToRef.name" as ONE key instead of a nested object
+      → invalid composed spec. The go-templating writer nests correctly.
+- [ ] KCL/Python ignore `template:` fields: kcl.go:193 / python.go:181 render
+      "${_xr}-<template NAME>" and never read b.Spec.Templates — every
+      conventions-derived field on engine kcl/python is wrong. No test covers
+      templates in kcl_test.go/python_test.go. Either translate the template
+      body (hard) or refuse `template:`/conventions on those engines with a
+      clear error (honest, small).
+- [ ] KCL `when` translation rewrites string literals: `params.x == "true"`
+      becomes "True" (kcl.go:233). Python status/observed access (python.go:
+      202, 263) reads req.observed.resources as dicts with .get() while the
+      same file reads .resource by attribute — verify against function-python
+      before trusting either.
+- [ ] internal/adopt/adopt.go:42 treats CustomResourceDefinition as the XRD: a
+      manifest bundling a provider CRD has that CRD's spec.properties scraped
+      into XR parameters. Accept only CompositeResourceDefinition there.
+      adopt.go:362,384 swallow a `resourceFromMap` error it never returns.
+- [ ] internal/api/examples.go:54 returns 502 for lockfile/cache I/O failures
+      (should be 500, as crdsource.go and handleAddProvider do);
+      adopt.go:31-34 reinterprets a malformed JSON body as raw YAML, so a
+      typo'd `{"manifest":…,"persist":true}` silently loses `persist`.
+- [ ] cmd/cf/options.go:50 `_ = store.SaveCRDs(...)` + swallowed FetchCRDs
+      error: a failed --cluster sync at startup is invisible.
+- [ ] acceptance_test.go:100 `defer os.RemoveAll(dir)` above `os.Exit(m.Run())`
+      never runs — every non-short run leaks a temp dir with the built binary
+      and full provider cache. Run m.Run() into a variable, clean, then exit.
+- [ ] Blueprint apiVersion/kind are read but never validated (types.go:26-27,
+      Validate never checks them): `apiVersion: totally/bogus` generates fine.
+      Enforce factory.crossplane.io/v1alpha1 + kind Blueprint, and decide the
+      migration story before a v1beta1 exists.
+- [ ] internal/schema/crd.go:192 still splits on "\n---" by hand (matches
+      "----" and `---` inside block scalars) — use SplitDocs. unknown.go
+      `unknownPathError` has zero callers while the five inline blocks remain
+      (composition.go:490,683,958,1042; envelope.go:86): wire it or delete it.
+      testfixture is used only by mcp; emit/composition_test.go:28,54,757 and
+      api/server_test.go:~150 still retype the Queue CRD.
+
+### UX — a person creating their first composition (walkthrough findings)
+
+Blank start → Sources → catalogue "s3" → Add → Kinds "bucket" → drop Bucket →
+set region → add parameter → drag-to-wire → Validate. It works end to end,
+and these are the places it made me stop and think.
+
+- [ ] Hand-written minimal blueprint is refused before the UI even opens:
+      `spec.xrd.parameters.providerName is required for a Namespaced XRD`.
+      The scaffold path (`cf serve` with a missing file) quietly adds it.
+      Either inject providerName by default with a note in the XRD inspector
+      ("added by cf; rename or keep"), or make the error say "run cf serve
+      without --blueprint to scaffold one".
+- [ ] Empty canvas has no next step. First paint shows one XApp card and an
+      empty palette section; nothing says "1. add a provider in SOURCES,
+      2. drag a kind". The Tour exists but is not offered on first run and
+      the Examples modal is not opened for a blank doc either. Offer one of
+      them once on first load of an empty blueprint (localStorage flag), and
+      put a one-line empty-state hint in the canvas itself.
+- [ ] After "Add" in the catalogue the palette stays on SOURCES and the row
+      still shows "Add" — no installed state, no "50 kinds added, open KINDS"
+      confirmation, and no progress indicator during the OCI pull (several
+      seconds). Show a spinner on the row, flip it to "Installed · 50 kinds",
+      and switch to KINDS (or show a toast with a link).
+- [ ] KINDS lists both `s3.aws.m.upbound.io` and `s3.aws.upbound.io` groups
+      with identical kinds for a Namespaced XRD (23 + 23 rows), the second
+      group unsorted (BucketAbac before Bucket). Hide or collapse the
+      scope-mismatched variant, label it "cluster-scoped", and sort.
+- [ ] Field-form buttons are single letters "V W R" with tooltips "Literal
+      value / Wire / Raw go-template". Unlabelled at first sight; use
+      icons+labels or a segmented control with the words.
+- [ ] Inspector marks providerConfigRef.kind and providerConfigRef.name as
+      REQ in the envelope although cf fills them automatically from
+      providerName — a first-time user thinks they must set them. Show
+      "auto: ClusterProviderConfig / $spec.providerName" as a filled, non-REQ
+      row.
+- [ ] managementPolicies description is a wall of text with two GitHub URLs
+      in the inspector. Truncate descriptions to two lines with "more".
+- [ ] "+ add field" on the XR card creates a parameter named `newField`
+      (string, required) with no naming step; the user must find it in the
+      inspector and rename it. Open an inline name input on the card (or
+      focus the inspector name field) — the SHARED rail form already has the
+      right shape.
+- [ ] Drag-to-wire accepted a `string` parameter onto the `boolean`
+      forceDestroy field and offered it as the top "suggested match" with no
+      type warning; the render would then fail at the API server with a
+      type error. Warn on type mismatch in the picker and offer "change
+      parameter type to boolean".
+- [ ] Validate result is a tiny topbar chip ("render ok · 1 resource" /
+      "render error"); the error itself lands as a raw one-line wall of text
+      in the output bar. Distinguish environment failures (Docker network
+      missing, crossplane CLI absent — that is what a laptop hits first) from
+      composition errors, and give the environment case a fix hint. Make the
+      chip clickable to open the full message.
+- [ ] Guide tab still says "status and native-ref wires arrive with the
+      engine work" and omits undo/redo, Ctrl+B, Escape, wire delete. It is a
+      hardcoded HTML string in palette.js:398-435 while docs/guide.md is a
+      second hand-maintained copy; the backlog ticked "generate the Guide
+      from /docs" but nothing does. Generate one from the other (embed
+      guide.md and render it), then fix the content once.
+- [ ] Examples modal "Load Blueprint" replaces the current document; no
+      "this replaces your current work (undoable)" hint on the button.
+- [ ] Output follows selection and shows the composition, but nothing tells
+      the user where the files went or what to do next (apply? push?
+      package?). Add a "what now" line under Generate: output dir path, the
+      `kubectl apply -f`/ArgoCD hint, and Package.
+- [ ] Accessibility of the new surfaces: examples modal never moves focus in,
+      never restores it, no focus trap (main.js:463-478); tour overlay same
+      (tour.js:157-166); wire delete badge and wire selection are mouse-only
+      (canvas.js:543,760,874) though Delete is bound. Keyboard users cannot
+      reach any of them.
+- [ ] Selector auto-match builds YAML by string concat
+      (inspector.js:1369-1463 `"{app: " + val + "}"`): a value with `}` `,`
+      `:` or a leading quote yields a malformed flow map. Build the map and
+      let the engine serialise it.
+- [ ] Touch: touchmove redraws all wires synchronously per sample
+      (canvas.js:1613-1635, bypasses the rAF path the mouse uses) and
+      pointerdown + touchstart both pan on one finger (canvas.js:1585,1593).
+
+### Docs drift (verified against code)
+
+- [ ] README:59 "dock them back with Ctrl+B" — Ctrl+B toggles the file tree;
+      README:182 "RBAC rule list generates alongside" — cf gen emits no RBAC
+      file (only GET /api/rbac); Development section omits make serve,
+      test-race, clean.
+- [ ] docs/cli.md: lists rbac/clusterrole.yaml that is never written; omits
+      runtime/ and templates/ (FileSystem mode); omits --engine,
+      --template-source, --cache-dir on gen; omits --blueprint, --out,
+      --context, --i-know-this-is-unauthenticated on serve (the README's
+      Docker command needs it); omits --yaml on package; says
+      ~/.cache/compositionfactory (macOS is ~/Library/Caches/…); no cf adopt,
+      no cf version.
+- [ ] docs/dsl.md: `scope: Cluster` documented but refused ("not supported in
+      M1"); parameter type `number` missing; envelope claims all four forms +
+      status wires (only value|from|raw, status wires refused); `when` ==/!=
+      literal form undocumented; spec.pipeline not mentioned at all;
+      map-entry bracket grammar not mentioned; `template:` refused on native
+      fields but allowed in annotations — unsaid; conventions.match is a
+      case-sensitive suffix match, refused on native kinds; array envelope
+      leaves take comma-separated `value`. Add a "Common errors" section
+      quoting the real cf gen messages.
+- [ ] docs/superpowers/specs/2026-09-02-addendum.md: engine named "gotpl"
+      (code accepts only go-templating); claims M1–M5 complete while M5 in
+      the spec includes cf index export + cosign verification that do not
+      exist. Original spec line 3 still "draft for review"; §11/§12 list
+      never-built CLI/MCP surface with no supersede pointer.
+- [ ] docs/mcp.md closing paragraph omits /api/rbac and /api/sources/crds
+      from the tool-less list.
+- [ ] AGENTS.md lacks: the port contract (8080 human, 8081 suite, 8086 demo
+      recorder), the make targets (it says `go test ./...`, which skips e2e),
+      and the no-AI-attribution commit rule. Add the one-driver rule above.
+- [ ] No CONTRIBUTING.md / first-contribution path. `make clean` misses
+      test-results/, playwright-report/ and the stale untracked web/ dist.
+
+### Cleanup and performance
+
+- [ ] Two startDrag implementations: js/drag.js (used) and js/dom.js:47
+      (zero importers) — delete dom.js's; output.js:815-840 splitter is still
+      hand-rolled; canvas.js:1355-1357 removes listeners it never adds.
+- [ ] inspector.js:53-71 entryOf/envelopeEntryOf still byte-identical twins
+      (ticked, not done); "env:" (inspector) vs "envelope." (canvas/wires)
+      still two namespaces for one target.
+- [ ] main.js:54 localStorage write per pointermove during column resize
+      (ticked, not done).
+- [ ] Engine names hard-coded in index.html:97-100 and output.js:590/629,
+      duplicating blueprint/types.go constants; serve them (GET /api/version
+      could carry `engines`).
+- [ ] api.js:52 throws plain object literals, not Error (no stack);
+      api.js:4 comment still says serve.py proxies.
+- [ ] 11 waitForTimeout calls across specs (slice63 ×5, slice33 ×2, slice12,
+      24, 29, 57); slice1:19-21 afterEach restores a module-scoped baseline on
+      top of resetDoc. Replace with expect.poll / locator waits.
+- [ ] Catalogue: map is cached but every unfiltered request re-marshals
+      139 KB and re-FNV/gzips it (server.go:338,377); cache bytes+ETag+gzip.
+      handleAddProvider copies the whole kind list (Index.All) to count one
+      provider (providers.go:171). `crds:` sources are still re-read and
+      re-parsed from disk per generate/render/package (cache/sources.go:26).
+- [ ] Exported surface that can shrink: emit.StructuredRHS/RHSKind/RHS*
+      (only used inside emit), api.newRecorder wrapper over NewRecorder.

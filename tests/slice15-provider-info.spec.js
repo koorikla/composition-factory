@@ -1,7 +1,8 @@
 // Slice 15 — provider info: a SOURCES row expands to digest, registry host
 // and the kinds it serves.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)

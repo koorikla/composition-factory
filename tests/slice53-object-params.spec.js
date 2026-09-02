@@ -1,5 +1,6 @@
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 async function param(request, name) {
   const doc = await (await request.get(ENGINE + '/api/blueprint')).json();

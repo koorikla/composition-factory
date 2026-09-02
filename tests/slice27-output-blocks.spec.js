@@ -2,7 +2,8 @@
 // generated providerconfig (annotated with the kind-picker state) and an
 // RBAC tab from GET /api/rbac.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+guardPageErrors()
 
 test.beforeEach(async ({ request, page }) => {
   await resetDoc(request)
