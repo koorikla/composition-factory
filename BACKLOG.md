@@ -339,7 +339,7 @@ clean, Playwright 115 passed / 1 skipped.
 - [x] Five esc() copies with four semantics (main.js:452 drops 0/false,
       output.js/palette.js throw on null, only inspector.js escapes `'`).
       One shared js/dom.js used by every region. — completed 2026-09-02
-- [ ] Six copies of pointerdown → move/up closure drag scaffolding
+- [x] Six copies of pointerdown → move/up closure drag scaffolding
       (main.js:62-76, 145-176; canvas.js:631, 968, 1380, 1462), none using
       setPointerCapture (pointercancel on mobile leaks listeners); touch
       gestures at canvas.js:1621-1668 re-implement the wheel-zoom math. One
@@ -355,9 +355,9 @@ clean, Playwright 115 passed / 1 skipped.
 - [ ] main.js column resize writes localStorage on every pointermove and
       the resize listener is unthrottled; inspector rebuilds its whole panel
       with innerHTML on every doc emit (the pattern canvas.js abandoned for
-      selection stability). main.js:441 iconOf() hardcodes the example IDs
+      selection stability). [x] main.js:441 iconOf() hardcodes the example IDs
       from internal/examples — serve the icon with the example.
-- [ ] tour.js injects its styles from a JS string — move to proto.css.
+- [x] tour.js injects its styles from a JS string — move to proto.css.
 
 ### Unify — Playwright suite
 

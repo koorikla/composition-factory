@@ -36,14 +36,21 @@ var k8sWorkloadYAML string
 var k8sCronJobYAML string
 
 // Example represents a curated starter blueprint available in Composition Factory.
+type ExampleIcon struct {
+	Label string `json:"label"`
+	Color string `json:"color"`
+}
+
+// Example represents a curated starter blueprint available in Composition Factory.
 type Example struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	Tags          []string `json:"tags"`
-	ResourceCount int      `json:"resourceCount"`
-	Sources       []string `json:"sources"`
-	YAML          string   `json:"yaml"`
+	ID            string      `json:"id"`
+	Name          string      `json:"name"`
+	Description   string      `json:"description"`
+	Tags          []string    `json:"tags"`
+	ResourceCount int         `json:"resourceCount"`
+	Sources       []string    `json:"sources"`
+	Icon          ExampleIcon `json:"icon"`
+	YAML          string      `json:"yaml"`
 }
 
 // All returns all available starter blueprints in canonical order.
@@ -55,6 +62,7 @@ func All() []Example {
 			Description: "Production-ready IAM Role with scoped AssumeRole trust policy, S3 permissions policy, and native K8s ServiceAccount with role-arn status annotation wire.",
 			Tags:        []string{"AWS", "IAM", "Kubernetes", "Status Wire", "Annotations"},
 			Sources:     []string{"ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0"},
+			Icon:        ExampleIcon{Label: "IAM", Color: "var(--wire-ref)"},
 			YAML:        strings.TrimSpace(irsaYAML),
 		},
 		{
@@ -63,6 +71,7 @@ func All() []Example {
 			Description: "Production-grade RDS PostgreSQL instance with storage autoscaling, backup retention, engine versioning, deletion protection, and credentials connection secret envelope.",
 			Tags:        []string{"AWS", "RDS", "Database", "Envelopes", "Parameters"},
 			Sources:     []string{"ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0"},
+			Icon:        ExampleIcon{Label: "RDS", Color: "#d97706"},
 			YAML:        strings.TrimSpace(rdsYAML),
 		},
 		{
@@ -75,6 +84,7 @@ func All() []Example {
 				"ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0",
 				"ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0",
 			},
+			Icon: ExampleIcon{Label: "APP", Color: "var(--wire-status)"},
 			YAML: strings.TrimSpace(k8sAppYAML),
 		},
 		{
@@ -83,6 +93,7 @@ func All() []Example {
 			Description: "Zero-dependency cloud-agnostic application composing native Kubernetes Deployment, Service, ConfigMap, and ServiceAccount with full environment & port wiring.",
 			Tags:        []string{"Cloud-Agnostic", "Kubernetes", "Native", "ConfigMap", "Deployment"},
 			Sources:     []string{},
+			Icon:        ExampleIcon{Label: "K8S", Color: "#0284c7"},
 			YAML:        strings.TrimSpace(k8sWorkloadYAML),
 		},
 		{
@@ -91,6 +102,7 @@ func All() []Example {
 			Description: "Periodic batch task orchestration composing native Kubernetes CronJob, ConfigMap, and ServiceAccount with cron scheduling and concurrency policies.",
 			Tags:        []string{"Cloud-Agnostic", "Kubernetes", "Batch", "CronJob", "Native"},
 			Sources:     []string{},
+			Icon:        ExampleIcon{Label: "CRON", Color: "#7c3aed"},
 			YAML:        strings.TrimSpace(k8sCronJobYAML),
 		},
 		{
@@ -99,6 +111,7 @@ func All() []Example {
 			Description: "Secure AWS S3 Bucket with server-side encryption, versioning configuration, and strict public access block controls.",
 			Tags:        []string{"AWS", "S3", "Storage", "Security", "Conditionals"},
 			Sources:     []string{"ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0"},
+			Icon:        ExampleIcon{Label: "S3", Color: "#059669"},
 			YAML:        strings.TrimSpace(s3BucketYAML),
 		},
 		{
@@ -107,6 +120,7 @@ func All() []Example {
 			Description: "Resilient AWS SQS messaging topology with Main Queue, Dead Letter Queue (DLQ), and Queue Policy status wire.",
 			Tags:        []string{"AWS", "SQS", "Messaging", "Status Wire", "Conditionals"},
 			Sources:     []string{"ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"},
+			Icon:        ExampleIcon{Label: "SQS", Color: "#e11d48"},
 			YAML:        strings.TrimSpace(sqsQueueYAML),
 		},
 	}

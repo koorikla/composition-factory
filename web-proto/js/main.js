@@ -1,3 +1,4 @@
+import { startDrag } from "./drag.js";
 /**
  * main.js — boot. The single module entry (index.html loads only this).
  * Imports the shared store/api and explicitly initializes every region,
@@ -63,17 +64,11 @@ store.loadDoc();
     el.addEventListener("pointerdown", function (e) {
       e.preventDefault();
       var sx = e.clientX, start = side === "l" ? widths.l : widths.r;
-      function mv(ev) {
+      startDrag(e, function (ev) {
         var d = ev.clientX - sx;
         if (side === "l") widths.l = start + d; else widths.r = start - d;
         apply(); place();
-      }
-      function up() {
-        document.removeEventListener("pointermove", mv);
-        document.removeEventListener("pointerup", up);
-      }
-      document.addEventListener("pointermove", mv);
-      document.addEventListener("pointerup", up);
+      });
     });
     cols.style.position = "relative";
     cols.appendChild(el);
@@ -154,7 +149,7 @@ store.loadDoc();
       var offX = e.clientX - rect.left;
       var offY = e.clientY - rect.top;
 
-      function mv(ev) {
+      startDrag(e, function (ev) {
         var x = Math.max(10, Math.min(window.innerWidth - el.offsetWidth - 10, ev.clientX - offX));
         var y = Math.max(48, Math.min(window.innerHeight - 50, ev.clientY - offY));
         el.style.left = x + "px";
@@ -162,17 +157,10 @@ store.loadDoc();
         el.style.right = "auto";
         el.style.bottom = "auto";
         if (onMove) onMove(x, y);
-      }
-
-      function up() {
+      }, function () {
         el.classList.remove("dragging");
-        document.removeEventListener("pointermove", mv);
-        document.removeEventListener("pointerup", up);
         save();
-      }
-
-      document.addEventListener("pointermove", mv);
-      document.addEventListener("pointerup", up);
+      });
     });
   }
 
@@ -439,16 +427,7 @@ store.loadDoc();
 
   var cachedExamples = null;
 
-  function iconOf(id) {
-    if (id === "irsa") return { label: "IAM", color: "var(--wire-ref)" };
-    if (id === "rds-postgres") return { label: "RDS", color: "#d97706" };
-    if (id === "k8s-app") return { label: "APP", color: "var(--wire-status)" };
-    if (id === "k8s-workload") return { label: "K8S", color: "#0284c7" };
-    if (id === "k8s-cronjob") return { label: "CRON", color: "#7c3aed" };
-    if (id === "s3-bucket") return { label: "S3", color: "#059669" };
-    if (id === "sqs-queue") return { label: "SQS", color: "#e11d48" };
-    return { label: "EX", color: "var(--wire-xrd)" };
-  }
+  
 
   function renderExamples(list) {
     if (!list || !list.length) {
@@ -457,7 +436,7 @@ store.loadDoc();
     }
     var html = "";
     list.forEach(function (ex) {
-      var ic = iconOf(ex.id);
+      var ic = ex.icon || { label: "EX", color: "var(--wire-xrd)" };
       var tagsHtml = (ex.tags || []).map(function (t) {
         return '<span class="example-tag">' + esc(t) + '</span>';
       }).join("");
