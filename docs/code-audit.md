@@ -7,6 +7,16 @@ closed, so it deliberately does not restate their items. Every finding below
 was measured on this tree; the command that produced each number is given so a
 later run is comparable rather than impressionistic.
 
+**Scope caveat.** This audit is static: it reads the tree, the tooling and the
+shapes. It never built a composition or applied one to a cluster. Backlog v4
+ran the opposite method against the same commit — five agents building real
+compositions end to end — and found P0 defects in emitted output that nothing
+here could surface: nested `forProvider` paths emitted as literal dotted keys,
+`value:` always quoted regardless of CRD type, `resolveKind` matching on Kind
+while ignoring `provider:`. Read that backlog alongside this. The grades below
+are grades for the codebase as an artifact, not a claim that it generates
+correct YAML; where the two disagree, the dogfooding wins, because it checked.
+
 ## Method
 
 ```bash
@@ -27,7 +37,7 @@ committed secrets.
 
 | Area | Grade | Basis |
 |---|---|---|
-| Correctness tooling | A | vet, staticcheck and the race detector are all clean; nothing suppressed |
+| Correctness tooling | A | vet, staticcheck and the race detector are all clean; nothing suppressed — but see the scope caveat: none of it renders or applies |
 | Tests | A | 724 Go test functions + 150 Playwright behaviors; 25 398 test LOC against 16 458 production LOC |
 | Coverage | A− | 80–100 % across the packages that matter; two soft spots (below) |
 | Dead code | A | four "unreachable" hits from `deadcode`, all four test-only helpers or a second `main` — no dead production code |
@@ -37,9 +47,17 @@ committed secrets.
 | Reproducibility | B+ | strong in the engine, weaker in the build image (now fixed) |
 | Workspace hygiene | C | 731 MB working copy, of which ~625 MB is stale agent worktrees |
 
-Overall: **A−**. This is a well-kept codebase. The remaining work is structural
-(a handful of oversized units) and janitorial (workspace state), not
-correctness.
+Overall: **A−** *as an artifact* — well-kept, well-tested, cheap to change.
+The remaining work in this dimension is structural (a handful of oversized
+units) and janitorial (workspace state).
+
+That is not the same as "correct", and Backlog v4 is the proof: a suite of 874
+tests stayed green through defects that break real applies. The reason is
+visible in the grades above — the emitter's tests pin its bytes against its own
+goldens, so an emitter that is wrong the same way twice passes. Every gate in
+the Method section shares that blind spot. The strongest single recommendation
+this audit can make is therefore not in its own findings list: it is that the
+kind-cluster lane already on the backlog becomes the gate that closes it.
 
 ## What is already healthy — and worth not regressing
 

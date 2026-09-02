@@ -897,7 +897,16 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
       splitter still hand-rolled; `crds:` sources still re-read per generate; api/server_test
       still retypes the Queue CRD; the Guide tab is still a hardcoded copy of docs/guide.md.
 
-## Backlog v4 — whole-tree code audit (2026-09-02, main @ ee61f82)
+## Backlog v5 — whole-tree code audit (2026-09-02, main @ ee61f82)
+
+Scope caveat, and it matters: this audit is static. It reads the tree, the
+tooling and the shapes; it never built a composition or applied one. Backlog
+v4 above ran the opposite method on the same commit — five agents building
+real compositions end to end — and found P0 defects in emitted output that
+nothing here could have surfaced (dotted forProvider keys, `value:` always
+quoted, `resolveKind` ignoring `provider:`). Read v4 first. The grades below
+are grades for the codebase as an artifact, not for whether it generates
+correct YAML; where the two disagree, v4 wins, because it checked.
 
 Method: tooling first, then a read of the largest units. `gofmt`/`go vet`,
 staticcheck v0.8.1, `deadcode ./cmd/...`, `go test ./... -short -cover`,
@@ -905,12 +914,15 @@ staticcheck v0.8.1, `deadcode ./cmd/...`, `go test ./... -short -cover`,
 deploy manifests and a secrets scan. Full report with the numbers and the
 commands that produced them: docs/code-audit.md.
 
-Headline: there was very little to clean. The consolidation backlog and
-Backlog v2 took the duplication; vet, staticcheck and the race detector are
-clean, and `deadcode` finds no dead production code at all (its four hits are
-test seams and a second `main`). 724 Go test functions + 150 Playwright
-behaviors, 25 398 test LOC against 16 458 production LOC, 80-100% coverage on
-the packages that matter. What is left is structural, not correctness.
+Headline: there was very little to clean *at this level*. The consolidation
+backlog and Backlog v2 took the duplication; vet, staticcheck and the race
+detector are clean, and `deadcode` finds no dead production code at all (its
+four hits are test seams and a second `main`). 724 Go test functions + 150
+Playwright behaviors, 25 398 test LOC against 16 458 production LOC, 80-100%
+coverage on the packages that matter. What is left *in this dimension* is
+structural. That a suite this large stayed green through v4's P0s is itself
+the finding worth carrying forward: the tests pin the emitter's bytes against
+its own goldens, so an emitter that is wrong in the same way twice passes.
 
 ### Fixed in this pass (listed so the cause is not lost)
 
