@@ -3,10 +3,13 @@
 package adopt
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"sigs.k8s.io/yaml"
 
@@ -18,19 +21,133 @@ type Options struct {
 	// DefaultProviderRef is used when resource provider sources cannot be
 	// automatically inferred from the CRD group.
 	DefaultProviderRef string
+	// CacheDir is the schema cache directory used for schema lookups.
+	CacheDir string
+}
+
+// LossReport records any dropped fields, unsupported patches, or schema discrepancies.
+type LossReport struct {
+	Drops []Drop `json:"drops,omitempty"`
+}
+
+// Drop represents one dropped item during adoption.
+type Drop struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
+// IsLossy returns true if any fields or actions were dropped.
+func (r *LossReport) IsLossy() bool {
+	return r != nil && len(r.Drops) > 0
+}
+
+// Record appends a drop entry.
+func (r *LossReport) Record(path, reason string) {
+	if r == nil {
+		return
+	}
+	r.Drops = append(r.Drops, Drop{Path: path, Reason: reason})
+}
+
+// String returns a human-readable summary of all dropped items.
+func (r *LossReport) String() string {
+	if !r.IsLossy() {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Adopt loss report (%d dropped item(s)):\n", len(r.Drops)))
+	for _, d := range r.Drops {
+		sb.WriteString(fmt.Sprintf("  - %s: %s\n", d.Path, d.Reason))
+	}
+	return sb.String()
+}
+
+// FormatAdoptedYAML marshals bp to clean YAML (omitting empty strings and null slices)
+// and prepends "# adopt: dropped ..." comments if lossy.
+func FormatAdoptedYAML(bp *blueprint.Blueprint, report *LossReport) ([]byte, error) {
+	rawJSON, err := json.Marshal(bp)
+	if err != nil {
+		return nil, fmt.Errorf("marshal blueprint json: %w", err)
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(rawJSON, &root); err != nil {
+		return nil, fmt.Errorf("unmarshal blueprint json: %w", err)
+	}
+
+	cleaned := cleanAdoptedMap(root, true)
+
+	outBytes, err := yaml.Marshal(cleaned)
+	if err != nil {
+		return nil, fmt.Errorf("marshal blueprint yaml: %w", err)
+	}
+
+	if report != nil && report.IsLossy() {
+		var comments strings.Builder
+		for _, d := range report.Drops {
+			comments.WriteString(fmt.Sprintf("# adopt: dropped %s (%s)\n", d.Path, d.Reason))
+		}
+		outBytes = append([]byte(comments.String()), outBytes...)
+	}
+	return outBytes, nil
+}
+
+func cleanAdoptedMap(v any, isRoot bool) any {
+	switch val := v.(type) {
+	case map[string]any:
+		cleaned := make(map[string]any)
+		for k, child := range val {
+			if child == nil {
+				continue
+			}
+			if s, ok := child.(string); ok && s == "" {
+				if k == "from" || k == "value" || k == "raw" || k == "template" ||
+					k == "forEach" || k == "when" || k == "default" || k == "description" ||
+					k == "templateSource" || k == "engine" || k == "match" {
+					continue
+				}
+			}
+			if slice, ok := child.([]any); ok && len(slice) == 0 {
+				if k == "conventions" || k == "pipeline" || k == "enum" {
+					continue
+				}
+			}
+			if childMap, ok := child.(map[string]any); ok && len(childMap) == 0 {
+				if k == "templates" || k == "envelope" || k == "annotations" || k == "properties" {
+					continue
+				}
+			}
+			cleanedChild := cleanAdoptedMap(child, false)
+			if cleanedChild != nil {
+				cleaned[k] = cleanedChild
+			}
+		}
+		return cleaned
+	case []any:
+		var cleaned []any
+		for _, elem := range val {
+			if c := cleanAdoptedMap(elem, false); c != nil {
+				cleaned = append(cleaned, c)
+			}
+		}
+		return cleaned
+	default:
+		return val
+	}
 }
 
 // Adopt parses Crossplane Composition (and optional XRD) YAML documents and
-// produces a valid Blueprint.
-func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, error) {
+// produces a valid Blueprint along with a LossReport.
+func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, error) {
 	docs, err := splitYAML(manifest)
 	if err != nil {
-		return nil, fmt.Errorf("split manifest yaml: %w", err)
+		return nil, nil, fmt.Errorf("split manifest yaml: %w", err)
 	}
 	if len(docs) == 0 {
-		return nil, fmt.Errorf("manifest contains no YAML documents")
+		return nil, nil, fmt.Errorf("manifest contains no YAML documents")
 	}
 
+	report := &LossReport{}
 	var compDoc map[string]any
 	var xrdDoc map[string]any
 
@@ -45,7 +162,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, error) {
 	}
 
 	if compDoc == nil {
-		return nil, fmt.Errorf("no Composition document found in manifest")
+		return nil, nil, fmt.Errorf("no Composition document found in manifest")
 	}
 
 	bp := &blueprint.Blueprint{
@@ -73,7 +190,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, error) {
 	// 2. XRD compositeTypeRef
 	spec, _ := compDoc["spec"].(map[string]any)
 	if spec == nil {
-		return nil, fmt.Errorf("composition missing spec section")
+		return nil, nil, fmt.Errorf("composition missing spec section")
 	}
 
 	if ctr, ok := spec["compositeTypeRef"].(map[string]any); ok {
@@ -93,7 +210,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, error) {
 
 	// 3. If XRD document is present, parse parameters & metadata
 	if xrdDoc != nil {
-		parseXRDDoc(xrdDoc, bp)
+		parseXRDDoc(xrdDoc, bp, report)
 	}
 
 	if bp.Spec.XRD.Kind == "" {
@@ -122,17 +239,21 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, error) {
 	}
 
 	// 4. Parse Pipeline or Classic Resources
+	nameMapping := make(map[string]string)
 	if pipeline, ok := spec["pipeline"].([]any); ok && len(pipeline) > 0 {
-		if err := parsePipelineComposition(pipeline, bp, opts.DefaultProviderRef); err != nil {
-			return nil, err
+		if err := parsePipelineComposition(pipeline, bp, opts.DefaultProviderRef, report, nameMapping); err != nil {
+			return nil, nil, err
 		}
 	} else if resources, ok := spec["resources"].([]any); ok && len(resources) > 0 {
-		if err := parseClassicComposition(resources, bp, opts.DefaultProviderRef); err != nil {
-			return nil, err
+		if err := parseClassicComposition(resources, bp, opts.DefaultProviderRef, report, nameMapping); err != nil {
+			return nil, nil, err
 		}
 	} else {
-		return nil, fmt.Errorf("composition has neither spec.pipeline nor spec.resources")
+		return nil, nil, fmt.Errorf("composition has neither spec.pipeline nor spec.resources")
 	}
+
+	// Rewrite status references with normalized names
+	rewriteStatusReferences(bp, nameMapping)
 
 	// 5. Deduplicate and collect provider sources
 	collectSources(bp, opts.DefaultProviderRef)
@@ -143,10 +264,10 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, error) {
 	})
 
 	if err := bp.Validate(); err != nil {
-		return nil, fmt.Errorf("validate adopted blueprint: %w", err)
+		return nil, nil, fmt.Errorf("validate adopted blueprint: %w", err)
 	}
 
-	return bp, nil
+	return bp, report, nil
 }
 
 // splitYAML splits a multi-document YAML stream into individual maps.
@@ -165,7 +286,7 @@ func splitYAML(data []byte) ([]map[string]any, error) {
 	return docs, nil
 }
 
-func parseXRDDoc(xrdDoc map[string]any, bp *blueprint.Blueprint) {
+func parseXRDDoc(xrdDoc map[string]any, bp *blueprint.Blueprint, report *LossReport) {
 	spec, ok := xrdDoc["spec"].(map[string]any)
 	if !ok {
 		return
@@ -181,6 +302,15 @@ func parseXRDDoc(xrdDoc map[string]any, bp *blueprint.Blueprint) {
 			bp.Spec.XRD.Plural = p
 		}
 	}
+
+	// Check unsupported XRD fields
+	if _, ok := spec["claimNames"]; ok {
+		report.Record("xrd.claimNames", "claimNames is not supported in blueprint")
+	}
+	if _, ok := spec["connectionSecretKeys"]; ok {
+		report.Record("xrd.connectionSecretKeys", "connectionSecretKeys is not supported in blueprint")
+	}
+
 	if versions, ok := spec["versions"].([]any); ok && len(versions) > 0 {
 		if v0, ok := versions[0].(map[string]any); ok {
 			if vName, ok := v0["name"].(string); ok && bp.Spec.XRD.Version == "" {
@@ -188,14 +318,14 @@ func parseXRDDoc(xrdDoc map[string]any, bp *blueprint.Blueprint) {
 			}
 			if schema, ok := v0["schema"].(map[string]any); ok {
 				if openAPI, ok := schema["openAPIV3Schema"].(map[string]any); ok {
-					parseOpenAPISpec(openAPI, bp)
+					parseOpenAPISpec(openAPI, bp, report)
 				}
 			}
 		}
 	}
 }
 
-func parseOpenAPISpec(openAPI map[string]any, bp *blueprint.Blueprint) {
+func parseOpenAPISpec(openAPI map[string]any, bp *blueprint.Blueprint, report *LossReport) {
 	props, ok := openAPI["properties"].(map[string]any)
 	if !ok {
 		return
@@ -208,64 +338,218 @@ func parseOpenAPISpec(openAPI map[string]any, bp *blueprint.Blueprint) {
 	if !ok {
 		return
 	}
-	paramsProp, ok := specSubProps["parameters"].(map[string]any)
-	if !ok {
-		paramsProp = specSubProps
+
+	reqSet := make(map[string]bool)
+	collectRequired(specProp, reqSet)
+
+	var paramMap map[string]any
+	if paramsObj, ok := specSubProps["parameters"].(map[string]any); ok && paramsObj["properties"] != nil {
+		// Classic style: spec.properties.parameters.properties
+		collectRequired(paramsObj, reqSet)
+		paramMap, _ = paramsObj["properties"].(map[string]any)
+	} else {
+		// Flat style (Crossplane v2 / cf style): spec.properties
+		paramMap = specSubProps
 	}
 
-	paramMap, ok := paramsProp["properties"].(map[string]any)
-	if !ok {
+	if paramMap == nil {
 		return
-	}
-	reqList, _ := paramsProp["required"].([]any)
-	reqSet := make(map[string]bool)
-	for _, r := range reqList {
-		if s, ok := r.(string); ok {
-			reqSet[s] = true
-		}
 	}
 
 	for pName, pVal := range paramMap {
+		if pName == "parameters" {
+			continue
+		}
 		pObj, ok := pVal.(map[string]any)
 		if !ok {
 			continue
 		}
-		pType, _ := pObj["type"].(string)
-		if pType == "" {
-			pType = "string"
+		if !isValidParamIdentifier(pName) {
+			report.Record("xrd.parameters."+pName, "invalid parameter name (must be camelCase and not a YAML keyword)")
+			continue
 		}
-		pDesc, _ := pObj["description"].(string)
-
-		var pEnum []string
-		if enumRaw, ok := pObj["enum"].([]any); ok {
-			for _, e := range enumRaw {
-				pEnum = append(pEnum, fmt.Sprint(e))
-			}
-		}
-
-		var defStr string
-		if defVal, ok := pObj["default"]; ok {
-			defStr = fmt.Sprint(defVal)
-		}
-
-		bp.Spec.XRD.Parameters[pName] = blueprint.Parameter{
-			Type:        pType,
-			Required:    reqSet[pName],
-			Description: pDesc,
-			Default:     defStr,
-			Enum:        pEnum,
+		param, ok := parseParameter(pName, pObj, reqSet[pName], report, "xrd.parameters."+pName)
+		if ok {
+			bp.Spec.XRD.Parameters[pName] = param
 		}
 	}
 }
 
+func collectRequired(obj map[string]any, reqSet map[string]bool) {
+	if reqList, ok := obj["required"].([]any); ok {
+		for _, r := range reqList {
+			if s, ok := r.(string); ok {
+				reqSet[s] = true
+			}
+		}
+	}
+}
+
+func parseParameter(pName string, pObj map[string]any, isRequired bool, report *LossReport, path string) (blueprint.Parameter, bool) {
+	pType, _ := pObj["type"].(string)
+	if pType == "" {
+		if _, hasProps := pObj["properties"].(map[string]any); hasProps {
+			pType = "object"
+		} else {
+			pType = "string"
+		}
+	}
+
+	if pType == "array" {
+		report.Record(path, "array parameter is not supported in blueprint")
+		return blueprint.Parameter{}, false
+	}
+
+	if pType == "object" {
+		props, hasProps := pObj["properties"].(map[string]any)
+		if hasProps && len(props) > 0 {
+			childReqSet := make(map[string]bool)
+			collectRequired(pObj, childReqSet)
+			childParams := make(map[string]blueprint.Parameter)
+
+			for childName, childVal := range props {
+				childObj, ok := childVal.(map[string]any)
+				if !ok {
+					continue
+				}
+				childPath := path + ".properties." + childName
+				if !isValidParamIdentifier(childName) {
+					report.Record(childPath, "invalid member name (must be camelCase and not a YAML keyword)")
+					continue
+				}
+				cp, ok := parseParameter(childName, childObj, childReqSet[childName], report, childPath)
+				if ok {
+					childParams[childName] = cp
+				}
+			}
+
+			pDesc, _ := pObj["description"].(string)
+			if err := checkScalarClean(pDesc); err != nil {
+				report.Record(path+".description", "contains control characters")
+				pDesc = ""
+			}
+
+			return blueprint.Parameter{
+				Type:        "object",
+				Required:    isRequired,
+				Description: pDesc,
+				Properties:  childParams,
+			}, true
+		}
+		// Free-form object
+		pDesc, _ := pObj["description"].(string)
+		return blueprint.Parameter{
+			Type:        "object",
+			Required:    isRequired,
+			Description: pDesc,
+		}, true
+	}
+
+	pDesc, _ := pObj["description"].(string)
+	if err := checkScalarClean(pDesc); err != nil {
+		report.Record(path+".description", "contains control characters")
+		pDesc = ""
+	}
+
+	var pEnum []string
+	if enumRaw, ok := pObj["enum"].([]any); ok {
+		for _, e := range enumRaw {
+			s := fmt.Sprint(e)
+			if checkScalarClean(s) == nil {
+				pEnum = append(pEnum, s)
+			}
+		}
+	}
+
+	var defStr string
+	if defVal, ok := pObj["default"]; ok {
+		switch v := defVal.(type) {
+		case bool:
+			if v {
+				defStr = "true"
+			} else {
+				defStr = "false"
+			}
+		case float64:
+			if v == float64(int64(v)) {
+				defStr = strconv.FormatInt(int64(v), 10)
+			} else {
+				defStr = strconv.FormatFloat(v, 'f', -1, 64)
+			}
+		default:
+			defStr = fmt.Sprint(defVal)
+		}
+		if err := checkScalarClean(defStr); err != nil {
+			report.Record(path+".default", "contains control characters")
+			defStr = ""
+		}
+	}
+
+	return blueprint.Parameter{
+		Type:        pType,
+		Required:    isRequired,
+		Description: pDesc,
+		Default:     defStr,
+		Enum:        pEnum,
+	}, true
+}
+
 var (
 	reDefine         = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
-	reParamVar       = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
+	reParamVar       = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
 	reObservedStatus = regexp.MustCompile(`\{\{-?\s*\(index\s+\$observed\s+"([^"]+)"\)\.resource\.status\.atProvider\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
 	reMustacheExpr   = regexp.MustCompile(`\{\{.*?\}\}`)
+	paramNameRE      = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
+	dnsInvalidRE     = regexp.MustCompile(`[^a-z0-9-]+`)
+	yamlKeywords     = map[string]bool{
+		"true": true, "false": true, "yes": true, "no": true,
+		"on": true, "off": true, "null": true, "y": true, "n": true,
+	}
 )
 
-func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultProvider string) error {
+func isReservedCompositeField(name string) bool {
+	root := strings.Split(name, ".")[0]
+	switch root {
+	case "claimRef", "resourceRefs", "resourceRef", "compositionRef", "compositionSelector",
+		"compositionRevisionRef", "compositionRevisionSelector", "compositionUpdatePolicy",
+		"writeConnectionSecretToRef", "publishConnectionDetailsTo":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidParamIdentifier(name string) bool {
+	parts := strings.Split(name, ".")
+	for _, p := range parts {
+		if !paramNameRE.MatchString(p) || yamlKeywords[strings.ToLower(p)] {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeDNSLabel(name string) string {
+	s := strings.ToLower(name)
+	s = dnsInvalidRE.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	if len(s) > 63 {
+		s = strings.TrimRight(s[:63], "-")
+	}
+	if s == "" || !unicode.IsLetter(rune(s[0])) && !unicode.IsDigit(rune(s[0])) {
+		s = "res-" + s
+		s = strings.Trim(s, "-")
+	}
+	if s == "res" || s == "" {
+		s = "res-1"
+	}
+	return s
+}
+
+func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultProvider string, report *LossReport, nameMapping map[string]string) error {
 	var otherSteps []blueprint.PipelineStep
 
 	for _, stepRaw := range pipeline {
@@ -288,8 +572,17 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 			inline, _ := input["inline"].(map[string]any)
 			tmpl, _ := inline["template"].(string)
 			if tmpl != "" {
-				if err := parseGoTemplateBody(tmpl, bp, defaultProvider); err != nil {
+				if err := parseGoTemplateBody(tmpl, bp, defaultProvider, report, nameMapping); err != nil {
 					return fmt.Errorf("parse go template: %w", err)
+				}
+			}
+		} else if fnName == "function-patch-and-transform" || strings.Contains(fnName, "patch-and-transform") {
+			input, _ := step["input"].(map[string]any)
+			if input != nil {
+				if resources, ok := input["resources"].([]any); ok {
+					if err := parseClassicComposition(resources, bp, defaultProvider, report, nameMapping); err != nil {
+						return fmt.Errorf("parse patch-and-transform resources: %w", err)
+					}
 				}
 			}
 		} else {
@@ -318,7 +611,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 	return nil
 }
 
-func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider string) error {
+func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider string, report *LossReport, nameMapping map[string]string) error {
 	// 1. Extract defines
 	defines := reDefine.FindAllStringSubmatch(tmpl, -1)
 	for _, m := range defines {
@@ -335,11 +628,10 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 	for _, m := range paramMatches {
 		if len(m) >= 2 {
 			pName := m[1]
-			if _, exists := bp.Spec.XRD.Parameters[pName]; !exists {
-				bp.Spec.XRD.Parameters[pName] = blueprint.Parameter{
-					Type:     "string",
-					Required: false,
-				}
+			if isValidParamIdentifier(pName) {
+				ensureParamDeclared(bp, pName)
+			} else {
+				report.Record("template.param."+pName, "invalid parameter identifier")
 			}
 		}
 	}
@@ -358,7 +650,7 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 		return fmt.Errorf("split masked template yaml: %w", err)
 	}
 	for _, doc := range docs {
-		res, err := resourceFromMap(doc, defaultProvider, placeholderTable)
+		res, err := resourceFromMap(doc, defaultProvider, placeholderTable, report, nameMapping)
 		if err != nil || res == nil {
 			continue
 		}
@@ -368,8 +660,8 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 	return nil
 }
 
-func parseClassicComposition(resources []any, bp *blueprint.Blueprint, defaultProvider string) error {
-	for _, resRaw := range resources {
+func parseClassicComposition(resources []any, bp *blueprint.Blueprint, defaultProvider string, report *LossReport, nameMapping map[string]string) error {
+	for resIdx, resRaw := range resources {
 		resMap, ok := resRaw.(map[string]any)
 		if !ok {
 			continue
@@ -380,17 +672,24 @@ func parseClassicComposition(resources []any, bp *blueprint.Blueprint, defaultPr
 			continue
 		}
 
-		res, err := resourceFromMap(base, defaultProvider, nil)
+		res, err := resourceFromMap(base, defaultProvider, nil, report, nameMapping)
 		if err != nil || res == nil {
 			continue
 		}
 		if resName != "" {
-			res.Name = resName
+			normName := normalizeDNSLabel(resName)
+			if normName != resName {
+				nameMapping[resName] = normName
+			}
+			res.Name = normName
 		}
+
+		// Ensure unique name
+		uniqueName(bp, res)
 
 		// Apply patches
 		if patches, ok := resMap["patches"].([]any); ok {
-			for _, pRaw := range patches {
+			for patchIdx, pRaw := range patches {
 				pMap, ok := pRaw.(map[string]any)
 				if !ok {
 					continue
@@ -400,34 +699,100 @@ func parseClassicComposition(resources []any, bp *blueprint.Blueprint, defaultPr
 				toPath, _ := pMap["toFieldPath"].(string)
 
 				if pType == "FromCompositeFieldPath" || pType == "" {
-					paramName := strings.TrimPrefix(fromPath, "spec.parameters.")
-					paramName = strings.TrimPrefix(paramName, "spec.")
+					var isParamPatch bool
+					var paramName string
+					if strings.HasPrefix(fromPath, "spec.parameters.") {
+						paramName = strings.TrimPrefix(fromPath, "spec.parameters.")
+						isParamPatch = true
+					} else if strings.HasPrefix(fromPath, "spec.") {
+						paramName = strings.TrimPrefix(fromPath, "spec.")
+						isParamPatch = true
+					}
+
 					targetField := strings.TrimPrefix(toPath, "spec.forProvider.")
 					targetField = strings.TrimPrefix(targetField, "spec.")
 
-					if paramName != "" && targetField != "" {
+					if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
 						if res.Fields == nil {
 							res.Fields = make(map[string]blueprint.Field)
 						}
 						res.Fields[targetField] = blueprint.Field{
 							From: "params." + paramName,
 						}
-						if _, exists := bp.Spec.XRD.Parameters[paramName]; !exists {
-							bp.Spec.XRD.Parameters[paramName] = blueprint.Parameter{
-								Type: "string",
-							}
-						}
+						ensureParamDeclared(bp, paramName)
+					} else {
+						report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
+							fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
 					}
+				} else {
+					report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
+						fmt.Sprintf("patch type %q is not supported in blueprint", pType))
 				}
 			}
 		}
 
+		// Check readinessChecks and connectionDetails
+		if _, ok := resMap["readinessChecks"]; ok {
+			report.Record(fmt.Sprintf("resource.%s.readinessChecks", res.Name), "readinessChecks are not supported in blueprint")
+		}
+		if _, ok := resMap["connectionDetails"]; ok {
+			report.Record(fmt.Sprintf("resource.%s.connectionDetails", res.Name), "connectionDetails are not supported in blueprint")
+		}
+
 		bp.Spec.Resources = append(bp.Spec.Resources, *res)
+		_ = resIdx
 	}
 	return nil
 }
 
-func resourceFromMap(m map[string]any, defaultProvider string, placeholders []string) (*blueprint.Resource, error) {
+func uniqueName(bp *blueprint.Blueprint, res *blueprint.Resource) {
+	original := res.Name
+	counter := 2
+	for bp.ResourceNamed(res.Name) != nil {
+		res.Name = fmt.Sprintf("%s-%d", original, counter)
+		counter++
+	}
+}
+
+func ensureParamDeclared(bp *blueprint.Blueprint, paramPath string) {
+	parts := strings.Split(paramPath, ".")
+	root := parts[0]
+	if len(parts) == 1 {
+		if _, exists := bp.Spec.XRD.Parameters[root]; !exists {
+			bp.Spec.XRD.Parameters[root] = blueprint.Parameter{
+				Type:     "string",
+				Required: false,
+			}
+		}
+		return
+	}
+
+	// Nested object member
+	rootParam, exists := bp.Spec.XRD.Parameters[root]
+	if !exists {
+		rootParam = blueprint.Parameter{
+			Type:       "object",
+			Properties: make(map[string]blueprint.Parameter),
+		}
+	} else if rootParam.Type != "object" {
+		rootParam.Type = "object"
+		if rootParam.Properties == nil {
+			rootParam.Properties = make(map[string]blueprint.Parameter)
+		}
+	} else if rootParam.Properties == nil {
+		rootParam.Properties = make(map[string]blueprint.Parameter)
+	}
+
+	member := parts[1]
+	if _, mExists := rootParam.Properties[member]; !mExists {
+		rootParam.Properties[member] = blueprint.Parameter{
+			Type: "string",
+		}
+	}
+	bp.Spec.XRD.Parameters[root] = rootParam
+}
+
+func resourceFromMap(m map[string]any, defaultProvider string, placeholders []string, report *LossReport, nameMapping map[string]string) (*blueprint.Resource, error) {
 	kind, _ := m["kind"].(string)
 	if kind == "" {
 		return nil, nil
@@ -442,6 +807,10 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 	if name == "" {
 		name = strings.ToLower(kind)
 	}
+	normName := normalizeDNSLabel(name)
+	if normName != name && nameMapping != nil {
+		nameMapping[name] = normName
+	}
 
 	provider := defaultProvider
 	if strings.Contains(apiVersion, "k8s.io") || !strings.Contains(apiVersion, ".") {
@@ -449,7 +818,7 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 	}
 
 	res := &blueprint.Resource{
-		Name:        name,
+		Name:        normName,
 		Kind:        kind,
 		Provider:    provider,
 		Fields:      make(map[string]blueprint.Field),
@@ -461,10 +830,24 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 		if anns, ok := meta["annotations"].(map[string]any); ok {
 			for k, v := range anns {
 				rawStr := unmaskString(fmt.Sprint(v), placeholders)
+				if err := checkScalarClean(rawStr); err != nil {
+					report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, k), "contains newlines or control characters")
+					continue
+				}
 				if m := reParamVar.FindStringSubmatch(rawStr); len(m) >= 2 {
-					res.Annotations[k] = blueprint.Field{From: "params." + m[1]}
+					if isValidParamIdentifier(m[1]) {
+						res.Annotations[k] = blueprint.Field{From: "params." + m[1]}
+					} else {
+						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, k), "invalid parameter reference")
+					}
 				} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 3 {
-					res.Annotations[k] = blueprint.Field{From: "resources." + m[1] + ".status." + m[2]}
+					srcRes := m[1]
+					if nameMapping != nil && nameMapping[srcRes] != "" {
+						srcRes = nameMapping[srcRes]
+					} else {
+						srcRes = normalizeDNSLabel(srcRes)
+					}
+					res.Annotations[k] = blueprint.Field{From: "resources." + srcRes + ".status." + m[2]}
 				} else {
 					res.Annotations[k] = blueprint.Field{Value: rawStr}
 				}
@@ -481,13 +864,13 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 			targetProps = spec
 		}
 
-		extractFields("", targetProps, res.Fields, placeholders)
+		extractFields("", targetProps, res.Fields, placeholders, res.Name, report, nameMapping)
 	}
 
 	return res, nil
 }
 
-func extractFields(prefix string, obj map[string]any, out map[string]blueprint.Field, placeholders []string) {
+func extractFields(prefix string, obj map[string]any, out map[string]blueprint.Field, placeholders []string, resName string, report *LossReport, nameMapping map[string]string) {
 	for k, v := range obj {
 		path := k
 		if prefix != "" {
@@ -495,21 +878,54 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 		}
 		switch val := v.(type) {
 		case map[string]any:
-			extractFields(path, val, out, placeholders)
+			extractFields(path, val, out, placeholders, resName, report, nameMapping)
 		case string:
 			rawStr := unmaskString(val, placeholders)
+			if err := checkScalarClean(rawStr); err != nil {
+				report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path),
+					"multi-line scalar contains newlines, which is not supported in blueprint values")
+				continue
+			}
 			if m := reParamVar.FindStringSubmatch(rawStr); len(m) >= 2 {
-				out[path] = blueprint.Field{From: "params." + m[1]}
+				if isValidParamIdentifier(m[1]) {
+					out[path] = blueprint.Field{From: "params." + m[1]}
+				} else {
+					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid parameter reference")
+				}
 			} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 3 {
-				out[path] = blueprint.Field{From: "resources." + m[1] + ".status." + m[2]}
+				srcRes := m[1]
+				if nameMapping != nil && nameMapping[srcRes] != "" {
+					srcRes = nameMapping[srcRes]
+				} else {
+					srcRes = normalizeDNSLabel(srcRes)
+				}
+				out[path] = blueprint.Field{From: "resources." + srcRes + ".status." + m[2]}
+			} else if strings.Contains(rawStr, "{{") {
+				out[path] = blueprint.Field{Raw: rawStr}
 			} else {
 				out[path] = blueprint.Field{Value: rawStr}
 			}
+		case []any:
+			report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "array field values cannot be represented as scalar fields")
 		default:
 			rawStr := unmaskString(fmt.Sprint(val), placeholders)
+			if err := checkScalarClean(rawStr); err != nil {
+				report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path),
+					"contains newlines or control characters")
+				continue
+			}
 			out[path] = blueprint.Field{Value: rawStr}
 		}
 	}
+}
+
+func checkScalarClean(s string) error {
+	for i, r := range s {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return fmt.Errorf("control character at %d", i)
+		}
+	}
+	return nil
 }
 
 func unmaskString(s string, placeholders []string) string {
@@ -521,6 +937,42 @@ func unmaskString(s string, placeholders []string) string {
 		return placeholders[idx]
 	}
 	return s
+}
+
+func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]string) {
+	if len(nameMapping) == 0 {
+		return
+	}
+	for i := range bp.Spec.Resources {
+		r := &bp.Spec.Resources[i]
+		for fName, f := range r.Fields {
+			if f.From != "" {
+				f.From = rewriteFromWire(f.From, nameMapping)
+				r.Fields[fName] = f
+			}
+		}
+		for aName, a := range r.Annotations {
+			if a.From != "" {
+				a.From = rewriteFromWire(a.From, nameMapping)
+				r.Annotations[aName] = a
+			}
+		}
+	}
+}
+
+func rewriteFromWire(wire string, nameMapping map[string]string) string {
+	if !strings.HasPrefix(wire, "resources.") {
+		return wire
+	}
+	rest := strings.TrimPrefix(wire, "resources.")
+	parts := strings.SplitN(rest, ".", 3)
+	if len(parts) >= 3 && parts[1] == "status" {
+		origName := parts[0]
+		if newName, ok := nameMapping[origName]; ok {
+			return fmt.Sprintf("resources.%s.status.%s", newName, parts[2])
+		}
+	}
+	return wire
 }
 
 func collectSources(bp *blueprint.Blueprint, defaultRef string) {
