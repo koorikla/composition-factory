@@ -206,6 +206,8 @@ export function init(rootEl, deps) {
     buildTree();
   }
 
+  var onTabSelected = null;
+
   function selectTab(newTab) {
     tab = newTab;
     [].forEach.call(el.tabs.children, function (c) {
@@ -216,6 +218,7 @@ export function init(rootEl, deps) {
         ti.classList.toggle("active", ti.getAttribute("data-t") === tab);
       });
     }
+    if (typeof onTabSelected === "function") onTabSelected(tab);
     render();
   }
 
@@ -697,9 +700,12 @@ export function init(rootEl, deps) {
       if (doc) hideEditor(); // a rejected edit stays open so it can be fixed
     });
   });
+  onTabSelected = function (t) {
+    editBtn.hidden = t !== "bp";
+    hideEditor();
+  };
   el.tabs.addEventListener("click", function () {
-    editBtn.hidden = tab !== "bp";
-    hideEditor(); // switching tabs abandons an in-progress edit
+    if (onTabSelected) onTabSelected(tab);
   });
 
   /* ---------- splitter (canvas ↕ output) ---------- */
@@ -733,7 +739,7 @@ function initSplitter(rootEl) {
     ".of-split::after{content:\"\";position:absolute;left:0;right:0;top:3px;height:2px;" +
     "background:transparent;transition:background .12s}" +
     ".of-split:hover::after,.of-split.drag::after{background:var(--wire-xrd)}" +
-    "#region-output[data-collapsed] .warnbar,#region-output[data-collapsed] .code{display:none!important}";
+    "#region-output[data-collapsed] .drawer-body,#region-output[data-collapsed] .warnbar,#region-output[data-collapsed] .code{display:none!important}";
   document.head.appendChild(style);
 
   var split = document.createElement("div");
