@@ -148,5 +148,10 @@
       `ocds`, status wires, loops, conditionals, and auto-ready annotations;
       auto-pins `function-kcl` in `functions.yaml` and `package.yaml`.
       CLI: `cf gen --engine=kcl`. — completed 2026-09-02
+- [x] Auto-import & cache provider schemas on example & blueprint import:
+      loading starter blueprints (IRSA, RDS, K8s App) or importing any blueprint
+      YAML via GUI / API dynamically fetches, caches, digest-pins and indexes all
+      declared provider dependencies into the local schema cache and `/api/kinds`.
+      — user request 2026-09-02
 - [ ] (back-backlog) Generate compositions in other languages — Python
       (`function-python` et al.) as additional emitter.
