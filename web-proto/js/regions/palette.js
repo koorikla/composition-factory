@@ -408,7 +408,11 @@ export function init(rootEl, deps) {
         '<div style="margin-top:6px;display:flex;flex-direction:column;gap:5px">' +
           '<button class="btn sm" data-guide-example="irsa" style="justify-content:flex-start">⚡ AWS IRSA (Role + ServiceAccount)</button>' +
           '<button class="btn sm" data-guide-example="rds-postgres" style="justify-content:flex-start">🗄️ AWS RDS PostgreSQL</button>' +
-          '<button class="btn sm" data-guide-example="k8s-app" style="justify-content:flex-start">📦 K8s App (Deployment + SQS + IAM)</button>' +
+          '<button class="btn sm" data-guide-example="k8s-app" style="justify-content:flex-start">📦 Full-Stack Microservice (App + SQS + IRSA + RDS)</button>' +
+          '<button class="btn sm" data-guide-example="k8s-workload" style="justify-content:flex-start">🌐 Cloud-Agnostic Web Workload</button>' +
+          '<button class="btn sm" data-guide-example="k8s-cronjob" style="justify-content:flex-start">⏱️ Cloud-Agnostic Scheduled CronJob</button>' +
+          '<button class="btn sm" data-guide-example="s3-bucket" style="justify-content:flex-start">🪣 AWS S3 Secure Storage Bucket</button>' +
+          '<button class="btn sm" data-guide-example="sqs-queue" style="justify-content:flex-start">📬 AWS SQS Queue with DLQ</button>' +
         '</div>') +
       sec("The loop",
         "Drag a kind from KINDS onto the canvas, wire XR parameters to resource fields, " +

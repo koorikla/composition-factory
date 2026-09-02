@@ -23,10 +23,14 @@ test('examples button opens modal listing starter blueprints and closes on escap
   await btn.click()
   await expect(overlay).toBeVisible()
 
-  // Should list all 3 starter examples
+  // Should list all starter examples
   await expect(page.locator('.example-card[data-id="irsa"]')).toBeVisible()
   await expect(page.locator('.example-card[data-id="rds-postgres"]')).toBeVisible()
   await expect(page.locator('.example-card[data-id="k8s-app"]')).toBeVisible()
+  await expect(page.locator('.example-card[data-id="k8s-workload"]')).toBeVisible()
+  await expect(page.locator('.example-card[data-id="k8s-cronjob"]')).toBeVisible()
+  await expect(page.locator('.example-card[data-id="s3-bucket"]')).toBeVisible()
+  await expect(page.locator('.example-card[data-id="sqs-queue"]')).toBeVisible()
 
   // Close via close button
   await page.click('#examplesCloseBtn')
