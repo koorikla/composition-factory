@@ -119,15 +119,6 @@ function schemaFor(resource) {
   return null;
 }
 
-/* ---------- default layout ---------- */
-
-function ensurePositions() {
-  // Placement is measurement-driven and happens POST-paint (render()'s
-  // layout pass): placing here with estimated sizes stacked real 232px
-  // cards on a 160px guess — overlapping cards whose covered headers ate
-  // clicks. The pre-paint frame is never displayed (same JS turn).
-}
-
 /* ---------- rendering ---------- */
 
 function portRow(owner, path, opts) {
@@ -434,7 +425,6 @@ function render() {
   if (!canvasEl) return;
   const d = doc();
   if (!d) { canvasEl.innerHTML = ""; wiresEl.innerHTML = ""; return; }
-  ensurePositions(d);
   const sel = S.state.selectedResource;
   let h = xrCardHTML(d, sel);
   (d.spec.resources || []).forEach(function (r) {

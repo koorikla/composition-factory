@@ -264,11 +264,6 @@ export function syncCluster() {
   return request("POST", "/api/cluster/sync");
 }
 
-/** POST /api/cluster/connect — connect or switch cluster context and discover CRDs. */
-export function connectCluster(body) {
-  return request("POST", "/api/cluster/connect", body || {});
-}
-
 
 /**
  * POST /api/blueprint/import — raw blueprint YAML through the file gate;

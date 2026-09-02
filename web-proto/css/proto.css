@@ -204,10 +204,6 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .bound .src.sh{color:var(--shared)}
 .bound .x{margin-left:auto;color:var(--faint);font-size:13px;line-height:1}
 .bound .x:hover{color:var(--err)}
-.xf{margin-top:4px;font-family:var(--mono);font-size:10px;color:var(--muted);
-  padding:3px 7px;background:var(--sunk);border-radius:4px}
-.promote{margin-top:4px;font-family:var(--mono);font-size:10.5px;color:var(--wire-xrd)}
-.promote:hover{text-decoration:underline}
 .empty{padding:24px 16px;text-align:center;color:var(--faint);font-size:12px;line-height:1.5}
 
 /* drawer */
@@ -540,17 +536,12 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
   border-bottom:1px solid var(--rule)}
 .branch:hover{background:var(--sunk)}
 .branch .sp{flex:1}
-.btw{width:13px;flex:0 0 auto;color:var(--faint);font-size:9px;line-height:1}
-.btw:hover{color:var(--ink)}
-.bn{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--ink)}
 .bt{font-family:var(--mono);font-size:9.5px;color:var(--faint)}
-.bk{margin-left:auto;font-family:var(--mono);font-size:9.5px;color:var(--faint)}
 .branch .rq{font-family:var(--cond);font-size:9px;font-weight:600;letter-spacing:.05em;
   color:var(--err);text-transform:uppercase}
 
 /* array items + resize handle */
 .branch.item{background:var(--surface);border-bottom:1px dashed var(--rule)}
-.bn.idx{color:var(--muted);font-weight:500}
 .addi{width:16px;height:16px;border-radius:3px;background:var(--sunk);color:var(--muted);
   font-size:12px;line-height:1;display:grid;place-items:center;flex:0 0 auto}
 .addi:hover{background:var(--wire-xrd);color:#fff}
@@ -558,8 +549,6 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
   border-right:2px solid var(--rule-2);border-bottom:2px solid var(--rule-2);
   border-bottom-right-radius:7px;opacity:.7}
 .rs:hover{border-color:var(--wire-xrd);opacity:1}
-.more{padding:3px 9px;border-top:1px dashed var(--rule-2);font-family:var(--mono);
-  font-size:9.5px;color:var(--faint);text-align:center}
 .kind{cursor:grab}
 .kind:active{cursor:grabbing}
 

@@ -847,9 +847,16 @@ export function init(rootEl, deps) {
     if (e && (e.source === "addParameter" || e.source === "deleteParameter")) { paramErr = e.message; drawRail(); }
   });
 
+  let lastSourcesSig = "";
   store.subscribe("doc", function () {
-    // Sources and kinds may change when a new doc is loaded.
-    loadKinds();
+    // Sources and kinds only change when a new doc has different sources (providers).
+    const d = store.state.doc;
+    const sig = ((d && d.spec && d.spec.sources) || [])
+      .map(function (s) { return s.provider; }).join("|");
+    if (sig !== lastSourcesSig) {
+      lastSourcesSig = sig;
+      loadKinds();
+    }
     if (rail !== "kinds") drawRail();
   });
 

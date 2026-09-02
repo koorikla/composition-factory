@@ -22,12 +22,8 @@
 // parameter map inside the blueprint — is compared at every level rather
 // than only at the top.
 //
-// web/ (the frontend, and therefore these fixtures) lives on the m3-canvas
-// branch, not here on m2-schema-api — this branch predates the frontend
-// entirely. So on this branch, fixturesDir does not exist and every test in
-// this file skips with an explanatory message; that is expected, not a
-// failure. The test activates on its own once this branch merges with
-// m3-canvas and web/src/api/fixtures/*.json actually exist on disk.
+// The contract fixtures live in testdata/contract/*.json, checking that Go
+// response shapes match the frozen JSON API contract.
 package api
 
 import (
@@ -43,9 +39,8 @@ import (
 	"github.com/koorikla/compositionfactory/internal/index"
 )
 
-// fixturesDir is where the frontend keeps its canned API fixtures, relative
-// to this package (internal/api -> internal -> repo root -> web/...).
-const fixturesDir = "../../web/src/api/fixtures"
+// fixturesDir is where the API contract JSON fixtures live relative to this package.
+const fixturesDir = "testdata/contract"
 
 // kindResponse mirrors GET /api/kinds/{apiVersion}/{kind}'s body, and
 // generateResponse mirrors POST /api/generate's. Both handlers write a
@@ -151,8 +146,7 @@ func checkFixtureKeySetRoundTrips(t *testing.T, path string, into any) {
 	t.Helper()
 
 	if _, err := os.Stat(fixturesDir); err != nil {
-		t.Skipf("web/ is not present on this branch (%s: %v) — this contract test activates once "+
-			"m2-schema-api merges with m3-canvas's frontend fixtures", fixturesDir, err)
+		t.Fatalf("contract fixtures directory missing (%s: %v)", fixturesDir, err)
 	}
 
 	raw, err := os.ReadFile(path)
