@@ -483,6 +483,7 @@ store.loadDoc();
           tagsHtml +
         '</div>' +
         '<button class="btn pri sm example-btn" data-load-id="' + esc(ex.id) + '">Load Blueprint</button>' +
+        '<div class="example-note" style="font-size:10px;color:var(--faint);text-align:center;margin-top:3px">(replaces current blueprint \u00b7 undoable)</div>' +
       '</div>';
     });
     grid.innerHTML = html;
