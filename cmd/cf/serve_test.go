@@ -95,8 +95,7 @@ func TestServeAcceptsOtherLoopbackForms(t *testing.T) {
 // <ref>` command -- not an empty palette." It reuses gen_test.go's seed
 // helper for the blueprint file, but deliberately does NOT seed the cache
 // Store it points at, so cache.Store.Load fails exactly the way it would for
-// an operator who forgot to run `cf provider add` before `cf serve`.
-func TestServeMissingProviderNamesAddCommand(t *testing.T) {
+func TestServeMissingProviderSurvivesAndStarts(t *testing.T) {
 	dir := t.TempDir()
 	bp := filepath.Join(dir, "xqueue.cf.yaml")
 	if err := os.WriteFile(bp, []byte(genBlueprint), 0o644); err != nil {
@@ -104,15 +103,38 @@ func TestServeMissingProviderNamesAddCommand(t *testing.T) {
 	}
 	cacheDir := filepath.Join(dir, "cache") // deliberately never populated
 
-	c := &ServeCmd{Addr: "127.0.0.1:0", Blueprint: bp, Out: filepath.Join(dir, "out"), CacheDir: cacheDir}
-	var buf bytes.Buffer
-	err := c.run(context.Background(), &buf)
-	if err == nil {
-		t.Fatal("run() with an uncached provider = nil error, want one naming `cf provider add`")
+	ready := make(chan string, 1)
+	c := &ServeCmd{
+		Addr:      "127.0.0.1:0",
+		Blueprint: bp,
+		Out:       filepath.Join(dir, "out"),
+		CacheDir:  cacheDir,
+		Lock:      filepath.Join(dir, ".cf.lock"),
+		ready:     ready,
 	}
-	const wantCmd = "cf provider add example.org/provider-test:v2"
-	if !strings.Contains(err.Error(), wantCmd) {
-		t.Errorf("error = %q, want it to contain the exact command %q, not an empty palette", err.Error(), wantCmd)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var buf bytes.Buffer
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.run(ctx, &buf)
+	}()
+
+	select {
+	case addr := <-ready:
+		if addr == "" {
+			t.Fatal("empty address from ready channel")
+		}
+		cancel()
+	case err := <-errCh:
+		t.Fatalf("run failed prematurely: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for server to start with uncached provider")
+	}
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("run exited with error: %v", err)
 	}
 }
 

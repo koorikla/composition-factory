@@ -140,6 +140,9 @@ func (c *ServeCmd) Run(out io.Writer) error {
 // by cancelling a context they control, instead of sending the process a
 // real signal.
 func (c *ServeCmd) run(ctx context.Context, out io.Writer) error {
+	if c.Lock == "" {
+		c.Lock = ".cf.lock"
+	}
 	if err := c.check(); err != nil {
 		return err
 	}
