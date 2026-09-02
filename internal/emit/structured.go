@@ -69,6 +69,16 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 			rhs = quoteYAML(f.Value)
 			return s, rhs, guard, nil
 		}
+		// IntOrString normalizes to type string in the tree, so the string
+		// case below would quote it — but an integer literal here is a port
+		// NUMBER, and quoting makes the API server read it as a port NAME.
+		// See isIntOrStringNode.
+		if isIntOrStringNode(node) && isIntegerLiteral(f.Value) {
+			s.value = f.Value
+			s.targetType = "integer"
+			return s, f.Value, guard, nil
+		}
+
 		switch targetType {
 		case "string":
 			s.value = f.Value
@@ -234,7 +244,15 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 			if isMap {
 				s.targetType = "string"
 			}
-			if s.targetType == "string" || isMap {
+			// An IntOrString target reaches here as targetType "string" (the
+			// tree's normalization), so the plain string rule would quote it.
+			// Quote only when the wire really is a string: a quoted IntOrString
+			// is a port NAME to the API server, and a numeric name is refused.
+			intIntoIntOrString := isIntOrStringNode(node) && wireDecl.Type == "integer"
+			if intIntoIntOrString {
+				s.targetType = "integer"
+			}
+			if (s.targetType == "string" || isMap) && !intIntoIntOrString {
 				rhs = fmt.Sprintf("{{ $spec.%s | quote }}", refName)
 			} else {
 				rhs = fmt.Sprintf("{{ $spec.%s }}", refName)
@@ -243,6 +261,23 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 		}
 	}
 	return s, rhs, guard, nil
+}
+
+// isIntOrStringNode reports whether a schema leaf is a Kubernetes IntOrString.
+// BuildTree gives such a leaf type "string" — the one spelling legal for both
+// halves — but the format survives resolution, and it is the only thing that
+// separates IntOrString from a genuine string. The distinction matters on the
+// wire: the API server reads a QUOTED IntOrString as a name (a Service
+// targetPort of "8080" is rejected with "must contain at least one letter"),
+// so a numeric source has to render as a bare scalar. Quantity carries no
+// format and stays quoted, which is correct for it.
+func isIntOrStringNode(node *schema.Node) bool {
+	return node != nil && node.Format == "int-or-string"
+}
+
+func isIntegerLiteral(v string) bool {
+	_, err := strconv.ParseInt(v, 10, 64)
+	return err == nil
 }
 
 func isFieldTypeCompatible(targetType, paramType string, isMap bool) bool {

@@ -7,7 +7,15 @@ BASENAME=$(basename "$TOPLEVEL" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '
 HASH=$(printf "%s" "$TOPLEVEL" | shasum -a 256 | cut -c1-6)
 SLUG="${BASENAME}-${HASH}"
 NAMESPACE="cf-${SLUG}"
-GROUP_SUFFIX="${SLUG}.cf-test"
+# The group suffix lands inside cluster-scoped names like
+# xworkloads.workloads.sparky.ee.<suffix>, and Crossplane copies the
+# Composition's name verbatim into the crossplane.io/composition-name *label*
+# of every CompositionRevision. Label values cap at 63 characters, so a suffix
+# built from the (arbitrarily long) directory basename silently breaks
+# CompositionRevision creation. Keep the group suffix short and bounded: the
+# 6-char path hash is what actually provides isolation, and it is the same hash
+# that appears in the namespace, so group and namespace remain easy to pair up.
+GROUP_SUFFIX="w${HASH}.cf-test"
 PORT_OFFSET=$(node -e "console.log(parseInt('$HASH', 16) % 10000)" 2>/dev/null || echo "8080")
 LOCAL_PORT=$((19000 + PORT_OFFSET))
 

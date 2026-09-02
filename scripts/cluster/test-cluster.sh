@@ -30,6 +30,19 @@ echo "==> Applying XRD to cluster..."
 kubectl apply -f "${OUT_DIR}/xrds/"
 
 XRD_NAME="xworkloads.workloads.sparky.ee.${WORKSPACE_GROUP_SUFFIX}"
+
+# Crossplane copies the Composition name into the crossplane.io/composition-name
+# label of every CompositionRevision, and label values cap at 63 characters. Over
+# that limit Crossplane creates no revision at all and only says so in an Event,
+# so the XR just never composes. Fail here instead, with the reason.
+if [ "${#XRD_NAME}" -gt 63 ]; then
+  echo "ERROR: generated name '${XRD_NAME}' is ${#XRD_NAME} characters." >&2
+  echo "       Crossplane labels CompositionRevisions with this name and labels" >&2
+  echo "       cap at 63 characters. Shorten WORKSPACE_GROUP_SUFFIX in" >&2
+  echo "       scripts/cluster/workspace.sh." >&2
+  exit 1
+fi
+
 echo "==> Waiting for XRD ${XRD_NAME} to become Established..."
 kubectl wait --for=condition=Established "xrd/${XRD_NAME}" --timeout=60s
 
@@ -40,13 +53,24 @@ kubectl apply -f "${OUT_DIR}/functions.yaml"
 
 COMP_NAME="xworkloads.workloads.sparky.ee.${WORKSPACE_GROUP_SUFFIX}"
 echo "==> Waiting for CompositionRevision for ${COMP_NAME}..."
+REVISION_FOUND=false
 for i in {1..30}; do
   if kubectl get compositionrevision -l "crossplane.io/composition-name=${COMP_NAME}" 2>/dev/null | grep -q "${COMP_NAME}"; then
     echo "    Found CompositionRevision for ${COMP_NAME}."
+    REVISION_FOUND=true
     break
   fi
   sleep 1
 done
+
+# Without a revision the XR can never compose, and the only record of why lives
+# in the Composition's Events. Report it here rather than timing out later on a
+# Deployment that was never going to appear.
+if [ "$REVISION_FOUND" = false ]; then
+  echo "ERROR: no CompositionRevision was created for ${COMP_NAME}" >&2
+  kubectl describe composition "${COMP_NAME}" >&2 || true
+  exit 1
+fi
 
 # 4. Create XR in workspace namespace
 XR_MANIFEST="${OUT_DIR}/xr-instance.yaml"
