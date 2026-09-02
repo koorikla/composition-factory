@@ -141,3 +141,30 @@ spec:
 		t.Errorf("expected function-python package in functions.yaml, got:\n%s", fnStr)
 	}
 }
+
+func TestTranslateWhenToPython_BooleanSubstrings(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{
+			in:   "params.is_true_enabled == true",
+			want: "bool(spec.get(\"is_true_enabled\")) is True",
+		},
+		{
+			in:   "params.use_false_fallback == false",
+			want: "bool(spec.get(\"use_false_fallback\")) is False",
+		},
+		{
+			in:   "params.truename != false",
+			want: "bool(spec.get(\"truename\")) is not False",
+		},
+	}
+
+	for _, tc := range cases {
+		got := translateWhenToPython(tc.in)
+		if got != tc.want {
+			t.Errorf("translateWhenToPython(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

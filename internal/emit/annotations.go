@@ -32,6 +32,7 @@ package emit
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
@@ -67,21 +68,28 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 		f := r.Annotations[k]
 		switch {
 		case f.Value != "":
-			plan = append(plan, forProviderField{path: k, rhs: quoteYAML(f.Value)})
+			plan = append(plan, forProviderField{
+				path:       k,
+				rhs:        quoteYAML(f.Value),
+				structured: StructuredRHS{Kind: RHSLiteral, Value: f.Value},
+			})
 		case f.Raw != "":
 			// The raw escape hatch, verbatim as everywhere else. The author
 			// owns making it a string in the rendered document.
-			plan = append(plan, forProviderField{path: k, rhs: f.Raw})
+			plan = append(plan, forProviderField{
+				path:       k,
+				rhs:        f.Raw,
+				structured: StructuredRHS{Kind: RHSRaw, Value: f.Raw},
+			})
 		case f.Template != "":
 			if _, ok := b.Spec.Templates[f.Template]; !ok {
 				return nil, fmt.Errorf("resource %q annotation %q: unknown template %q", r.Name, k, f.Template)
 			}
-			// The same include call fields emit, .field carrying the
-			// annotation key. templateFieldNindent is correct here by
-			// construction, not coincidence: annotation entries are written at
-			// the same inner-document column as forProvider children (both
-			// land at column 4, children at 6) — see writeAnnotations.
-			plan = append(plan, forProviderField{path: k, rhs: templateCallRHS(f.Template, r.Name, k)})
+			plan = append(plan, forProviderField{
+				path:       k,
+				rhs:        templateCallRHS(f.Template, r.Name, k),
+				structured: StructuredRHS{Kind: RHSTemplate, Value: f.Template},
+			})
 		case f.From != "":
 			ref, err := blueprint.ParseFrom(f.From)
 			if err != nil {
@@ -92,11 +100,19 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 				if err != nil {
 					return nil, err
 				}
-				// Always conditional, exactly like a field wire: the value
-				// does not exist until the source resource is observed, so
-				// the KEY is omitted cleanly until then and Crossplane fills
-				// it on a later reconcile.
-				plan = append(plan, forProviderField{path: k, rhs: "{{ " + expr + " | quote }}", guard: guard})
+				plan = append(plan, forProviderField{
+					path:  k,
+					rhs:   "{{ " + expr + " | quote }}",
+					guard: guard,
+					structured: StructuredRHS{
+						Kind:       RHSStatus,
+						Resource:   ref.Resource,
+						StatusPath: strings.Join(ref.StatusPath, "."),
+						Optional:   true,
+						Guard:      guard,
+						RawExpr:    expr,
+					},
+				})
 				continue
 			}
 			decl, ok := b.Spec.XRD.Parameters[ref.Param]
@@ -105,13 +121,32 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 			}
 			rhs := fmt.Sprintf("{{ $spec.%s | quote }}", ref.Param)
 			if decl.Required {
-				plan = append(plan, forProviderField{path: k, rhs: rhs})
+				plan = append(plan, forProviderField{
+					path: k,
+					rhs:  rhs,
+					structured: StructuredRHS{
+						Kind:      RHSParam,
+						Param:     ref.Param,
+						ParamSegs: []string{ref.Param},
+						RawExpr:   "$spec." + ref.Param,
+					},
+				})
 				continue
 			}
-			// Optional: the same hasKey guard planFields emits, for the same
-			// missingkey=error reason — and the same clean omission: an XR
-			// that never set the parameter renders no entry for this key.
-			plan = append(plan, forProviderField{path: k, rhs: rhs, guard: fmt.Sprintf("hasKey $spec %q", ref.Param)})
+			guard := fmt.Sprintf("hasKey $spec %q", ref.Param)
+			plan = append(plan, forProviderField{
+				path:  k,
+				rhs:   rhs,
+				guard: guard,
+				structured: StructuredRHS{
+					Kind:      RHSParam,
+					Param:     ref.Param,
+					ParamSegs: []string{ref.Param},
+					Optional:  true,
+					Guard:     guard,
+					RawExpr:   "$spec." + ref.Param,
+				},
+			})
 		}
 	}
 	return plan, nil

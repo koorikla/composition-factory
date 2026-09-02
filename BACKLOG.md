@@ -177,7 +177,7 @@ clean, Playwright 115 passed / 1 skipped.
 
 ### Correctness (do first)
 
-- [ ] KCL and Python emitters drop every field/envelope/annotation guard and
+- [x] KCL and Python emitters drop every field/envelope/annotation guard and
       re-parse the Go-template RHS as a string: `.guard` is never read in
       internal/emit/kcl.go or python.go, so an optional param or a status
       wire renders unconditionally; unrecognised RHS shapes fall through to
@@ -186,6 +186,7 @@ clean, Playwright 115 passed / 1 skipped.
       whole expression (corrupts any param name containing true/false).
       Fix shape: planFields/planAnnotations/planEnvelope return a structured
       RHS (kind + param/resource + path + guard); each backend formats it.
+      — completed 2026-09-02
 - [x] `POST /api/cluster/sync` still carries its own inline index rebuild
       (internal/api/cluster.go:104-124) that omits `crds:` sources — every
       scanned CRD kind disappears from /api/kinds after a sync. Replace with
@@ -287,17 +288,17 @@ clean, Playwright 115 passed / 1 skipped.
       anyStatusFrom, referencingResources, anyFrom). Export them, or return
       a typed StillReferencedError so the API classifies 409 without
       re-scanning.
-- [ ] YAML document splitting exists four times with two delimiters:
+- [x] YAML document splitting exists four times with two delimiters:
       xpkg/fetch.go:141, api/render.go:299, blueprint/load.go:403
       ("\n---\n" — mis-splits a trailing ---), adopt/adopt.go:150. One
-      `SplitDocs`.
-- [ ] "Unknown path — did you mean" block written five times
+      `SplitDocs`. — completed 2026-09-02
+- [x] "Unknown path — did you mean" block written five times
       (composition.go:379, 576, 944, 1036; envelope.go:32). One
-      `unknownPath(kind, what, target, leaves, filter) error`.
-- [ ] Field-form switch value/raw/template/from + guard construction in
+      `unknownPath(kind, what, target, leaves, filter) error`. — completed 2026-09-02
+- [x] Field-form switch value/raw/template/from + guard construction in
       three planners (composition.go planFields, annotations.go
       planAnnotations, envelope.go planEnvelope) — the same extraction the
-      KCL/Python fix above needs (`resolveRHS`).
+      KCL/Python fix above needs (`resolveRHS`). — completed 2026-09-02
 - [ ] `provider add` sequence (fetch → ParseCRDs → lock → Save) duplicated
       between cmd/cf/provider.go:29-62 and internal/api/providers.go:141-185
       with the same comment pasted; `validateStatusRef` /

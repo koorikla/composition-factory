@@ -3,11 +3,17 @@ package emit
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
+)
+
+var (
+	kclBoolTrueRE  = regexp.MustCompile(`\btrue\b`)
+	kclBoolFalseRE = regexp.MustCompile(`\bfalse\b`)
 )
 
 // kclTemplateBody generates idiomatic KCL code for function-kcl (krm.kcl.dev/v1alpha1).
@@ -105,7 +111,7 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 			sb.WriteString(fmt.Sprintf("%s\"krm.kcl.dev/composition-resource-name\" = %q\n", annInner, r.Name))
 		}
 		for _, ann := range annPlan {
-			rhs := kclRHS(ann.rhs)
+			rhs := kclStructuredRHS(ann.structured, ann.rhs)
 			sb.WriteString(fmt.Sprintf("%s%q = %s\n", annInner, ann.path, rhs))
 		}
 		sb.WriteString(fmt.Sprintf("%s}\n", metaInner))
@@ -139,7 +145,7 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 
 			// envelope fields
 			for _, ef := range envPlan {
-				rhs := kclRHS(ef.rhs)
+				rhs := kclStructuredRHS(ef.structured, ef.rhs)
 				pathKey := strings.Join(ef.path, ".")
 				sb.WriteString(fmt.Sprintf("%s%s = %s\n", specInner, quoteKCLKey(pathKey), rhs))
 			}
@@ -165,7 +171,7 @@ func writeKCLMapEntries(sb *strings.Builder, indent string, fields []forProvider
 			continue
 		}
 
-		rhs := kclRHS(f.rhs)
+		rhs := kclStructuredRHS(f.structured, f.rhs)
 		sb.WriteString(fmt.Sprintf("%s%s = %s\n", indent, quoteKCLKey(f.path), rhs))
 	}
 }
@@ -175,6 +181,26 @@ func quoteKCLKey(k string) string {
 		return fmt.Sprintf("%q", k)
 	}
 	return k
+}
+
+func kclStructuredRHS(s StructuredRHS, fallbackRHS string) string {
+	switch s.Kind {
+	case RHSLiteral:
+		return kclFormatLiteral(s.Value)
+	case RHSRaw:
+		return s.Value
+	case RHSTemplate:
+		return fmt.Sprintf("\"${_xr}-%s\"", s.Value)
+	case RHSParam:
+		if len(s.ParamSegs) > 0 {
+			return "_spec?." + strings.Join(s.ParamSegs, "?.")
+		}
+		return translateParamAccessToKCL(s.Param)
+	case RHSStatus:
+		return fmt.Sprintf("ocds?[%q]?.Resource?.status?.atProvider?.%s", s.Resource, strings.ReplaceAll(s.StatusPath, ".", "?."))
+	default:
+		return kclRHS(fallbackRHS)
+	}
 }
 
 func kclRHS(rhs string) string {
@@ -204,8 +230,8 @@ func translateObservedAccessToKCL(expr string) string {
 func translateWhenToKCL(when string) string {
 	when = strings.TrimSpace(when)
 	when = strings.ReplaceAll(when, "params.", "_spec?.")
-	when = strings.ReplaceAll(when, "true", "True")
-	when = strings.ReplaceAll(when, "false", "False")
+	when = kclBoolTrueRE.ReplaceAllString(when, "True")
+	when = kclBoolFalseRE.ReplaceAllString(when, "False")
 	return when
 }
 

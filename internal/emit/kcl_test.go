@@ -138,3 +138,30 @@ spec:
 		t.Errorf("expected function-kcl package in functions.yaml, got:\n%s", fnStr)
 	}
 }
+
+func TestTranslateWhenToKCL_BooleanSubstrings(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{
+			in:   "params.is_true_enabled == true",
+			want: "_spec?.is_true_enabled == True",
+		},
+		{
+			in:   "params.use_false_fallback == false",
+			want: "_spec?.use_false_fallback == False",
+		},
+		{
+			in:   "params.truename != false",
+			want: "_spec?.truename != False",
+		},
+	}
+
+	for _, tc := range cases {
+		got := translateWhenToKCL(tc.in)
+		if got != tc.want {
+			t.Errorf("translateWhenToKCL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

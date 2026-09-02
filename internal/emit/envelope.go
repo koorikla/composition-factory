@@ -122,33 +122,16 @@ func walkEnvelopeNodes(nodes []*schema.Node, prefix string, out map[string]*sche
 // semantics as forProviderField.guard: a hasKey for an optional parameter,
 // a memberGuard shape for a typed object member).
 type envField struct {
-	path     []string
-	rhs      string
-	optional bool
-	guard    string
+	path       []string
+	rhs        string
+	optional   bool
+	guard      string
+	structured StructuredRHS
 }
 
 // planEnvelope resolves r.Envelope into a deterministic, path-sorted plan,
 // type-checking every entry against the schema node it targets (nodes comes
 // from checkEnvelopePaths, so every path is known to resolve).
-//
-// The type rules, per node:
-//
-//   - branch (an object with properties, or an array of objects): raw only.
-//     It is the whole-subtree escape hatch, written verbatim as single-line
-//     YAML; value has no defined rendering for a composite, and from cannot
-//     render one (Validate refuses composite parameters behind from).
-//   - array leaf (scalar items, e.g. managementPolicies): value is a
-//     comma-separated list rendered as a flow sequence of quoted strings;
-//     raw passes verbatim; from is refused — a scalar parameter renders one
-//     scalar, and array parameters do not exist in M1, so no wire can render
-//     a list. This is the documented v1 ruling (see blueprint.Resource).
-//   - map leaf (additionalProperties): raw only, same reasoning as a branch.
-//   - scalar leaf: value is parsed per the node's declared type and emitted
-//     canonically (an integer as an integer, not a quoted string — the
-//     API server would reject '2048' against type: integer), strings via
-//     quoteYAML; from requires the parameter's type to be compatible with
-//     the node's, so a wire cannot render a YAML scalar of the wrong type.
 func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string]*schema.Node) ([]envField, error) {
 	paths := make([]string, 0, len(r.Envelope))
 	for p := range r.Envelope {
@@ -166,12 +149,14 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 		switch {
 		case f.Raw != "":
 			e.rhs = f.Raw
+			e.structured = StructuredRHS{Kind: RHSRaw, Value: f.Raw}
 		case f.Value != "":
 			rhs, err := envelopeValueRHS(n, branch, f.Value)
 			if err != nil {
 				return nil, fmt.Errorf("resource %q: envelope %q: %w", r.Name, p, err)
 			}
 			e.rhs = rhs
+			e.structured = StructuredRHS{Kind: RHSLiteral, Value: f.Value}
 		case f.From != "":
 			param, member, _ := blueprint.ParamRef(f.From)
 			chainRef := param
@@ -183,9 +168,6 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 			if err != nil {
 				return nil, err
 			}
-			// wireDecl is the declaration whose type governs the wire — the
-			// leaf member's for a params.<name>.<member...> reference, the
-			// parameter's own otherwise. refName is how errors below name it.
 			wireDecl := chain[len(chain)-1]
 			refName := strings.Join(segs, ".")
 			deref := "$spec." + refName
@@ -209,21 +191,24 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 					"which the API server rejects on apply", r.Name, p, n.Type, refName, wireDecl.Type)
 			}
 			e.rhs = fmt.Sprintf("{{ %s }}", deref)
+			e.structured = StructuredRHS{
+				Kind:      RHSParam,
+				Param:     chainRef,
+				ParamSegs: segs,
+				RawExpr:   deref,
+			}
 			switch {
 			case member != "":
-				// The same guard chain forProvider member wires get (see
-				// chainGuard in composition.go). A required-all-the-way
-				// chain needs no guard at all.
 				if g := chainGuard(segs, chain); g != "" {
 					e.optional, e.guard = true, g
+					e.structured.Optional = true
+					e.structured.Guard = g
 				}
 			case !chain[0].Required:
-				// Same guard rule as planFields: only the XRD's required gate
-				// makes an unguarded dereference safe under missingkey=error.
-				// (A defaulted parameter is also always present after schema
-				// defaulting, but the guard is kept for consistency with
-				// forProvider fields — harmless when the key is present.)
-				e.optional, e.guard = true, fmt.Sprintf("hasKey $spec %q", param)
+				g := fmt.Sprintf("hasKey $spec %q", param)
+				e.optional, e.guard = true, g
+				e.structured.Optional = true
+				e.structured.Guard = g
 			}
 		}
 		plan = append(plan, e)

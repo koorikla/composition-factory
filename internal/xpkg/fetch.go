@@ -5,7 +5,6 @@ package xpkg
 
 import (
 	"archive/tar"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -16,6 +15,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 )
 
 // labelPrefix marks the layer holding the package stream. The full label key is
@@ -139,13 +139,5 @@ func readSingleFileLayer(l v1.Layer) ([]byte, error) {
 // splitYAML splits a multi-document YAML stream on "---" at column zero and
 // drops empty documents.
 func splitYAML(in []byte) [][]byte {
-	var out [][]byte
-	for _, part := range bytes.Split(in, []byte("\n---")) {
-		trimmed := bytes.TrimSpace(bytes.TrimPrefix(part, []byte("---")))
-		if len(trimmed) == 0 {
-			continue
-		}
-		out = append(out, trimmed)
-	}
-	return out
+	return blueprint.SplitDocs(in)
 }

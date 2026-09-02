@@ -401,14 +401,7 @@ func ParseAny(body []byte) (*Blueprint, error) {
 
 // splitDocs splits a multi-document YAML stream on "---" at column zero.
 func splitDocs(in []byte) [][]byte {
-	var docs [][]byte
-	for _, d := range strings.Split(string(in), "\n---\n") {
-		if strings.TrimSpace(d) == "" {
-			continue
-		}
-		docs = append(docs, []byte(d))
-	}
-	return docs
+	return SplitDocs(in)
 }
 
 // Validate reports the first structural problem, naming the offending field.

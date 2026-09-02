@@ -103,7 +103,7 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 			sb.WriteString(fmt.Sprintf("%s\"annotations\": {\n", metaInner))
 			annInner := metaInner + "    "
 			for _, ann := range annPlan {
-				rhs := pythonRHS(ann.rhs)
+				rhs := pythonStructuredRHS(ann.structured, ann.rhs)
 				sb.WriteString(fmt.Sprintf("%s%q: %s,\n", annInner, ann.path, rhs))
 			}
 			sb.WriteString(fmt.Sprintf("%s},\n", metaInner))
@@ -138,7 +138,7 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 
 			// envelope fields
 			for _, ef := range envPlan {
-				rhs := pythonRHS(ef.rhs)
+				rhs := pythonStructuredRHS(ef.structured, ef.rhs)
 				pathKey := strings.Join(ef.path, ".")
 				sb.WriteString(fmt.Sprintf("%s%q: %s,\n", specInner, pathKey, rhs))
 			}
@@ -162,8 +162,53 @@ func writePythonMapEntries(sb *strings.Builder, indent string, fields []forProvi
 			continue
 		}
 
-		rhs := pythonRHS(f.rhs)
+		rhs := pythonStructuredRHS(f.structured, f.rhs)
 		sb.WriteString(fmt.Sprintf("%s%q: %s,\n", indent, f.path, rhs))
+	}
+}
+
+func pythonStructuredRHS(s StructuredRHS, fallbackRHS string) string {
+	switch s.Kind {
+	case RHSLiteral:
+		return pythonFormatLiteral(s.Value)
+	case RHSRaw:
+		return s.Value
+	case RHSTemplate:
+		return fmt.Sprintf("f\"{xr_name}-%s\"", s.Value)
+	case RHSParam:
+		if len(s.ParamSegs) > 0 {
+			if len(s.ParamSegs) == 1 {
+				return fmt.Sprintf("spec.get(%q)", s.ParamSegs[0])
+			}
+			var sb strings.Builder
+			sb.WriteString("spec")
+			for i, p := range s.ParamSegs {
+				if i == len(s.ParamSegs)-1 {
+					sb.WriteString(fmt.Sprintf(".get(%q)", p))
+				} else {
+					sb.WriteString(fmt.Sprintf(".get(%q, {})", p))
+				}
+			}
+			return sb.String()
+		}
+		return translateParamAccessToPython(s.Param)
+	case RHSStatus:
+		parts := strings.Split(s.StatusPath, ".")
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("ocds.get(%q, {}).get(\"resource\", {})", s.Resource))
+		for i, p := range parts {
+			if p == "" {
+				continue
+			}
+			if i == len(parts)-1 {
+				sb.WriteString(fmt.Sprintf(".get(%q, \"\")", p))
+			} else {
+				sb.WriteString(fmt.Sprintf(".get(%q, {})", p))
+			}
+		}
+		return sb.String()
+	default:
+		return pythonRHS(fallbackRHS)
 	}
 }
 

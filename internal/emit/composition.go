@@ -761,34 +761,18 @@ func editDistance(a, b string) int {
 // cross-resource status reference. An empty guard means the line always
 // renders — see writeMapField.
 type forProviderField struct {
-	path    string
-	rhs     string
-	guard   string
-	isMap   bool
-	entries []forProviderField
+	path       string
+	rhs        string
+	guard      string
+	structured StructuredRHS
+	isMap      bool
+	entries    []forProviderField
 }
 
 // planFields resolves r.Fields into a deterministic, path-sorted plan,
 // erroring on any field that references an unknown parameter. It does not
 // write anything: writeMapField needs the full plan up front to decide
 // whether the parent key can ever render with zero children.
-//
-// Quoting: the template body is a YAML block scalar (`template: |`), so the
-// outer document never needs escaping for what we write into it — the block
-// scalar takes its content literally, whatever quotes or colons appear.
-// What matters is the document that block scalar's content becomes once
-// function-go-templating renders it: a second, inner YAML document that gets
-// applied to the cluster. f.Value is blueprint-authored free text written
-// straight into that inner document as a plain scalar, so it gets the same
-// treatment as XRD's description/enum values (see yaml.go's quoteYAML): a
-// colon makes it invalid, a "#" truncates it, and "yes"/"no"/"1.0" silently
-// change type. f.Raw is deliberately NOT quoted — "raw" is the escape hatch
-// for a blueprint author who wants literal YAML (a number, a bool, a nested
-// map, or even another Go template expression) passed through unprocessed;
-// quoting it would force everything through it to render as a string. f.From
-// is emitted as a bare `{{ $spec.param }}` template expression, not a
-// literal string, so it isn't a quoting candidate here either — its value
-// arrives at render time from the composite's own (schema-typed) spec.
 func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) ([]forProviderField, error) {
 	paths := make([]string, 0, len(r.Fields))
 	for p := range r.Fields {
@@ -797,61 +781,29 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 	sort.Strings(paths)
 
 	type leafItem struct {
-		basePath string
-		key      string
-		isMap    bool
-		rhs      string
-		guard    string
+		basePath   string
+		key        string
+		isMap      bool
+		rhs        string
+		guard      string
+		structured StructuredRHS
 	}
 	leaves := make([]leafItem, 0, len(paths))
 
 	for _, p := range paths {
 		f := r.Fields[p]
 		basePath, mapKey, isMap := blueprint.ParseFieldPath(p)
-		var rhs, guard string
-		switch {
-		case f.Value != "":
-			rhs = quoteYAML(f.Value)
-		case f.Raw != "":
-			rhs = f.Raw
-		case f.Template != "":
-			if _, ok := b.Spec.Templates[f.Template]; !ok {
-				return nil, fmt.Errorf("resource %q field %q: unknown template %q", r.Name, p, f.Template)
-			}
-			rhs = templateCallRHS(f.Template, r.Name, p)
-		case f.From != "":
-			ref, err := blueprint.ParseFrom(f.From)
-			if err != nil {
-				return nil, fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
-			}
-			if ref.Resource != "" {
-				g, expr, err := statusWire(ref, r, fmt.Sprintf("field %q", p), b, crds, wantNamespaced)
-				if err != nil {
-					return nil, err
-				}
-				rhs = "{{ " + expr + " }}"
-				guard = g
-			} else {
-				param, member, _ := blueprint.ParamRef(f.From)
-				chainRef := param
-				if member != "" {
-					chainRef = param + "." + member
-				}
-				segs, chain, err := blueprint.ParamChain(b.Spec.XRD,
-					fmt.Sprintf("resource %q field %q", r.Name, p), chainRef)
-				if err != nil {
-					return nil, err
-				}
-				rhs = fmt.Sprintf("{{ $spec.%s }}", strings.Join(segs, "."))
-				guard = chainGuard(segs, chain)
-			}
+		sRHS, rhs, guard, err := resolveFieldRHS(p, f, r, b, crds, wantNamespaced)
+		if err != nil {
+			return nil, err
 		}
 		leaves = append(leaves, leafItem{
-			basePath: basePath,
-			key:      mapKey,
-			isMap:    isMap,
-			rhs:      rhs,
-			guard:    guard,
+			basePath:   basePath,
+			key:        mapKey,
+			isMap:      isMap,
+			rhs:        rhs,
+			guard:      guard,
+			structured: sRHS,
 		})
 	}
 
@@ -866,15 +818,17 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 		if l.isMap {
 			isMapField[l.basePath] = true
 			grouped[l.basePath] = append(grouped[l.basePath], forProviderField{
-				path:  l.key,
-				rhs:   l.rhs,
-				guard: l.guard,
+				path:       l.key,
+				rhs:        l.rhs,
+				guard:      l.guard,
+				structured: l.structured,
 			})
 		} else {
 			grouped[l.basePath] = append(grouped[l.basePath], forProviderField{
-				path:  l.basePath,
-				rhs:   l.rhs,
-				guard: l.guard,
+				path:       l.basePath,
+				rhs:        l.rhs,
+				guard:      l.guard,
+				structured: l.structured,
 			})
 		}
 	}

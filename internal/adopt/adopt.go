@@ -3,7 +3,6 @@
 package adopt
 
 import (
-	"bytes"
 	"fmt"
 	"regexp"
 	"sort"
@@ -152,21 +151,11 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, error) {
 
 // splitYAML splits a multi-document YAML stream into individual maps.
 func splitYAML(data []byte) ([]map[string]any, error) {
-	rawDocs := bytes.Split(data, []byte("\n---"))
+	rawDocs := blueprint.SplitDocs(data)
 	var docs []map[string]any
 	for _, chunk := range rawDocs {
-		trimmed := bytes.TrimSpace(chunk)
-		if len(trimmed) == 0 {
-			continue
-		}
-		trimmed = bytes.TrimPrefix(trimmed, []byte("---"))
-		trimmed = bytes.TrimSpace(trimmed)
-		if len(trimmed) == 0 {
-			continue
-		}
-
 		var doc map[string]any
-		if err := yaml.Unmarshal(trimmed, &doc); err != nil {
+		if err := yaml.Unmarshal(chunk, &doc); err != nil {
 			return nil, fmt.Errorf("unmarshal document: %w", err)
 		}
 		if len(doc) > 0 {

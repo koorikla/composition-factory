@@ -292,18 +292,7 @@ func countComposedResources(stream []byte) (int, error) {
 }
 
 // splitYAMLStream splits a multi-document YAML stream on "---" at column
-// zero and drops empty documents — a small deliberate duplicate of
-// internal/xpkg's unexported splitYAML (the same precedent as blueprint.go's
-// referencingResources: the original is private to its package, and this
-// three-line scan is not worth an export).
+// zero and drops empty documents.
 func splitYAMLStream(in []byte) [][]byte {
-	var out [][]byte
-	for _, part := range strings.Split(string(in), "\n---") {
-		trimmed := strings.TrimSpace(strings.TrimPrefix(part, "---"))
-		if len(trimmed) == 0 {
-			continue
-		}
-		out = append(out, []byte(trimmed))
-	}
-	return out
+	return blueprint.SplitDocs(in)
 }
