@@ -111,16 +111,13 @@ function schemaFor(resource) {
 /* ---------- default layout ---------- */
 
 function ensurePositions(d) {
-  if (!S.getPosition(XR_ID)) S.setPosition(XR_ID, { x: 36, y: 48 });
+  // dependency-aware defaults: layers left→right (a status consumer cannot
+  // exist before its source), stacked without overlap. Measured card sizes
+  // refine placement on the post-paint pass in render().
   const resources = d.spec && d.spec.resources || [];
-  resources.forEach(function (r, i) {
-    if (!S.getPosition(r.name)) {
-      S.setPosition(r.name, {
-        x: 330 + (i % 2) * 258,
-        y: 40 + Math.floor(i / 2) * 200,
-      });
-    }
-  });
+  const anyUnplaced = !S.getPosition(XR_ID) ||
+    resources.some(function (r) { return !S.getPosition(r.name); });
+  if (anyUnplaced) applyDependencyLayout(true);
 }
 
 /* ---------- rendering ---------- */
@@ -329,6 +326,69 @@ function resourceCardHTML(d, r, sel) {
   return h;
 }
 
+/* ---------- dependency layout (slice 46) ----------
+   Status wires are creation-order facts: a consumer of another resource's
+   observed status cannot exist before its source reports, so it sits to the
+   RIGHT. Layers: XR at 0; a resource's layer = 1 + max(source layers of its
+   status wires). Unplaced cards get layered positions (measured widths and
+   heights, no overlaps); tidy clears every stored position and re-lays. */
+function dependencyLayers(d) {
+  const layers = {};
+  const rs = d.spec.resources || [];
+  const deps = {};
+  rs.forEach(function (r) { deps[r.name] = new Set(); });
+  listWires(d).forEach(function (w) {
+    if (w.kind === "status" && deps[w.resource] && w.srcResource !== w.resource) {
+      deps[w.resource].add(w.srcResource);
+    }
+  });
+  function layerOf(name, seen) {
+    if (layers[name] !== undefined) return layers[name];
+    if (seen[name]) return 1; // cycle guard: flat
+    seen[name] = true;
+    let l = 1;
+    deps[name].forEach(function (src) { l = Math.max(l, layerOf(src, seen) + 1); });
+    layers[name] = l;
+    return l;
+  }
+  rs.forEach(function (r) { layerOf(r.name, {}); });
+  return layers;
+}
+
+function applyDependencyLayout(onlyUnplaced) {
+  const d = doc();
+  if (!d) return;
+  const layers = dependencyLayers(d);
+  const GX = 60, GY = 24, X0 = 40, Y0 = 40;
+  const byLayer = {};
+  (d.spec.resources || []).forEach(function (r) {
+    (byLayer[layers[r.name]] = byLayer[layers[r.name]] || []).push(r.name);
+  });
+  // measured widths per card (fall back to 220 pre-paint)
+  function width(id) {
+    const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(id) + '"]');
+    return el ? el.offsetWidth : 220;
+  }
+  function height(id) {
+    const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(id) + '"]');
+    return el ? el.offsetHeight : 160;
+  }
+  let x = X0 + width(XR_ID) + GX; // layer 1 starts right of the XR card
+  const xrEl = canvasEl.querySelector('.node[data-id="' + XR_ID + '"]');
+  if (!S.getPosition(XR_ID) || !onlyUnplaced) S.setPosition(XR_ID, { x: X0, y: Y0 });
+  Object.keys(byLayer).map(Number).sort(function (a, b) { return a - b; }).forEach(function (L) {
+    let y = Y0;
+    let maxW = 0;
+    byLayer[L].forEach(function (id) {
+      if (onlyUnplaced && S.getPosition(id)) { maxW = Math.max(maxW, width(id)); return; }
+      S.setPosition(id, { x: x, y: y });
+      y += height(id) + GY;
+      maxW = Math.max(maxW, width(id));
+    });
+    x += maxW + GX;
+  });
+}
+
 let gestureActive = false;
 let pendingRender = false;
 let gestureCleanup = null; // the active drag's own up(), for forced ends
@@ -363,6 +423,15 @@ function render() {
     h += resourceCardHTML(d, r, sel);
   });
   canvasEl.innerHTML = h;
+  // measured layout pass for cards that have no stored position
+  const anyUnplaced = (d.spec.resources || []).some(function (r) { return !S.getPosition(r.name); }) || !S.getPosition(XR_ID);
+  if (anyUnplaced) {
+    applyDependencyLayout(true);
+    canvasEl.querySelectorAll(".node").forEach(function (el) {
+      const p = S.getPosition(el.getAttribute("data-id"));
+      if (p) { el.style.left = p.x + "px"; el.style.top = p.y + "px"; }
+    });
+  }
   Object.keys(cardSizes).forEach(function (n) {
     const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(n) + '"]');
     if (el) applyCardSize(el, n);
@@ -497,12 +566,21 @@ function buildZoomControls() {
     '<button class="btn sm" id="zoom-out" title="Zoom out">\u2212</button>' +
     '<span id="zoom-pct" style="font-size:10px;color:var(--faint);min-width:34px;text-align:center">100%</span>' +
     '<button class="btn sm" id="zoom-in" title="Zoom in">+</button>' +
-    '<button class="btn sm" id="zoom-reset" title="Reset view">\u2302</button>';
+    '<button class="btn sm" id="zoom-reset" title="Reset view">\u2302</button>' +
+    '<button class="btn sm" id="layout-btn" title="Tidy: lay the dependency tree left\u2192right">\u234b</button>';
   cwEl.appendChild(bar);
   const rect = function () { const r = cwEl.getBoundingClientRect(); return { x: r.width / 2, y: r.height / 2 }; };
   bar.querySelector("#zoom-in").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1.2); });
   bar.querySelector("#zoom-out").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1 / 1.2); });
   bar.querySelector("#zoom-reset").addEventListener("click", function () { view.x = 0; view.y = 0; view.k = 1; applyView(); });
+  bar.querySelector("#layout-btn").addEventListener("click", function () {
+    applyDependencyLayout(false);
+    canvasEl.querySelectorAll(".node").forEach(function (el) {
+      const p = S.getPosition(el.getAttribute("data-id"));
+      if (p) { el.style.left = p.x + "px"; el.style.top = p.y + "px"; }
+    });
+    drawWires();
+  });
 }
 
 /* ---------- status outputs shown on cards (slice 32) ---------- */
