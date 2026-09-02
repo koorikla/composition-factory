@@ -603,7 +603,8 @@ export function init(rootEl, deps) {
   });
 
   store.subscribe("doc", function () {
-    // Fan-out counts and sources come from the doc; kinds tab is unaffected.
+    // Sources and kinds may change when a new doc is loaded.
+    loadKinds();
     if (rail !== "kinds") drawRail();
   });
 

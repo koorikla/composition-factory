@@ -9,7 +9,7 @@ module.exports = defineConfig({
   webServer: {
     // the suite's own engine: scratch blueprint + out dir, port 8081 —
     // the human's server on 8080 is never touched by tests.
-    command: 'sh -c "mkdir -p .testrun/out && cp tests/fixtures/pristine-doc.yaml .testrun/doc.cf.yaml 2>/dev/null || ./bin/cf serve --help >/dev/null; cp testdata/xqueue.cf.yaml .testrun/doc.cf.yaml; ./bin/cf serve --addr 127.0.0.1:8081 --blueprint .testrun/doc.cf.yaml --out .testrun/out --lock .testrun/.cf.lock"',
+    command: 'sh -c "rm -rf .testrun && mkdir -p .testrun/out && cp tests/fixtures/pristine-doc.yaml .testrun/doc.cf.yaml && ./bin/cf serve --addr 127.0.0.1:8081 --blueprint .testrun/doc.cf.yaml --out .testrun/out --lock .testrun/.cf.lock"',
     url: 'http://127.0.0.1:8081/healthz',
     reuseExistingServer: false,
   },
