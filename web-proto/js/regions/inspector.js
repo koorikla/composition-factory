@@ -241,29 +241,29 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
   if (filter === "req" && !(f.required || entry)) return "";
   if (filter === "set" && !entry) return "";
 
-  var wired = m === "w" && dm === "w" && !uiMode[f.path];
+  var wired = m === "w" && dm === "w" && !uiMode[f.path] && entry;
   var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
-  var h = '<div class="fld' + (dm === "w" ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
+  var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
     '<div class="fld-h"><span class="n">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
     (f.required ? '<span class="rq">req</span>' : "") +
     modeButtons(f.path, m, false) +
     '</div><div class="fld-d">' + esc(f.description) + "</div>";
 
   if (m === "w") {
-    if (dm === "w" && !uiMode[f.path]) {
+    if (dm === "w" && !uiMode[f.path] && entry) {
       var wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
       var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
       h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-        '<span class="src" style="color:' + wireCol + '">' + esc(entry.from) + "</span>" +
+        '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
         '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
     } else {
       h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false);
     }
   } else if (m === "r") {
     h += '<textarea class="val raw" data-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
-      esc(dm === "r" ? entry.raw : "") + "</textarea>";
+      esc((dm === "r" && entry) ? entry.raw : "") + "</textarea>";
   } else {
-    h += '<input class="val" data-v="' + esc(f.path) + '" value="' + esc(dm === "v" ? entry.value : "") +
+    h += '<input class="val" data-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
       '" placeholder="' + (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from output") + '">';
   }
   return h + "</div>";
@@ -277,29 +277,29 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
 
   if (filter === "set" && !entry) return "";
 
-  var wired = m === "w" && dm === "w" && !uiMode[mKey];
+  var wired = m === "w" && dm === "w" && !uiMode[mKey] && entry;
   var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
-  var h = '<div class="fld' + (dm === "w" ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
+  var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
     '<div class="fld-h"><span class="n">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
     (f.required ? '<span class="rq">req</span>' : "") +
     modeButtons(f.path, m, true) +
     '</div><div class="fld-d">' + esc(f.description) + "</div>";
 
   if (m === "w") {
-    if (dm === "w" && !uiMode[mKey]) {
+    if (dm === "w" && !uiMode[mKey] && entry) {
       var wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
       var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
       h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-        '<span class="src" style="color:' + wireCol + '">' + esc(entry.from) + "</span>" +
+        '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
         '<span class="x" role="button" tabindex="0" data-env-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
     } else {
       h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, true);
     }
   } else if (m === "r") {
     h += '<textarea class="val raw" data-env-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
-      esc(dm === "r" ? entry.raw : "") + "</textarea>";
+      esc((dm === "r" && entry) ? entry.raw : "") + "</textarea>";
   } else {
-    h += '<input class="val" data-env-v="' + esc(f.path) + '" value="' + esc(dm === "v" ? entry.value : "") +
+    h += '<input class="val" data-env-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
       '" placeholder="' + (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from envelope") + '">';
   }
   return h + "</div>";

@@ -190,7 +190,14 @@ function resourceCardHTML(d, r, sel) {
   const seen = {};
   paths.forEach(function (p) { seen[p] = true; });
   // Required-but-unset schema fields also get a row (prototype look: required *).
-  const extra = schema ? schema.requiredPaths.filter(function (p) { return !seen[p]; }).sort() : [];
+  // For kinds with hundreds of nested required schema leaves (like native Deployment),
+  // only surface shallow unset fields on the card so it stays compact.
+  const extra = schema ? schema.requiredPaths.filter(function (p) {
+    if (seen[p]) return false;
+    const sf = schema.byPath[p];
+    if (schema.requiredPaths.length <= 8) return true;
+    return sf && (sf.depth !== undefined ? sf.depth <= 1 : (p.split(".").length <= 2));
+  }).sort() : [];
 
   paths.concat(extra).forEach(function (p) {
     const f = fields[p] || null;
