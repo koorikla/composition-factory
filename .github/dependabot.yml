@@ -1,0 +1,50 @@
+version: 2
+
+# Four ecosystems live in this repo and each fails differently, so each gets
+# its own entry rather than one catch-all.
+#
+# Updates are grouped so a quiet week produces one PR per ecosystem instead of
+# a dozen. Majors stay ungrouped and arrive on their own: this tree's CI is the
+# only thing that proves a major is safe, and a major buried in a group of ten
+# patches is a major nobody reads.
+updates:
+  # The workflows drifted a long way behind before anyone noticed — the Node 20
+  # runtime deprecation warnings were the first signal, and by then every action
+  # was one to three majors back.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      go-minor:
+        update-types: [minor, patch]
+
+  # Node is not a product dependency: it runs the Playwright suite and nothing
+  # else. Playwright pins the browser build to the package version, so a bump
+  # here re-downloads Chromium in CI — worth knowing when one looks slow.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor:
+        update-types: [minor, patch]
+
+  # The runtime image ships to ghcr.io on every tag, so a stale base here is a
+  # stale base in everyone's `docker pull`.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

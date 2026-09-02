@@ -28,10 +28,10 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
-        with: { go-version: '1.26' }
+      - uses: actions/setup-go@v7
+        with: { go-version: '1.27' }
 
       # Live mode: talks to api.github.com and ghcr.io directly, anonymously
       # (see scripts/build-catalogue/main.go). No secrets are needed or used.

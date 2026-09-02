@@ -3,7 +3,7 @@
 # The toolchain is pinned to the minor the module declares: this project's
 # contract is byte-identical output for the same inputs, so the compiler is
 # an input worth naming.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS builder
 
 WORKDIR /src
 
@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -o /bin/cf ./cmd/cf
 
 # Final minimal runtime image for the target architecture
-FROM alpine:3.21
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates tzdata && \
     addgroup -S cf && adduser -S cf -G cf -h /home/cf && \

@@ -5,9 +5,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with: { go-version: "1.26" }
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version: "1.27" }
       - run: make lint
       - run: make lint-strict
       - run: make test
@@ -17,9 +17,9 @@ jobs:
   acceptance:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with: { go-version: "1.26" }
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version: "1.27" }
       - name: Install crossplane CLI
         run: |
           curl -sL https://raw.githubusercontent.com/crossplane/crossplane/main/install.sh | sh
@@ -32,12 +32,12 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with: { go-version: "1.26" }
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version: "1.27" }
+      - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
       - name: Install crossplane CLI
         run: |
           curl -sL https://raw.githubusercontent.com/crossplane/crossplane/main/install.sh | sh
@@ -52,7 +52,7 @@ jobs:
   docker-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Verify Docker build
         run: docker build .
 
@@ -60,10 +60,10 @@ jobs:
   cluster:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with: { go-version: "1.26" }
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version: "1.27" }
+      - uses: azure/setup-helm@v5
       - name: Install kind
         run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
