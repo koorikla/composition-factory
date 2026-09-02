@@ -15,8 +15,30 @@ consumer's git diff.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-03
+
 ### Added
 
+- Discovery CLI: `cf kinds`, `cf fields` and `cf catalogue`, backed by a
+  reverse kind index, so a blueprint author can find a kind and its field
+  paths without leaving the terminal.
+- Adopt engine: `cf` reads an existing `function-patch-and-transform`
+  composition's `input.resources` back into a blueprint, emits flat XRD
+  parameters, and reports what it could not carry across as a loss report
+  rather than dropping it silently.
+- Render-time OpenAPI validation of emitted resources against the cached CRD
+  schemas, plus raw-template and raw-reference validation, so a blueprint that
+  would be rejected on apply fails at generate time instead.
+- Lane C, in-cluster verification on a real kind cluster with Crossplane and
+  the pipeline functions (`make cluster`, `make cluster-down`,
+  `make test-cluster`), and workspace isolation so concurrent checkouts do not
+  collide on cluster-scoped names.
+- Additional vendored core Kubernetes kinds; `providerName` is optional for
+  blueprints composed purely of native kinds; `cf --version`.
+- Aggregated ClusterRole RBAC emission and array-element emission for provider
+  kinds; self-contained FileSystem template exports.
+- Python engine `MessageToDict` output, KCL `forEach` list syntax, and
+  observed context available to templates.
 - `make lint-strict`: staticcheck over the whole module, pinned to v0.8.1 in
   the `Makefile` and run through `go run` so it needs no separate install and
   cannot drift between a developer's machine and CI. CI lane A runs it next to
@@ -26,18 +48,54 @@ consumer's git diff.
   and are deliberately written as full explanatory sentences.
 - `CHANGELOG.md` (this file) and `docs/code-audit.md`, a dated, repeatable
   audit of the tree with the method written down so the next run is comparable.
+- CI grew four jobs beside the Go lane: acceptance, Playwright e2e, a Docker
+  build check, and the kind-cluster lane.
 
 ### Changed
 
+The entries below alter emitted YAML for an unchanged blueprint. They are bug
+fixes, but each moves a consumer's git diff.
+
+- An integer parameter or literal targeting a Kubernetes `IntOrString` field
+  now renders as a bare scalar rather than a quoted string. The vendored schema
+  normalizes `IntOrString` to type string — the one spelling legal for both
+  halves — and the emitter quoted on that basis, emitting `targetPort: "8080"`.
+  The API server reads a *string* `targetPort` as a port NAME and rejects a
+  numeric one with `must contain at least one letter (a-z)`, so the composed
+  Service never applied. A string source still quotes, and `Quantity` (which
+  carries no `int-or-string` format) is untouched.
+- Typed literals: a `value:` is emitted with the type its target field
+  declares instead of always as a quoted string, and leaf strings are quoted
+  where YAML 1.2 would otherwise coerce them. Real source headers are
+  preserved.
+- Nested `forProvider` emission for dotted field paths, and deterministic
+  sibling naming for native kinds.
+- Map merging, and YAML 1.2 boolean keys are quoted.
 - `make lint` runs `gofmt` over the tracked files (`git ls-files '*.go'`)
   instead of the whole directory. Locally, `gofmt -l .` walked 1701 `.go` files
   — ten times the 163 this tree owns — because agent worktrees under
   `.worktrees/` and `.claude/worktrees/` are other branches' full checkouts. An
   unformatted file on an abandoned branch could fail the lint of the tree you
   are actually editing.
+- The cluster harness' group suffix carries only the 6-char workspace path
+  hash (`w<hash>.cf-test`) rather than the full directory slug. Crossplane
+  copies a Composition's name into the `crossplane.io/composition-name` label
+  of every CompositionRevision, and label values cap at 63 characters, so a
+  longer suffix silently stopped revisions — and therefore all composition —
+  from being created.
+- `BACKLOG.md` holds open work only; the 150 closed items moved whole to
+  `docs/backlog-archive.md`. It is read into every agent's context on every
+  session, so that history was a cost paid on every read.
 
 ### Fixed
 
+- Cluster source schema loading and native CRD convention handling.
+- `PUT`-time validation and atomic blueprint update in the API; sources are
+  auto-declared; MCP contract enhancements.
+- Canvas: dynamic engine list from `/api/version`, touch `pointerType` guards
+  against double-panning, and palette scope grouping.
+- `field-when` hints and kind suggestions in validation output; `cf check`
+  reports extra files.
 - `internal/emit/kcl.go`: `buildEnvTree`'s `findOrCreate` closure was declared
   and assigned separately, the shape required only for a self-recursive
   closure. It never recursed, so the split was a leftover; collapsed to `:=`.
@@ -192,7 +250,8 @@ Re-tag of 0.5.6; no code change.
 - Research notes, design spec, M1 plan and the UX prototype that the canvas is
   built from.
 
-[Unreleased]: https://github.com/koorikla/compositionfactory/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/koorikla/compositionfactory/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/koorikla/compositionfactory/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/koorikla/compositionfactory/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/koorikla/compositionfactory/compare/v0.5.7...v0.6.0
 [0.5.7]: https://github.com/koorikla/compositionfactory/compare/v0.5.6...v0.5.7
