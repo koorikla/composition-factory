@@ -25,6 +25,9 @@ type CLI struct {
 	Package     PackageCmd       `cmd:"" help:"Build a Crossplane Configuration package (.xpkg) from a blueprint."`
 	Push        PushCmd          `cmd:"" help:"Push a built .xpkg to an OCI registry."`
 	Adopt       AdoptCmd         `cmd:"" help:"Import an existing Crossplane Composition into a blueprint."`
+	Kinds       KindsCmd         `cmd:"" help:"List available CRD kinds from cached providers and native kinds."`
+	Fields      FieldsCmd        `cmd:"" help:"Print the field schema tree for a given kind."`
+	Catalogue   CatalogueCmd     `cmd:"" help:"Search the provider catalogue."`
 }
 
 type VersionCmd struct{}

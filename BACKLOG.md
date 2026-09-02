@@ -169,13 +169,6 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
 
 ### P2 — discovery and CLI
 
-- [ ] Catalogue search is a substring over name/description only: `DatabaseInstance`,
-      `CloudSQL`, `ServiceAccount`, `Topic` return nothing; `Bucket` returns
-      provider-bitbucket-server; all 84 GCP entries carry the same description. Index kinds
-      per package at catalogue build time and search kind → package. C.
-- [ ] No CLI to browse kinds, fields, status outputs or the catalogue — every agent started
-      `cf serve` and hit `/api/kinds/...` (and one reverse-engineered `cache/*/crds.json`).
-      Add `cf kinds [q]`, `cf fields <kind> [--required] [--status]`, `cf catalogue <q>`. A, C.
 - [ ] The kind list mixes `.m.` and cluster-scoped duplicates for a Namespaced XRD (backlog
       v2 labelled them, did not hide them). `cf provider add --help` and the providerconfigs
       ASSUMPTION note point at xpkg.upbound.io/upbound while everything else is

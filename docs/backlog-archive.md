@@ -8,6 +8,15 @@ is the way it is, and this repo has already re-raised settled questions twice.
 Nothing here is open work. Open items live in BACKLOG.md. Full history is in
 git — `git log -p BACKLOG.md`.
 
+- [x] Catalogue search is a substring over name/description only: `DatabaseInstance`,
+      `CloudSQL`, `ServiceAccount`, `Topic` return nothing; `Bucket` returns
+      provider-bitbucket-server; all 84 GCP entries carry the same description. Index kinds
+      per package at catalogue build time and search kind → package. C.
+      — completed 2026-09-03
+- [x] No CLI to browse kinds, fields, status outputs or the catalogue — every agent started
+      `cf serve` and hit `/api/kinds/...` (and one reverse-engineered `cache/*/crds.json`).
+      Add `cf kinds [q]`, `cf fields <kind> [--required] [--status]`, `cf catalogue <q>`. A, C.
+      — completed 2026-09-03
 - [x] Python: every blueprint fails at real render with `AttributeError: get` — the emitted
       script calls `.get()` on protobuf Struct/Message (`oxr.get("spec")`,
       `ocds.get(...).get("resource")`); verified with crossplane-function-sdk-python. Also

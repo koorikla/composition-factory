@@ -310,3 +310,36 @@ func (s *Store) Clear() {
 	s.memo = nil
 	s.mu.Unlock()
 }
+
+// List returns the refs of all provider packages currently in the on-disk cache,
+// sorted alphabetically.
+func (s *Store) List() ([]string, error) {
+	entries, err := os.ReadDir(s.Root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read cache dir %s: %w", s.Root, err)
+	}
+
+	var refs []string
+	for _, d := range entries {
+		if !d.IsDir() {
+			continue
+		}
+		path := filepath.Join(s.Root, d.Name(), "crds.json")
+		body, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var entry Entry
+		if err := json.Unmarshal(body, &entry); err != nil {
+			continue
+		}
+		if entry.Ref != "" {
+			refs = append(refs, entry.Ref)
+		}
+	}
+	sort.Strings(refs)
+	return refs, nil
+}
