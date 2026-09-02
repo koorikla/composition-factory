@@ -38,6 +38,9 @@ import (
 // single-load invariant). POST /api/providers preserves that agreement at
 // runtime — it swaps Index and appends to Providers together, under srv.mu.
 type Options struct {
+	// Version is the build version string the UI's wordmark shows
+	// (main.version via ldflags). Empty renders as "dev".
+	Version string
 	Index     *index.Index
 	Store     *cache.Store
 	Blueprint string   // path to the blueprint file on disk
@@ -158,6 +161,13 @@ func New(o Options) (http.Handler, error) {
 	// ServeMux's own default 404/405 handling (normalized to JSON below)
 	// is what actually gives 405-vs-404 "for free", per this task's brief.
 	mux.HandleFunc("GET /healthz", handleHealthz)
+	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
+		v := o.Version
+		if v == "" {
+			v = "dev"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"version": v})
+	})
 	mux.HandleFunc("GET /api/kinds", srv.handleKinds)
 	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}", srv.handleKind)
 	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}/fields", srv.handleKindFields)

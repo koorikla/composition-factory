@@ -242,3 +242,8 @@ export function renameResource(name, to) {
 export function getRBAC() {
   return request("GET", "/api/rbac");
 }
+
+/** GET /api/version — the server build version for the wordmark. */
+export function getVersion() {
+  return request("GET", "/api/version");
+}

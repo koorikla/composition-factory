@@ -90,5 +90,6 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string) (api.Opti
 		OutDir:    outDir,
 		Lock:      lockPath,
 		Providers: refs,
+		Version:   version,
 	}, nil
 }

@@ -251,8 +251,18 @@ export function init(rootEl, deps) {
   function drawTopbar(doc) {
     var name = doc && doc.metadata && doc.metadata.name || "blueprint";
     el.crumb.innerHTML = "blueprints/<b>" + esc(name) + ".cf.yaml</b>";
+    // the wordmark shows the BUILD version (the doc's schema version was
+    // read as "I'm on an old app" — it lives with the blueprint name now)
     var av = doc && doc.apiVersion || "";
-    el.ver.textContent = av.indexOf("/") >= 0 ? av.split("/").pop() : av;
+    var schemaV = av.indexOf("/") >= 0 ? av.split("/").pop() : av;
+    el.crumb.innerHTML += schemaV ? ' <span class="dg">' + esc(schemaV) + "</span>" : "";
+    if (!el.ver.dataset.build) {
+      el.ver.dataset.build = "1";
+      api.getVersion().then(function (r) {
+        el.ver.textContent = r.version;
+        el.ver.title = "compositionfactory build " + r.version;
+      }).catch(function () { el.ver.textContent = ""; });
+    }
     var bp = el.tabs.querySelector('[data-t="bp"]');
     if (bp) bp.textContent = bpTabLabel(doc);
   }
