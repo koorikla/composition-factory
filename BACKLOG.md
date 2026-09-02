@@ -688,3 +688,175 @@ exists on the dev box today (the `kind-cf-test` context is stale), so this start
       schema source specs (slice45) run against the real API server instead of a stub, and the
       manifests-as-source spike's `kubectl get composition -o yaml` fixture is taken from a
       cf-emitted Composition applied here.
+
+## Backlog v4 — dogfooding five real compositions on v0.7.0 (2026-09-02)
+
+Method: five agents each built a composition end to end with only the CLI, docs and HTTP/MCP
+API — A: AWS VPC/subnets/RDS with forEach + status wires + when; B: cloud-agnostic K8s app on
+native kinds; C: GCP CloudSQL/GCS/IAM/PubSub incl. KCL and Python engines; D: adopting three
+real-world compositions; E: SQS queue + DLQ built purely through MCP and HTTP. A sixth agent
+re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogfood-*/`
+(blueprints, outputs, renders, REPORT.md). Items marked (repro) were reproduced by hand.
+
+### P0 — generated output is wrong at apply time; render does not catch it
+
+- [ ] Nested forProvider paths are emitted as literal dotted keys (repro): `settings.tier:
+      {from: params.tier}` → `settings.tier: {{ $spec.tier }}` under forProvider, and the API
+      server prunes it on apply. The validator accepts the path (it exists in the CRD) and the
+      writer never re-nests it; only native kinds get a tree (emit/native.go buildNativeTree).
+      Build the same tree for provider kinds (composition.go planFields → writer) with the
+      hasKey guards moved to the leaf. Golden: DatabaseInstance settings.tier +
+      settings.ipConfiguration.ipv4Enabled renders as a nested map. Found by A and C.
+- [ ] `value:` is always a quoted string (structured.go:43 quoteYAML) regardless of the CRD
+      leaf type: `enableDnsHostnames: "true"`, `allocatedStorage: "20"`; and string params are
+      emitted bare so `engineVersion: 16.3` becomes a float. Emit typed literals from the leaf
+      type (bool/number unquoted, strings `| quote`), refuse `value: notabool` on a boolean,
+      refuse a scalar `from:` into an array leaf (envelope already does, envelope.go:176) or
+      wrap it. Add a param-type vs leaf-type check with a clear error. KCL already emits typed
+      literals, so the engines currently disagree. Found by A and C.
+- [ ] `resolveKind` ignores `provider:` (composition.go:1263 matches Kind only): `kind: Instance`
+      with provider-aws-rds silently resolves to ec2 Instance because ec2 was listed first.
+      Match on the resource's declared provider, error on ambiguity. Found by A.
+- [ ] `lifecycleRule[0].action.type` is accepted by the validator (it even suggests it) and
+      listed by /api/kinds/…/fields, then emitted as the literal key
+      `'lifecycleRule[0].action.type'`. Implement array-element emission or refuse the grammar
+      for provider kinds. Found by C.
+- [ ] `crossplane composition render` and POST /api/render report ok on output the API server
+      would reject (all of the above). Add schema validation of the rendered composed
+      resources against the cached CRDs in `cf gen`, `/api/render` and the Validate chip; agent
+      A's typecheck.py against `crossplane xpkg extract` output is the reference.
+- [ ] Header `# Source: blueprints/<name>.cf.yaml` is fabricated — it prints a hardcoded
+      prefix, not the path given. Found by A, C and E.
+
+### P1 — alternative engines are broken for real blueprints
+
+- [ ] Python: every blueprint fails at real render with `AttributeError: get` — the emitted
+      script calls `.get()` on protobuf Struct/Message (`oxr.get("spec")`,
+      `ocds.get(...).get("resource")`); verified with crossplane-function-sdk-python. Also
+      `ready = fnv1.READY_TRUE` unconditionally while function-auto-ready is still in the
+      pipeline. Found by C.
+- [ ] KCL forEach emits invalid syntax (`for _i in range(...):` inside a list literal →
+      `InvalidSyntax expected one of ["]"]`); unobserved status wires emit `null` where
+      go-templating omits the key; loop instances are named `${_i}-topic` in KCL and
+      `f"{_i}-topic"` in Python but `topic-0` in go-templating, which breaks observed-resource
+      matching and contradicts the forEach error text. Found by A and C.
+- [ ] `raw:` is pasted verbatim into KCL/Python programs (`settings = {tier: {{ … }}}` →
+      syntax error at render). Refuse `{{` in raw under non-go engines with a clear message, or
+      document raw as go-templating-only. Found by A, B(?), C.
+- [ ] Lane B renders only go-templating. Extend the acceptance test to render each engine
+      through its real function image (function-kcl, function-python) on the same fixtures;
+      the Python `.get` bug would have been caught on day one.
+- [ ] Docker container reuse via `render.crossplane.io/runtime-docker-name: cf-function-*`
+      leaves a container attached to a stale network after a failed run; the next renders
+      fail (`container … is not connected to Docker network`) or hang 2 minutes. Use a per-run
+      name, or document `docker rm -f cf-function-*` in the Validate error tip. Found by A and C.
+
+### P1 — adopt loses most of what it reads, silently
+
+- [ ] cf cannot adopt its own output: the `{{- $spec := … -}}` prelude and `{{- if hasKey }}`
+      guards break the mask-then-YAML parser (`cannot unmarshal string into … map`). Every
+      `{{ }}` is masked as a quoted scalar, so block-level actions become YAML values.
+      Decide: fix adopt's masking to treat control-flow lines as opaque blocks, or fold adopt
+      into the Backlog v3 reader (which must read cf's dialect anyway). Found by C and D.
+- [ ] function-patch-and-transform `input.resources` is discarded with no warning
+      (`resources: []`), and a package `…function-patch-and-transform:v0.1.0` is invented.
+      docs/cli.md claims classic P&T support; only pre-2.0 `spec.resources` is parsed. Found
+      by C and D.
+- [ ] XRD parsing ignores the schema when parameters sit flat under `spec` (cf's own XRDs,
+      Crossplane v2 style): `required`, types, defaults, descriptions, nested objects all lost;
+      arrays refuse (`type "array" is not supported`); `claimNames`/`connectionSecretKeys`
+      dropped. Found by D.
+- [ ] Every patch `fromFieldPath` becomes a parameter name (`metadata.uid`, `status.eks.oidc`
+      → "invalid parameter name"), resource names are not normalised to DNS labels, block
+      scalars are put in `value:` and then refused for containing `\n`. Adopt of
+      platform-ref-aws XEKS needed five successive manual edits and still failed. Found by D.
+- [ ] Non-param mustache lands in `value:` and gen single-quotes it (`tags: '{{ toYaml … }}'`);
+      `.observed.composite.resource.spec.X` is not recognised as a param; nested maps are
+      flattened to dotted paths gen then refuses; arrays/objects serialised via fmt.Sprint
+      (`'[map[conditionStatus:False …]]'`); composed apiVersion is rebound to `--provider`
+      (cluster-scoped `iam.aws.upbound.io` → `.m.`); without `--provider`, `sources: null`.
+- [ ] No loss report at all — only "Adopted blueprint written to …". Print what was dropped,
+      write `# adopt: dropped …` comments, exit 2 when lossy, validate the adopted blueprint
+      against the schema before writing. `--cache-dir` is not accepted by `cf adopt`; output
+      is padded with `from: ""`, `raw: ""`, `conventions: null`, `enum: null`.
+
+### P1 — API and MCP contract
+
+- [ ] PUT /api/blueprint and replace_blueprint are not atomic: a document whose new source
+      fails to fetch (`MANIFEST_UNKNOWN`) is persisted anyway, and every later call fails with
+      the same fetch error. Sync sources before persist; roll back on failure. Found by E.
+- [ ] add_provider / POST /api/providers caches the schemas but does not declare the source in
+      `spec.sources`; the first resource using it is refused. Declare it (idempotently). E.
+- [ ] Unknown field paths and status paths pass PUT/replace with 200 and fail only at
+      generate; docs/mcp.md promises refusal at replace time. Validate at PUT with the same
+      did-you-mean; nested unknown paths currently get no suggestion at all. E.
+- [ ] Resource rename/delete ignore `raw:` references: rename leaves the old name inside raw
+      guards; delete of a raw-referenced resource succeeds and generates a guard that is
+      false forever (from: wires are protected). Scan raw text for `"<name>"` in observed
+      lookups, or warn. E.
+- [ ] HTTP ignores unknown query params (`?search=` silently returns everything; kinds use
+      `q`); POST /api/render ignores an `xr` body key silently; /api/blueprint/import wants raw
+      YAML while /adopt wants `{"manifest"}`. Return 400 on unknown params, accept `search` as
+      an alias, document bodies (an /api/openapi or route list). C and E.
+- [ ] render_check reports Docker transients (`container is marked for removal`) as a
+      blueprint `error`; classify daemon/runtime failures as `unavailable`. E.
+- [ ] `cf mcp` exits when `--blueprint` does not exist while `cf serve` scaffolds; parameter
+      `default` accepts non-strings and enum/default mismatches; MCP errors give CLI advice
+      (`run: cf provider add`) instead of the tool name; the persisted document drifts to
+      `sources: null` and every field carries `from: "" raw: "" template: "" value: ""`. E.
+- [ ] get_kind_fields lacks `enum`, `default`, `minimum`/`maximum`, `format` (they exist only
+      as prose in descriptions) and there is no status view, so an agent wiring
+      `resources.x.status.atProvider.arn` guesses. MCP has no resource add/update/rename/
+      delete tools — structural edits are whole-document replace only. E.
+
+### P2 — DSL expressiveness gaps every scenario hit
+
+- [ ] The escape hatch does the real work: nested objects (until P0 lands), array elements,
+      typed literals, quoted strings, XR-derived names (`{{ $xr }}-sa-key`), per-index values
+      (`printf "10.0.%d.0/24" $i`, `index (list …) $i`) and aggregate status wires over a
+      forEach set (a 500-character one-line `range … append … toJson` with a hand-written
+      guard chain) all needed `raw:`. `raw:` must be single-line, and `$i`, `$spec`, `$xr`,
+      `$xrMeta` are undocumented — every agent read composition.go to learn them. Document the
+      raw contract now; then add first-class forms in this order: typed literals (P0 above),
+      `resources.<looped>[*].status.<path>` list wires, forEach index helpers (cidr/az from
+      index), XR-name interpolation in envelope/annotation values, paired forEach.
+- [ ] `template:` cannot see observed resources (`map has no entry for key "observed"`), so
+      any string built around a status wire (a redrive policy JSON, `serviceAccount:<email>`)
+      is raw with a hand-copied 11-term guard. Give templates the observed map and a helper
+      that emits the guard. A, E.
+- [ ] Object param into a map leaf is refused; an explicit `tags[env]` entry replaces the
+      convention wholesale instead of merging. A, C.
+- [ ] Field-level `when` is rejected as `unknown field "when"` with no hint it is resource-level.
+      Parameter named `n` fails as `parameters.false` (YAML 1.1). Kind `ProjectIamMember` gets
+      "not found; run cf provider add" instead of the nearest match. `--check` ignores stale
+      extra files in out/.
+
+### P2 — discovery and CLI
+
+- [ ] Catalogue search is a substring over name/description only: `DatabaseInstance`,
+      `CloudSQL`, `ServiceAccount`, `Topic` return nothing; `Bucket` returns
+      provider-bitbucket-server; all 84 GCP entries carry the same description. Index kinds
+      per package at catalogue build time and search kind → package. C.
+- [ ] No CLI to browse kinds, fields, status outputs or the catalogue — every agent started
+      `cf serve` and hit `/api/kinds/...` (and one reverse-engineered `cache/*/crds.json`).
+      Add `cf kinds [q]`, `cf fields <kind> [--required] [--status]`, `cf catalogue <q>`. A, C.
+- [ ] The kind list mixes `.m.` and cluster-scoped duplicates for a Namespaced XRD (backlog
+      v2 labelled them, did not hide them). `cf provider add --help` and the providerconfigs
+      ASSUMPTION note point at xpkg.upbound.io/upbound while everything else is
+      ghcr.io/crossplane-contrib. A, C.
+- [ ] Every status wire is an 11-term hasKey/kindIs guard; correct but unreviewable by eye
+      (the same item Backlog v3 Phase 1 needs). A, E.
+
+### v2 half-fixes (verifier, 14 of 46 ticked items partially done)
+
+- [ ] Engines list: index.html still hardcodes the three `<option>`s so the /api/version path
+      is dead code; touch: `pointerdown` + `touchstart` both pan on one finger (no
+      `pointerType` guard, no touch spec); api.js header still says it throws a plain object;
+      `resourceFromMap` returns an error it never produces; `make clean` leaves web/ dist;
+      design spec still "draft for review" with §11/§12 unsuperseded.
+- [ ] Drag-to-wire type warning ships but "change parameter type" does not; scope-mismatched
+      KINDS group labelled but not collapsed; catalogue-add spinner/toast/tab-switch and the
+      managementPolicies "more" button have no real spec coverage (the latter's spec passes
+      vacuously); inspector "env:" vs canvas "envelope." namespaces still split; output.js
+      splitter still hand-rolled; `crds:` sources still re-read per generate; api/server_test
+      still retypes the Queue CRD; the Guide tab is still a hardcoded copy of docs/guide.md.
