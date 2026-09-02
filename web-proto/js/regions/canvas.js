@@ -606,21 +606,16 @@ function onPanDown(e) {
   if (e.target.closest(".node") || e.target.closest("button") || e.target.closest("svg path")) return;
   const sx = e.clientX, sy = e.clientY, ox = view.x, oy = view.y;
   let moved = false;
-  function mv(ev) {
-    if (!ev.buttons) { up(); return; } // release happened while unfocused
+  const abortDrag = startDrag(e, function mv(ev) {
+    if (!ev.buttons) { abortDrag(); return; } // release happened while unfocused
     moved = true;
     view.x = ox + ev.clientX - sx;
     view.y = oy + ev.clientY - sy;
     applyView();
-  }
-  function up() {
-    document.removeEventListener("pointermove", mv);
-    document.removeEventListener("pointerup", up);
+  }, function up() {
     gestureEnd();
-  }
-  gestureBegin(up);
-  document.addEventListener("pointermove", mv);
-  document.addEventListener("pointerup", up);
+  });
+  gestureBegin(abortDrag);
 }
 
 function buildZoomControls() {
@@ -942,22 +937,17 @@ function onResizeDown(e) {
   if (!el) return;
   const startW = el.getBoundingClientRect().width / view.k;
   const sx = e.clientX;
-  function mv(ev) {
-    if (!ev.buttons) { up(); return; } // release happened while unfocused
+  const abortDrag = startDrag(e, function mv(ev) {
+    if (!ev.buttons) { abortDrag(); return; } // release happened while unfocused
     const w = Math.max(198, startW + (ev.clientX - sx) / view.k);
     cardSizes[name] = Math.round(w);
     el.style.width = cardSizes[name] + "px";
     el.style.maxWidth = "none";
     scheduleWires();
-  }
-  function up() {
-    document.removeEventListener("pointermove", mv);
-    document.removeEventListener("pointerup", up);
+  }, function up() {
     gestureEnd();
-  }
-  gestureBegin(up);
-  document.addEventListener("pointermove", mv);
-  document.addEventListener("pointerup", up);
+  });
+  gestureBegin(abortDrag);
 }
 
 /* ---------- drag-to-wire (slice: drag-to-wire) ---------- */
@@ -1406,10 +1396,12 @@ function onWireDragDown(e, portEl) {
     }
   }
 
-  gestureBegin(function () { if (previewPath) { previewPath.remove(); previewPath = null; } clearHovers(); });
-  document.addEventListener("pointermove", mv);
-  document.addEventListener("pointerup", up);
-  document.addEventListener("pointercancel", up);
+  const abortDrag = startDrag(e, mv, up);
+  gestureBegin(function () {
+    abortDrag();
+    if (previewPath) { previewPath.remove(); previewPath = null; }
+    clearHovers();
+  });
 }
 
 function onPointerDown(e) {
@@ -1444,21 +1436,15 @@ function onPointerDown(e) {
     el.style.top = ly + "px";
     scheduleWires();
   }
-  function up() {
-    document.removeEventListener("pointermove", mv);
-    document.removeEventListener("pointerup", up);
-    document.removeEventListener("pointercancel", up);
+  const abortDrag = startDrag(e, mv, function up() {
     S.setPosition(name, { x: lx, y: ly }); // client-side only, recorded on release
     if (Math.abs(lx - start.x) > 3 || Math.abs(ly - start.y) > 3) {
       autoPlaced.delete(name);             // a real drag: the user owns it now
     }
     drawWires();
     gestureEnd();
-  }
-  gestureBegin(up);
-  document.addEventListener("pointermove", mv);
-  document.addEventListener("pointerup", up);
-  document.addEventListener("pointercancel", up);
+  });
+  gestureBegin(abortDrag);
   e.preventDefault();
 }
 
