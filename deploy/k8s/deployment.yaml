@@ -16,6 +16,19 @@ spec:
         app.kubernetes.io/name: compositionfactory
         app.kubernetes.io/component: canvas
     spec:
+      initContainers:
+        - name: populate-cache
+          image: compositionfactory
+          command:
+            - cf
+            - provider
+            - add
+            - ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+            - --cache-dir
+            - /home/cf/.cache/compositionfactory
+          volumeMounts:
+            - name: cache
+              mountPath: /home/cf/.cache/compositionfactory
       containers:
         - name: compositionfactory
           image: compositionfactory
