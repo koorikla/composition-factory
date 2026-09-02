@@ -114,10 +114,10 @@
       per yaml file, helm-chart-style readability), wired for `source:
       FileSystem` + ConfigMap mounts, splitting across multiple ConfigMaps
       to stay under the ~1MiB object limit for big compositions.
-- [ ] Docs restructure (user request 2026-09-02): split README extras into
+- [x] Docs restructure (user request 2026-09-02): split README extras into
       /docs to keep the main README quick to read; make the gif-recorder
       flow part of it; use /docs content to GENERATE the in-app Guide tab(s)
-      and improve them.
+      and improve them. — completed 2026-09-02
 - [x] Startup example chooser (user request 2026-09-02): pick between a few
       starting blueprints on first load — IRSA, an RDS composition, and a
       k8s app composition that uses both. — completed 2026-09-02

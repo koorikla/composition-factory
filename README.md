@@ -160,83 +160,16 @@ crossplane composition render testdata/xr.yaml \
 
 ---
 
-## Blueprint DSL
-
-A blueprint combines an XRD definition and composed resources into a single declarative file:
-
-```yaml
-apiVersion: factory.crossplane.io/v1alpha1
-kind: Blueprint
-metadata:
-  name: irsa
-spec:
-  sources:
-    - provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
-  xrd:
-    group: platform.sparky.ee
-    kind: XIrsa
-    plural: xirsas
-    version: v1alpha1
-    scope: Namespaced
-    parameters:
-      providerName:    {type: string, required: true}
-      oidcProviderArn: {type: string, required: true}
-      namespace:       {type: string, default: default}
-  templates:
-    # The output is single-quoted so the rendered assumeRolePolicy is a JSON
-    # STRING, and the OIDC issuer is derived from the provider ARN.
-    trust-policy: >-
-      '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ regexReplaceAll "^.*:oidc-provider/" .spec.oidcProviderArn "" }}:sub":"system:serviceaccount:{{ .spec.namespace }}:{{ .xr }}"}}}]}'
-  resources:
-    - name: role
-      kind: Role
-      provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
-      fields:
-        description:      {value: IAM role assumed by a Kubernetes ServiceAccount via IRSA}
-        assumeRolePolicy: {template: trust-policy}
-    - name: sa
-      kind: ServiceAccount
-      provider: k8s
-      fields:
-        automountServiceAccountToken: {raw: "true"}
-      annotations:
-        # A cross-resource status wire into a native object's annotation: the
-        # key is cleanly absent until AWS reports the Role's ARN, then
-        # Crossplane fills it in on a later reconcile.
-        eks.amazonaws.com/role-arn: {from: resources.role.status.atProvider.arn}
-```
-
-The full, commented version of this blueprint lives at `testdata/irsa.cf.yaml`.
-
-### Field Modes
-
-- **`value`**: Literal scalar value (emitted quoted for strings).
-- **`from`**: Parameter or cross-resource reference (`params.<name>` or `resources.<name>.status.<field>`). Required parameters dereference directly; optional parameters are automatically wrapped in `hasKey` guards.
-- **`raw`**: Verbatim template expression or complex JSON/YAML block.
-- **`template`**: Calls a named `spec.templates` entry; its output becomes the value.
-
-### Annotations
-
-`resources[*].annotations` authors `metadata.annotations` on the composed document — on native and managed kinds alike — with the same `{value|from|raw|template}` forms as fields. Keys are free-form annotation keys (dots and slashes legal, validated to the Kubernetes qualified-name shape); values always land as strings, wires included. A wired annotation whose source is absent omits the key entirely.
-
-### Flow Control
-
-- **`forEach: params.<count>`**: Replicates a resource N times using Go template range with distinct indexed resource names.
-- **`when: params.<bool>`**: Conditionally includes a resource based on a boolean parameter.
-
 ---
 
-## CLI Commands
+## Documentation
 
-| Command | Description |
-| :--- | :--- |
-| `cf provider add <image>` | Pulls and caches CRD schemas from an OCI provider image into `.cf.lock`. |
-| `cf gen <blueprint> -o <out>` | Generates Compositions, XRDs, and supporting manifests into the output directory. |
-| `cf gen --check <blueprint>` | Checks if output matches blueprint without writing (exits 0 if in sync, 2 if drifted). |
-| `cf serve --blueprint <file>` | Starts HTTP API and embedded canvas visual editor on `:8080`. |
-| `cf mcp --blueprint <file>` | Runs MCP server over stdio for AI agent workflows. |
-| `cf package <blueprint> [-o file.xpkg]` | Builds a Crossplane Configuration package: the emitted XRD + Composition plus a synthesized `crossplane.yaml` pinning every provider and function dependency, with the blueprint source embedded for recovery. `crossplane xpkg extract`-compatible; the canvas has a matching **Package** download button. |
-| `cf push <ref> <file.xpkg>` | Pushes a built package to an OCI registry (same keychain auth as `cf provider add`). `crossplane xpkg push` works on the same file. |
+- 📘 **[Blueprint DSL Reference](docs/dsl.md)** — Specification for field modes (`value`, `from`, `raw`, `template`), cross-resource status wires, loops (`forEach`), conditionals (`when`), and envelopes.
+- 🛠️ **[CLI & GitOps Guide](docs/cli.md)** — Detailed manual for `cf gen`, `cf serve`, `cf package`, `cf push`, `cf provider`, drift checks (`--check`), and CI/CD pipelines.
+- 🎨 **[Canvas & User Guide](docs/guide.md)** — Visual canvas manual, wire color systems, gestures, keyboard shortcuts, and starter blueprints.
+- 🤖 **[MCP Server Guide](docs/mcp.md)** — Setting up `cf mcp` with Claude Code, Antigravity, and AI assistant workflows.
+- 📦 **[Provider Catalogue](docs/catalogue.md)** — Curated list of 476+ installable OSS Crossplane packages and upjet families.
+- 🎥 **[Demo GIF Recorder](docs/record-demos.md)** — Headless recording harness for automated doc animations without ffmpeg.
 
 ---
 
@@ -252,34 +185,18 @@ make test-e2e       # Run Playwright browser tests
 make lint           # Check formatting and vet
 ```
 
-### Demo recordings
-
-The README's GIFs are recorded from the real app (no mocks) by
-`scripts/record-demos/run.sh` — it boots a scratch engine seeded with the
-IRSA example and drives the canvas with Playwright, encoding the frames to
-GIF natively (no ffmpeg). Re-run it after visual changes.
-
 ### Local Kubernetes with Skaffold
 
 You can run Composition Factory inside a local Kubernetes cluster (Minikube, kind, k3d, Docker Desktop) with [Skaffold](https://skaffold.dev/):
 
 ```sh
-# Continuous build, deploy, file-sync, and port-forward to http://localhost:8080
-skaffold dev
-
-# Or one-shot deploy
-skaffold run
+skaffold dev        # Continuous build, deploy, sync, and port-forward
+skaffold run        # One-shot deploy
 ```
-
----
-
-## Documentation
-
-- [MCP Server Guide](docs/mcp.md) — Registering and using `cf mcp` with Claude Code and other agent tools.
-- [Provider Catalogue](docs/catalogue.md) — Curated list of popular Crossplane providers.
 
 ---
 
 ## License
  
 This project is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+
