@@ -250,6 +250,11 @@ export const store = {
    * @param {string} to   New name.
    * @returns {Promise<Object|null>}
    */
+  /** POST /api/blueprint/import — YAML through the file gate; one undo step. */
+  async importBlueprint(yamlText) {
+    return this._paramOp("importBlueprint", function () { return api.importBlueprint(yamlText); });
+  },
+
   /** POST /api/blueprint/resources/{name}/rename — same contract as the parameter ops. */
   async renameResource(name, to) {
     return this._paramOp("renameResource", function () { return api.renameResource(name, to); });

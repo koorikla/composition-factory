@@ -263,3 +263,23 @@ export function connectCluster(body) {
   return request("POST", "/api/cluster/connect", body || {});
 }
 
+
+/**
+ * POST /api/blueprint/import — raw blueprint YAML through the file gate;
+ * returns the persisted doc. 400s carry the parse/validation error verbatim.
+ */
+export function importBlueprint(yamlText) {
+  return fetch("/api/blueprint/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/yaml" },
+    body: yamlText,
+  }).then(async function (res) {
+    const body = await res.json().catch(function () { return {}; });
+    if (!res.ok) {
+      const e = new Error(body.error || res.statusText);
+      e.status = res.status;
+      throw e;
+    }
+    return body;
+  });
+}

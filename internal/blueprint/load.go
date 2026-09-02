@@ -322,12 +322,23 @@ func Load(path string) (*Blueprint, error) {
 	if err != nil {
 		return nil, &ReadError{Err: fmt.Errorf("read blueprint: %w", err)}
 	}
+	b, err := Parse(body)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return b, nil
+}
+
+// Parse decodes and validates raw blueprint YAML — the same gate Load runs
+// on a file, exposed for callers that hold the bytes themselves (the HTTP
+// import endpoint, tests).
+func Parse(body []byte) (*Blueprint, error) {
 	var b Blueprint
 	if err := yaml.Unmarshal(body, &b); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, fmt.Errorf("parse blueprint: %w", err)
 	}
 	if err := b.Validate(); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, err
 	}
 	return &b, nil
 }

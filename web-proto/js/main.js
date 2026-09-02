@@ -151,3 +151,40 @@ store.loadDoc();
     }
   });
 })();
+
+
+/* ---- import dsl.yaml: file picker -> server YAML gate -> doc replaced ---- */
+(function () {
+  var btn = document.getElementById("importBtn");
+  var file = document.getElementById("importFile");
+  if (!btn || !file) return;
+  btn.addEventListener("click", function () { file.click(); });
+  store.subscribe("error", function (e) {
+    if (!e || e.source !== "importBlueprint") return;
+    var bar = document.getElementById("import-warn");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "import-warn";
+      bar.className = "warnbar";
+      bar.setAttribute("role", "alert");
+      var host = document.getElementById("region-topbar") || document.body;
+      host.parentNode.insertBefore(bar, host.nextSibling);
+    }
+    bar.hidden = false;
+    bar.textContent = "import failed: " + e.message;
+    setTimeout(function () { bar.hidden = true; }, 8000);
+  });
+  file.addEventListener("change", function () {
+    var f = file.files && file.files[0];
+    file.value = "";
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      store.importBlueprint(String(reader.result)).then(function (doc) {
+        if (doc) store.select(null);
+        // failures surface through the store's error topic (verbatim 400)
+      });
+    };
+    reader.readAsText(f);
+  });
+})();

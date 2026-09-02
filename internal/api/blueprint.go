@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -147,6 +148,33 @@ func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, &b)
+}
+
+// handleImportBlueprint is POST /api/blueprint/import: the body is raw
+// blueprint YAML — the on-disk DSL format — run through the same
+// strict-decode + Validate gate a file gets (blueprint.Parse), persisted,
+// and returned as the full JSON document. The GUI's import button lands
+// here; the response shape is identical to PUT's, so no new contract
+// fixture is needed.
+func (srv *server) handleImportBlueprint(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	b, err := blueprint.Parse(body)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	if !srv.persistBlueprint(w, b) {
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
 }
 
 // addParameterRequest is the POST /api/blueprint/parameters body.

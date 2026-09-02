@@ -23,6 +23,8 @@
     <button class="btn" id="pane-toggle-r" title="Inspector">⚙</button>
     <button class="btn" id="undoBtn" disabled title="Undo (⌘Z / Ctrl+Z)">↩</button>
     <button class="btn" id="redoBtn" disabled title="Redo (⇧⌘Z / Shift+Ctrl+Z)">↪</button>
+    <button class="btn" id="importBtn" title="Import a blueprint .yaml (replaces the current document; undoable)">Import</button>
+    <input type="file" id="importFile" accept=".yaml,.yml" hidden>
     <button class="btn" id="themeBtn">Theme</button>
     <button class="btn" id="validateBtn" disabled title="Run a real crossplane composition render of this blueprint against a sample XR">Validate</button>
     <button class="btn pri" id="generateBtn" disabled title="Regenerate composition.yaml and definition.yaml from the blueprint now">Generate</button>
