@@ -161,7 +161,27 @@ func (srv *server) handleKindFields(w http.ResponseWriter, r *http.Request) {
 		fields = []index.Field{}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"fields": fields, "total": total})
+	// requiredBranches travels as its own list, NOT as rows inside "fields":
+	// "fields" is a pure leaf listing (its total counts leaves, limit
+	// truncates leaves, every path is settable) and mixing branch rows into
+	// it would change that contract for every existing consumer. The list
+	// carries the chain-required branch nodes with no chain-true leaves
+	// beneath them — Deployment's spec.selector and spec.template — which the
+	// flat leaf list structurally drops. required_only=true therefore means
+	// "fields filtered to requiredChain, plus everything in
+	// requiredBranches"; the list is small and constant per kind, so it is
+	// served whole on every response, unfiltered by the query, and a client
+	// narrows it itself if it needs to.
+	branches := index.RequiredBranches(nodes)
+	if branches == nil {
+		branches = []index.Field{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"fields":           fields,
+		"total":            total,
+		"requiredBranches": branches,
+	})
 }
 
 // pathAPIVersion extracts and unescapes the {apiVersion} path wildcard.

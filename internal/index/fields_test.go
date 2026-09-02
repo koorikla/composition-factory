@@ -92,11 +92,85 @@ func TestMaxDepthPrunes(t *testing.T) {
 	}
 }
 
-func TestRequiredOnlyKeepsOnlyRequiredLeaves(t *testing.T) {
-	got := paths(Fields(deepTree(t), FieldQuery{RequiredOnly: true}))
-	want := []string{"selector.matchLabels", "template.spec.containers[0].name"}
+// chainTree exercises every effective-requiredness case on managed (strict)
+// semantics: a required root leaf, a required-in-required leaf, a
+// required-in-OPTIONAL leaf (raw-required but not effectively required), and
+// a required branch none of whose leaves are chain-required.
+func chainTree(t *testing.T) []*schema.Node {
+	t.Helper()
+	props := map[string]any{
+		"region": map[string]any{"type": "string"},
+		"config": map[string]any{
+			"type": "object", "required": []any{"endpoint"},
+			"properties": map[string]any{
+				"endpoint": map[string]any{"type": "string"},
+				"timeout":  map[string]any{"type": "integer"},
+			},
+		},
+		"optionalBlock": map[string]any{
+			"type": "object", "required": []any{"inner"},
+			"properties": map[string]any{
+				"inner": map[string]any{"type": "string"},
+			},
+		},
+		"selector": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"matchLabels": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+			},
+		},
+	}
+	nodes := schema.BuildTree(props, []string{"region", "config", "selector"})
+	schema.ComputeRequiredChain(nodes, false)
+	return nodes
+}
+
+// RequiredOnly runs on the required CHAIN, not the raw flag: a raw-required
+// leaf inside an optional block (optionalBlock.inner — the EnvVar.name
+// pattern that made the old filter noise) stays out, while a required leaf
+// whose ancestors are all required (config.endpoint) and a required root
+// leaf (region) stay in.
+func TestRequiredOnlyKeepsChainRequiredLeaves(t *testing.T) {
+	got := paths(Fields(chainTree(t), FieldQuery{RequiredOnly: true}))
+	want := []string{"config.endpoint", "region"}
 	if diff := cmp.Diff(want, got); diff != "" {
-		t.Errorf("RequiredOnly (-want +got):\n%s\n(a required LEAF, not a leaf under a required branch)", diff)
+		t.Errorf("RequiredOnly (-want +got):\n%s\n(chain-required leaves only: required-in-optional is raw noise)", diff)
+	}
+
+	// The raw flag still travels on every row, untouched: optionalBlock.inner
+	// keeps required=true with requiredChain=false.
+	for _, f := range Fields(chainTree(t), FieldQuery{}) {
+		if f.Path == "optionalBlock.inner" {
+			if !f.Required || f.RequiredChain {
+				t.Errorf("optionalBlock.inner: required=%v requiredChain=%v, want raw true and chain false",
+					f.Required, f.RequiredChain)
+			}
+		}
+	}
+
+	// An UNANNOTATED tree (built directly, never handed out by a CRD method)
+	// has no chain at all, so RequiredOnly keeps nothing rather than falling
+	// back to the raw flag.
+	if got := paths(Fields(deepTree(t), FieldQuery{RequiredOnly: true})); len(got) != 0 {
+		t.Errorf("RequiredOnly on an unannotated tree = %v, want nothing", got)
+	}
+}
+
+// A chain-required branch with no chain-required leaves (selector) surfaces
+// through RequiredBranches; a required branch whose leaves already carry the
+// chain (config -> config.endpoint) does not — its leaves surface it.
+func TestRequiredBranchesSurfaceLeaflessRequiredSubtrees(t *testing.T) {
+	got := paths(RequiredBranches(chainTree(t)))
+	want := []string{"selector"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("RequiredBranches (-want +got):\n%s", diff)
+	}
+	rows := RequiredBranches(chainTree(t))
+	if len(rows) == 1 {
+		r := rows[0]
+		if !r.Required || !r.RequiredChain || r.Type != "object" || r.Depth != 0 {
+			t.Errorf("selector branch row = %+v, want required, chain-required, object, depth 0", r)
+		}
 	}
 }
 

@@ -6,23 +6,29 @@ import (
 	"github.com/koorikla/compositionfactory/internal/index"
 )
 
-// The required flag /api/fields serves for a native kind is what the palette
-// badges and the required_only filter run on; this test pins it at the HTTP
-// boundary against the vendored Deployment schema's own requiredness rather
-// than a hand-written field list. required_only=true must return exactly the
-// fields the full listing flags required — a strict minority of the tree
-// (the vendored v1.34.1 truth is 250 of 842) — with the schema's actual
-// requireds (containers[0].name, ports[0].containerPort) present and its
-// actual optionals (containers[0].image, spec.replicas) absent. A resolver
-// that inverts or defaults the flag flips the minority check and surfaces
-// image/replicas here, loudly.
-func TestNativeDeploymentRequiredOnlyServesTheSchemasRequireds(t *testing.T) {
+// fieldsResponse mirrors GET /api/kinds/{av}/{kind}/fields' body for these
+// tests, including the requiredBranches list handleKindFields serves.
+type fieldsResponse struct {
+	Fields           []index.Field `json:"fields"`
+	Total            int           `json:"total"`
+	RequiredBranches []index.Field `json:"requiredBranches"`
+}
+
+// Effective requiredness at the HTTP boundary, against the vendored
+// Deployment schema. The RAW flag marks 250 of 842 leaves required
+// (members of optional objects, EnvVar.name and friends) — noise for a
+// "what must I set" filter — while the two fields a user must actually set,
+// spec.selector and spec.template, are BRANCH nodes the leaf list
+// structurally drops. So: required_only=true must return exactly the
+// chain-true leaves (the vendored data proves there are none — every
+// required leaf sits under an unrequired ancestor, see
+// internal/schema/k8s/requiredchain_test.go), and requiredBranches must
+// carry exactly selector and template. The raw flag still travels on every
+// row for the badge, and stays a strict minority of the full listing.
+func TestNativeDeploymentRequiredOnlyServesEffectiveRequireds(t *testing.T) {
 	h := nativeTestHandler(t)
 
-	var all, req struct {
-		Fields []index.Field `json:"fields"`
-		Total  int           `json:"total"`
-	}
+	var all, req fieldsResponse
 	if code := getJSON(t, h, "/api/kinds/apps%2Fv1/Deployment/fields", &all); code != 200 {
 		t.Fatalf("GET fields: status %d", code)
 	}
@@ -33,47 +39,70 @@ func TestNativeDeploymentRequiredOnlyServesTheSchemasRequireds(t *testing.T) {
 		t.Fatal("Deployment served no fields at all")
 	}
 
-	// required_only must be exactly the required subset of the full listing.
-	wantRequired := map[string]bool{}
+	// required_only must be exactly the chain-required subset of the full
+	// listing — for the vendored Deployment, the empty set.
+	wantChain := map[string]bool{}
 	for _, f := range all.Fields {
-		if f.Required {
-			wantRequired[f.Path] = true
+		if f.RequiredChain {
+			wantChain[f.Path] = true
 		}
 	}
-	if len(req.Fields) != len(wantRequired) || req.Total != len(wantRequired) {
-		t.Errorf("required_only returned %d fields (total %d), want the %d the full listing flags required",
-			len(req.Fields), req.Total, len(wantRequired))
+	if len(wantChain) != 0 {
+		t.Errorf("full listing flags %d chain-required leaves, want 0 (the vendored data proves none)", len(wantChain))
 	}
-	got := map[string]bool{}
-	for _, f := range req.Fields {
-		if !f.Required {
-			t.Errorf("required_only leaked unrequired field %q", f.Path)
-		}
-		got[f.Path] = true
+	if len(req.Fields) != 0 || req.Total != 0 {
+		t.Errorf("required_only returned %d leaves (total %d), want 0: every raw-required Deployment leaf "+
+			"sits under an unrequired ancestor", len(req.Fields), req.Total)
 	}
 
-	// The vendored schema's requireds must be in; its optionals must not.
+	// The two fields a user must actually set surface as required branches —
+	// on BOTH responses, filtered by nothing.
+	for _, resp := range []struct {
+		name string
+		got  []index.Field
+	}{{"default listing", all.RequiredBranches}, {"required_only", req.RequiredBranches}} {
+		var paths []string
+		for _, b := range resp.got {
+			paths = append(paths, b.Path)
+		}
+		if len(paths) != 2 || paths[0] != "spec.selector" || paths[1] != "spec.template" {
+			t.Errorf("%s requiredBranches = %v, want exactly [spec.selector spec.template]", resp.name, paths)
+		}
+	}
+
+	// The raw flag is untouched by all of this: the schema's actual
+	// requireds still carry it, its actual optionals still do not, and raw
+	// requiredness stays a strict minority of the tree (~30% for the
+	// vendored v1.34.1; an inversion lands at ~70%).
+	raw := map[string]bool{}
+	rawCount := 0
+	for _, f := range all.Fields {
+		raw[f.Path] = f.Required
+		if f.Required {
+			rawCount++
+		}
+	}
 	for _, want := range []string{
 		"spec.template.spec.containers[0].name",
 		"spec.template.spec.containers[0].ports[0].containerPort",
 	} {
-		if !got[want] {
-			t.Errorf("required_only is missing %q, which the vendored schema requires", want)
+		if !raw[want] {
+			t.Errorf("raw required flag missing on %q, which the vendored schema requires", want)
 		}
 	}
 	for _, absent := range []string{
 		"spec.template.spec.containers[0].image",
 		"spec.replicas",
 	} {
-		if got[absent] {
-			t.Errorf("required_only includes %q, which the vendored schema does NOT require", absent)
+		if raw[absent] {
+			t.Errorf("raw required flag set on %q, which the vendored schema does NOT require", absent)
 		}
 	}
-
-	// Requiredness stays a strict minority of the tree (~30% for the
-	// vendored v1.34.1 Deployment; an inversion lands at ~70%).
-	if req.Total*2 >= all.Total {
-		t.Errorf("required_only total %d is at least half of %d fields — the required flag looks inverted or defaulted",
-			req.Total, all.Total)
+	if rawCount == 0 {
+		t.Error("no raw-required leaves at all — the vendored required arrays are being dropped")
+	}
+	if rawCount*2 >= all.Total {
+		t.Errorf("%d of %d leaves carry the raw required flag (>= half) — it looks inverted or defaulted",
+			rawCount, all.Total)
 	}
 }

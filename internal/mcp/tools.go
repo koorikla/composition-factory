@@ -238,7 +238,7 @@ type kindFieldsInput struct {
 	Prefix       string `json:"prefix,omitempty" jsonschema:"Only fields under this dotted path prefix (e.g. template.spec). Omit for the whole tree."`
 	MaxDepth     int    `json:"max_depth,omitempty" jsonschema:"Only fields at most this deep; a top-level field has depth 0, so max_depth:1 returns depths 0 and 1. Omit or 0 for unlimited."`
 	Search       string `json:"search,omitempty" jsonschema:"Case-insensitive substring matched against each field's path and description."`
-	RequiredOnly bool   `json:"required_only,omitempty" jsonschema:"Only fields the provider schema marks required."`
+	RequiredOnly bool   `json:"required_only,omitempty" jsonschema:"Only effectively required fields: required along their whole ancestor chain, not merely required within an optional parent object. The response's requiredBranches list carries required subtrees with no such leaf (e.g. a Deployment's spec.selector and spec.template)."`
 	Limit        int    `json:"limit,omitempty" jsonschema:"Maximum number of fields to return; total still counts the whole filtered set. Omit or 0 for unlimited."`
 }
 

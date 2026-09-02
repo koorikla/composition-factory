@@ -13,7 +13,13 @@ type Field struct {
 	Type        string `json:"type"` // string number integer boolean object array map
 	Description string `json:"description"`
 	Required    bool   `json:"required"`
-	Depth       int    `json:"depth"` // 0 for a top-level field
+	// RequiredChain is effective requiredness: the field's own Required flag
+	// AND every ancestor's, per schema.Node.RequiredChain. Required stays the
+	// RAW schema flag (EnvVar.name is raw-required but only binds once an
+	// optional env entry exists); RequiredChain is what a "must actually set
+	// this" filter runs on. False on trees the CRD methods did not annotate.
+	RequiredChain bool `json:"requiredChain"`
+	Depth         int  `json:"depth"` // 0 for a top-level field
 }
 
 // FieldQuery narrows the field list Fields returns. The zero value returns
@@ -24,7 +30,7 @@ type Field struct {
 // which options are set together: Prefix, then MaxDepth, then RequiredOnly,
 // then Search, then Limit.
 type FieldQuery struct {
-	RequiredOnly bool
+	RequiredOnly bool   // keep only chain-required leaves (Field.RequiredChain)
 	MaxDepth     int    // 0 means unlimited
 	Prefix       string // "" for the whole tree; e.g. "template.spec" to expand one subtree
 	Search       string // case-insensitive substring over path and description
@@ -41,10 +47,11 @@ func Fields(nodes []*schema.Node, q FieldQuery) []Field {
 	fields := make([]Field, 0, len(leaves))
 	for _, l := range leaves {
 		fields = append(fields, Field{
-			Path:        l.Path,
-			Type:        l.Node.Type,
-			Description: l.Node.Description,
-			Required:    l.Node.Required,
+			Path:          l.Path,
+			Type:          l.Node.Type,
+			Description:   l.Node.Description,
+			Required:      l.Node.Required,
+			RequiredChain: l.Node.RequiredChain,
 			// The path has no separator before a top-level field's name, one
 			// before a field one level down, and so on; an array index is
 			// part of its own segment rather than adding a separator, so
@@ -98,14 +105,39 @@ func filterMaxDepth(fields []Field, maxDepth int) []Field {
 	return out
 }
 
-// filterRequiredOnly keeps only fields whose own leaf is required — a
-// required leaf, not a leaf that merely descends from a required branch.
+// filterRequiredOnly keeps only chain-required fields — fields the user must
+// actually set, not every leaf carrying the raw required flag. The raw flag
+// marks members required WITHIN their parent object even when that parent is
+// optional (EnvVar.name on ~30% of a Deployment's leaves); filtering on it
+// made "required only" noise. See Field.RequiredChain.
 func filterRequiredOnly(fields []Field) []Field {
 	out := make([]Field, 0, len(fields))
 	for _, f := range fields {
-		if f.Required {
+		if f.RequiredChain {
 			out = append(out, f)
 		}
+	}
+	return out
+}
+
+// RequiredBranches converts schema.RequiredBranches' rows — chain-required
+// branch nodes with no chain-true leaves beneath, the required subtrees a
+// leaf-only listing drops (Deployment's spec.selector and spec.template) —
+// into Field rows on the same path/depth grammar the leaf listing uses. The
+// rows are branches, not settable leaves, which is why they travel in their
+// own list rather than inside the leaf listing (see handleKindFields).
+func RequiredBranches(nodes []*schema.Node) []Field {
+	branches := schema.RequiredBranches(nodes, "")
+	out := make([]Field, 0, len(branches))
+	for _, b := range branches {
+		out = append(out, Field{
+			Path:          b.Path,
+			Type:          b.Node.Type,
+			Description:   b.Node.Description,
+			Required:      b.Node.Required,
+			RequiredChain: b.Node.RequiredChain,
+			Depth:         strings.Count(b.Path, "."),
+		})
 	}
 	return out
 }

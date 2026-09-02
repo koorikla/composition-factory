@@ -137,6 +137,33 @@ func TestFieldsHonoursRequiredOnly(t *testing.T) {
 	}
 }
 
+// The managed Queue's requireds are all ROOT-level (forProvider requires
+// region and nothing deeper), so effective requiredness changes NOTHING for
+// it: requiredChain == required on every row, required_only still returns
+// exactly region, and there are no required branches. This is the
+// no-regression half of the effective-requiredness change — the native
+// Deployment half lives in native_required_test.go.
+func TestQueueChainEqualsRawAndHasNoRequiredBranches(t *testing.T) {
+	esc := url.PathEscape("sqs.aws.m.upbound.io/v1beta1")
+	h := testHandler(t)
+	var all fieldsResponse
+	if code := getJSON(t, h, "/api/kinds/"+esc+"/Queue/fields", &all); code != 200 {
+		t.Fatalf("status %d", code)
+	}
+	if len(all.Fields) == 0 {
+		t.Fatal("Queue served no fields")
+	}
+	for _, f := range all.Fields {
+		if f.RequiredChain != f.Required {
+			t.Errorf("%s: requiredChain=%v != required=%v — the Queue's requireds are root-level, "+
+				"so the chain must equal the raw flag on every row", f.Path, f.RequiredChain, f.Required)
+		}
+	}
+	if len(all.RequiredBranches) != 0 {
+		t.Errorf("requiredBranches = %+v, want none for the Queue", all.RequiredBranches)
+	}
+}
+
 func TestFieldsRejectsBadQueryParamsLoudly(t *testing.T) {
 	esc := url.PathEscape("sqs.aws.m.upbound.io/v1beta1")
 	h := testHandler(t)
