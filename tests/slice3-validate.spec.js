@@ -9,12 +9,14 @@ test.beforeEach(async ({ request }) => {
 })
 
 test('Validate renders the composition for real and reports the resource count', async ({ page }) => {
+  test.setTimeout(90000)
   await page.goto('/')
   await page.click('#validateBtn')
   await expect(page.locator('#valid')).toContainText(/render ok · \d+ resources|render check unavailable/, { timeout: 90000 })
 })
 
 test('a template that dies under missingkey=error surfaces the render error verbatim', async ({ page, request }) => {
+  test.setTimeout(90000)
   const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
   doc.spec.resources.find(r => r.name === 'dead-letter').fields.tags =
     { raw: '{purpose: {{ $spec.doesNotExist | quote }}}' }

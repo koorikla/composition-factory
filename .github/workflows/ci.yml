@@ -40,7 +40,10 @@ jobs:
       - name: Install crossplane CLI
         run: |
           curl -sL https://raw.githubusercontent.com/crossplane/crossplane/main/install.sh | sh
-          sudo mv crossplane /usr/local/bin/
+      - name: Pre-pull function images
+        run: |
+          docker pull xpkg.upbound.io/crossplane-contrib/function-go-templating:v0.12.0 || true
+          docker pull xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0 || true
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: make test-e2e

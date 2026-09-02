@@ -23,6 +23,7 @@ test('building a condition persists the canonical grammar and badges the card', 
 })
 
 test('the render check counts the conditional resource in and out', async ({ page, request }) => {
+  test.setTimeout(90000)
   await page.goto('/')
   await page.click('.node[data-id="dead-letter"] .node-h')
   await page.selectOption('#insp select[data-when-param]', 'region')
