@@ -1620,9 +1620,9 @@ function onDrop(e) {
   S.replaceDoc(function (next) {
     // sources is the dependency manifest the server loads providers from at
     // startup — a dropped kind's provider must be declared there or generate
-    // cannot load its CRDs after a restart. Native kinds ("k8s") are not
-    // provider packages and never appear in sources.
-    if (entry.provider && entry.provider !== "k8s") {
+    // cannot load its CRDs after a restart. Native kinds ("k8s") and live cluster
+    // kinds ("cluster") are not provider packages and never appear in sources.
+    if (entry.provider && entry.provider !== "k8s" && entry.provider !== "cluster") {
       next.spec.sources = next.spec.sources || [];
       // a .yaml/.yml provider is a scanned crds: source (a CRD manifest
       // file), declared under crds:, never as a provider package

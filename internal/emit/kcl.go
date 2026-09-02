@@ -18,22 +18,6 @@ var (
 
 // kclTemplateBody generates idiomatic KCL code for function-kcl (krm.kcl.dev/v1alpha1).
 func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) {
-	if len(b.Spec.Conventions) > 0 {
-		return "", fmt.Errorf("spec.conventions: engine %q does not support template: conventions", b.Engine())
-	}
-	for _, r := range b.Spec.Resources {
-		for k, f := range r.Fields {
-			if f.Template != "" {
-				return "", fmt.Errorf("resource %q field %q: engine %q does not support template: fields", r.Name, k, b.Engine())
-			}
-		}
-		for k, a := range r.Annotations {
-			if a.Template != "" {
-				return "", fmt.Errorf("resource %q annotation %q: engine %q does not support template: fields", r.Name, k, b.Engine())
-			}
-		}
-	}
-
 	x := b.Spec.XRD
 	wantNamespaced := x.Scope == "Namespaced"
 

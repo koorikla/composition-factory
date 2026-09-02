@@ -717,7 +717,8 @@ func (b *Blueprint) Validate() error {
 					break
 				}
 			}
-			if !crdsSource && !providerRefRE.MatchString(r.Provider) {
+			isSpecial := r.Provider == NativeProvider || r.Provider == "cluster" || crdsSource
+			if !isSpecial && !providerRefRE.MatchString(r.Provider) {
 				return fmt.Errorf("spec.resources[%d].provider: %q is not a valid provider reference "+
 					"(e.g. ghcr.io/org/provider-name:v1.2.3, or ...@sha256:<digest>)", i, r.Provider)
 			}
@@ -726,8 +727,8 @@ func (b *Blueprint) Validate() error {
 			// provider nobody declared works on a warm server (the runtime
 			// add extended the index) and then fails hours later, after a
 			// restart, as "kind not found in any cached provider". Native
-			// kinds are not provider packages and are exempt.
-			if r.Provider != NativeProvider && !crdsSource {
+			// and cluster kinds are exempt.
+			if !isSpecial {
 				declared := false
 				for _, src := range b.Spec.Sources {
 					if src.Provider == r.Provider {
