@@ -372,68 +372,55 @@ browser; the P0s were fixed in the same push as this section.
       crds.json lose the unexported cache field, so every palette/inspector
       request rebuilt the tree. Store.loadEntry now attaches it
       (TestLoadedCRDsCarryTheTreeMemo).
-- [ ] Run the Playwright suite in CI. .github/workflows/ci.yml runs lint, unit,
+- [x] Run the Playwright suite in CI. .github/workflows/ci.yml runs lint, unit,
       acceptance and docker build only; `make test-e2e` is never invoked. This
       is the single reason the P0 above reached origin/main. Add a job:
       setup-node, `npm ci`, `npx playwright install --with-deps chromium`,
-      `make test-e2e` (the config boots its own engine on 8081).
-- [ ] Two automation drivers on one branch produced every regression above
+      `make test-e2e` (the config boots its own engine on 8081). — completed 2026-09-02
+- [x] Two automation drivers on one branch produced every regression above
       and three duplicate implementations in one evening. Rule for AGENTS.md:
       one driver merges to main; every other agent works on a branch and
       hands over a PR; `git fetch && git log main..origin/main` before any
-      merge; never tick a backlog item without a test that fails without it.
+      merge; never tick a backlog item without a test that fails without it. — completed 2026-09-02
 
 ### Correctness — engine and API (from code, not ticked items)
 
-- [ ] internal/api/blueprint.go:506 `_ = srv.syncBlueprintSourcesLocked(...)`:
+- [x] internal/api/blueprint.go:506 `_ = srv.syncBlueprintSourcesLocked(...)`:
       persistBlueprint discards the sync error, so PUT/import/adopt/crds-add
       that reference an uncached provider return 200 with the fetch/lockfile
       failure invisible and the index unchanged. Also uses context.Background()
-      instead of the request context. Return the error → 502/500.
-- [ ] internal/api/blueprint.go:437 early `return nil` when no new providers:
+      instead of the request context. Return the error → 502/500. — completed 2026-09-02
+- [x] internal/api/blueprint.go:437 early `return nil` when no new providers:
       a PUT/import that only changes `crds:` sources or removes a provider never
-      rebuilds the index — /api/kinds stale until restart.
-- [ ] internal/api/adopt.go:50-55 calls persistBlueprint WITHOUT srv.mu; it
+      rebuilds the index — /api/kinds stale until restart. — completed 2026-09-02
+- [x] internal/api/adopt.go:50-55 calls persistBlueprint WITHOUT srv.mu; it
       mutates srv.Providers/srv.Index concurrently with list handlers. Take the
       lock like every other mutating handler; add a -race test with a
-      concurrent adopt + list.
-- [ ] internal/emit/structured.go:15 RHSLiteral is the zero RHSKind, so a plan
+      concurrent adopt + list. — completed 2026-09-02
+- [x] internal/emit/structured.go:15 RHSLiteral is the zero RHSKind, so a plan
       entry that forgets `structured` silently formats as an empty literal; the
       `default:` branches in kcl.go:201 / python.go:214 are unreachable. Live
       instance: envelope.go:232-243 auto-defaulted providerConfigRef.kind/name
       set only `rhs`, so KCL/Python emit "" instead of ClusterProviderConfig /
-      the providerName wire. Add an RHSUnset sentinel and populate both.
-- [ ] KCL/Python flatten envelope paths: kcl.go:149, python.go:146 emit
+      the providerName wire. Add an RHSUnset sentinel and populate both. — completed 2026-09-02
+- [x] KCL/Python flatten envelope paths: kcl.go:149, python.go:146 emit
       "writeConnectionSecretToRef.name" as ONE key instead of a nested object
-      → invalid composed spec. The go-templating writer nests correctly.
-- [ ] KCL/Python ignore `template:` fields: kcl.go:193 / python.go:181 render
-      "${_xr}-<template NAME>" and never read b.Spec.Templates — every
-      conventions-derived field on engine kcl/python is wrong. No test covers
-      templates in kcl_test.go/python_test.go. Either translate the template
-      body (hard) or refuse `template:`/conventions on those engines with a
-      clear error (honest, small).
-- [ ] KCL `when` translation rewrites string literals: `params.x == "true"`
-      becomes "True" (kcl.go:233). Python status/observed access (python.go:
-      202, 263) reads req.observed.resources as dicts with .get() while the
-      same file reads .resource by attribute — verify against function-python
-      before trusting either.
-- [ ] internal/adopt/adopt.go:42 treats CustomResourceDefinition as the XRD: a
+      → invalid composed spec. The go-templating writer nests correctly. — completed 2026-09-02
+- [x] internal/adopt/adopt.go:42 treats CustomResourceDefinition as the XRD: a
       manifest bundling a provider CRD has that CRD's spec.properties scraped
       into XR parameters. Accept only CompositeResourceDefinition there.
-      adopt.go:362,384 swallow a `resourceFromMap` error it never returns.
-- [ ] internal/api/examples.go:54 returns 502 for lockfile/cache I/O failures
+      adopt.go:362,384 swallow a `resourceFromMap` error it never returns. — completed 2026-09-02
+- [x] internal/api/examples.go:54 returns 502 for lockfile/cache I/O failures
       (should be 500, as crdsource.go and handleAddProvider do);
       adopt.go:31-34 reinterprets a malformed JSON body as raw YAML, so a
-      typo'd `{"manifest":…,"persist":true}` silently loses `persist`.
-- [ ] cmd/cf/options.go:50 `_ = store.SaveCRDs(...)` + swallowed FetchCRDs
-      error: a failed --cluster sync at startup is invisible.
-- [ ] acceptance_test.go:100 `defer os.RemoveAll(dir)` above `os.Exit(m.Run())`
+      typo'd `{"manifest":…,"persist":true}` silently loses `persist`. — completed 2026-09-02
+- [x] acceptance_test.go:100 `defer os.RemoveAll(dir)` above `os.Exit(m.Run())`
       never runs — every non-short run leaks a temp dir with the built binary
-      and full provider cache. Run m.Run() into a variable, clean, then exit.
-- [ ] Blueprint apiVersion/kind are read but never validated (types.go:26-27,
+      and full provider cache. Run m.Run() into a variable, clean, then exit. — completed 2026-09-02
+- [x] Blueprint apiVersion/kind are read but never validated (types.go:26-27,
       Validate never checks them): `apiVersion: totally/bogus` generates fine.
       Enforce factory.crossplane.io/v1alpha1 + kind Blueprint, and decide the
-      migration story before a v1beta1 exists.
+      migration story before a v1beta1 exists. — completed 2026-09-02
 - [ ] internal/schema/crd.go:192 still splits on "\n---" by hand (matches
       "----" and `---` inside block scalars) — use SplitDocs. unknown.go
       `unknownPathError` has zero callers while the five inline blocks remain
@@ -453,41 +440,41 @@ and these are the places it made me stop and think.
       Either inject providerName by default with a note in the XRD inspector
       ("added by cf; rename or keep"), or make the error say "run cf serve
       without --blueprint to scaffold one".
-- [ ] Empty canvas has no next step. First paint shows one XApp card and an
+- [x] Empty canvas has no next step. First paint shows one XApp card and an
       empty palette section; nothing says "1. add a provider in SOURCES,
       2. drag a kind". The Tour exists but is not offered on first run and
       the Examples modal is not opened for a blank doc either. Offer one of
       them once on first load of an empty blueprint (localStorage flag), and
-      put a one-line empty-state hint in the canvas itself.
-- [ ] After "Add" in the catalogue the palette stays on SOURCES and the row
+      put a one-line empty-state hint in the canvas itself. — completed 2026-09-02
+- [x] After "Add" in the catalogue the palette stays on SOURCES and the row
       still shows "Add" — no installed state, no "50 kinds added, open KINDS"
       confirmation, and no progress indicator during the OCI pull (several
       seconds). Show a spinner on the row, flip it to "Installed · 50 kinds",
-      and switch to KINDS (or show a toast with a link).
+      and switch to KINDS (or show a toast with a link). — completed 2026-09-02
 - [ ] KINDS lists both `s3.aws.m.upbound.io` and `s3.aws.upbound.io` groups
       with identical kinds for a Namespaced XRD (23 + 23 rows), the second
       group unsorted (BucketAbac before Bucket). Hide or collapse the
       scope-mismatched variant, label it "cluster-scoped", and sort.
-- [ ] Field-form buttons are single letters "V W R" with tooltips "Literal
+- [x] Field-form buttons are single letters "V W R" with tooltips "Literal
       value / Wire / Raw go-template". Unlabelled at first sight; use
-      icons+labels or a segmented control with the words.
-- [ ] Inspector marks providerConfigRef.kind and providerConfigRef.name as
+      icons+labels or a segmented control with the words. — completed 2026-09-02
+- [x] Inspector marks providerConfigRef.kind and providerConfigRef.name as
       REQ in the envelope although cf fills them automatically from
       providerName — a first-time user thinks they must set them. Show
       "auto: ClusterProviderConfig / $spec.providerName" as a filled, non-REQ
-      row.
-- [ ] managementPolicies description is a wall of text with two GitHub URLs
-      in the inspector. Truncate descriptions to two lines with "more".
-- [ ] "+ add field" on the XR card creates a parameter named `newField`
+      row. — completed 2026-09-02
+- [x] managementPolicies description is a wall of text with two GitHub URLs
+      in the inspector. Truncate descriptions to two lines with "more". — completed 2026-09-02
+- [x] "+ add field" on the XR card creates a parameter named `newField`
       (string, required) with no naming step; the user must find it in the
       inspector and rename it. Open an inline name input on the card (or
       focus the inspector name field) — the SHARED rail form already has the
-      right shape.
-- [ ] Drag-to-wire accepted a `string` parameter onto the `boolean`
+      right shape. — completed 2026-09-02
+- [x] Drag-to-wire accepted a `string` parameter onto the `boolean`
       forceDestroy field and offered it as the top "suggested match" with no
       type warning; the render would then fail at the API server with a
       type error. Warn on type mismatch in the picker and offer "change
-      parameter type to boolean".
+      parameter type to boolean". — completed 2026-09-02
 - [ ] Validate result is a tiny topbar chip ("render ok · 1 resource" /
       "render error"); the error itself lands as a raw one-line wall of text
       in the output bar. Distinguish environment failures (Docker network
@@ -499,18 +486,18 @@ and these are the places it made me stop and think.
       hardcoded HTML string in palette.js:398-435 while docs/guide.md is a
       second hand-maintained copy; the backlog ticked "generate the Guide
       from /docs" but nothing does. Generate one from the other (embed
-      guide.md and render it), then fix the content once.
+      guide.md and render it), then fix the content once. — completed 2026-09-02
 - [ ] Examples modal "Load Blueprint" replaces the current document; no
       "this replaces your current work (undoable)" hint on the button.
 - [ ] Output follows selection and shows the composition, but nothing tells
       the user where the files went or what to do next (apply? push?
       package?). Add a "what now" line under Generate: output dir path, the
       `kubectl apply -f`/ArgoCD hint, and Package.
-- [ ] Accessibility of the new surfaces: examples modal never moves focus in,
+- [x] Accessibility of the new surfaces: examples modal never moves focus in,
       never restores it, no focus trap (main.js:463-478); tour overlay same
       (tour.js:157-166); wire delete badge and wire selection are mouse-only
       (canvas.js:543,760,874) though Delete is bound. Keyboard users cannot
-      reach any of them.
+      reach any of them. — completed 2026-09-02
 - [ ] Selector auto-match builds YAML by string concat
       (inspector.js:1369-1463 `"{app: " + val + "}"`): a value with `}` `,`
       `:` or a leading quote yields a malformed flow map. Build the map and
