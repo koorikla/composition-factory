@@ -110,14 +110,11 @@ function schemaFor(resource) {
 
 /* ---------- default layout ---------- */
 
-function ensurePositions(d) {
-  // dependency-aware defaults: layers left→right (a status consumer cannot
-  // exist before its source), stacked without overlap. Measured card sizes
-  // refine placement on the post-paint pass in render().
-  const resources = d.spec && d.spec.resources || [];
-  const anyUnplaced = !S.getPosition(XR_ID) ||
-    resources.some(function (r) { return !S.getPosition(r.name); });
-  if (anyUnplaced) applyDependencyLayout(true);
+function ensurePositions() {
+  // Placement is measurement-driven and happens POST-paint (render()'s
+  // layout pass): placing here with estimated sizes stacked real 232px
+  // cards on a 160px guess — overlapping cards whose covered headers ate
+  // clicks. The pre-paint frame is never displayed (same JS turn).
 }
 
 /* ---------- rendering ---------- */
@@ -355,6 +352,9 @@ function dependencyLayers(d) {
   return layers;
 }
 
+const autoPlaced = new Set(); // cards the layout owns until the user drags them
+let lastLayoutSig = "";       // measured-size signature; re-lay only on change
+
 function applyDependencyLayout(onlyUnplaced) {
   const d = doc();
   if (!d) return;
@@ -380,7 +380,14 @@ function applyDependencyLayout(onlyUnplaced) {
     let y = Y0;
     let maxW = 0;
     byLayer[L].forEach(function (id) {
-      if (onlyUnplaced && S.getPosition(id)) { maxW = Math.max(maxW, width(id)); return; }
+      if (onlyUnplaced && S.getPosition(id) && !autoPlaced.has(id)) {
+        // user-owned card: leave it where the user put it, but RESERVE its
+        // slot in this column so auto-placed siblings never stack into it
+        y += height(id) + GY;
+        maxW = Math.max(maxW, width(id));
+        return;
+      }
+      autoPlaced.add(id);
       S.setPosition(id, { x: x, y: y });
       y += height(id) + GY;
       maxW = Math.max(maxW, width(id));
@@ -424,7 +431,17 @@ function render() {
   });
   canvasEl.innerHTML = h;
   // measured layout pass for cards that have no stored position
-  const anyUnplaced = (d.spec.resources || []).some(function (r) { return !S.getPosition(r.name); }) || !S.getPosition(XR_ID);
+  const freshCards = (d.spec.resources || []).some(function (r) { return !S.getPosition(r.name); }) ||
+    !S.getPosition(XR_ID);
+  let sig = "";
+  if (freshCards || autoPlaced.size > 0) {
+    canvasEl.querySelectorAll(".node").forEach(function (el) {
+      const id = el.getAttribute("data-id");
+      if (freshCards || autoPlaced.has(id)) sig += id + ":" + el.offsetWidth + "x" + el.offsetHeight + ";";
+    });
+  }
+  const anyUnplaced = freshCards || (autoPlaced.size > 0 && sig !== lastLayoutSig);
+  lastLayoutSig = sig;
   if (anyUnplaced) {
     applyDependencyLayout(true);
     canvasEl.querySelectorAll(".node").forEach(function (el) {
@@ -1293,6 +1310,9 @@ function onPointerDown(e) {
     document.removeEventListener("pointerup", up);
     document.removeEventListener("pointercancel", up);
     S.setPosition(name, { x: lx, y: ly }); // client-side only, recorded on release
+    if (Math.abs(lx - start.x) > 3 || Math.abs(ly - start.y) > 3) {
+      autoPlaced.delete(name);             // a real drag: the user owns it now
+    }
     drawWires();
     gestureEnd();
   }
@@ -1438,7 +1458,22 @@ export function init(rootEl, deps) {
     }).catch(function () { render(); });
   }
 
-  S.subscribe("doc", reloadKindsAndRender);
+  // The kinds list only changes when the doc's SOURCES change (a provider
+  // added/removed). Refetching on every doc emit made each field edit spawn
+  // a cascade of async renders — full DOM rebuilds that ate the user's next
+  // clicks once several providers were loaded.
+  let lastSourcesSig = "";
+  S.subscribe("doc", function () {
+    const d = doc();
+    const sig = ((d && d.spec && d.spec.sources) || [])
+      .map(function (s) { return s.provider; }).join("|");
+    if (sig !== lastSourcesSig) {
+      lastSourcesSig = sig;
+      reloadKindsAndRender();
+    } else {
+      render();
+    }
+  });
   // Selection must never rebuild the card DOM: a full innerHTML rebuild
   // destroys the element a rapid second click is about to land on ("can't
   // click anything" at human speed). Toggle classes in place instead.

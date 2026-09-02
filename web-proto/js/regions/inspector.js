@@ -596,7 +596,9 @@ async function renderResource(res) {
         '</div>';
     }
   }
+  var __snap = snapshotFocusedEdit();
   box.innerHTML = h;
+  restoreFocusedEdit(__snap);
 }
 
 /* ---------------- rendering: XRD ---------------- */
@@ -709,31 +711,61 @@ function renderXRD() {
     '<button class="btn sm pri" id="addPipeStepBtn">+ Add step</button>' +
     '</div>';
 
+  var __snap = snapshotFocusedEdit();
   box.innerHTML = h;
+  restoreFocusedEdit(__snap);
 }
 
 /* ---------------- render dispatch ---------------- */
 
-var renderDeferredForEdit = false;
+/**
+ * Re-renders must never discard an in-progress edit: snapshot the focused
+ * control before innerHTML replacement and restore its identity, value,
+ * caret and focus afterwards (the palette's preserver pattern). Deferring
+ * renders instead proved too blunt — error warnbars must paint DURING
+ * editing.
+ */
+var lastIntentAt = 0; // pointer/keydown after a snapshot means the user moved on
+document.addEventListener("pointerdown", function () { lastIntentAt = Date.now(); }, true);
+
+function snapshotFocusedEdit() {
+  var ae = document.activeElement;
+  if (!ae || !box || !box.contains(ae)) return null;
+  if (ae.tagName !== "INPUT" && ae.tagName !== "TEXTAREA" && ae.tagName !== "SELECT") return null;
+  var key = null;
+  for (var i = 0; i < ae.attributes.length; i++) {
+    var a = ae.attributes[i];
+    if (a.name.indexOf("data-") === 0) { key = '[' + a.name + '="' + CSS.escape(a.value) + '"]'; break; }
+  }
+  if (!key) return null;
+  return {
+    sel: ae.tagName.toLowerCase() + key,
+    value: ae.value,
+    checked: ae.checked,
+    selStart: ae.selectionStart, selEnd: ae.selectionEnd,
+    at: Date.now(),
+  };
+}
+
+function restoreFocusedEdit(snap) {
+  if (!snap) return;
+  var el = box.querySelector(snap.sel);
+  if (!el) return;
+  if (el.type === "checkbox") el.checked = snap.checked;
+  else el.value = snap.value;
+  // Refocus only when the replacement itself killed focus — a pointerdown
+  // since the snapshot means the user deliberately moved on; stealing focus
+  // back would eat their click's consequences.
+  if (lastIntentAt <= snap.at) {
+    el.focus();
+    try {
+      if (snap.selStart !== null && el.setSelectionRange) el.setSelectionRange(snap.selStart, snap.selEnd);
+    } catch (_) { /* selects don't */ }
+  }
+}
 
 function render() {
   if (!box) return;
-  // Never replace the inspector's DOM out from under an active edit: the
-  // async re-render used to land mid-typing, discard the focused input and
-  // repaint the last-committed value — the "my change silently reverted"
-  // class. Defer until the edit ends.
-  var ae = document.activeElement;
-  if (ae && box.contains(ae) &&
-      (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) {
-    if (!renderDeferredForEdit) {
-      renderDeferredForEdit = true;
-      ae.addEventListener("blur", function () {
-        renderDeferredForEdit = false;
-        render();
-      }, { once: true });
-    }
-    return;
-  }
   renderToken++;
   var doc = store.state.doc;
   if (!doc) { box.innerHTML = '<div class="empty">No blueprint loaded.</div>'; return; }
