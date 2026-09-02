@@ -393,6 +393,17 @@ async function renderResource(res) {
     intParams.map(function (n) {
       var v = "params." + n;
       return '<option value="' + esc(v) + '"' + (res.forEach === v ? " selected" : "") + ">" + esc(v) + "</option>";
+    }).join("") +
+    Object.keys(otherStatusMap).sort().map(function (rn) {
+      // observed counts: integer/number status leaves of unlooped siblings —
+      // zero instances until the source reports (engine semantics)
+      return (otherStatusMap[rn] || []).filter(function (sf) {
+        return sf.type === "integer" || sf.type === "number";
+      }).map(function (sf) {
+        var v = "resources." + rn + ".status." + sf.path;
+        return '<option value="' + esc(v) + '"' + (res.forEach === v ? " selected" : "") + ">" +
+          esc(rn) + ".status." + esc(sf.path) + "</option>";
+      }).join("");
     }).join("") + "</select></div>" +
     (intParams.length ? "" : '<div class="g" style="padding:2px 0 0">declare an integer parameter to enable looping</div>') +
     "</div>";
