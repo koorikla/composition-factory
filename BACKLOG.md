@@ -136,7 +136,11 @@
       experience with topbar horizontal scrolling, 1-finger canvas touch pan &
       2-finger pinch zoom, responsive drawer overlays and backdrop dismissal.
       — completed 2026-09-02
-- [ ] Ansible provider support (user backlog 2026-09-02): explore converting
-      a runbook/role into a composition.
+- [x] Ansible provider support — exploration done (memo:
+      docs/research/2026-09-02-ansible-provider-support.md). Composing
+      AnsibleRun works today (provider-ansible is in the catalogue; templated
+      playbookInline carries XR params). Recommended follow-ups when demand
+      shows: an example/Guide section, then `cf adopt --ansible` lifting role
+      vars into XRD parameters. Task transpilation ruled out. — 2026-09-02
 - [ ] (back-backlog) Generate compositions in other languages — KCL, Python
       (function-kcl, function-python et al.) as alternative emitters.
