@@ -72,7 +72,7 @@
 - [x] Output drawer: providerconfigs tab(s) next to the DSL tabs, annotated with
       the picker state ("provider-aws-s3 — only Bucket enabled"), and an RBAC
       tab from GET /api/rbac. — user request 2026-09-02
-- [ ] Annotations authoring (engine, in flight): Resource.annotations map with
+- [x] Annotations authoring (engine shipped; IRSA opening demo live): Resource.annotations map with
       value/from/raw/template forms — IRSA (Role arn → ServiceAccount
       annotation) as the acceptance fixture; becomes the opening demo.
 - [ ] First-class map-entry wires in fields (annotations[key]-style bracket
@@ -80,3 +80,6 @@
 - [ ] Test isolation v2: the behavior suite gets its OWN cf serve (own port +
       scratch blueprint copy) so runs stop trampling the doc the user is
       looking at (today a suite run leaves test wires/doc state behind).
+- [ ] Palette required-count badges still show RAW counts (Deployment "250 req")
+      — adopt effective (chain+branch) counts; needs index.Kind or a cheap
+      per-kind fetch. — observed 2026-09-02
