@@ -216,6 +216,30 @@ function resourceCardHTML(d, r, sel) {
     });
   });
 
+  // Configured envelope fields (e.g. writeConnectionSecretToRef.name)
+  const envFields = r.envelope || {};
+  const envKeys = Object.keys(envFields).filter(function (p) { return formOf(envFields[p]); }).sort();
+  envKeys.forEach(function (p) {
+    const f = envFields[p];
+    const parsed = f && f.from ? parseFrom(f.from) : null;
+    let dot = "var(--rule-2)";
+    if (parsed) {
+      if (parsed.kind === "param") {
+        dot = fanOut(d, parsed.param) > 1 ? "var(--shared)" : COLORS.xrd;
+      } else if (parsed.kind === "status") {
+        dot = "var(--wire-status)";
+      }
+    }
+    h += portRow(r.name, "envelope." + p, {
+      dir: "in",
+      dotColor: dot,
+      req: false,
+      ty: "env",
+      label: "env." + shortPath(p),
+      title: r.name + ".envelope." + p + " (Crossplane envelope)",
+    });
+  });
+
   // Outgoing status wires from this resource
   const outStatusWires = listWires(d).filter(function (w) {
     return w.kind === "status" && w.srcResource === r.name;
@@ -235,8 +259,11 @@ function resourceCardHTML(d, r, sel) {
   });
   h += '</div>';
 
-  if (r.when || r.forEach) {
+  if (r.when || r.forEach || envKeys.length > 0) {
     h += '<div class="node-f">';
+    if (envKeys.length > 0) {
+      h += '<span class="pill" style="background:var(--wire-ref-soft);color:var(--wire-ref)" title="' + esc(envKeys.join(", ")) + '">envelope (' + envKeys.length + ')</span>';
+    }
     if (r.forEach) {
       const fe = typeof r.forEach === "string" ? r.forEach
         : (r.forEach && r.forEach.over) ? r.forEach.over : JSON.stringify(r.forEach);

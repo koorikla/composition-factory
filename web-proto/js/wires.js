@@ -40,25 +40,37 @@ export function listWires(doc) {
   const out = [];
   const resources = doc && doc.spec && doc.spec.resources || [];
   resources.forEach(function (r) {
-    const fields = r.fields || {};
-    Object.keys(fields).sort().forEach(function (path) {
-      const f = fields[path];
-      if (!f || typeof f.from !== "string") return;
-      const parsed = parseFrom(f.from);
-      if (!parsed) return;
-      if (parsed.kind === "param") {
-        out.push({ kind: "param", param: parsed.param, resource: r.name, path: path, from: f.from });
-      } else if (parsed.kind === "status") {
-        out.push({
-          kind: "status",
-          srcResource: parsed.resource,
-          srcPath: parsed.statusPath,
-          resource: r.name,
-          path: path,
-          from: f.from
-        });
-      }
-    });
+    const checkDict = function (dict, isEnv) {
+      if (!dict) return;
+      Object.keys(dict).sort().forEach(function (path) {
+        const f = dict[path];
+        if (!f || typeof f.from !== "string") return;
+        const parsed = parseFrom(f.from);
+        if (!parsed) return;
+        if (parsed.kind === "param") {
+          out.push({
+            kind: "param",
+            param: parsed.param,
+            resource: r.name,
+            path: isEnv ? ("envelope." + path) : path,
+            from: f.from,
+            isEnvelope: !!isEnv
+          });
+        } else if (parsed.kind === "status") {
+          out.push({
+            kind: "status",
+            srcResource: parsed.resource,
+            srcPath: parsed.statusPath,
+            resource: r.name,
+            path: isEnv ? ("envelope." + path) : path,
+            from: f.from,
+            isEnvelope: !!isEnv
+          });
+        }
+      });
+    };
+    checkDict(r.fields, false);
+    checkDict(r.envelope, true);
   });
   return out;
 }

@@ -64,6 +64,16 @@ function entryOf(res, path) {
   return { from: from, value: value, raw: raw };
 }
 
+function envelopeEntryOf(res, path) {
+  var f = res && res.envelope && res.envelope[path];
+  if (!f || typeof f !== "object") return null;
+  var from = typeof f.from === "string" ? f.from : "";
+  var value = typeof f.value === "string" ? f.value : "";
+  var raw = typeof f.raw === "string" ? f.raw : "";
+  if (!from && !value && !raw) return null;
+  return { from: from, value: value, raw: raw };
+}
+
 function docMode(entry) {
   if (!entry) return "v";
   if (entry.from) return "w";
@@ -155,20 +165,23 @@ function warnHtml() {
     : "";
 }
 
-function modeButtons(path, pressed) {
+function modeButtons(path, pressed, isEnv) {
   var titles = { v: "Literal value", w: "Wire from a parameter or resource status", r: "Raw go-template" };
+  var envAttr = isEnv ? ' data-env="1"' : "";
   return '<span class="modes">' + ["v", "w", "r"].map(function (x) {
-    return '<button data-m="' + x + '" data-path="' + esc(path) + '" aria-pressed="' +
+    return '<button' + envAttr + ' data-m="' + x + '" data-path="' + esc(path) + '" aria-pressed="' +
       (pressed === x) + '" title="' + titles[x] + '">' + x.toUpperCase() + "</button>";
   }).join("") + "</span>";
 }
 
-function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap) {
+function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap, isEnv) {
   var names = Object.keys(params).filter(function (n) {
     return compatible(params[n].type, fieldType);
   });
+  var wireAttr = isEnv ? 'data-env-wire="' : 'data-wire="';
+  var npKey = isEnv ? ("env:" + path) : path;
   var h = '<div class="bound"><span style="color:var(--faint)">&#8592;</span>' +
-    '<select class="tsel" data-wire="' + esc(path) + '" style="flex:1">' +
+    '<select class="tsel" ' + wireAttr + esc(path) + '" style="flex:1">' +
     '<option value="">wire to&#8230;</option>';
 
   if (names.length > 0) {
@@ -198,15 +211,15 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap)
   }
 
   h += '<option value="__new__">+ new XRD parameter&#8230;</option></select></div>';
-  if (pendingNewParam === path) {
+  if (pendingNewParam === npKey) {
     h += '<div class="frow" style="margin-top:4px;margin-bottom:0">' +
-      '<input class="tin" data-npname="' + esc(path) + '" placeholder="parameterName" aria-label="New parameter name">' +
-      '<select class="tsel" data-nptype="' + esc(path) + '" aria-label="New parameter type">' +
+      '<input class="tin" data-npname="' + esc(npKey) + '" placeholder="parameterName" aria-label="New parameter name">' +
+      '<select class="tsel" data-nptype="' + esc(npKey) + '" aria-label="New parameter type">' +
       PARAM_TYPES.map(function (t) {
         return "<option" + (t === suggestedParamType(fieldType) ? " selected" : "") + ">" + t + "</option>";
       }).join("") + "</select>" +
-      '<button class="btn sm" data-npok="' + esc(path) + '">Add</button>' +
-      '<button class="del" data-npcancel="' + esc(path) + '" title="Cancel">&#215;</button></div>';
+      '<button class="btn sm" data-npok="' + esc(npKey) + '">Add</button>' +
+      '<button class="del" data-npcancel="' + esc(npKey) + '" title="Cancel">&#215;</button></div>';
   }
   return h;
 }
@@ -224,7 +237,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
   var h = '<div class="fld' + (dm === "w" ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
     '<div class="fld-h"><span class="n">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
     (f.required ? '<span class="rq">req</span>' : "") +
-    modeButtons(f.path, m) +
+    modeButtons(f.path, m, false) +
     '</div><div class="fld-d">' + esc(f.description) + "</div>";
 
   if (m === "w") {
@@ -235,7 +248,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
         '<span class="src" style="color:' + wireCol + '">' + esc(entry.from) + "</span>" +
         '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
     } else {
-      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap);
+      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false);
     }
   } else if (m === "r") {
     h += '<textarea class="val raw" data-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
@@ -243,6 +256,42 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
   } else {
     h += '<input class="val" data-v="' + esc(f.path) + '" value="' + esc(dm === "v" ? entry.value : "") +
       '" placeholder="' + (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from output") + '">';
+  }
+  return h + "</div>";
+}
+
+function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
+  var entry = envelopeEntryOf(res, f.path);
+  var dm = docMode(entry);
+  var mKey = "env:" + f.path;
+  var m = uiMode[mKey] || dm;
+
+  if (filter === "set" && !entry) return "";
+
+  var wired = m === "w" && dm === "w" && !uiMode[mKey];
+  var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
+  var h = '<div class="fld' + (dm === "w" ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
+    '<div class="fld-h"><span class="n">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
+    (f.required ? '<span class="rq">req</span>' : "") +
+    modeButtons(f.path, m, true) +
+    '</div><div class="fld-d">' + esc(f.description) + "</div>";
+
+  if (m === "w") {
+    if (dm === "w" && !uiMode[mKey]) {
+      var wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
+      var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
+      h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
+        '<span class="src" style="color:' + wireCol + '">' + esc(entry.from) + "</span>" +
+        '<span class="x" role="button" tabindex="0" data-env-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
+    } else {
+      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, true);
+    }
+  } else if (m === "r") {
+    h += '<textarea class="val raw" data-env-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
+      esc(dm === "r" ? entry.raw : "") + "</textarea>";
+  } else {
+    h += '<input class="val" data-env-v="' + esc(f.path) + '" value="' + esc(dm === "v" ? entry.value : "") +
+      '" placeholder="' + (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from envelope") + '">';
   }
   return h + "</div>";
 }
@@ -312,6 +361,24 @@ async function renderResource(res) {
     var body = fields.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap); }).join("");
     h += body || '<div class="empty">No fields match this filter.</div>';
 
+    // Crossplane Envelope section (if this CRD defines envelope properties)
+    if (detail && detail.envelope && detail.envelope.length > 0) {
+      var envRows = detail.envelope.map(function (f) {
+        return envelopeFieldRow(res, f, params, otherResources, otherStatusMap);
+      }).join("");
+      if (envRows) {
+        var envSetCount = detail.envelope.filter(function (f) { return envelopeEntryOf(res, f.path); }).length;
+        h += '<div class="insp-sec" style="margin-top:14px;padding:8px 12px;border-top:1px solid var(--rule);background:var(--surface)">' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">' +
+          '<span style="font-size:11px;font-weight:600;color:var(--wire-ref);text-transform:uppercase;letter-spacing:0.5px">Crossplane Envelope</span>' +
+          (envSetCount > 0 ? '<span class="pill" style="background:var(--wire-ref-soft);color:var(--wire-ref);font-size:10px">' + envSetCount + ' configured</span>' : "") +
+          '</div>' +
+          '<div style="font-size:11px;color:var(--faint);margin-bottom:8px">Secrets, policies and metadata outside forProvider:</div>' +
+          envRows +
+          '</div>';
+      }
+    }
+
     // Status outputs section
     if (detail && detail.status && detail.status.length > 0) {
       h += '<div class="insp-sec" style="margin-top:14px;padding:8px 12px;border-top:1px solid var(--rule);background:var(--surface-2)">' +
@@ -347,9 +414,6 @@ function renderXRD() {
     '<div style="padding:7px 12px 3px"><span class="lbl">Parameters (' + names.length + ")</span></div>";
 
   function paramDetailRow(n, p) {
-    // The engine's rules, mirrored: object = free-form string map, no
-    // default/enum; boolean default is strictly true/false; enum is a
-    // string-only affordance; array is refused by Validate entirely.
     if (p.type === "object") {
       return '<div class="g" style="padding:2px 0 4px">free-form map (string values) \u2014 bind map fields like tags</div>';
     }
@@ -359,49 +423,51 @@ function renderXRD() {
         '<option value=""' + (!p.default ? " selected" : "") + ">no default</option>" +
         '<option' + (p.default === "true" ? " selected" : "") + ">true</option>" +
         '<option' + (p.default === "false" ? " selected" : "") + ">false</option></select>";
+    } else if (p.enum && p.enum.length) {
+      h += '<span class="g" style="flex:1">enum: ' + esc(p.enum.join(", ")) + "</span>";
     } else {
       h += '<input class="tin" data-pdef="' + esc(n) + '" value="' + esc(p.default || "") +
-        '" placeholder="default" aria-label="Default value"' +
-        (p.type === "integer" || p.type === "number" ? ' inputmode="numeric"' : "") + ">";
+        '" placeholder="default value" aria-label="Default value">';
     }
-    if (p.type === "string") {
-      h += '<input class="tin" data-pe="' + esc(n) + '" value="' + esc((p.enum || []).join(", ")) +
-        '" placeholder="enum values, comma-separated" aria-label="Enum values">';
-    }
-    return h + "</div>";
+    h += '<input class="tin" data-pe="' + esc(n) + '" value="' + esc((p.enum || []).join(",")) +
+      '" placeholder="enum,values" title="Comma-separated allowed values" aria-label="Enum values">' +
+      '<button class="del" data-pd="' + esc(n) + '" title="Delete parameter">&#215;</button></div>';
+    return h;
   }
 
   names.forEach(function (n) {
-    var p = params[n];
+    var p = params[n] || {};
     var fo = fanOut(doc, n);
-    h += '<div class="fld' + (fo > 0 ? " wired" : "") + '"><div class="frow">' +
-      '<input class="tin" data-pn="' + esc(n) + '" value="' + esc(n) + '" aria-label="Parameter name">' +
-      '<select class="tsel" data-pt="' + esc(n) + '" aria-label="Type">' +
-      PARAM_TYPES.map(function (ty) {
-        return "<option" + (ty === p.type ? " selected" : "") + ">" + ty + "</option>";
+    h += '<div class="fld"><div class="frow" style="margin-bottom:3px">' +
+      '<input class="tin bold" data-pn="' + esc(n) + '" value="' + esc(n) + '" aria-label="Parameter name">' +
+      '<select class="tsel" data-pt="' + esc(n) + '" aria-label="Parameter type">' +
+      PARAM_TYPES.map(function (t) {
+        return "<option" + (t === p.type ? " selected" : "") + ">" + t + "</option>";
       }).join("") + "</select>" +
-      '<label class="ck"><input type="checkbox" data-pr="' + esc(n) + '"' + (p.required ? " checked" : "") + ">req</label>" +
-      '<button class="del" data-pd="' + esc(n) + '" title="Delete parameter">&#215;</button></div>' +
-      paramDetailRow(n, p) +
-      (fo > 0 ? '<div class="xf">wired into ' + fo + " field" + (fo === 1 ? "" : "s") + "</div>" : "");
-    h += "</div>";
+      '<label class="g" style="display:inline-flex;align-items:center;gap:3px;font-size:11px">' +
+      '<input type="checkbox" data-pr="' + esc(n) + '"' + (p.required ? " checked" : "") + ">req</label>" +
+      '<span class="fan" title="Wired into ' + fo + ' field' + (fo === 1 ? "" : "s") + '">&#215;' + fo + "</span></div>" +
+      paramDetailRow(n, p) + "</div>";
   });
-
-  h += '<div style="padding:9px 12px"><button class="btn sm" id="addParamBtn">+ Add parameter</button></div>';
+  h += '<div style="padding:8px 12px">' +
+    '<button class="btn sm pri" id="addParamBtn">+ Add parameter</button></div>';
   box.innerHTML = h;
 }
 
 /* ---------------- render dispatch ---------------- */
 
 function render() {
-  if (!box) return;
   renderToken++;
-  var doc = store.state.doc, sel = store.state.selectedResource;
-  if (!doc) { box.innerHTML = warnHtml() + '<div class="empty">Loading&#8230;</div>'; return; }
-  if (!sel) { box.innerHTML = warnHtml() + '<div class="empty">Select a node.</div>'; return; }
-  if (sel === "xrd") { renderXRD(); return; }
+  if (!box) return;
+  var doc = store.state.doc;
+  if (!doc) { box.innerHTML = '<div class="empty">No blueprint loaded.</div>'; return; }
+  var sel = store.state.selectedResource;
+  if (!sel || sel === "xrd") { renderXRD(); return; }
   var res = selectedResource();
-  if (!res) { box.innerHTML = warnHtml() + '<div class="empty">Select a node.</div>'; return; }
+  if (!res) {
+    box.innerHTML = '<div class="empty">Resource "' + esc(sel) + '" not found in blueprint.</div>';
+    return;
+  }
   renderResource(res);
 }
 
@@ -417,6 +483,27 @@ function setField(path, form) {
           rs[i].fields = rs[i].fields || {};
           if (form === null) delete rs[i].fields[path];
           else rs[i].fields[path] = form;
+          return;
+        }
+      }
+    });
+  });
+}
+
+function setEnvelopeField(path, form) {
+  var sel = store.state.selectedResource;
+  return op(function () {
+    return store.replaceDoc(function (doc) {
+      var rs = doc.spec.resources || [];
+      for (var i = 0; i < rs.length; i++) {
+        if (rs[i].name === sel) {
+          rs[i].envelope = rs[i].envelope || {};
+          if (form === null) {
+            delete rs[i].envelope[path];
+            if (Object.keys(rs[i].envelope).length === 0) delete rs[i].envelope;
+          } else {
+            rs[i].envelope[path] = form;
+          }
           return;
         }
       }
@@ -459,21 +546,44 @@ async function commitValue(path, kind, text) {
   if (ok !== null) delete uiMode[path];
 }
 
+async function commitEnvelopeValue(path, kind, text) {
+  var res = selectedResource();
+  if (!res) return;
+  var entry = envelopeEntryOf(res, path);
+  if (entry && entry.from && kind === "value") {
+    if (!confirm('This envelope field is wired from "' + entry.from + '". Overwrite the wire with a literal value?')) {
+      render();
+      return;
+    }
+  }
+  var ok;
+  if (text === "") {
+    ok = await setEnvelopeField(path, null);
+  } else {
+    var form = { value: "", from: "", raw: "" };
+    form[kind] = text;
+    ok = await setEnvelopeField(path, form);
+  }
+  if (ok !== null) delete uiMode["env:" + path];
+}
+
 function onBoxClick(e) {
   var doc = store.state.doc;
   if (!doc) return;
 
   var mb = e.target.closest("button[data-m]");
   if (mb) {
+    var isEnv = mb.hasAttribute("data-env");
     var path = mb.getAttribute("data-path");
     var m = mb.getAttribute("data-m");
     var res = selectedResource();
-    var entry = res ? entryOf(res, path) : null;
+    var entry = isEnv ? (res ? envelopeEntryOf(res, path) : null) : (res ? entryOf(res, path) : null);
     if (entry && entry.from && (m === "v" || m === "r")) {
       if (!confirm('This field is wired from "' + entry.from + '". Switch modes and overwrite the wire?')) return;
     }
-    uiMode[path] = m;
-    if (m !== "w" && pendingNewParam === path) pendingNewParam = null;
+    var mKey = isEnv ? ("env:" + path) : path;
+    uiMode[mKey] = m;
+    if (m !== "w" && pendingNewParam === mKey) pendingNewParam = null;
     render();
     return;
   }
@@ -485,9 +595,18 @@ function onBoxClick(e) {
     return;
   }
 
+  var unEnv = e.target.closest("[data-env-unwire]");
+  if (unEnv) {
+    var pe = unEnv.getAttribute("data-env-unwire");
+    setEnvelopeField(pe, null).then(function (r) { if (r !== null) delete uiMode["env:" + pe]; });
+    return;
+  }
+
   var ok = e.target.closest("[data-npok]");
   if (ok) {
     var p2 = ok.getAttribute("data-npok");
+    var isEnv = p2.indexOf("env:") === 0;
+    var realPath = isEnv ? p2.slice(4) : p2;
     var nameEl = box.querySelector('[data-npname="' + CSS.escape(p2) + '"]');
     var typeEl = box.querySelector('[data-nptype="' + CSS.escape(p2) + '"]');
     var name = nameEl && nameEl.value.trim();
@@ -496,7 +615,10 @@ function onBoxClick(e) {
     op(function () { return store.addParameter(name, { type: type, required: false }); })
       .then(function (docAfter) {
         if (docAfter === null) return null;
-        return setField(p2, { from: "params." + name, value: "", raw: "" });
+        if (isEnv) {
+          return setEnvelopeField(realPath, { from: "params." + name, value: "", raw: "" });
+        }
+        return setField(realPath, { from: "params." + name, value: "", raw: "" });
       })
       .then(function (r) {
         if (r !== null) { pendingNewParam = null; delete uiMode[p2]; }
@@ -542,6 +664,8 @@ function onBoxChange(e) {
 
   if (t.hasAttribute("data-v")) { commitValue(t.getAttribute("data-v"), "value", t.value); return; }
   if (t.hasAttribute("data-raw")) { commitValue(t.getAttribute("data-raw"), "raw", t.value); return; }
+  if (t.hasAttribute("data-env-v")) { commitEnvelopeValue(t.getAttribute("data-env-v"), "value", t.value); return; }
+  if (t.hasAttribute("data-env-raw")) { commitEnvelopeValue(t.getAttribute("data-env-raw"), "raw", t.value); return; }
 
   if (t.hasAttribute("data-wire")) {
     var path = t.getAttribute("data-wire");
@@ -551,6 +675,17 @@ function onBoxChange(e) {
     var fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
     setField(path, { from: fromVal, value: "", raw: "" })
       .then(function (r) { if (r !== null) { delete uiMode[path]; pendingNewParam = null; } });
+    return;
+  }
+
+  if (t.hasAttribute("data-env-wire")) {
+    var path = t.getAttribute("data-env-wire");
+    var v = t.value;
+    if (v === "__new__") { pendingNewParam = "env:" + path; render(); return; }
+    if (!v) return;
+    var fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
+    setEnvelopeField(path, { from: fromVal, value: "", raw: "" })
+      .then(function (r) { if (r !== null) { delete uiMode["env:" + path]; pendingNewParam = null; } });
     return;
   }
 
