@@ -584,32 +584,40 @@ Memo: docs/research/2026-09-02-manifests-as-source-of-truth.md. Phase 0 is a mea
 Phases 1–3 are BLOCKED on that decision and on Kaur saying go. Automation drivers: do not start
 Phase 1 from this list.
 
-### Phase 0 — spike and measure (go/no-go, ~3 days, throwaway code allowed)
+### Phase 0 — spike against cf's own output (go/no-go, ~2 days, throwaway code allowed)
 
-- [ ] Build `internal/manifest` prototype: `text/template/parse` (SkipFuncCheck) + scalar-action
-      masking + `yaml.v3` line/column → a document model whose leaves carry byte ranges into the
-      original template; top-level `if`/`range`/`with`/`define`, key-position actions,
-      `setResourceNameAnnotation` lines and `toYaml|nindent` pipes become opaque spans.
-- [ ] Round-trip golden over every cf-emitted composition in testdata and internal/emit/testdata:
-      `patch(parse(x), nothing) == x` byte-exact; then one wire edit + one literal edit change only
-      the intended bytes (diff assert).
-- [ ] Corpus sample: run the parser over the go-templating corpus sample used in
-      docs/research/raw/cs-gotemplating-corpus.md; report % documents fully parsed, % with opaque
-      spans, % failed, and the top five failure constructs. Numbers go into the memo.
-- [ ] `kubectl get composition -o yaml` fixture (from the kind cluster): open, scrub the
-      server-side fields, edit one field, prove `crossplane composition render` equals the
-      original's render except for that field.
-- [ ] Decide layout storage: `.cf/layout.yaml` sidecar vs `cf.crossplane.io/layout` annotation on
-      the Composition (annotation is portable, sidecar keeps manifests pure). Decide XRD
-      canonicalisation policy on first save. Record both in the memo.
-- [ ] Decision meeting: go/no-go with the numbers against the gate in memo §6.
+Scope per Kaur: the reader parses the go-templating format cf emits — nothing else. Foreign
+templates open as an opaque card or not at all, as today.
+
+- [ ] Write the dialect down: one table of cf's emitted forms (prelude, define block, document
+      header + setResourceNameAnnotation, literal field, wire field, guarded optional field,
+      status-wire guard chain, forEach range, when if, envelope, annotations, FileSystem file
+      split) with the exact emitted text and the exact matcher for each. This table is the
+      "specified structure"; emitter and reader are both generated/checked from it so they
+      cannot drift (golden per form).
+- [ ] Build `internal/manifest` prototype: recognise the forms as blocks with byte ranges
+      (`text/template/parse` with SkipFuncCheck for positions, scalar-action masking + `yaml.v3`
+      line/column for keys); anything unrecognised inside the body is an opaque span.
+- [ ] Round-trip golden over every cf-emitted composition in testdata and
+      internal/emit/testdata: `patch(parse(x), nothing) == x` byte-exact; then one wire edit,
+      one literal edit and one added resource change only the intended bytes (diff assert).
+- [ ] Preservation fixtures: a hand-added label, an extra pipeline step, a hand-added
+      `{{ range }}` block and a comment inside the template survive three open-edit-save cycles
+      byte-for-byte.
+- [ ] `kubectl get composition -o yaml` fixture of a cf-emitted composition (from the kind
+      cluster): open, scrub server-side fields, edit one field, prove `crossplane composition
+      render` equals the original's render except for that field.
+- [ ] Decide layout storage (`.cf/layout.yaml` sidecar vs annotation) and XRD first-save
+      canonicalisation policy; record in the memo.
+- [ ] Decision: go/no-go against memo §6 with the goldens' results.
 
 ### Phase 1 — cf-dialect round-trip (blocked on Phase 0 go)
 
 - [ ] Simplify cf's own emitted template so a human can edit it in place: replace the ten-clause
       status-wire guard chain with a `define "cf.observed"` helper (or `dig`) that stays
-      `missingkey=error`-safe; prove by render on the IRSA and foreach-status fixtures. Keep
-      byte-determinism goldens.
+      `missingkey=error`-safe; prove by render on the IRSA and foreach-status fixtures. The
+      reader must accept both the old and the new chain for one release (migration), then only
+      the new. Keep byte-determinism goldens.
 - [ ] Specified structure = Configuration source tree: crossplane.yaml (sources), apis/<xr>/
       definition.yaml + composition.yaml, .cf/layout.yaml, .cf.lock. `cf package` and
       `crossplane xpkg build` consume it unchanged.
@@ -617,9 +625,9 @@ Phase 1 from this list.
       dereference; XRD default vs template default drift; scope vs `.m.` group mismatch).
       Schema validation of field paths against CRDs runs on the parsed placeholders — unchanged
       differentiator.
-- [ ] Wire expression grammar: `$spec.x`, `.observed.composite.resource.spec.x`, cf guard chains,
-      `(index $.observed.resources "r")...`, `getComposedResource` → param/status wires; anything
-      else → raw wire.
+- [ ] Wire expression grammar limited to what cf emits: `$spec.x` chains, cf's guard chains,
+      `(index $.observed.resources "r").resource.status.…` → param/status wires; anything else
+      inside a cf-shaped field → raw wire (shown, text-editable, not typed).
 - [ ] Engine edits as splices: set literal, wire param, unwire, add guarded optional field, add /
       remove / rename resource document, when, forEach (cf canonical `range`), annotations,
       envelope. Each with a golden proving only the intended bytes change.

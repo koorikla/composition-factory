@@ -2,7 +2,8 @@
 
 **Status:** analysis for decision · **Date:** 2026-09-02 · **Asked by:** Kaur ("remove the DSL,
 use plain Crossplane manifests with a specified structure; fields the engine does not know it
-does not touch; go-templating only for now")
+does not touch; go-templating only for now; the parser only has to read the go-templating
+format cf itself emits")
 
 ## 1. What is being proposed, precisely
 
@@ -25,34 +26,39 @@ everything else as opaque bytes and never re-serialise it. That is how editors t
 YAML, shape is data-dependent, indentation is semantic") still bounds *understanding*; it does not
 bound *preservation*.
 
-## 2. What the corpus says about the understanding ceiling
+## 2. Scope: cf's own dialect, not arbitrary templates
 
-From `raw/cs-gotemplating-corpus.md` (381 real Compositions, 347 inline, 21k template actions):
+Kaur's clarification narrows the problem decisively: the reader only has to parse **the
+go-templating format cf emits**. Foreign hand-written templates are out of scope — they open
+as a single opaque card or not at all, exactly as today. The corpus numbers about `range`/`if`/
+`toYaml` in the wild therefore do not bound this design; what bounds it is whether cf's
+emitted form is regular enough to be read back, and it is, by construction:
 
-| Share of corpus | Construct | Consequence for an in-place model |
-|---|---|---|
-| 28% | no control flow at all | fully understood: every field a card row |
-| 60% | no loop and no `define` | understood except whole-doc `if` blocks |
-| 57% / 40% / 10% | `if` / `range` / `with` | recognised only in cf-shaped forms; otherwise an opaque block |
-| 82% | multi-document (`---`) templates | fine: the model is a list of documents |
-| 70% vs 22% | raw resource-name annotation string vs `setResourceNameAnnotation` | both recognisable line patterns |
-| 32% | reads observed resources | status wires, recognisable when the expression is a plain path |
-| 13% / 12% | `toYaml` / `nindent` | value-position pipes: field stays editable as raw, not as a typed value |
-| 9% | `printf`-built resource names | name is a raw expression, not editable as text |
-| 5% | true escapes (`define`/`set`/`mergeOverwrite`/`regexSplit`) | opaque |
-| 73% of 10k value expressions | bare `$spec.x` path | typed, wireable |
+- a fixed prelude (`$spec`, `$xr`, `$xrMeta`), `define` blocks first, one `---` document per
+  resource, `setResourceNameAnnotation "<name>"` naming each document;
+- fields in three shapes only: literal (`key: 'v'`), wire (`key: {{ $spec.x }}`), and guarded
+  optional (`{{- if hasKey $spec "x" }} … {{- end }}`), plus the status-wire guard chain,
+  `range` for forEach and `if` for when, each emitted from one canonical writer;
+- a provenance header and `options: ["missingkey=error"]`, so a file can be recognised as
+  cf-shaped before parsing.
 
-The share a placeholder-token parser would accept **was never measured** — the research stopped
-at "do not build Tier 2". `cf adopt` already contains the technique (`internal/adopt/adopt.go:321`:
-strip `define`s, mask every `{{ … }}` with `"__CF_EXPR_n__"`, YAML-parse, unmask) and it fails
-exactly where the research predicted: key-position actions, `setResourceNameAnnotation` (a whole
-line, not a value), `{{- if }}` wrapping keys, `toYaml | nindent` injecting blocks. Each of those
-is a *block*, not a value, and blocks can be preserved as opaque spans instead of parsed.
+"Fields the engine does not know it does not touch" then means two concrete things: (1) YAML
+outside the template body — labels, extra annotations, extra pipeline steps, `writeConnection…`,
+anything a user or a controller added — is preserved through `yaml.v3` Node edits; (2) inside
+the template body, any span the reader does not recognise as one of cf's forms (a hand-added
+`range`, a `toYaml` pipe, a comment) is kept as an opaque span with its bytes untouched and
+shown locked. Understanding of cf-shaped content is 100% by construction; preservation of
+everything else is total by mechanism.
 
-Honest expectation: for **cf-emitted** templates, 100% understanding is achievable because cf
-controls the dialect. For **foreign** templates, something between the 28% (fully) and 60%
-(mostly) rows, with the rest shown as locked "raw" regions on a card or a locked card. That is
-strictly more than today, where a foreign template is `adopt`ed lossily or not opened at all.
+The one design obligation this creates: **the writer and the reader must share one definition
+of the forms.** If the emitter is a set of `fmt.Sprintf` calls and the parser a set of regexes
+written separately, they drift on the first change. Define each form once (a table of
+bidirectional patterns: emit + match) and generate both sides from it, with a golden per form.
+
+`cf adopt` already contains the masking technique (`internal/adopt/adopt.go:321`: strip
+`define`s, mask `{{ … }}` as `"__CF_EXPR_n__"`, YAML-parse, unmask); it fails on block-level
+actions because it treats them as values. Reading cf's own forms as *blocks with byte ranges*
+is the missing half.
 
 ## 3. Mechanism that satisfies "does not touch what it does not know"
 
@@ -124,16 +130,18 @@ guard" and "XRD default and template `| default` disagree".
 
 ## 6. Verdict
 
-Feasible, and it is the better product if the numbers hold, because it removes the one thing
+Feasible, and the better product, because it removes the one thing
 users will always fight (a private DSL between them and their manifests) and turns `adopt` from a
-lossy import into "open". It is not feasible to decide from the couch: the research never
-measured what a placeholder+span parser accepts. **Run the spike, measure, then decide.** Do not
+lossy import into "open". The remaining risk is engineering, not research: a reader that mirrors the writer, and
+a rewrite of everything that speaks blueprint JSON. **Run the spike against cf's own goldens,
+then decide.** Do not
 start the rewrite on a hunch; the last three weeks of consolidation work show what a half-done
 pivot costs.
 
-Go/no-go gate for the spike: (a) 100% of cf's own goldens round-trip byte-exact with no edits and
-survive one wire edit + one literal edit with only the intended bytes changed; (b) on the corpus
-sample, ≥60% of documents parse with every `forProvider` leaf addressable and ≥90% of documents
-open with opaque spans and zero bytes lost; (c) a `kubectl get -o yaml` export opens, scrubs,
-edits one field, and `crossplane composition render` of the result equals render of the original
-except for that field.
+Go/no-go gate for the spike: (a) 100% of cf's own goldens round-trip byte-exact with no edits,
+and survive one wire edit + one literal edit + one added resource with only the intended bytes
+changed; (b) a cf-emitted composition exported with `kubectl get -o yaml` opens, scrubs its
+server-side fields, takes one field edit, and `crossplane composition render` of the result
+equals the original's render except for that field; (c) a hand-added label on the Composition,
+an extra pipeline step, and a hand-added `{{ range }}` block inside the template all survive
+three consecutive open-edit-save cycles byte-for-byte.
