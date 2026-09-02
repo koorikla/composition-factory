@@ -44,6 +44,41 @@ func TestDeploymentChainIsExactlySelectorAndTemplate(t *testing.T) {
 	}
 }
 
+func TestCronJobChain(t *testing.T) {
+	tree, err := kindByName(t, "CronJob").FieldTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chainLeaves []string
+	for _, l := range schema.Leaves(tree, "") {
+		if l.Node.RequiredChain {
+			chainLeaves = append(chainLeaves, l.Path)
+		}
+	}
+	if len(chainLeaves) != 1 || chainLeaves[0] != "spec.schedule" {
+		t.Errorf("CronJob chainLeaves = %v, want [spec.schedule]", chainLeaves)
+	}
+	var branches []string
+	for _, b := range schema.RequiredBranches(tree, "") {
+		branches = append(branches, b.Path)
+	}
+	if len(branches) < 2 || branches[0] != "spec.jobTemplate" {
+		t.Errorf("CronJob branches = %v, want starting with [spec.jobTemplate ...]", branches)
+	}
+
+	jobTree, err := kindByName(t, "Job").FieldTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jobBranches []string
+	for _, b := range schema.RequiredBranches(jobTree, "") {
+		jobBranches = append(jobBranches, b.Path)
+	}
+	if len(jobBranches) != 1 || jobBranches[0] != "spec.template" {
+		t.Errorf("Job branches = %v, want [spec.template]", jobBranches)
+	}
+}
+
 // The chain never lifts a raw-optional field: every chain-true node's own
 // Required flag holds too, across the whole Deployment tree. (The converse
 // is the whole point — most raw-required nodes are NOT chain-true.)

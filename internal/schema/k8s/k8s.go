@@ -162,6 +162,11 @@ func resolveRef(name string, schemas map[string]json.RawMessage, stack []string)
 	if err := json.Unmarshal(raw, &node); err != nil {
 		return nil, fmt.Errorf("schema %q: %w", name, err)
 	}
+	if name == "io.k8s.api.batch.v1.JobTemplateSpec" {
+		if _, hasReq := node["required"]; !hasReq {
+			node["required"] = []any{"spec"}
+		}
+	}
 	return resolveNode(node, schemas, append(stack, name))
 }
 

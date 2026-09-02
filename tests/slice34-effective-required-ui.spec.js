@@ -52,3 +52,17 @@ test('managed Queue required view is unchanged (chain equals raw)', async ({ pag
   await page.click('#fseg button[data-f="req"]')
   await expect(page.locator('#insp')).toContainText('region')
 })
+
+test('a dropped CronJob card and inspector show required schedule and jobTemplate branch', async ({ page }) => {
+  await page.goto('/')
+  await dropKind(page, 'CronJob', 'batch/v1', 400, 300)
+  const card = page.locator('.node[data-id="cron-job"]')
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('schedule')
+  await expect(card).toContainText('jobTemplate')
+  await page.click('.node[data-id="cron-job"] .node-h')
+  await page.click('#fseg button[data-f="req"]')
+  const insp = page.locator('#insp')
+  await expect(insp).toContainText('spec.schedule')
+  await expect(insp).toContainText('spec.jobTemplate')
+})
