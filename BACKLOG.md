@@ -38,7 +38,7 @@
       and whatever else the kind's .m. CRD envelope actually carries (validated
       against Envelope(), same {value|from|raw} field forms). GUI: an "envelope"
       section on the card/inspector. — user request 2026-09-01
-- [ ] Cross-object atProvider wiring GUI (engine side in flight): wire e.g. a
+- [ ] Cross-object atProvider wiring GUI (engine merged in main, GUI pending): wire e.g. a
       postgres provider field from an RDS instance's status.atProvider output —
       teal status wires, pickable from the source card's status section.
 - [x] Provider detail view: click a provider in SOURCES → full registry ref shown,
