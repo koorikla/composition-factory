@@ -165,3 +165,51 @@ func TestTranslateWhenToKCL_BooleanSubstrings(t *testing.T) {
 		}
 	}
 }
+
+// A status wire's StructuredRHS.StatusPath already starts at the status
+// root ("atProvider.arn"), so the KCL dereference must not add its own
+// atProvider segment on top.
+func TestKCLStatusWireReadsStatusPathOnce(t *testing.T) {
+	got := kclStructuredRHS(StructuredRHS{Kind: RHSStatus, Resource: "role", StatusPath: "atProvider.arn"}, "")
+	want := `ocds?["role"]?.Resource?.status?.atProvider?.arn`
+	if got != want {
+		t.Errorf("kclStructuredRHS = %q, want %q", got, want)
+	}
+
+	b := wireBlueprint()
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+	out, err := Composition(b, wireCRDs(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := lineContaining(t, string(out), "queueUrl =")
+	if n := strings.Count(line, "atProvider"); n != 1 {
+		t.Errorf("queueUrl wire mentions atProvider %d times, want 1:\n%s", n, line)
+	}
+	if !strings.Contains(line, `ocds?["main-queue"]?.Resource?.status?.atProvider?.url`) {
+		t.Errorf("queueUrl wire = %s", line)
+	}
+}
+
+func TestTranslateForEachToKCL_StatusBoundReadsPathOnce(t *testing.T) {
+	got := translateForEachToKCL("resources.main-queue.status.atProvider.nodeCount")
+	want := `range(0, int(ocds?["main-queue"]?.Resource?.status?.atProvider?.nodeCount or 0))`
+	if got != want {
+		t.Errorf("translateForEachToKCL = %q, want %q", got, want)
+	}
+}
+
+// lineContaining returns the single line of s that contains needle.
+func lineContaining(t *testing.T, s, needle string) string {
+	t.Helper()
+	var hits []string
+	for _, l := range strings.Split(s, "\n") {
+		if strings.Contains(l, needle) {
+			hits = append(hits, strings.TrimSpace(l))
+		}
+	}
+	if len(hits) != 1 {
+		t.Fatalf("want exactly one line containing %q, got %d:\n%s", needle, len(hits), s)
+	}
+	return hits[0]
+}

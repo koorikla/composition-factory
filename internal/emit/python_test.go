@@ -168,3 +168,57 @@ func TestTranslateWhenToPython_BooleanSubstrings(t *testing.T) {
 		}
 	}
 }
+
+// The observed object sits under .resource, and its status under
+// .resource.status — the Python wire must walk status before atProvider,
+// and must not default the leaf to "" (an unobserved value is None, which
+// _present drops, mirroring the go-templating hasKey guard).
+func TestPythonStatusWireWalksResourceStatus(t *testing.T) {
+	got := pythonStructuredRHS(StructuredRHS{Kind: RHSStatus, Resource: "role", StatusPath: "atProvider.arn"}, "")
+	want := `ocds.get("role", {}).get("resource", {}).get("status", {}).get("atProvider", {}).get("arn")`
+	if got != want {
+		t.Errorf("pythonStructuredRHS = %q, want %q", got, want)
+	}
+
+	b := wireBlueprint()
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	out, err := Composition(b, wireCRDs(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := lineContaining(t, string(out), `"queueUrl":`)
+	if !strings.Contains(line, `.get("resource", {}).get("status", {}).get("atProvider", {}).get("url")`) {
+		t.Errorf("queueUrl wire = %s", line)
+	}
+}
+
+func TestTranslateForEachToPython_StatusBoundReadsPathOnce(t *testing.T) {
+	got := translateForEachToPython("resources.main-queue.status.atProvider.nodeCount")
+	want := `range(int(ocds.get("main-queue", {}).get("resource", {}).get("status", {}).get("atProvider", {}).get("nodeCount", 0)))`
+	if got != want {
+		t.Errorf("translateForEachToPython = %q, want %q", got, want)
+	}
+}
+
+// An optional parameter (not required, no default) the XR omits must not
+// land as null in the desired object: the field dicts are passed through a
+// single _present helper that drops None values.
+func TestPythonOptionalParamIsDroppedWhenAbsent(t *testing.T) {
+	b := wireBlueprint()
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	b.Spec.Resources[0].Fields["maxMessageSize"] = blueprint.Field{From: "params.maxMessageSize"}
+	out, err := Composition(b, wireCRDs(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if n := strings.Count(s, "_present = lambda d: {k: v for k, v in d.items() if v is not None}"); n != 1 {
+		t.Errorf("_present helper defined %d times, want exactly 1:\n%s", n, s)
+	}
+	if !strings.Contains(s, `"forProvider": _present({`) {
+		t.Errorf("forProvider dict is not passed through _present:\n%s", s)
+	}
+	if !strings.Contains(s, `"maxMessageSize": spec.get("maxMessageSize"),`) {
+		t.Errorf("optional param must read without a default:\n%s", s)
+	}
+}

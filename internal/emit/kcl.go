@@ -197,7 +197,7 @@ func kclStructuredRHS(s StructuredRHS, fallbackRHS string) string {
 		}
 		return translateParamAccessToKCL(s.Param)
 	case RHSStatus:
-		return fmt.Sprintf("ocds?[%q]?.Resource?.status?.atProvider?.%s", s.Resource, strings.ReplaceAll(s.StatusPath, ".", "?."))
+		return fmt.Sprintf("ocds?[%q]?.Resource?.status?.%s", s.Resource, strings.ReplaceAll(s.StatusPath, ".", "?."))
 	default:
 		return kclRHS(fallbackRHS)
 	}
@@ -242,7 +242,7 @@ func translateForEachToKCL(forEach string) string {
 	}
 	if strings.HasPrefix(forEach, "resources.") {
 		res, path, _ := blueprint.StatusRef(forEach)
-		return fmt.Sprintf("range(0, int(ocds?[%q]?.Resource?.status?.atProvider?.%s or 0))", res, strings.ReplaceAll(path, ".", "?."))
+		return fmt.Sprintf("range(0, int(ocds?[%q]?.Resource?.status?.%s or 0))", res, strings.ReplaceAll(path, ".", "?."))
 	}
 	return "range(0, 0)"
 }
