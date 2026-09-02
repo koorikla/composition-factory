@@ -72,6 +72,28 @@ func Generate(b *blueprint.Blueprint, crds []schema.CRD, outDir string) ([]Outpu
 	for _, fam := range families {
 		out = append(out, Output{Path: filepath.Join(outDir, "providerconfigs", fam+".yaml"), Body: pcs[fam]})
 	}
+
+	if b.TemplateSource() == blueprint.TemplateSourceFileSystem {
+		rt, err := RuntimeDoc(b, crds)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Output{Path: filepath.Join(outDir, "runtime", name), Body: rt})
+
+		tplFiles, err := TemplateFiles(b, crds)
+		if err != nil {
+			return nil, err
+		}
+		baseName := b.Spec.XRD.Plural + "." + b.Spec.XRD.Group
+		for _, f := range tplFiles {
+			out = append(out, Output{Path: filepath.Join(outDir, "templates", baseName, f.Name), Body: f.Body})
+		}
+	}
+
 	out = append(out, Output{Path: filepath.Join(outDir, "xrds", name), Body: xrd})
+
+	sort.Slice(out, func(i, j int) bool {
+		return filepath.ToSlash(out[i].Path) < filepath.ToSlash(out[j].Path)
+	})
 	return out, nil
 }

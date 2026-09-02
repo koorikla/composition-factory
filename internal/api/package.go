@@ -8,6 +8,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
@@ -22,6 +23,11 @@ func (srv *server) handlePackage(w http.ResponseWriter, r *http.Request) {
 
 	b, ok := srv.loadBlueprint(w)
 	if !ok {
+		return
+	}
+	if b.TemplateSource() == blueprint.TemplateSourceFileSystem {
+		writeJSONError(w, http.StatusBadRequest, "cannot package a blueprint with spec.emit.templateSource: FileSystem "+
+			"(a Configuration package ships XRDs and Compositions only; switch to templateSource: Inline or use cf gen)")
 		return
 	}
 	crds, err := srv.loadSourceCRDs(b)

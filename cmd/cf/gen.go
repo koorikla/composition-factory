@@ -59,11 +59,10 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 		return 1, err
 	}
 	crds = append(crds, native...)
-	generate := emit.Generate
 	if c.TemplateSource == "filesystem" {
-		generate = emit.GenerateFS
+		b.Spec.Emit = &blueprint.Emit{TemplateSource: blueprint.TemplateSourceFileSystem}
 	}
-	outputs, err := generate(b, crds, c.Out)
+	outputs, err := emit.Generate(b, crds, c.Out)
 	if err != nil {
 		return 1, err
 	}

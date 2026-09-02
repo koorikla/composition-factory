@@ -47,6 +47,7 @@ export function init(rootEl, deps) {
     themeBtn: document.getElementById("themeBtn"),
     validateBtn: document.getElementById("validateBtn"),
     generateBtn: document.getElementById("generateBtn"),
+    tplSource: document.getElementById("tplSource"),
   };
 
   var tab = "comp";          // "comp" | "xrd" | "bp"
@@ -62,9 +63,27 @@ export function init(rootEl, deps) {
       '<button data-t="fns" aria-pressed="' + (tab === "fns") + '">functions.yaml</button>' +
       '<button data-t="bp" aria-pressed="' + (tab === "bp") + '">' + esc(bpLabel) + '</button>';
     h += '<button data-t="pkg" aria-pressed="' + (tab === "pkg") + '">package.yaml</button>';
-    // one tab per generated providerconfig family (outputs carry the bodies)
+
     var g = store.state.lastGenerate;
-    (g && g.outputs || []).forEach(function (o) {
+    var outputs = (g && g.outputs || []);
+    var hasRuntime = false;
+    var tplOutputs = [];
+    outputs.forEach(function (o) {
+      if (/[\\/]runtime[\\/]/.test(o.path)) hasRuntime = true;
+      var tm = /[\\/]templates[\\/][^\\/]+[\\/]([^\\/]+)$/.exec(o.path);
+      if (tm) tplOutputs.push({ file: tm[1], path: o.path });
+    });
+    tplOutputs.sort(function (a, b) { return a.file < b.file ? -1 : 1; });
+    tplOutputs.forEach(function (to) {
+      var key = "tpl:" + to.file;
+      h += '<button data-t="' + key + '" aria-pressed="' + (tab === key) + '">templates/' + esc(to.file) + '</button>';
+    });
+    if (hasRuntime) {
+      h += '<button data-t="runtime" aria-pressed="' + (tab === "runtime") + '">runtime.yaml</button>';
+    }
+
+    // one tab per generated providerconfig family (outputs carry the bodies)
+    outputs.forEach(function (o) {
       var m = /providerconfigs[\/\\]([^\/\\]+)\.yaml$/.exec(o.path);
       if (!m) return;
       var key = "pc:" + m[1];
@@ -154,6 +173,21 @@ export function init(rootEl, deps) {
         return new RegExp("providerconfigs[/\\\\]" + fam + "\\.yaml$").test(o.path);
       });
       return pcs.length ? pcs[0].body : "";
+    }
+    if (tab === "runtime") {
+      var g = store.state.lastGenerate;
+      var rts = (g && g.outputs || []).filter(function (o) {
+        return /[\\/]runtime[\\/]/.test(o.path);
+      });
+      return rts.length ? rts[0].body : "";
+    }
+    if (tab.indexOf("tpl:") === 0) {
+      var file = tab.slice(4);
+      var g = store.state.lastGenerate;
+      var tpls = (g && g.outputs || []).filter(function (o) {
+        return o.path.endsWith("/" + file) || o.path.endsWith("\\" + file);
+      });
+      return tpls.length ? tpls[0].body : "";
     }
     if (tab === "pkg") {
       if (pkgCache) return pkgCache;
@@ -362,9 +396,34 @@ export function init(rootEl, deps) {
     }).finally(function () { el.validateBtn.disabled = false; });
   });
 
+  if (el.tplSource) {
+    el.tplSource.addEventListener("change", function () {
+      var val = el.tplSource.value;
+      store.replaceDoc(function (doc) {
+        doc.spec = doc.spec || {};
+        if (val === "FileSystem") {
+          doc.spec.emit = { templateSource: "FileSystem" };
+        } else {
+          if (doc.spec.emit) {
+            delete doc.spec.emit.templateSource;
+            if (Object.keys(doc.spec.emit).length === 0) {
+              delete doc.spec.emit;
+            }
+          }
+        }
+      });
+    });
+  }
+
   store.subscribe("doc", function (doc) {
     drawTopbar(doc);
     drawWarn(doc);
+    if (el.tplSource) {
+      var curMode = (doc && doc.spec && doc.spec.emit && doc.spec.emit.templateSource) || "Inline";
+      if (el.tplSource.value !== curMode) {
+        el.tplSource.value = curMode;
+      }
+    }
     if (tab === "bp") render();
     scheduleGenerate();
   });

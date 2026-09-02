@@ -77,6 +77,29 @@ type Spec struct {
 	// list means the same thing as an absent one, so nothing is lost by
 	// collapsing the two.
 	Pipeline []PipelineStep `json:"pipeline,omitempty"`
+	// Emit configures how the generator emits the composition. When absent
+	// or templateSource: Inline, the template body is embedded directly in
+	// the Composition manifest. In FileSystem mode, templates are exported
+	// as individual files packed into ConfigMaps and mounted into the function.
+	Emit *Emit `json:"emit,omitempty"`
+}
+
+// Emit contains emission preferences for the blueprint.
+type Emit struct {
+	TemplateSource string `json:"templateSource,omitempty"`
+}
+
+const (
+	TemplateSourceInline     = "Inline"
+	TemplateSourceFileSystem = "FileSystem"
+)
+
+// TemplateSource returns the effective template source mode ("Inline" or "FileSystem").
+func (b *Blueprint) TemplateSource() string {
+	if b != nil && b.Spec.Emit != nil && b.Spec.Emit.TemplateSource == TemplateSourceFileSystem {
+		return TemplateSourceFileSystem
+	}
+	return TemplateSourceInline
 }
 
 // Convention binds a template to every top-level forProvider leaf whose name

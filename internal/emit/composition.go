@@ -13,13 +13,10 @@ import (
 // Composition renders the Composition for b, resolving each resource's kind
 // against crds.
 func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
-	return composition(b, crds, "")
-}
-
-// CompositionFileSystem renders the same Composition with the templating
-// step reading from fsDir (source: FileSystem) instead of carrying the
-// template inline — the export pairing with TemplateFiles/GenerateFS.
-func CompositionFileSystem(b *blueprint.Blueprint, crds []schema.CRD, fsDir string) ([]byte, error) {
+	fsDir := ""
+	if b.TemplateSource() == blueprint.TemplateSourceFileSystem {
+		fsDir = templatesDirPath(b)
+	}
 	return composition(b, crds, fsDir)
 }
 

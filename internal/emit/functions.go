@@ -22,7 +22,11 @@ var templatingFunction = fn{
 // may share a function), each carrying its package exactly as the blueprint
 // declared it -- tag, digest pin, or neither, verbatim.
 func Functions(b *blueprint.Blueprint) ([]byte, error) {
-	return functionsDoc(b, "")
+	rcName := ""
+	if b.TemplateSource() == blueprint.TemplateSourceFileSystem {
+		rcName = blueprint.TemplatingFunctionName
+	}
+	return functionsDoc(b, rcName)
 }
 
 // functionsDoc renders functions.yaml; a non-empty runtimeConfigName pins a

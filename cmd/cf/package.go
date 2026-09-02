@@ -39,6 +39,10 @@ func (c *PackageCmd) Run(out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if b.TemplateSource() == blueprint.TemplateSourceFileSystem {
+		return fmt.Errorf("cannot package a blueprint with spec.emit.templateSource: FileSystem " +
+			"(a Configuration package ships XRDs and Compositions only; switch to templateSource: Inline or use cf gen)")
+	}
 	store := cache.New(c.CacheDir)
 	crds, err := cache.LoadSources(store, b, filepath.Dir(c.Blueprint))
 	if err != nil {

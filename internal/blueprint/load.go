@@ -421,6 +421,15 @@ func (b *Blueprint) Validate() error {
 		return err
 	}
 
+	if b.Spec.Emit != nil && b.Spec.Emit.TemplateSource != "" {
+		switch b.Spec.Emit.TemplateSource {
+		case TemplateSourceInline, TemplateSourceFileSystem:
+		default:
+			return fmt.Errorf("spec.emit.templateSource: %q is not a valid template source (must be %q or %q)",
+				b.Spec.Emit.TemplateSource, TemplateSourceInline, TemplateSourceFileSystem)
+		}
+	}
+
 	// spec.sources[*].provider was never checked here before PUT
 	// /api/blueprint existed: no route made the full document
 	// client-writable, so an operator hand-editing the file was the only
