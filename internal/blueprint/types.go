@@ -111,6 +111,13 @@ const (
 	PythonFunctionPackage = "xpkg.upbound.io/crossplane-contrib/function-python:v0.5.0"
 )
 
+// SupportedEngines lists all composition rendering engines supported by composition-factory.
+var SupportedEngines = []string{
+	EngineGoTemplating,
+	EngineKCL,
+	EnginePython,
+}
+
 // TemplateSource returns the effective template source mode ("Inline" or "FileSystem").
 func (b *Blueprint) TemplateSource() string {
 	if b != nil && b.Spec.Emit != nil && b.Spec.Emit.TemplateSource == TemplateSourceFileSystem {

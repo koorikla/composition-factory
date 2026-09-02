@@ -764,7 +764,7 @@ type forProviderField struct {
 	path       string
 	rhs        string
 	guard      string
-	structured StructuredRHS
+	structured structuredRHS
 	isMap      bool
 	entries    []forProviderField
 }
@@ -786,7 +786,7 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 		isMap      bool
 		rhs        string
 		guard      string
-		structured StructuredRHS
+		structured structuredRHS
 	}
 	leaves := make([]leafItem, 0, len(paths))
 

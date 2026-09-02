@@ -170,7 +170,7 @@ func TestTranslateWhenToPython_BooleanSubstrings(t *testing.T) {
 }
 
 func TestPythonStatusWireWalksResourceStatus(t *testing.T) {
-	got := pythonStructuredRHS(StructuredRHS{Kind: RHSStatus, Resource: "role", StatusPath: "atProvider.arn"}, "")
+	got := pythonStructuredRHS(structuredRHS{kind: rhsStatus, resource: "role", statusPath: "atProvider.arn"}, "")
 	want := `ocds.get("role", {}).get("resource", {}).get("status", {}).get("atProvider", {}).get("arn")`
 	if got != want {
 		t.Errorf("pythonStructuredRHS = %q, want %q", got, want)

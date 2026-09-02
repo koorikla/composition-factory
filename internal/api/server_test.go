@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -648,5 +649,63 @@ func TestSyncBlueprintSourcesLockedPinsCachedProvider(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("lock entry not found or mismatch in: %+v", l.Providers)
+	}
+}
+
+func TestAPIVersionReturnsVersionAndEngines(t *testing.T) {
+	tmp := t.TempDir()
+	bpPath := filepath.Join(tmp, "blueprint.yaml")
+	if err := os.WriteFile(bpPath, []byte("apiVersion: factory.crossplane.io/v1alpha1\nkind: Blueprint\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(tmp, ".cf.lock")
+	if err := os.WriteFile(lockPath, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := index.Build(map[string][]schema.CRD{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(Options{
+		Version:   "v1.2.3-test",
+		Index:     idx,
+		Store:     cache.New(tmp),
+		Blueprint: bpPath,
+		OutDir:    tmp,
+		Lock:      lockPath,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var res struct {
+		Version string   `json:"version"`
+		Engines []string `json:"engines"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if res.Version != "v1.2.3-test" {
+		t.Errorf("Version = %q, want %q", res.Version, "v1.2.3-test")
+	}
+
+	wantEngines := []string{"go-templating", "kcl", "python"}
+	if len(res.Engines) != len(wantEngines) {
+		t.Fatalf("Engines length = %d, want %d (%v)", len(res.Engines), len(wantEngines), res.Engines)
+	}
+	for i, e := range wantEngines {
+		if res.Engines[i] != e {
+			t.Errorf("Engines[%d] = %q, want %q", i, res.Engines[i], e)
+		}
 	}
 }

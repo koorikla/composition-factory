@@ -71,7 +71,7 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 			plan = append(plan, forProviderField{
 				path:       k,
 				rhs:        quoteYAML(f.Value),
-				structured: StructuredRHS{Kind: RHSLiteral, Value: f.Value},
+				structured: structuredRHS{kind: rhsLiteral, value: f.Value},
 			})
 		case f.Raw != "":
 			// The raw escape hatch, verbatim as everywhere else. The author
@@ -79,7 +79,7 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 			plan = append(plan, forProviderField{
 				path:       k,
 				rhs:        f.Raw,
-				structured: StructuredRHS{Kind: RHSRaw, Value: f.Raw},
+				structured: structuredRHS{kind: rhsRaw, value: f.Raw},
 			})
 		case f.Template != "":
 			if _, ok := b.Spec.Templates[f.Template]; !ok {
@@ -88,7 +88,7 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 			plan = append(plan, forProviderField{
 				path:       k,
 				rhs:        templateCallRHS(f.Template, r.Name, k),
-				structured: StructuredRHS{Kind: RHSTemplate, Value: f.Template},
+				structured: structuredRHS{kind: rhsTemplate, value: f.Template},
 			})
 		case f.From != "":
 			ref, err := blueprint.ParseFrom(f.From)
@@ -104,13 +104,13 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 					path:  k,
 					rhs:   "{{ " + expr + " | quote }}",
 					guard: guard,
-					structured: StructuredRHS{
-						Kind:       RHSStatus,
-						Resource:   ref.Resource,
-						StatusPath: strings.Join(ref.StatusPath, "."),
-						Optional:   true,
-						Guard:      guard,
-						RawExpr:    expr,
+					structured: structuredRHS{
+						kind:       rhsStatus,
+						resource:   ref.Resource,
+						statusPath: strings.Join(ref.StatusPath, "."),
+						optional:   true,
+						guard:      guard,
+						rawExpr:    expr,
 					},
 				})
 				continue
@@ -124,11 +124,11 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 				plan = append(plan, forProviderField{
 					path: k,
 					rhs:  rhs,
-					structured: StructuredRHS{
-						Kind:      RHSParam,
-						Param:     ref.Param,
-						ParamSegs: []string{ref.Param},
-						RawExpr:   "$spec." + ref.Param,
+					structured: structuredRHS{
+						kind:      rhsParam,
+						param:     ref.Param,
+						paramSegs: []string{ref.Param},
+						rawExpr:   "$spec." + ref.Param,
 					},
 				})
 				continue
@@ -138,13 +138,13 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 				path:  k,
 				rhs:   rhs,
 				guard: guard,
-				structured: StructuredRHS{
-					Kind:      RHSParam,
-					Param:     ref.Param,
-					ParamSegs: []string{ref.Param},
-					Optional:  true,
-					Guard:     guard,
-					RawExpr:   "$spec." + ref.Param,
+				structured: structuredRHS{
+					kind:      rhsParam,
+					param:     ref.Param,
+					paramSegs: []string{ref.Param},
+					optional:  true,
+					guard:     guard,
+					rawExpr:   "$spec." + ref.Param,
 				},
 			})
 		}

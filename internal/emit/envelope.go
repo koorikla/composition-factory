@@ -126,7 +126,7 @@ type envField struct {
 	rhs        string
 	optional   bool
 	guard      string
-	structured StructuredRHS
+	structured structuredRHS
 }
 
 // planEnvelope resolves r.Envelope into a deterministic, path-sorted plan,
@@ -149,14 +149,14 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 		switch {
 		case f.Raw != "":
 			e.rhs = f.Raw
-			e.structured = StructuredRHS{Kind: RHSRaw, Value: f.Raw}
+			e.structured = structuredRHS{kind: rhsRaw, value: f.Raw}
 		case f.Value != "":
 			rhs, err := envelopeValueRHS(n, branch, f.Value)
 			if err != nil {
 				return nil, fmt.Errorf("resource %q: envelope %q: %w", r.Name, p, err)
 			}
 			e.rhs = rhs
-			e.structured = StructuredRHS{Kind: RHSLiteral, Value: f.Value}
+			e.structured = structuredRHS{kind: rhsLiteral, value: f.Value}
 		case f.From != "":
 			param, member, _ := blueprint.ParamRef(f.From)
 			chainRef := param
@@ -191,24 +191,24 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 					"which the API server rejects on apply", r.Name, p, n.Type, refName, wireDecl.Type)
 			}
 			e.rhs = fmt.Sprintf("{{ %s }}", deref)
-			e.structured = StructuredRHS{
-				Kind:      RHSParam,
-				Param:     chainRef,
-				ParamSegs: segs,
-				RawExpr:   deref,
+			e.structured = structuredRHS{
+				kind:      rhsParam,
+				param:     chainRef,
+				paramSegs: segs,
+				rawExpr:   deref,
 			}
 			switch {
 			case member != "":
 				if g := chainGuard(segs, chain); g != "" {
 					e.optional, e.guard = true, g
-					e.structured.Optional = true
-					e.structured.Guard = g
+					e.structured.optional = true
+					e.structured.guard = g
 				}
 			case !chain[0].Required:
 				g := fmt.Sprintf("hasKey $spec %q", param)
 				e.optional, e.guard = true, g
-				e.structured.Optional = true
-				e.structured.Guard = g
+				e.structured.optional = true
+				e.structured.guard = g
 			}
 		}
 		plan = append(plan, e)
@@ -233,9 +233,9 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 		plan = append(plan, envField{
 			path: []string{"providerConfigRef", "kind"},
 			rhs:  "ClusterProviderConfig",
-			structured: StructuredRHS{
-				Kind:  RHSLiteral,
-				Value: "ClusterProviderConfig",
+			structured: structuredRHS{
+				kind:  rhsLiteral,
+				value: "ClusterProviderConfig",
 			},
 		})
 	}
@@ -243,11 +243,11 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 		plan = append(plan, envField{
 			path: []string{"providerConfigRef", "name"},
 			rhs:  "{{ $spec.providerName }}",
-			structured: StructuredRHS{
-				Kind:      RHSParam,
-				Param:     "providerName",
-				ParamSegs: []string{"providerName"},
-				RawExpr:   "$spec.providerName",
+			structured: structuredRHS{
+				kind:      rhsParam,
+				param:     "providerName",
+				paramSegs: []string{"providerName"},
+				rawExpr:   "$spec.providerName",
 			},
 		})
 	}

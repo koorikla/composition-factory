@@ -631,9 +631,7 @@ func (b *Blueprint) Validate() error {
 		switch {
 		case !ok:
 			return fmt.Errorf("spec.xrd.parameters.providerName is required for a Namespaced XRD: " +
-				"the Composition emits providerConfigRef.name as {{ $spec.providerName }} for every " +
-				"composed resource, so a blueprint without this parameter generates a Composition " +
-				"that can never render. Add: providerName: {type: string, required: true}")
+				"run cf serve without --blueprint to scaffold one, or add: providerName: {type: string, required: true}")
 		case p.Type != "string":
 			return fmt.Errorf("spec.xrd.parameters.providerName: type must be string, got %q -- "+
 				"it is rendered into providerConfigRef.name, which is a Kubernetes object name", p.Type)
