@@ -165,4 +165,3 @@ func TestCatalogueTypeFilter(t *testing.T) {
 		}
 	}
 }
-
