@@ -294,7 +294,7 @@ func envelopeValueRHS(n *schema.Node, branch bool, value string) (string, error)
 			return "", fmt.Errorf("it is an array of objects; value's comma-separated form renders " +
 				"scalar entries only — set the whole array with raw:")
 		}
-		return "", fmt.Errorf("it is an object; value cannot render a composite — set its individual " +
+		return "", fmt.Errorf("it is an object; value cannot render a composite — set its individual "+
 			"children (e.g. %s.<key>), or set the whole node with raw:", n.Name)
 	}
 	switch n.Type {

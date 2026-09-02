@@ -40,8 +40,6 @@ func validateResourceEnvelope(x XRD, r Resource) error {
 			}
 		}
 
-
-
 		f := r.Envelope[p]
 		set := 0
 		for _, v := range []string{f.From, f.Value, f.Raw} {
