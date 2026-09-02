@@ -83,26 +83,9 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
 
 ### P1 — alternative engines are broken for real blueprints
 
-- [ ] Python: every blueprint fails at real render with `AttributeError: get` — the emitted
-      script calls `.get()` on protobuf Struct/Message (`oxr.get("spec")`,
-      `ocds.get(...).get("resource")`); verified with crossplane-function-sdk-python. Also
-      `ready = fnv1.READY_TRUE` unconditionally while function-auto-ready is still in the
-      pipeline. Found by C.
-- [ ] KCL forEach emits invalid syntax (`for _i in range(...):` inside a list literal →
-      `InvalidSyntax expected one of ["]"]`); unobserved status wires emit `null` where
-      go-templating omits the key; loop instances are named `${_i}-topic` in KCL and
-      `f"{_i}-topic"` in Python but `topic-0` in go-templating, which breaks observed-resource
-      matching and contradicts the forEach error text. Found by A and C.
-- [ ] `raw:` is pasted verbatim into KCL/Python programs (`settings = {tier: {{ … }}}` →
-      syntax error at render). Refuse `{{` in raw under non-go engines with a clear message, or
-      document raw as go-templating-only. Found by A, B and C.
 - [ ] Lane B renders only go-templating. Extend the acceptance test to render each engine
       through its real function image (function-kcl, function-python) on the same fixtures;
       the Python `.get` bug would have been caught on day one.
-- [ ] Docker container reuse via `render.crossplane.io/runtime-docker-name: cf-function-*`
-      leaves a container attached to a stale network after a failed run; the next renders
-      fail (`container … is not connected to Docker network`) or hang 2 minutes. Use a per-run
-      name, or document `docker rm -f cf-function-*` in the Validate error tip. Found by A and C.
 
 ### P1 — adopt loses most of what it reads, silently
 

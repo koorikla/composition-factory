@@ -8,6 +8,27 @@ is the way it is, and this repo has already re-raised settled questions twice.
 Nothing here is open work. Open items live in BACKLOG.md. Full history is in
 git — `git log -p BACKLOG.md`.
 
+- [x] Python: every blueprint fails at real render with `AttributeError: get` — the emitted
+      script calls `.get()` on protobuf Struct/Message (`oxr.get("spec")`,
+      `ocds.get(...).get("resource")`); verified with crossplane-function-sdk-python. Also
+      `ready = fnv1.READY_TRUE` unconditionally while function-auto-ready is still in the
+      pipeline. Found by C.
+      — completed 2026-09-03
+- [x] KCL forEach emits invalid syntax (`for _i in range(...):` inside a list literal →
+      `InvalidSyntax expected one of ["]"]`); unobserved status wires emit `null` where
+      go-templating omits the key; loop instances are named `${_i}-topic` in KCL and
+      `f"{_i}-topic"` in Python but `topic-0` in go-templating, which breaks observed-resource
+      matching and contradicts the forEach error text. Found by A and C.
+      — completed 2026-09-03
+- [x] `raw:` is pasted verbatim into KCL/Python programs (`settings = {tier: {{ … }}}` →
+      syntax error at render). Refuse `{{` in raw under non-go engines with a clear message, or
+      document raw as go-templating-only. Found by A, B and C.
+      — completed 2026-09-03
+- [x] Docker container reuse via `render.crossplane.io/runtime-docker-name: cf-function-*`
+      leaves a container attached to a stale network after a failed run; the next renders
+      fail (`container … is not connected to Docker network`) or hang 2 minutes. Use a per-run
+      name, or document `docker rm -f cf-function-*` in the Validate error tip. Found by A and C.
+      — completed 2026-09-03
 - [x] `crossplane composition render` and POST /api/render report ok on output the API server
       would reject (all of the above). Add schema validation of the rendered composed
       resources against the cached CRDs in `cf gen`, `/api/render` and the Validate chip; agent
