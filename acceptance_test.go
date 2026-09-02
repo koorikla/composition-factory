@@ -1400,50 +1400,6 @@ func TestAcceptanceIRSARenders(t *testing.T) {
 	})
 }
 
-// decodeRenderedDocs splits `crossplane composition render`'s multi-document
-// stream and decodes each document, keyed by kind (each kind appears once in
-// this fixture).
-func decodeRenderedDocs(t *testing.T, rendered []byte) map[string]map[string]any {
-	t.Helper()
-	docs := map[string]map[string]any{}
-	for _, chunk := range strings.Split(string(rendered), "\n---\n") {
-		chunk = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(chunk), "---"))
-		if chunk == "" {
-			continue
-		}
-		var doc map[string]any
-		if err := yaml.Unmarshal([]byte(chunk), &doc); err != nil {
-			t.Fatalf("rendered document is not valid YAML: %v\n---\n%s", err, chunk)
-		}
-		if kind, _ := doc["kind"].(string); kind != "" {
-			docs[kind] = doc
-		}
-	}
-	return docs
-}
-
-// digAny walks nested maps/slices by string key or int index, returning nil
-// the moment a step does not resolve — assertions then fail on the value.
-func digAny(v any, path ...any) any {
-	for _, step := range path {
-		switch s := step.(type) {
-		case string:
-			m, ok := v.(map[string]any)
-			if !ok {
-				return nil
-			}
-			v = m[s]
-		case int:
-			l, ok := v.([]any)
-			if !ok || s >= len(l) {
-				return nil
-			}
-			v = l[s]
-		}
-	}
-	return v
-}
-
 // fakeReporter records which of Skipf/Fatalf unavailable chose, so the
 // decision can be tested without a Docker daemon or a crossplane CLI.
 
