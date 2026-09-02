@@ -47,10 +47,21 @@ function shortPath(p) {
 /** Provider family for the prototype's color scheme. */
 function famOf(provider) {
   if (!provider) return "k8s";
-  if (provider.indexOf("kubernetes") >= 0) return "k8s";
+  const p = String(provider).toLowerCase();
+  if (p.indexOf("kubernetes") >= 0 || p === "k8s") return "k8s";
+  if (p.indexOf("azure") >= 0) return "azure";
+  if (p.indexOf("gcp") >= 0 || p.indexOf("google") >= 0) return "gcp";
+  if (p.indexOf("helm") >= 0) return "helm";
   return "aws";
 }
-const COLORS = { aws: "var(--wire-ref)", k8s: "var(--wire-status)", xrd: "var(--wire-xrd)" };
+const COLORS = {
+  aws: "var(--wire-ref)",
+  k8s: "var(--wire-status)",
+  xrd: "var(--wire-xrd)",
+  azure: "#0078d4",
+  gcp: "#ea4335",
+  helm: "#0f1689",
+};
 
 /** Prototype slug: CamelCase -> camel-case. */
 function slug(k) {
@@ -171,7 +182,7 @@ function resourceCardHTML(d, r, sel) {
     (r.forEach ? " stack" : "") + '" data-id="' + esc(r.name) + '"' +
     ' style="left:' + pos.x + 'px;top:' + pos.y + 'px">' +
     '<div class="node-h" style="background:var(--surface-2)">' +
-    '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
+    '<span class="sw" style="background:' + (COLORS[fam] || "var(--wire-ref)") + '"></span>' +
     '<span class="k">' + esc(r.kind) + '</span>' +
     '<span class="nm">' + esc(r.name) + '</span>' +
     '<button class="del" data-act="duplicate" data-res="' + esc(r.name) + '" title="Duplicate (\u2318C \u2318V)">\u29c9</button>' +

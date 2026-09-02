@@ -40,9 +40,7 @@ import (
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
-	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
-	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 	"sigs.k8s.io/yaml"
 )
@@ -691,36 +689,7 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 		srv.Providers = append(srv.Providers, ref)
 	}
 
-	// Rebuild index
-	byProvider := make(map[string][]schema.CRD, len(srv.Providers)+2)
-	for _, ref := range srv.Providers {
-		if crds, err := srv.Store.Load(ref); err == nil {
-			byProvider[ref] = crds
-		}
-	}
-	if srv.Blueprint != "" {
-		dir := filepath.Dir(srv.Blueprint)
-		for _, s := range b.Spec.Sources {
-			if s.CRDs != "" {
-				p := s.CRDs
-				if !filepath.IsAbs(p) {
-					p = filepath.Join(dir, p)
-				}
-				if data, err := os.ReadFile(p); err == nil {
-					if scanned, err := schema.ParseCRDManifest(data); err == nil {
-						byProvider[s.CRDs] = scanned
-					}
-				}
-			}
-		}
-	}
-	if native, err := k8s.Kinds(); err == nil {
-		byProvider[blueprint.NativeProvider] = native
-	}
-	if idx, err := index.Build(byProvider); err == nil {
-		srv.Index = idx
-	}
-	return nil
+	return srv.rebuildIndexLocked(b)
 }
 
 // persistBlueprint writes b to srv.Blueprint, deterministically and only if

@@ -9,9 +9,7 @@ import (
 	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
-	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
-	k8s "github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
 // crdSourceNameRE keeps the manifest's file name a plain slug: the name is
@@ -80,44 +78,10 @@ func (srv *server) handleAddCRDSource(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Rebuild the index: cached providers + every crds source of the (now
-	// current) blueprint + the vendored native kinds — the same union the
-	// startup build assembles.
-	byProvider := map[string][]schema.CRD{}
-	for _, ref := range srv.Providers {
-		existing, err := srv.Store.Load(ref)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		byProvider[ref] = existing
-	}
-	for _, s := range b.Spec.Sources {
-		if s.CRDs == "" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, s.CRDs))
-		if err != nil {
-			continue // a missing sibling manifest must not block this add
-		}
-		got, err := schema.ParseCRDManifest(data)
-		if err != nil {
-			continue
-		}
-		byProvider[s.CRDs] = got
-	}
-	native, err := k8s.Kinds()
-	if err != nil {
+	if err := srv.rebuildIndexLocked(b); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	byProvider[blueprint.NativeProvider] = native
-	idx, err := index.Build(byProvider)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	srv.Index = idx
 
 	kinds := make([]string, 0, len(scanned))
 	for _, c := range scanned {

@@ -20,7 +20,6 @@ import (
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
-	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
 
@@ -190,42 +189,14 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	// enforces: the index and the store must describe the same bytes, so the
 	// existing refs are re-read from the store they were saved to, and the
 	// new ref uses the exact CRDs Save just persisted.
-	byProvider := make(map[string][]schema.CRD, len(srv.Providers)+2)
-	for _, ref := range srv.Providers {
-		existing, err := srv.Store.Load(ref)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		byProvider[ref] = existing
-	}
-	byProvider[req.Ref] = crds
-	// The vendored native kinds are indexed under their own label, exactly
-	// as cmd/cf/serve.go's startup build does — without this line the first
-	// provider add would rebuild an index with every native kind silently
-	// gone from /api/kinds. They are not part of srv.Providers (that list is
-	// xpkg refs with digests to pin and cache entries to count; native kinds
-	// have neither — their pin is the vendored Kubernetes version).
-	native, err := k8s.Kinds()
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	byProvider[blueprint.NativeProvider] = native
-
-	idx, err := index.Build(byProvider)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// The atomic step the whole handler exists for: index and provider set
-	// swap together, under the same mu the duplicate check ran under.
-	srv.Index = idx
 	srv.Providers = append(srv.Providers, req.Ref)
+	if err := srv.rebuildIndexLocked(); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	added := []index.Kind{}
-	for _, k := range idx.All() {
+	for _, k := range srv.Index.All() {
 		if k.Provider == req.Ref {
 			added = append(added, k)
 		}
@@ -311,26 +282,14 @@ func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Rebuild over the remaining providers' cached schemas — the same
-	// single-load discipline handleAddProvider follows: the index and the
-	// store must describe the same bytes, so every surviving ref is re-read
-	// from the store it was saved to.
 	remaining := make([]string, 0, len(srv.Providers)-1)
-	byProvider := make(map[string][]schema.CRD, len(srv.Providers)-1)
 	for _, p := range srv.Providers {
-		if p == ref {
-			continue
+		if p != ref {
+			remaining = append(remaining, p)
 		}
-		crds, err := srv.Store.Load(p)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		byProvider[p] = crds
-		remaining = append(remaining, p)
 	}
-	idx, err := index.Build(byProvider)
-	if err != nil {
+	srv.Providers = remaining
+	if err := srv.rebuildIndexLocked(); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -350,11 +309,6 @@ func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-
-	// The atomic step: index and provider set swap together, under the same
-	// mu every reader snapshots them under.
-	srv.Index = idx
-	srv.Providers = remaining
 
 	entries, err := srv.providerEntriesLocked()
 	if err != nil {

@@ -21,14 +21,20 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/cluster"
 	"github.com/koorikla/compositionfactory/internal/index"
+	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
+	"sigs.k8s.io/yaml"
 )
 
 // Options configures the server New builds.
@@ -467,3 +473,57 @@ func (r *recorder) Header() http.Header { return r.header }
 func (r *recorder) WriteHeader(status int) { r.status = status }
 
 func (r *recorder) Write(b []byte) (int, error) { return r.body.Write(b) }
+
+// rebuildIndexLocked rebuilds srv.Index from srv.Store, srv.Providers,
+// vendored Kubernetes native kinds, and any CRD sources declared in the blueprint.
+// Caller must hold srv.mu.
+func (srv *server) rebuildIndexLocked(optB ...*blueprint.Blueprint) error {
+	var b *blueprint.Blueprint
+	if len(optB) > 0 && optB[0] != nil {
+		b = optB[0]
+	} else if srv.Blueprint != "" {
+		if data, err := os.ReadFile(srv.Blueprint); err == nil {
+			var parsed blueprint.Blueprint
+			if err := yaml.Unmarshal(data, &parsed); err == nil {
+				b = &parsed
+			}
+		}
+	}
+
+	byProvider := make(map[string][]schema.CRD, len(srv.Providers)+2)
+	if srv.Store != nil {
+		for _, ref := range srv.Providers {
+			if crds, err := srv.Store.Load(ref); err == nil {
+				byProvider[ref] = crds
+			}
+		}
+	}
+	if b != nil {
+		dir := ""
+		if srv.Blueprint != "" {
+			dir = filepath.Dir(srv.Blueprint)
+		}
+		for _, s := range b.Spec.Sources {
+			if s.CRDs != "" {
+				p := s.CRDs
+				if !filepath.IsAbs(p) && dir != "" {
+					p = filepath.Join(dir, p)
+				}
+				if crdData, err := os.ReadFile(p); err == nil {
+					if scanned, err := schema.ParseCRDManifest(crdData); err == nil {
+						byProvider[s.CRDs] = scanned
+					}
+				}
+			}
+		}
+	}
+	if native, err := k8s.Kinds(); err == nil {
+		byProvider[blueprint.NativeProvider] = native
+	}
+	idx, err := index.Build(byProvider)
+	if err != nil {
+		return err
+	}
+	srv.Index = idx
+	return nil
+}
