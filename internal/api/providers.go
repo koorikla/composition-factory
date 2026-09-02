@@ -80,14 +80,12 @@ func (srv *server) providerEntriesLocked() ([]providerEntry, error) {
 	return entries, nil
 }
 
-// kindCountsByProvider counts idx's kinds per provider ref, one pass for the
-// whole response rather than one index scan per provider.
+// kindCountsByProvider returns the indexed kind count per provider ref.
 func kindCountsByProvider(idx *index.Index) map[string]int {
-	counts := make(map[string]int)
-	for _, k := range idx.All() {
-		counts[k.Provider]++
+	if idx == nil {
+		return nil
 	}
-	return counts
+	return idx.CountsByProvider()
 }
 
 // addProviderRequest is the POST /api/providers body.

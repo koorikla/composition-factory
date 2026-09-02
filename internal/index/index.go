@@ -35,9 +35,10 @@ type Kind struct {
 // were built from so a caller can resolve one back to its full schema
 // without re-reading the cache.
 type Index struct {
-	kinds      []Kind
-	crds       map[string]schema.CRD // keyed by apiVersion + "/" + kind
-	kindsByKey map[string]Kind       // keyed by apiVersion + "/" + kind, same key as crds
+	kinds            []Kind
+	crds             map[string]schema.CRD // keyed by apiVersion + "/" + kind
+	kindsByKey       map[string]Kind       // keyed by apiVersion + "/" + kind, same key as crds
+	countsByProvider map[string]int
 }
 
 // Build indexes every managed-resource CRD across byProvider, a map from
@@ -155,7 +156,24 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 		return kinds[i].Provider < kinds[j].Provider
 	})
 
-	return &Index{kinds: kinds, crds: crds, kindsByKey: kindsByKey}, nil
+	countsByProvider := make(map[string]int)
+	for _, k := range kinds {
+		countsByProvider[k.Provider]++
+	}
+
+	return &Index{kinds: kinds, crds: crds, kindsByKey: kindsByKey, countsByProvider: countsByProvider}, nil
+}
+
+// CountsByProvider returns the number of indexed kinds for each provider ref.
+func (i *Index) CountsByProvider() map[string]int {
+	if i == nil {
+		return nil
+	}
+	out := make(map[string]int, len(i.countsByProvider))
+	for k, v := range i.countsByProvider {
+		out[k] = v
+	}
+	return out
 }
 
 // All returns every indexed Kind sorted by (APIVersion, Kind). It is a copy

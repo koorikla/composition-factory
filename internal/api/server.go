@@ -459,6 +459,50 @@ func newRecorder() *ResponseRecorder {
 	return NewRecorder()
 }
 
+// BuildIndex builds an index.Index over the given cache store, provider refs,
+// blueprint CRD sources, and native Kubernetes kinds.
+func BuildIndex(store *cache.Store, providers []string, b *blueprint.Blueprint, dir string) (*index.Index, error) {
+	byProvider := make(map[string][]schema.CRD, len(providers)+2)
+	if store != nil {
+		for _, ref := range providers {
+			crds, err := store.Load(ref)
+			if err != nil {
+				return nil, fmt.Errorf("load provider schemas %s: %w", ref, err)
+			}
+			byProvider[ref] = crds
+		}
+	}
+	if b != nil {
+		for _, s := range b.Spec.Sources {
+			if s.CRDs != "" {
+				p := s.CRDs
+				if !filepath.IsAbs(p) && dir != "" {
+					p = filepath.Join(dir, p)
+				}
+				crdData, err := os.ReadFile(p)
+				if err != nil {
+					if os.IsNotExist(err) {
+						continue
+					}
+					return nil, fmt.Errorf("read crds %s: %w", p, err)
+				}
+				scanned, err := schema.ParseCRDManifest(crdData)
+				if err != nil {
+					return nil, fmt.Errorf("parse crd manifest %s: %w", p, err)
+				}
+				byProvider[s.CRDs] = scanned
+			}
+		}
+	}
+	native, err := k8s.Kinds()
+	if err != nil {
+		return nil, fmt.Errorf("load native kubernetes kinds: %w", err)
+	}
+	byProvider[blueprint.NativeProvider] = native
+
+	return index.Build(byProvider)
+}
+
 // rebuildIndexLocked rebuilds srv.Index from srv.Store, srv.Providers,
 // vendored Kubernetes native kinds, and any CRD sources declared in the blueprint.
 // Caller must hold srv.mu.
@@ -481,49 +525,12 @@ func (srv *server) rebuildIndexLocked(optB ...*blueprint.Blueprint) error {
 		}
 	}
 
-	byProvider := make(map[string][]schema.CRD, len(srv.Providers)+2)
-	if srv.Store != nil {
-		for _, ref := range srv.Providers {
-			crds, err := srv.Store.Load(ref)
-			if err != nil {
-				return fmt.Errorf("load provider schemas %s: %w", ref, err)
-			}
-			byProvider[ref] = crds
-		}
+	dir := ""
+	if srv.Blueprint != "" {
+		dir = filepath.Dir(srv.Blueprint)
 	}
-	if b != nil {
-		dir := ""
-		if srv.Blueprint != "" {
-			dir = filepath.Dir(srv.Blueprint)
-		}
-		for _, s := range b.Spec.Sources {
-			if s.CRDs != "" {
-				p := s.CRDs
-				if !filepath.IsAbs(p) && dir != "" {
-					p = filepath.Join(dir, p)
-				}
-				crdData, err := os.ReadFile(p)
-				if err != nil {
-					if os.IsNotExist(err) {
-						continue
-					}
-					return fmt.Errorf("read crds %s: %w", p, err)
-				}
-				scanned, err := schema.ParseCRDManifest(crdData)
-				if err != nil {
-					return fmt.Errorf("parse crd manifest %s: %w", p, err)
-				}
-				byProvider[s.CRDs] = scanned
-			}
-		}
-	}
-	native, err := k8s.Kinds()
-	if err != nil {
-		return fmt.Errorf("load native kubernetes kinds: %w", err)
-	}
-	byProvider[blueprint.NativeProvider] = native
 
-	idx, err := index.Build(byProvider)
+	idx, err := BuildIndex(srv.Store, srv.Providers, b, dir)
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@
 
 # Build output
 /bin/
+/cf
 /out/
 dist/
 .worktrees/

@@ -31,12 +31,19 @@ export function parseFrom(from) {
   return null;
 }
 
+const docWiresCache = new WeakMap();
+const docFanOutCache = new WeakMap();
+
 /**
  * List every wire in the document.
  * @param {Object} doc The full blueprint document.
  * @returns {Array<{kind:string, param?:string, srcResource?:string, srcPath?:string, resource:string, path:string, from:string}>}
  */
 export function listWires(doc) {
+  if (!doc || typeof doc !== "object") return [];
+  if (docWiresCache.has(doc)) {
+    return docWiresCache.get(doc);
+  }
   const out = [];
   const resources = doc && doc.spec && doc.spec.resources || [];
   resources.forEach(function (r) {
@@ -89,7 +96,30 @@ export function listWires(doc) {
       });
     }
   });
+  docWiresCache.set(doc, out);
   return out;
+}
+
+/**
+ * Compute the fan-out count map for every parameter in the document in a single pass.
+ * @param {Object} doc The full blueprint document.
+ * @returns {Record<string, number>} Map from param name to count.
+ */
+export function fanOutMap(doc) {
+  if (!doc || typeof doc !== "object") return {};
+  if (docFanOutCache.has(doc)) {
+    return docFanOutCache.get(doc);
+  }
+  const map = {};
+  const wires = listWires(doc);
+  for (let i = 0; i < wires.length; i++) {
+    const w = wires[i];
+    if (w.kind === "param" && w.param) {
+      map[w.param] = (map[w.param] || 0) + 1;
+    }
+  }
+  docFanOutCache.set(doc, map);
+  return map;
 }
 
 /**
@@ -99,5 +129,6 @@ export function listWires(doc) {
  * @returns {number}
  */
 export function fanOut(doc, param) {
-  return listWires(doc).filter(function (w) { return w.kind === "param" && w.param === param; }).length;
+  if (!doc) return 0;
+  return fanOutMap(doc)[param] || 0;
 }

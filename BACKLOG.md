@@ -276,9 +276,9 @@ clean, Playwright 115 passed / 1 skipped.
 
 ### Unify — Go
 
-- [ ] cmd/cf/options.go:35-106 still builds the same providers + crds +
+- [x] cmd/cf/options.go:35-106 still builds the same providers + crds +
       cluster + native union by hand — have it call the api package's
-      rebuild (export a `BuildIndex(store, providers, blueprint, dir)`).
+      rebuild (export a `BuildIndex(store, providers, blueprint, dir)`). — completed 2026-09-02
 - [x] Six handlers in internal/api/blueprint.go (198, 285, 360, 417, 466,
       514) repeat decode → lock → load → edit → classify → persist → 200;
       the two rename handlers are line-identical. Add
@@ -322,9 +322,9 @@ clean, Playwright 115 passed / 1 skipped.
       Cache per (apiVersion, kind). — completed 2026-09-02
 - [ ] acceptance_test.go builds the binary and pulls the provider 11 times.
       TestMain: build once, one pre-warmed cache dir.
-- [ ] Unfiltered GET /api/catalogue re-marshals + re-hashes + re-gzips the
+- [x] Unfiltered GET /api/catalogue re-marshals + re-hashes + re-gzips the
       139 KB embedded catalogue per request; index.All() copies the whole
-      kinds slice per provider list. Cache both.
+      kinds slice per provider list. Cache both. — completed 2026-09-02
 
 ### Unify — canvas (web-proto)
 
@@ -333,9 +333,9 @@ clean, Playwright 115 passed / 1 skipped.
       canvas.js:1682-1693 already guards with a sources signature and
       documents why (async render cascade ate the next clicks). Apply the
       same guard in both. Biggest UX win for the least code.
-- [ ] Wire computation is quadratic: wires.js fanOut() walks the whole doc
+- [x] Wire computation is quadratic: wires.js fanOut() walks the whole doc
       and is called per port; listWires runs again per card, per layout,
-      per draw. Compute once per render, pass a fan map down.
+      per draw. Compute once per render, pass a fan map down. — completed 2026-09-02
 - [x] Five esc() copies with four semantics (main.js:452 drops 0/false,
       output.js/palette.js throw on null, only inspector.js escapes `'`).
       One shared js/dom.js used by every region. — completed 2026-09-02

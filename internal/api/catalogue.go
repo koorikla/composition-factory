@@ -23,7 +23,10 @@ import (
 // at CI time — fails only the specific requests that need it with a 500,
 // rather than a broken embed crashing server startup for routes that never
 // touch the catalogue at all.
-var catalogueEntries, catalogueErr = catalogue.Load()
+var (
+	catalogueEntries, catalogueErr = catalogue.Load()
+	unfilteredCatalogueMap         = map[string]any{"providers": catalogueEntries}
+)
 
 // handleCatalogue serves GET /api/catalogue?q=: {"providers":[...]},
 // optionally filtered to entries whose name or description contains q as a
@@ -42,6 +45,11 @@ func handleCatalogue(w http.ResponseWriter, r *http.Request) {
 
 	q := strings.ToLower(r.URL.Query().Get("q"))
 	typ := strings.ToLower(r.URL.Query().Get("type")) // "function", "provider", or ""
+	if q == "" && typ == "" {
+		writeJSON(w, http.StatusOK, unfilteredCatalogueMap)
+		return
+	}
+
 	entries := make([]catalogue.Provider, 0, len(catalogueEntries))
 	for _, e := range catalogueEntries {
 		isFn := strings.HasPrefix(e.Name, "function-")
