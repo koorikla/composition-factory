@@ -135,7 +135,7 @@ func build() ([]schema.CRD, error) {
 				Storage:    true,
 				Properties: props,
 			}},
-		})
+		}.Cached())
 	}
 	return out, nil
 }

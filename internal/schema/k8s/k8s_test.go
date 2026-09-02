@@ -282,3 +282,37 @@ func TestVendoredFilesRecordThePinnedVersion(t *testing.T) {
 		}
 	}
 }
+
+// TestNativeKindTreesAreMemoised pins the memo on hand-built native kinds:
+// the vendored Deployment is the largest tree the palette and inspector
+// serve, and without CRD.Cached() every request rebuilt it from the raw
+// OpenAPI map.
+func TestNativeKindTreesAreMemoised(t *testing.T) {
+	kinds, err := Kinds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dep *schema.CRD
+	for i := range kinds {
+		if kinds[i].Kind == "Deployment" {
+			dep = &kinds[i]
+		}
+	}
+	if dep == nil {
+		t.Fatal("no Deployment among native kinds")
+	}
+	first, err := dep.FieldTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := dep.FieldTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) == 0 || len(second) == 0 {
+		t.Fatal("empty Deployment field tree")
+	}
+	if first[0] != second[0] {
+		t.Fatalf("Deployment.FieldTree() rebuilt the tree on a repeated call; want the memoised graph")
+	}
+}

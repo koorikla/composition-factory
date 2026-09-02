@@ -21,6 +21,19 @@ type crdCache struct {
 	trees map[string][]*Node
 }
 
+// Cached returns c with a tree memo attached when it has none. ParseCRDs
+// attaches one to every CRD it builds; constructors that assemble a CRD by
+// hand (the vendored native kinds in schema/k8s) call this so their trees
+// are memoised too — those are the largest trees served (a Deployment has
+// ~250 fields) and are rebuilt on every palette and inspector request
+// otherwise. Copies of the returned CRD share the same memo.
+func (c CRD) Cached() CRD {
+	if c.cache == nil {
+		c.cache = &crdCache{trees: make(map[string][]*Node)}
+	}
+	return c
+}
+
 type CRD struct {
 	Group      string
 	Kind       string
