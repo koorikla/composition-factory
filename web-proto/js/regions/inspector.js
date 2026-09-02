@@ -208,8 +208,16 @@ function modeButtons(path, pressed, isEnv) {
 }
 
 function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap, isEnv) {
-  var names = Object.keys(params).filter(function (n) {
-    return compatible(params[n].type, fieldType);
+  var names = [];
+  Object.keys(params).forEach(function (n) {
+    var p = params[n];
+    if (p.type === "object" && p.properties) {
+      Object.keys(p.properties).sort().forEach(function (mn) {
+        if (compatible(p.properties[mn].type, fieldType)) names.push(n + "." + mn);
+      });
+      return; // a typed object itself is not a scalar wire target
+    }
+    if (compatible(p.type, fieldType)) names.push(n);
   });
   var wireAttr = isEnv ? 'data-env-wire="' : 'data-wire="';
   var npKey = isEnv ? ("env:" + path) : path;

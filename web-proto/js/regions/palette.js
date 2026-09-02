@@ -151,7 +151,14 @@ export function init(rootEl, deps) {
         '<span class="nm" style="color:var(--shared)">$' + esc(n) + "</span>" +
         '<span class="sp"></span><span class="bind">' + fanOut(doc, n) + " bound</span>" +
         '<button class="del" data-param-del="' + esc(n) + '" title="Delete parameter">\u00d7</button></div>' +
-        '<div class="card-b">' + paramLines(params[n]) + "</div></div>";
+        '<div class="card-b">' + paramLines(params[n]) +
+        (params[n].properties
+          ? Object.keys(params[n].properties).sort().map(function (mn) {
+              const mp = params[n].properties[mn];
+              return '<div class="dg" style="padding-left:8px">.' + esc(mn) + " \u00b7 " + esc(mp.type) +
+                (mp.default ? " = " + esc(mp.default) : "") + "</div>";
+            }).join("")
+          : "") + "</div></div>";
     });
     if (!paramFormOpen) {
       h += '<div style="padding:8px 10px"><button class="btn sm" id="param-add-btn">+ Add parameter</button></div>';
@@ -170,7 +177,18 @@ export function init(rootEl, deps) {
         '<input id="param-add-enum" class="search" placeholder="enum values, comma-separated"' +
         (paramType === "string" ? "" : " hidden") + ' aria-label="Enum values">' +
         (paramType === "object"
-          ? '<div class="dg">a free-form string map (key: value pairs, like tags) \u2014 no default or enum</div>'
+          ? '<div class="dg">no members \u2192 a free-form string map (like tags); declare members for a typed object</div>' +
+            paramMembers.map(function (m, mi) {
+              return '<div style="display:flex;gap:4px;align-items:center">' +
+                '<input class="search" data-member-name data-mi="' + mi + '" placeholder="memberName" value="' + esc(m.name) + '" style="flex:1;min-width:0">' +
+                '<select class="search" data-member-type data-mi="' + mi + '" style="flex:0 0 auto">' +
+                ["string","integer","number","boolean"].map(function (t) {
+                  return '<option' + (m.type === t ? " selected" : "") + ">" + t + "</option>";
+                }).join("") + "</select>" +
+                '<input class="search" data-member-default data-mi="' + mi + '" placeholder="default" value="' + esc(m.default || "") + '" style="flex:0 0 70px">' +
+                '<button class="del" data-member-del="' + mi + '" title="Remove member">\u00d7</button></div>';
+            }).join("") +
+            '<button class="btn sm" id="param-add-member">+ member</button>'
           : "") +
         '<div style="display:flex;gap:6px">' +
         '<button class="btn sm pri" id="param-add-submit">Add</button>' +
@@ -183,6 +201,7 @@ export function init(rootEl, deps) {
   let paramFormOpen = false;
   let paramErr = null;
   let paramType = "string";    // add-form type; controls which inputs render
+  let paramMembers = [];       // typed-object member rows in the add form
 
   let providers = null;        // server-side cached providers, null = not loaded
   let providersErr = null;     // verbatim server error from the last add/list
@@ -339,8 +358,24 @@ export function init(rootEl, deps) {
     debounceTimer = setTimeout(loadKinds, 150);
   });
 
+  function syncMemberRows() {
+    railEl.querySelectorAll("[data-member-name]").forEach(function (el) {
+      const mi = Number(el.getAttribute("data-mi"));
+      if (paramMembers[mi]) paramMembers[mi].name = el.value;
+    });
+    railEl.querySelectorAll("[data-member-type]").forEach(function (el) {
+      const mi = Number(el.getAttribute("data-mi"));
+      if (paramMembers[mi]) paramMembers[mi].type = el.value;
+    });
+    railEl.querySelectorAll("[data-member-default]").forEach(function (el) {
+      const mi = Number(el.getAttribute("data-mi"));
+      if (paramMembers[mi]) paramMembers[mi].default = el.value;
+    });
+  }
+
   railEl.addEventListener("change", function (e) {
-    if (e.target.id === "param-add-type") { paramType = e.target.value; drawRail(); return; }
+    if (e.target.id === "param-add-type") { syncMemberRows(); paramType = e.target.value; drawRail(); return; }
+    if (e.target.closest("[data-member-name],[data-member-type],[data-member-default]")) { syncMemberRows(); return; }
     const pickAll = e.target.closest("input[data-pick-all]");
     if (pickAll) {
       const ref = pickAll.getAttribute("data-ref");
@@ -409,7 +444,18 @@ export function init(rootEl, deps) {
       store.deleteParameter(n);   // failure surfaces via the error topic below
       return;
     }
-    if (e.target.closest("#param-add-btn")) { paramFormOpen = true; paramErr = null; paramType = "string"; drawRail(); return; }
+    if (e.target.closest("#param-add-member")) {
+      syncMemberRows();
+      paramMembers.push({ name: "", type: "string", default: "" });
+      drawRail(); return;
+    }
+    const mdel = e.target.closest("[data-member-del]");
+    if (mdel) {
+      syncMemberRows();
+      paramMembers.splice(Number(mdel.getAttribute("data-member-del")), 1);
+      drawRail(); return;
+    }
+    if (e.target.closest("#param-add-btn")) { paramFormOpen = true; paramErr = null; paramType = "string"; paramMembers = []; drawRail(); return; }
     if (e.target.closest("#param-add-cancel")) { paramFormOpen = false; paramErr = null; drawRail(); return; }
     if (e.target.closest("#param-add-submit")) {
       const name = (railEl.querySelector("#param-add-name") || {}).value || "";
@@ -421,6 +467,17 @@ export function init(rootEl, deps) {
       const ev = (railEl.querySelector("#param-add-enum") || {}).value || "";
       if (dv.trim() && type !== "object") param.default = dv.trim();
       if (ev.trim() && type === "string") param.enum = ev.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      if (type === "object") {
+        syncMemberRows();
+        const props = {};
+        paramMembers.forEach(function (m) {
+          if (!m.name.trim()) return;
+          const mp = { type: m.type };
+          if ((m.default || "").trim()) mp.default = m.default.trim();
+          props[m.name.trim()] = mp;
+        });
+        if (Object.keys(props).length) param.properties = props;
+      }
       paramErr = null;
       store.addParameter(name.trim(), param).then(function (res) {
         // the store resolves null on failure and emits the verbatim error;
