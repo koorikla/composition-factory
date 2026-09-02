@@ -6,8 +6,6 @@ const { resetDoc, ENGINE } = require('./helpers')
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)
-  const api = await request.get(ENGINE + '/api/kinds')
-  test.skip(!api.ok(), 'cf serve is not running on 8080')
   // dead-letter depends on work-queue's observed arn — the IRSA shape
   const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
   const dl = doc.spec.resources.find(r => r.name === 'dead-letter')

@@ -1,13 +1,10 @@
 // Slice 2 — the Add-provider button: SOURCES tab adds a real provider by ref,
 // its kinds appear in the palette; failures surface verbatim.
 const { test, expect } = require('@playwright/test')
-const { resetDoc } = require('./helpers')
-const ENGINE = 'http://127.0.0.1:8081'
+const { resetDoc, ENGINE } = require('./helpers')
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)
-  const api = await request.get(ENGINE + '/api/kinds')
-  test.skip(!api.ok(), 'cf serve is not running on 8080')
 })
 
 test('an invalid ref shows the server error verbatim and adds nothing', async ({ page }) => {

@@ -361,14 +361,14 @@ clean, Playwright 115 passed / 1 skipped.
 
 ### Unify — Playwright suite
 
-- [ ] 12 specs re-implement resetDoc + ENGINE instead of importing
+- [x] 12 specs re-implement resetDoc + ENGINE instead of importing
       tests/helpers.js (slice42-drag-to-card-picker, 43, 44, 48, 49, 50,
       51, 52, 53, 57-interactive-tour, 59; slice22 is the skipped one) and
       PUT tests/fixtures/pristine-doc.yaml — JSON content under a .yaml name,
       identical to pristine-doc.json. Delete the .yaml fixture, import
       helpers, drop the ESM `import` in a commonjs package.
-- [ ] 44 specs repeat a beforeEach whose skip message says "not running on
+- [x] 44 specs repeat a beforeEach whose skip message says "not running on
       8080" while probing 8081, which playwright.config.js already
       guarantees via /healthz. One shared fixture or globalSetup (~180 lines).
-- [ ] Two specs share the slice42 prefix; the suite is not in CI and no
+- [x] Two specs share the slice42 prefix; the suite is not in CI and no
       timing baseline is kept (last local run: 115 passed in 2.9 min).

@@ -5,8 +5,6 @@ const { resetDoc, ENGINE } = require('./helpers')
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)
-  const api = await request.get(ENGINE + '/api/kinds')
-  test.skip(!api.ok(), 'cf serve is not running on 8080')
 })
 
 test('removing a provider the blueprint uses is refused with referencers named', async ({ page }) => {
