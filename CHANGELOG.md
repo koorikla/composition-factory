@@ -15,6 +15,26 @@ consumer's git diff.
 
 ## [Unreleased]
 
+### Fixed
+
+- `web-proto`: hovering a wire's floating delete button no longer throws it
+  across the canvas. The button is positioned by a `transform` **attribute** on
+  its `<g>`, which on an SVG element is the same property as CSS `transform`,
+  so the `:hover{transform:scale(1.2)}` on that same element dropped the
+  translate and animated the button off to the SVG origin — out from under the
+  cursor hovering it. The position now lives on the outer group and the grow on
+  an inner one, with `transform-box:fill-box` so it grows about its own centre.
+- `tests/`: the canvas-geometry e2e tests that failed intermittently on the
+  headless Linux runner while passing on macOS now wait on the state they need
+  rather than on luck. Three separate causes, each reproduced before it was
+  fixed: a wire whose endpoints share a `y` is a perfectly horizontal path whose
+  client rect is zero-height, which Playwright calls invisible and refuses to
+  click even with `force`; `locator.boundingBox()` waits only for the element to
+  be attached and returns `null` while layout has yet to run; and Chromium's
+  context-menu hit test truncates the cursor to whole pixels, enough on its own
+  to miss a 2.25px stroke. `tests/helpers.js` gains `canvasSettled`,
+  `settledBox` and `clickWire`, and a new test pins the hover fix above.
+
 ## [0.8.0] - 2026-09-03
 
 ### Added

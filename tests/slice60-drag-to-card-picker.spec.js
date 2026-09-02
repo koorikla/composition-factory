@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors, canvasSettled, settledBox } = require('./helpers')
 guardPageErrors()
 
 test.describe('Drag to object popup field picker', () => {
@@ -11,16 +11,15 @@ test.describe('Drag to object popup field picker', () => {
     page.on('dialog', async d => await d.accept());
     await page.goto('/');
     await expect(page.locator('.node')).toHaveCount(3);
+    await canvasSettled(page);
 
     // Grab the $region parameter port dot
     const paramPort = page.locator('.port[data-owner="xrd"][data-path="region"] .d');
-    const paramBox = await paramPort.boundingBox();
-    expect(paramBox).toBeTruthy();
+    const paramBox = await settledBox(paramPort);
 
     // Target the dead-letter queue card header (an empty card area)
     const card = page.locator('.node[data-id="dead-letter"] .node-h');
-    const cardBox = await card.boundingBox();
-    expect(cardBox).toBeTruthy();
+    const cardBox = await settledBox(card);
 
     // Drag from parameter to card
     await page.mouse.move(paramBox.x + paramBox.width / 2, paramBox.y + paramBox.height / 2);
@@ -60,11 +59,13 @@ test.describe('Drag to object popup field picker', () => {
 
   test('typing in search offers custom annotation and custom field path', async ({ page }) => {
     await page.goto('/');
+    await expect(page.locator('.node')).toHaveCount(3);
+    await canvasSettled(page);
 
     const paramPort = page.locator('.port[data-owner="xrd"][data-path="region"] .d');
-    const paramBox = await paramPort.boundingBox();
+    const paramBox = await settledBox(paramPort);
     const card = page.locator('.node[data-id="dead-letter"] .node-h');
-    const cardBox = await card.boundingBox();
+    const cardBox = await settledBox(card);
 
     await page.mouse.move(paramBox.x + paramBox.width / 2, paramBox.y + paramBox.height / 2);
     await page.mouse.down();

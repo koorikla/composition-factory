@@ -118,8 +118,9 @@ svg.wires path.hot{stroke-width:3.5}
 svg.wires .dim{opacity:.18}
 svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !important;stroke-dasharray:6 3;animation:wire-selected-dash .6s linear infinite;filter:drop-shadow(0 0 4px rgba(245, 158, 11, 0.7))}
 @keyframes wire-selected-dash{to{stroke-dashoffset:-9}}
-.wire-del-btn{cursor:pointer;transition:transform .12s ease;pointer-events:all}
-.wire-del-btn:hover{transform:scale(1.2)}
+.wire-del-btn{cursor:pointer;pointer-events:all}
+.wire-del-btn-g{transition:transform .12s ease;transform-box:fill-box;transform-origin:center}
+.wire-del-btn:hover .wire-del-btn-g{transform:scale(1.2)}
 .wire-del-btn circle{fill:#e11d48;stroke:var(--surface, #fff);stroke-width:1.5;filter:drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4))}
 .wire-del-btn text{fill:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:12px;font-weight:700;text-anchor:middle;dominant-baseline:central;user-select:none;pointer-events:none}
 

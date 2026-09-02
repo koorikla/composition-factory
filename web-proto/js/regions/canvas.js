@@ -561,9 +561,16 @@ function drawWires() {
     if (isSel) {
       const midX = (a.x + b.x) / 2;
       const midY = (a.y + b.y) / 2;
+      // The outer <g> carries the position and an inner one carries the hover
+      // grow. They cannot be the same element: on an SVG element the transform
+      // ATTRIBUTE is the very same property as CSS `transform`, so a
+      // :hover{transform:scale()} here would drop the translate and fling the
+      // button off to the SVG origin — out from under the cursor hovering it.
       delButtons += '<g class="wire-del-btn" data-wire-idx="' + idx + '" transform="translate(' + midX + ',' + midY + ')" pointer-events="all">' +
+        '<g class="wire-del-btn-g">' +
         '<circle r="9"></circle>' +
         '<text y="-0.5">\u00d7</text>' +
+        '</g>' +
         '<title>Delete wire (Delete/Backspace)</title>' +
         '</g>';
     }

@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors, canvasSettled, clickWire } = require('./helpers')
 guardPageErrors()
 
 test.describe('Select and delete wires on canvas', () => {
@@ -11,10 +11,10 @@ test.describe('Select and delete wires on canvas', () => {
     await page.goto('/');
     await expect(page.locator('.node')).toHaveCount(3);
     await expect(page.locator('svg.wires path.wire-path')).toHaveCount(3);
+    await canvasSettled(page);
 
     // Click the first wire path
-    const wire = page.locator('svg.wires path.wire-path').first();
-    await wire.click({ force: true });
+    await clickWire(page, 0);
 
     // The wire is visually selected with .wire-selected
     await expect(page.locator('svg.wires path.wire-path.wire-selected')).toHaveCount(1);
@@ -33,9 +33,10 @@ test.describe('Select and delete wires on canvas', () => {
     await page.goto('/');
     await expect(page.locator('.node')).toHaveCount(3);
     await expect(page.locator('svg.wires path.wire-path')).toHaveCount(3);
+    await canvasSettled(page);
 
     // Select the first wire
-    await page.locator('svg.wires path.wire-path').first().click({ force: true });
+    await clickWire(page, 0);
     await expect(page.locator('svg.wires .wire-del-btn')).toBeVisible();
 
     // Click the delete button
@@ -50,13 +51,64 @@ test.describe('Select and delete wires on canvas', () => {
     await expect.poll(async () => await page.locator('svg.wires path.wire-path').count()).toBe(3);
   });
 
+  // The delete button is positioned by a transform ATTRIBUTE on its <g>. On an
+  // SVG element that is the same CSS property as `transform`, so a bare
+  // :hover{transform:scale()} on the same element silently drops the translate
+  // and throws the button at the SVG origin — away from the cursor hovering it.
+  test('the floating delete button grows in place when hovered', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.node')).toHaveCount(3);
+    await expect(page.locator('svg.wires path.wire-path')).toHaveCount(3);
+    await canvasSettled(page);
+
+    await clickWire(page, 0);
+    const delBtn = page.locator('svg.wires .wire-del-btn');
+    await expect(delBtn).toBeVisible();
+
+    const centre = async () => {
+      const r = await delBtn.evaluate((e) => e.getBoundingClientRect().toJSON());
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width };
+    };
+    // read a size the .12s grow transition has finished moving, never a frame
+    // partway through it
+    const settled = async () => {
+      let prev = null;
+      const deadline = Date.now() + 5000;
+      for (;;) {
+        const c = await centre();
+        if (prev && Math.abs(c.w - prev.w) < 0.01) return c;
+        if (Date.now() > deadline) return c;
+        prev = c;
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      }
+    };
+
+    // clickWire leaves the pointer on the wire's midpoint, which is where the
+    // button just appeared — park it elsewhere so the baseline is the un-hovered
+    // size rather than an already-growing one
+    await page.mouse.move(4, 4);
+    const before = await settled();
+
+    // a raw move, not hover(): hover() scrolls the element into view, and
+    // svg.wires{overflow:visible} gives the overflow:hidden canvas something to
+    // scroll — which would shift the button for reasons that have nothing to
+    // do with the transform under test
+    await page.mouse.move(before.x, before.y);
+    await expect.poll(async () => (await centre()).w).toBeGreaterThan(before.w + 1);
+
+    const after = await settled();
+    expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+    expect(Math.abs(after.y - before.y)).toBeLessThan(1);
+  });
+
   test('pressing Delete or Backspace removes the selected wire', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.node')).toHaveCount(3);
     await expect(page.locator('svg.wires path.wire-path')).toHaveCount(3);
+    await canvasSettled(page);
 
     // Select the first wire
-    await page.locator('svg.wires path.wire-path').first().click({ force: true });
+    await clickWire(page, 0);
     await expect(page.locator('svg.wires path.wire-path.wire-selected')).toHaveCount(1);
 
     // Press Backspace
@@ -66,7 +118,7 @@ test.describe('Select and delete wires on canvas', () => {
     await expect.poll(async () => await page.locator('svg.wires path.wire-path').count()).toBe(2);
 
     // Select another wire and press Delete key
-    await page.locator('svg.wires path.wire-path').first().click({ force: true });
+    await clickWire(page, 0);
     await expect(page.locator('svg.wires path.wire-path.wire-selected')).toHaveCount(1);
     await page.keyboard.press('Delete');
 
@@ -84,9 +136,10 @@ test.describe('Select and delete wires on canvas', () => {
     await page.goto('/');
     await expect(page.locator('.node')).toHaveCount(3);
     await expect(page.locator('svg.wires path.wire-path')).toHaveCount(3);
+    await canvasSettled(page);
 
     // Right-click a wire
-    await page.locator('svg.wires path.wire-path').first().click({ button: 'right', force: true });
+    await clickWire(page, 0, { button: 'right' });
 
     // Context menu opens with Delete wire
     const ctxMenu = page.locator('#ctx-menu');
