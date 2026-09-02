@@ -349,3 +349,31 @@ func TestGenValidateFlag(t *testing.T) {
 		}
 	}
 }
+
+// TestGenCheckDetectsExtraStaleFiles covers --check when the output directory
+// contains unexpected/stale files not produced by the blueprint.
+func TestGenCheckDetectsExtraStaleFiles(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	out := filepath.Join(dir, "out")
+	var buf bytes.Buffer
+
+	// Generate once so the tree is in sync.
+	if err := (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir}).Run(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add an extra/stale file in out/
+	staleFile := filepath.Join(out, "stale.yaml")
+	if err := os.WriteFile(staleFile, []byte("stale content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	buf.Reset()
+	code, err := (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir, Check: true}).run(&buf)
+	if err != nil || code != 2 {
+		t.Fatalf("check with stale file: code=%d err=%v, want code 2 (drift)", code, err)
+	}
+	if !strings.Contains(buf.String(), "drift: "+staleFile) {
+		t.Errorf("check output = %q, want it to report drift for stale file %q", buf.String(), staleFile)
+	}
+}

@@ -205,6 +205,17 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 				return s, "", "", fmt.Errorf("resource %q field %q is an array, and a from: wire cannot render a list in v1 — a scalar parameter renders one scalar, and array parameters are not supported. Use value: with comma-separated entries, or raw: for literal YAML", r.Name, p)
 			}
 			if targetType == "map" && !isMap {
+				if wireDecl.Type == "object" {
+					g := chainGuard(segs, chain)
+					s.kind = rhsParam
+					s.param = chainRef
+					s.paramSegs = segs
+					s.optional = g != ""
+					s.guard = g
+					s.rawExpr = fmt.Sprintf("$spec.%s", refName)
+					s.targetType = "object"
+					return s, "", g, nil
+				}
 				return s, "", "", fmt.Errorf("resource %q field %q is a map, and a from: wire cannot render one in v1. Set it with raw:", r.Name, p)
 			}
 

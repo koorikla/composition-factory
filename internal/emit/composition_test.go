@@ -916,3 +916,18 @@ func TestForEachEmitIsDeterministic(t *testing.T) {
 		t.Error("two runs over the same blueprint produced different bytes")
 	}
 }
+
+// TestResolveKindTypoSuggestion proves that unknown kinds with typos suggest the nearest matching kind name.
+func TestResolveKindTypoSuggestion(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Resources[0].Kind = "Queu"
+
+	_, err := Composition(b, testCRDs(t))
+	if err == nil {
+		t.Fatal("Composition: expected error for typo kind, got nil")
+	}
+	wantSubstr := `did you mean "Queue"?`
+	if !strings.Contains(err.Error(), wantSubstr) {
+		t.Errorf("error = %q, want substring %q", err.Error(), wantSubstr)
+	}
+}

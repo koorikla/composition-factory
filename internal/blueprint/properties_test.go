@@ -197,7 +197,7 @@ func TestValidateRejectsUnknownMemberType(t *testing.T) {
 // Member names become raw YAML map keys in the emitted XRD schema, exactly
 // like parameter names, so they get the same identifier discipline.
 func TestValidateRejectsInvalidMemberNames(t *testing.T) {
-	for _, name := range []string{"has space", "yes", "colon:bad"} {
+	for _, name := range []string{"has space", "true", "colon:bad"} {
 		t.Run(name, func(t *testing.T) {
 			b := typedBlueprint(t, func(b *Blueprint) {
 				p := b.Spec.XRD.Parameters["tuning"]
@@ -462,7 +462,7 @@ func TestFailedEditLeavesPropertiesUnchanged(t *testing.T) {
 	b := typedBlueprint(t, nil)
 	// "on" is a YAML keyword, so the candidate fails Validate after the
 	// copy's maps were already rewritten.
-	if err := b.RenameParameter("tuning", "on"); err == nil {
+	if err := b.RenameParameter("tuning", "true"); err == nil {
 		t.Fatal("RenameParameter accepted a YAML-keyword name")
 	}
 	if got := b.Spec.Resources[0].Fields["maxMessageSize"].From; got != "params.tuning.maxSize" {

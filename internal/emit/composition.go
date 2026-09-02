@@ -541,6 +541,9 @@ func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
 		if isMap {
 			target = basePath
 		}
+		if p == "when" || (isMap && basePath == "when") {
+			return fmt.Errorf("resource %q: field %q is not in %s; when: is a resource-level field (placed directly under the resource, not under fields:)", r.Name, p, where)
+		}
 		if s := closestPath(arrayIdxRE.ReplaceAllString(target, "[0]"), suggestions); s != "" {
 			return fmt.Errorf("resource %q: field %q is not in %s; did you mean %q? "+
 				"(an unknown field is silently pruned by the API server on apply, so it must be "+
@@ -571,7 +574,7 @@ const templateFieldNindent = 6
 // alike. resource is a validated DNS label and field a schema-checked path,
 // so the %q interpolations are exact.
 func templateCallRHS(name, resource, field string) string {
-	return fmt.Sprintf(`{{ include %q (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "resource" %q "field" %q) | trim | nindent %d }}`,
+	return fmt.Sprintf(`{{ include %q (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" %q "field" %q) | trim | nindent %d }}`,
 		name, resource, field, templateFieldNindent)
 }
 
@@ -900,6 +903,7 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 	isMapField := map[string]bool{}
 	var distinctBase []string
 
+	mapBaseStructured := map[string]structuredRHS{}
 	for _, l := range leaves {
 		if _, exists := grouped[l.basePath]; !exists {
 			distinctBase = append(distinctBase, l.basePath)
@@ -912,6 +916,32 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 				guard:      l.guard,
 				structured: l.structured,
 			})
+		} else if l.structured.targetType == "object" && l.structured.kind == rhsParam {
+			isMapField[l.basePath] = true
+			mapBaseStructured[l.basePath] = l.structured
+			_, chain, err := blueprint.ParamChain(b.Spec.XRD, "", l.structured.param)
+			if err == nil && len(chain) > 0 {
+				wireDecl := chain[len(chain)-1]
+				if len(wireDecl.Properties) > 0 {
+					for mName, mDecl := range wireDecl.Properties {
+						mRHS := fmt.Sprintf("{{ $spec.%s.%s }}", l.structured.param, mName)
+						if mDecl.Type == "string" {
+							mRHS = fmt.Sprintf("{{ $spec.%s.%s | quote }}", l.structured.param, mName)
+						}
+						mGuard := fmt.Sprintf("hasKey $spec.%s %q", l.structured.param, mName)
+						grouped[l.basePath] = append(grouped[l.basePath], forProviderField{
+							path:  mName,
+							rhs:   mRHS,
+							guard: mGuard,
+							structured: structuredRHS{
+								kind:       rhsParam,
+								param:      l.structured.param + "." + mName,
+								targetType: mDecl.Type,
+							},
+						})
+					}
+				}
+			}
 		} else {
 			grouped[l.basePath] = append(grouped[l.basePath], forProviderField{
 				path:       l.basePath,
@@ -926,14 +956,26 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 	plan := make([]forProviderField, 0, len(distinctBase))
 	for _, base := range distinctBase {
 		if isMapField[base] {
-			entries := grouped[base]
+			rawEntries := grouped[base]
+			// Deduplicate entries by path (explicit keys override object param members)
+			seenKey := map[string]bool{}
+			var entries []forProviderField
+			for i := len(rawEntries) - 1; i >= 0; i-- {
+				e := rawEntries[i]
+				if !seenKey[e.path] {
+					seenKey[e.path] = true
+					entries = append(entries, e)
+				}
+			}
 			sort.Slice(entries, func(i, j int) bool {
 				return entries[i].path < entries[j].path
 			})
+			sObj := mapBaseStructured[base]
 			plan = append(plan, forProviderField{
-				path:    base,
-				isMap:   true,
-				entries: entries,
+				path:       base,
+				isMap:      true,
+				entries:    entries,
+				structured: sObj,
 			})
 		} else {
 			plan = append(plan, grouped[base]...)
@@ -1327,6 +1369,16 @@ func writeMapField(d *Doc, keyIndent int, key string, childIndent int, plan []fo
 // writeField emits one resolved field, gated on its guard when non-empty.
 func writeField(d *Doc, indent int, fld forProviderField) {
 	if fld.isMap {
+		if fld.structured.targetType == "object" && len(fld.entries) == 0 {
+			paramName := fld.structured.param
+			d.Line(indent, "{{- if hasKey $spec %q }}", paramName)
+			d.Line(indent, "%s:", formatKey(fld.path))
+			d.Line(indent+1, "{{- range $k, $v := $spec.%s }}", paramName)
+			d.Line(indent+1, "{{ $k }}: {{ $v }}")
+			d.Line(indent+1, "{{- end }}")
+			d.Line(indent, "{{- end }}")
+			return
+		}
 		anyChildGuaranteed := false
 		for _, e := range fld.entries {
 			if e.guard == "" {
@@ -1463,6 +1515,18 @@ func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (
 		return schema.CRD{}, fmt.Errorf("kind %q not found in any cached provider, but a native Kubernetes "+
 			"kind with that name exists; to compose the native %s, set provider: %s on the resource",
 			r.Kind, r.Kind, blueprint.NativeProvider)
+	}
+
+	var allKindNames []string
+	seen := make(map[string]bool)
+	for _, c := range crds {
+		if !seen[c.Kind] {
+			seen[c.Kind] = true
+			allKindNames = append(allKindNames, c.Kind)
+		}
+	}
+	if s := closestPath(r.Kind, allKindNames); s != "" {
+		return schema.CRD{}, fmt.Errorf("kind %q not found in any cached provider; did you mean %q?", r.Kind, s)
 	}
 	return schema.CRD{}, fmt.Errorf("kind %q not found in any cached provider; run cf provider add", r.Kind)
 }
