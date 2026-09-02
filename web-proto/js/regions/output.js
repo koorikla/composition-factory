@@ -372,6 +372,81 @@ export function init(rootEl, deps) {
     }
   });
 
+  /* ---------- selection → scroll the output to that resource ---------- */
+
+  function anchorLine(text, name) {
+    var lines = text.split("\n");
+    var marks = ['setResourceNameAnnotation "' + name + '"', "- name: " + name];
+    for (var m = 0; m < marks.length; m++) {
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].indexOf(marks[m]) !== -1) return i;
+      }
+    }
+    return -1;
+  }
+
+  store.subscribe("selection", function (name) {
+    if (!name || (tab !== "comp" && tab !== "bp")) return;
+    var idx = anchorLine(currentText(), name);
+    if (idx < 0) return;
+    var lh = parseFloat(getComputedStyle(el.code).lineHeight) || 16;
+    el.code.scrollTo({ top: Math.max(0, idx * lh - 40), behavior: "smooth" });
+  });
+
+  /* ---------- blueprint tab editor (yaml back through the import gate) ---------- */
+
+  var editBtn = document.createElement("button");
+  editBtn.id = "code-edit";
+  editBtn.className = "btn";
+  editBtn.textContent = "edit";
+  editBtn.title = "Edit the blueprint YAML in place — applied through the same parse+validate gate as an import (one undo step)";
+  editBtn.hidden = true;
+  el.meta.parentNode.insertBefore(editBtn, el.meta);
+
+  var editor = document.createElement("textarea");
+  editor.id = "code-editor";
+  editor.spellcheck = false;
+  editor.hidden = true;
+  editor.style.cssText = "flex:1;min-height:0;width:100%;box-sizing:border-box;resize:none;border:0;outline:none;" +
+    "background:transparent;color:inherit;font:inherit;padding:10px 12px;";
+  el.code.parentNode.insertBefore(editor, el.code.nextSibling);
+
+  var editBar = document.createElement("div");
+  editBar.id = "code-editbar";
+  editBar.hidden = true;
+  editBar.style.cssText = "display:flex;gap:8px;padding:6px 12px;border-top:1px solid var(--rule)";
+  editBar.innerHTML = '<button class="btn" id="code-apply">Apply</button>' +
+    '<button class="btn" id="code-cancel">Cancel</button>' +
+    '<span class="dg" style="align-self:center">applied through the same gate as an import — invalid YAML never lands</span>';
+  editor.parentNode.insertBefore(editBar, editor.nextSibling);
+
+  function hideEditor() {
+    editor.hidden = true;
+    editBar.hidden = true;
+    el.code.hidden = false;
+  }
+
+  editBtn.addEventListener("click", function () {
+    editor.value = currentText();
+    // the pre owns the drawer's free space via CSS; the textarea inherits its box
+    editor.style.height = Math.max(80, el.code.clientHeight - 36) + "px";
+    el.code.hidden = true;
+    editor.hidden = false;
+    editBar.hidden = false;
+    editor.focus();
+  });
+  editBar.addEventListener("click", function (e) {
+    if (e.target.id === "code-cancel") { hideEditor(); return; }
+    if (e.target.id !== "code-apply") return;
+    store.importBlueprint(editor.value).then(function (doc) {
+      if (doc) hideEditor(); // a rejected edit stays open so it can be fixed
+    });
+  });
+  el.tabs.addEventListener("click", function () {
+    editBtn.hidden = tab !== "bp";
+    hideEditor(); // switching tabs abandons an in-progress edit
+  });
+
   /* ---------- splitter (canvas ↕ output) ---------- */
 
   initSplitter(rootEl);
