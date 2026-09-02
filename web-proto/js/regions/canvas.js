@@ -748,6 +748,12 @@ function applyWire(srcOwner, srcPath, targetRes, targetPath) {
       r.fields = r.fields || {};
       r.fields[targetPath] = { from: fromExpr };
     }
+  }).then(function (ok) {
+    if (ok) {
+      S.select(targetRes);
+      drawWires();
+    }
+    return ok;
   });
 }
 
@@ -854,20 +860,12 @@ function onWireDragDown(e, portEl) {
   const startPt = portPos(owner, path);
   if (!startPt) return;
 
-  e.preventDefault();
-  e.stopPropagation();
+  const startClientX = e.clientX, startClientY = e.clientY;
+  let hasMoved = false;
 
-  let previewPath = wiresEl.querySelector("#wire-drag-preview");
-  if (!previewPath) {
-    previewPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    previewPath.id = "wire-drag-preview";
-    wiresEl.appendChild(previewPath);
-  }
+  let previewPath = null;
   const isStatus = path.indexOf("status.") === 0;
   const strokeColor = owner === XR_ID ? COLORS.xrd : (isStatus ? "var(--wire-status)" : COLORS.xrd);
-  previewPath.setAttribute("stroke", strokeColor);
-  previewPath.setAttribute("fill", "none");
-  previewPath.setAttribute("stroke-width", "2.5");
 
   let lastHoverNode = null;
   let lastHoverPort = null;
@@ -879,27 +877,41 @@ function onWireDragDown(e, portEl) {
 
   function mv(ev) {
     if (!ev.buttons) { up(ev); return; }
+    if (!hasMoved) {
+      const dist = Math.hypot(ev.clientX - startClientX, ev.clientY - startClientY);
+      if (dist < 4) return;
+      hasMoved = true;
+      previewPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      previewPath.id = "wire-drag-preview";
+      previewPath.setAttribute("stroke", strokeColor);
+      previewPath.setAttribute("fill", "none");
+      previewPath.setAttribute("stroke-width", "2.5");
+      wiresEl.appendChild(previewPath);
+    }
+
     const cw = cwEl.getBoundingClientRect();
     const mousePt = { x: ev.clientX - cw.left, y: ev.clientY - cw.top };
 
     let a = startPt, b = mousePt;
     if (dir === "in") { a = mousePt; b = startPt; }
     const dx = Math.max(30, Math.abs(b.x - a.x) * 0.45);
-    previewPath.setAttribute("d", "M" + a.x + "," + a.y + " C" + (a.x + dx) + "," + a.y + " " + (b.x - dx) + "," + b.y + " " + b.x + "," + b.y);
+    if (previewPath) {
+      previewPath.setAttribute("d", "M" + a.x + "," + a.y + " C" + (a.x + dx) + "," + a.y + " " + (b.x - dx) + "," + b.y + " " + b.x + "," + b.y);
+    }
 
     clearHovers();
-    const el = document.elementFromPoint(ev.clientX, ev.clientY);
-    if (!el) return;
-    const p = el.closest(".port");
+    const elements = document.elementsFromPoint(ev.clientX, ev.clientY) || [];
+    let p = null, n = null;
+    for (let i = 0; i < elements.length; i++) {
+      if (!p) p = elements[i].closest(".port");
+      if (!n) n = elements[i].closest(".node");
+    }
     if (p && p.getAttribute("data-owner") !== owner) {
       lastHoverPort = p;
       p.classList.add("wire-target-hover");
-    } else {
-      const n = el.closest(".node");
-      if (n && n.getAttribute("data-id") !== owner) {
-        lastHoverNode = n;
-        n.classList.add("wire-target-hover");
-      }
+    } else if (n && n.getAttribute("data-id") !== owner) {
+      lastHoverNode = n;
+      n.classList.add("wire-target-hover");
     }
   }
 
@@ -907,15 +919,23 @@ function onWireDragDown(e, portEl) {
     document.removeEventListener("pointermove", mv);
     document.removeEventListener("pointerup", up);
     document.removeEventListener("pointercancel", up);
-    if (previewPath) previewPath.remove();
+    if (previewPath) { previewPath.remove(); previewPath = null; }
     clearHovers();
     gestureEnd();
 
-    if (!ev) return;
-    const el = document.elementFromPoint(ev.clientX, ev.clientY);
-    if (!el) return;
+    if (!ev || !hasMoved) {
+      // Just a click on the port: select the node
+      if (owner) S.select(owner);
+      return;
+    }
 
-    const targetPort = el.closest(".port");
+    const elements = document.elementsFromPoint(ev.clientX, ev.clientY) || [];
+    let targetPort = null, targetNode = null;
+    for (let i = 0; i < elements.length; i++) {
+      if (!targetPort) targetPort = elements[i].closest(".port");
+      if (!targetNode) targetNode = elements[i].closest(".node");
+    }
+
     if (targetPort) {
       const tOwner = targetPort.getAttribute("data-owner");
       const tPath = targetPort.getAttribute("data-path");
@@ -929,7 +949,6 @@ function onWireDragDown(e, portEl) {
       }
     }
 
-    const targetNode = el.closest(".node");
     if (targetNode) {
       const tId = targetNode.getAttribute("data-id");
       if (tId && tId !== owner) {
@@ -940,7 +959,7 @@ function onWireDragDown(e, portEl) {
     }
   }
 
-  gestureBegin(function () { if (previewPath) previewPath.remove(); clearHovers(); });
+  gestureBegin(function () { if (previewPath) { previewPath.remove(); previewPath = null; } clearHovers(); });
   document.addEventListener("pointermove", mv);
   document.addEventListener("pointerup", up);
   document.addEventListener("pointercancel", up);
@@ -949,15 +968,10 @@ function onWireDragDown(e, portEl) {
 function onPointerDown(e) {
   if (e.target.closest("[data-resize]")) { onResizeDown(e); return; }
   if (e.button !== undefined && e.button !== 0) return;
-  // A press on an action button is a click, never a drag: entering the drag
-  // path re-selects and re-renders the card mid-press, destroying the very
-  // button under the pointer (its click then never fires), and any micro-
-  // movement during the press turns it into a card drag instead.
   if (e.target.closest("[data-act]") || e.target.closest("button")) return;
 
-  const portDot = e.target.closest(".port .d");
   const portEl = e.target.closest(".port");
-  if (portDot || (portEl && e.target === portDot)) {
+  if (portEl) {
     onWireDragDown(e, portEl);
     return;
   }

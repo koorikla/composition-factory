@@ -17,16 +17,19 @@ spec:
         app.kubernetes.io/component: canvas
     spec:
       initContainers:
-        - name: populate-cache
+        - name: init-workspace
           image: compositionfactory
           command:
-            - cf
-            - provider
-            - add
-            - ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
-            - --cache-dir
-            - /home/cf/.cache/compositionfactory
+            - sh
+            - -c
+            - |
+              cp /workspace/blueprints-config/* /workspace/blueprints/
+              cf provider add ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0 --cache-dir /home/cf/.cache/compositionfactory
           volumeMounts:
+            - name: blueprints-config
+              mountPath: /workspace/blueprints-config
+            - name: blueprints-data
+              mountPath: /workspace/blueprints
             - name: cache
               mountPath: /home/cf/.cache/compositionfactory
       containers:
@@ -65,17 +68,20 @@ spec:
               cpu: 500m
               memory: 512Mi
           volumeMounts:
-            - name: blueprints
+            - name: blueprints-data
               mountPath: /workspace/blueprints
             - name: cache
               mountPath: /home/cf/.cache/compositionfactory
             - name: out
               mountPath: /workspace/out
       volumes:
-        - name: blueprints
+        - name: blueprints-config
           configMap:
             name: cf-blueprints
+        - name: blueprints-data
+          emptyDir: {}
         - name: cache
           emptyDir: {}
         - name: out
           emptyDir: {}
+
