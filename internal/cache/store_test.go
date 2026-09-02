@@ -264,3 +264,26 @@ func TestLoadedCRDsCarryTheTreeMemo(t *testing.T) {
 		t.Fatalf("ForProvider() on a cache-loaded CRD rebuilt its tree; want the memoised graph")
 	}
 }
+
+func TestStoreList(t *testing.T) {
+	s := New(t.TempDir())
+	refs, err := s.List()
+	if err != nil {
+		t.Fatalf("List on empty cache: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("List on empty cache returned %v, want empty", refs)
+	}
+
+	_ = s.SaveCRDs("example.org/b:v1", "sha256:1", nil)
+	_ = s.SaveCRDs("example.org/a:v1", "sha256:2", nil)
+
+	refs, err = s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	want := []string{"example.org/a:v1", "example.org/b:v1"}
+	if diff := cmp.Diff(want, refs); diff != "" {
+		t.Errorf("List mismatch (-want +got):\n%s", diff)
+	}
+}

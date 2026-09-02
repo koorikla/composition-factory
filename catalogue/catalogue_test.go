@@ -90,3 +90,72 @@ func TestValidateCatchesEachInvariant(t *testing.T) {
 		})
 	}
 }
+
+// TestSearchByKindName verifies reverse kind-to-package lookup for representative
+// kinds and services.
+func TestSearchByKindName(t *testing.T) {
+	entries, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	cases := []struct {
+		query       string
+		wantPackage string
+	}{
+		{"DatabaseInstance", "provider-gcp-sql"},
+		{"CloudSQL", "provider-gcp-sql"},
+		{"Bucket", "provider-aws-s3"},
+		{"Topic", "provider-aws-sns"},
+		{"ServiceAccount", "provider-gcp-iam"},
+		{"Queue", "provider-aws-sqs"},
+		{"Table", "provider-aws-dynamodb"},
+		{"VPC", "provider-aws-ec2"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.query, func(t *testing.T) {
+			results := Search(entries, tt.query, "provider")
+			found := false
+			for _, r := range results {
+				if r.Name == tt.wantPackage {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Search(%q) did not return expected package %q; got %d results: %+v",
+					tt.query, tt.wantPackage, len(results), results)
+			}
+		})
+	}
+}
+
+func TestKindsAndPackagesForKind(t *testing.T) {
+	kinds := Kinds("provider-gcp-sql")
+	if len(kinds) == 0 {
+		t.Fatal("Kinds(provider-gcp-sql) returned empty slice")
+	}
+	hasDBInstance := false
+	for _, k := range kinds {
+		if k == "DatabaseInstance" {
+			hasDBInstance = true
+			break
+		}
+	}
+	if !hasDBInstance {
+		t.Errorf("Kinds(provider-gcp-sql) = %v, want DatabaseInstance", kinds)
+	}
+
+	pkgs := PackagesForKind("DatabaseInstance")
+	found := false
+	for _, p := range pkgs {
+		if p == "provider-gcp-sql" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("PackagesForKind(DatabaseInstance) = %v, want provider-gcp-sql", pkgs)
+	}
+}

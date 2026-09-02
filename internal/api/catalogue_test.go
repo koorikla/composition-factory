@@ -165,3 +165,42 @@ func TestCatalogueTypeFilter(t *testing.T) {
 		}
 	}
 }
+
+// TestCatalogueQFiltersByKindName verifies that searching the catalogue via HTTP
+// by kind name returns the providing package.
+func TestCatalogueQFiltersByKindName(t *testing.T) {
+	h := testHandler(t)
+
+	cases := []struct {
+		kind        string
+		wantPackage string
+	}{
+		{"DatabaseInstance", "provider-gcp-sql"},
+		{"CloudSQL", "provider-gcp-sql"},
+		{"Bucket", "provider-aws-s3"},
+		{"Topic", "provider-aws-sns"},
+		{"ServiceAccount", "provider-gcp-iam"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.kind, func(t *testing.T) {
+			var res struct {
+				Providers []catalogue.Provider `json:"providers"`
+			}
+			if code := getJSON(t, h, "/api/catalogue?q="+tt.kind, &res); code != 200 {
+				t.Fatalf("status %d", code)
+			}
+			found := false
+			for _, p := range res.Providers {
+				if p.Name == tt.wantPackage {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("GET /api/catalogue?q=%s did not return %s in results: %+v",
+					tt.kind, tt.wantPackage, res.Providers)
+			}
+		})
+	}
+}

@@ -87,7 +87,7 @@ func handleCatalogue(w http.ResponseWriter, r *http.Request) {
 		if typ == "provider" && isFn {
 			continue
 		}
-		if q == "" || strings.Contains(strings.ToLower(e.Name), q) || strings.Contains(strings.ToLower(e.Description), q) {
+		if q == "" || catalogue.Matches(e, q) {
 			entries = append(entries, e)
 		}
 	}
