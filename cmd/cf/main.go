@@ -16,14 +16,15 @@ var version = "dev"
 
 // CLI is the kong root. Subcommands are added as fields in later tasks.
 type CLI struct {
-	Version  VersionCmd  `cmd:"" help:"Print the cf version."`
-	Provider ProviderCmd `cmd:"" help:"Manage provider schema sources."`
-	Gen      GenCmd      `cmd:"" help:"Generate XRD, Composition and functions.yaml from a blueprint."`
-	Serve    ServeCmd    `cmd:"" help:"Serve the compositionfactory HTTP API, loopback-only by default."`
-	MCP      MCPCmd      `cmd:"" name:"mcp" help:"Serve the compositionfactory MCP server over stdio, for agent tooling."`
-	Package  PackageCmd  `cmd:"" help:"Build a Crossplane Configuration package (.xpkg) from a blueprint."`
-	Push     PushCmd     `cmd:"" help:"Push a built .xpkg to an OCI registry."`
-	Adopt    AdoptCmd    `cmd:"" help:"Import an existing Crossplane Composition into a blueprint."`
+	VersionFlag kong.VersionFlag `name:"version" help:"Print the cf version."`
+	Version     VersionCmd       `cmd:"" help:"Print the cf version."`
+	Provider    ProviderCmd      `cmd:"" help:"Manage provider schema sources."`
+	Gen         GenCmd           `cmd:"" help:"Generate XRD, Composition and functions.yaml from a blueprint."`
+	Serve       ServeCmd         `cmd:"" help:"Serve the compositionfactory HTTP API, loopback-only by default."`
+	MCP         MCPCmd           `cmd:"" name:"mcp" help:"Serve the compositionfactory MCP server over stdio, for agent tooling."`
+	Package     PackageCmd       `cmd:"" help:"Build a Crossplane Configuration package (.xpkg) from a blueprint."`
+	Push        PushCmd          `cmd:"" help:"Push a built .xpkg to an OCI registry."`
+	Adopt       AdoptCmd         `cmd:"" help:"Import an existing Crossplane Composition into a blueprint."`
 }
 
 type VersionCmd struct{}
@@ -52,6 +53,9 @@ func kongOptions() []kong.Option {
 		kong.Name("cf"),
 		kong.Description("Generate Crossplane Compositions and XRDs from provider schemas."),
 		kong.UsageOnError(),
-		kong.Vars{"cachedir": cache.DefaultRoot()},
+		kong.Vars{
+			"cachedir": cache.DefaultRoot(),
+			"version":  "cf " + version,
+		},
 	}
 }

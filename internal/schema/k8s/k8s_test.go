@@ -12,15 +12,22 @@ import (
 // native kinds the design pinned. A regeneration that drops one must fail
 // here, not surface as a kind quietly missing from /api/kinds.
 var wantKinds = map[string]string{
-	"Deployment":     "apps/v1",
-	"StatefulSet":    "apps/v1",
-	"DaemonSet":      "apps/v1",
-	"Job":            "batch/v1",
-	"CronJob":        "batch/v1",
-	"Service":        "v1",
-	"ConfigMap":      "v1",
-	"Secret":         "v1",
-	"ServiceAccount": "v1",
+	"Deployment":              "apps/v1",
+	"StatefulSet":             "apps/v1",
+	"DaemonSet":               "apps/v1",
+	"Job":                     "batch/v1",
+	"CronJob":                 "batch/v1",
+	"Service":                 "v1",
+	"ConfigMap":               "v1",
+	"Secret":                  "v1",
+	"ServiceAccount":          "v1",
+	"PersistentVolumeClaim":   "v1",
+	"Ingress":                 "networking.k8s.io/v1",
+	"NetworkPolicy":           "networking.k8s.io/v1",
+	"HorizontalPodAutoscaler": "autoscaling/v2",
+	"PodDisruptionBudget":     "policy/v1",
+	"Role":                    "rbac.authorization.k8s.io/v1",
+	"RoleBinding":             "rbac.authorization.k8s.io/v1",
 }
 
 func mustKinds(t *testing.T) []schema.CRD {
@@ -262,7 +269,15 @@ func TestKindsReturnsACopy(t *testing.T) {
 // regenerate" into a loud failure. This test pins the recorded versions so
 // the two can never drift silently even if the loader's check changes.
 func TestVendoredFilesRecordThePinnedVersion(t *testing.T) {
-	for _, name := range []string{"openapi_apps_v1.json", "openapi_batch_v1.json", "openapi_core_v1.json"} {
+	for _, name := range []string{
+		"openapi_apps_v1.json",
+		"openapi_autoscaling_v2.json",
+		"openapi_batch_v1.json",
+		"openapi_core_v1.json",
+		"openapi_networking_v1.json",
+		"openapi_policy_v1.json",
+		"openapi_rbac_v1.json",
+	} {
 		raw, err := vendored.ReadFile(name)
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
@@ -314,5 +329,99 @@ func TestNativeKindTreesAreMemoised(t *testing.T) {
 	}
 	if first[0] != second[0] {
 		t.Fatalf("Deployment.FieldTree() rebuilt the tree on a repeated call; want the memoised graph")
+	}
+}
+
+func TestKindNames(t *testing.T) {
+	names := KindNames()
+	if len(names) != len(wantKinds) {
+		t.Fatalf("KindNames returned %d names, want %d", len(names), len(wantKinds))
+	}
+	for i := 1; i < len(names); i++ {
+		if names[i-1] >= names[i] {
+			t.Errorf("KindNames not sorted: %s >= %s", names[i-1], names[i])
+		}
+	}
+	for _, name := range names {
+		if _, ok := wantKinds[name]; !ok {
+			t.Errorf("unexpected kind in KindNames: %s", name)
+		}
+	}
+}
+
+func TestNewNativeKindsExposeFieldTrees(t *testing.T) {
+	tests := []struct {
+		kind      string
+		wantPaths map[string]string
+	}{
+		{
+			kind: "Ingress",
+			wantPaths: map[string]string{
+				"spec.rules[0].host":                               "string",
+				"spec.rules[0].http.paths[0].path":                 "string",
+				"spec.rules[0].http.paths[0].backend.service.name": "string",
+			},
+		},
+		{
+			kind: "HorizontalPodAutoscaler",
+			wantPaths: map[string]string{
+				"spec.scaleTargetRef.kind": "string",
+				"spec.minReplicas":         "integer",
+				"spec.maxReplicas":         "integer",
+			},
+		},
+		{
+			kind: "PersistentVolumeClaim",
+			wantPaths: map[string]string{
+				"spec.accessModes":        "array",
+				"spec.resources.requests": "map",
+			},
+		},
+		{
+			kind: "NetworkPolicy",
+			wantPaths: map[string]string{
+				"spec.podSelector.matchLabels":                    "map",
+				"spec.ingress[0].from[0].podSelector.matchLabels": "map",
+			},
+		},
+		{
+			kind: "PodDisruptionBudget",
+			wantPaths: map[string]string{
+				"spec.minAvailable":         "string",
+				"spec.selector.matchLabels": "map",
+			},
+		},
+		{
+			kind: "Role",
+			wantPaths: map[string]string{
+				"rules[0].apiGroups": "array",
+				"rules[0].resources": "array",
+				"rules[0].verbs":     "array",
+			},
+		},
+		{
+			kind: "RoleBinding",
+			wantPaths: map[string]string{
+				"roleRef.kind":     "string",
+				"subjects[0].kind": "string",
+				"subjects[0].name": "string",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.kind, func(t *testing.T) {
+			paths := leafPaths(t, kindByName(t, tt.kind))
+			for path, wantType := range tt.wantPaths {
+				node, ok := paths[path]
+				if !ok {
+					t.Errorf("%s missing path %q", tt.kind, path)
+					continue
+				}
+				if node.Type != wantType {
+					t.Errorf("%s path %q type = %q, want %q", tt.kind, path, node.Type, wantType)
+				}
+			}
+		})
 	}
 }

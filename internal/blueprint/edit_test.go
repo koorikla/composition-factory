@@ -460,3 +460,36 @@ func TestDeleteParameterNamesDualReferencerOnce(t *testing.T) {
 		t.Errorf("err = %v: names replica-queue %d times, want exactly once", err, got)
 	}
 }
+
+func TestDeleteProviderNameSucceedsForNativeOnlyCompositions(t *testing.T) {
+	b := &Blueprint{
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "xapp"},
+		Spec: Spec{
+			XRD: XRD{
+				Group: "platform.sparky.ee", Kind: "XApp", Plural: "xapps",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]Parameter{
+					"providerName": {Type: "string", Required: true},
+					"image":        {Type: "string", Required: true},
+				},
+			},
+			Resources: []Resource{
+				{
+					Name: "web", Kind: "Deployment", Provider: NativeProvider,
+					Fields: map[string]Field{
+						"spec.template.spec.containers[0].name":  {Value: "web"},
+						"spec.template.spec.containers[0].image": {From: "params.image"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.DeleteParameter("providerName"); err != nil {
+		t.Fatalf("DeleteParameter(providerName) for native-only composition failed: %v", err)
+	}
+	if _, ok := b.Spec.XRD.Parameters["providerName"]; ok {
+		t.Fatal("providerName parameter should have been deleted")
+	}
+}

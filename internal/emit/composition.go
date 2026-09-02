@@ -1307,8 +1307,8 @@ func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (
 			}
 		}
 		if r.Provider == blueprint.NativeProvider {
-			return schema.CRD{}, fmt.Errorf("resource %q: kind %q is not one of the vendored native Kubernetes kinds "+
-				"(provider %q serves the subset pinned to Kubernetes %s)", r.Name, r.Kind, blueprint.NativeProvider, k8s.Version)
+			return schema.CRD{}, fmt.Errorf("resource %q: kind %q is not one of the vendored native Kubernetes kinds (%s): "+
+				"provider %q serves the subset pinned to Kubernetes %s", r.Name, r.Kind, strings.Join(k8s.KindNames(), ", "), blueprint.NativeProvider, k8s.Version)
 		}
 		return schema.CRD{}, fmt.Errorf("resource %q: kind %q not found in scanned source %q; "+
 			"check the CRD manifest actually defines it", r.Name, r.Kind, r.Provider)

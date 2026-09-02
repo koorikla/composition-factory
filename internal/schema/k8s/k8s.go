@@ -18,6 +18,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -32,7 +33,7 @@ import (
 // the one this constant claims.
 const Version = "v1.34.1"
 
-//go:embed openapi_apps_v1.json openapi_batch_v1.json openapi_core_v1.json
+//go:embed openapi_apps_v1.json openapi_autoscaling_v2.json openapi_batch_v1.json openapi_core_v1.json openapi_networking_v1.json openapi_policy_v1.json openapi_rbac_v1.json
 var vendored embed.FS
 
 // vendoredFile mirrors the on-disk shape gen/main.go writes.
@@ -65,6 +66,23 @@ var nativeKinds = []nativeKind{
 	{"openapi_core_v1.json", "io.k8s.api.core.v1.ConfigMap", "", "v1", "ConfigMap", "configmaps"},
 	{"openapi_core_v1.json", "io.k8s.api.core.v1.Secret", "", "v1", "Secret", "secrets"},
 	{"openapi_core_v1.json", "io.k8s.api.core.v1.ServiceAccount", "", "v1", "ServiceAccount", "serviceaccounts"},
+	{"openapi_core_v1.json", "io.k8s.api.core.v1.PersistentVolumeClaim", "", "v1", "PersistentVolumeClaim", "persistentvolumeclaims"},
+	{"openapi_networking_v1.json", "io.k8s.api.networking.v1.Ingress", "networking.k8s.io", "v1", "Ingress", "ingresses"},
+	{"openapi_networking_v1.json", "io.k8s.api.networking.v1.NetworkPolicy", "networking.k8s.io", "v1", "NetworkPolicy", "networkpolicies"},
+	{"openapi_autoscaling_v2.json", "io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler", "autoscaling", "v2", "HorizontalPodAutoscaler", "horizontalpodautoscalers"},
+	{"openapi_policy_v1.json", "io.k8s.api.policy.v1.PodDisruptionBudget", "policy", "v1", "PodDisruptionBudget", "poddisruptionbudgets"},
+	{"openapi_rbac_v1.json", "io.k8s.api.rbac.v1.Role", "rbac.authorization.k8s.io", "v1", "Role", "roles"},
+	{"openapi_rbac_v1.json", "io.k8s.api.rbac.v1.RoleBinding", "rbac.authorization.k8s.io", "v1", "RoleBinding", "rolebindings"},
+}
+
+// KindNames returns the names of all supported vendored native Kubernetes kinds, sorted alphabetically.
+func KindNames() []string {
+	names := make([]string, len(nativeKinds))
+	for i, k := range nativeKinds {
+		names[i] = k.kind
+	}
+	sort.Strings(names)
+	return names
 }
 
 var (
@@ -94,7 +112,15 @@ func Kinds() ([]schema.CRD, error) {
 // skip-and-continue: one bad kind fails the whole load, loudly.
 func build() ([]schema.CRD, error) {
 	files := make(map[string]map[string]json.RawMessage)
-	for _, name := range []string{"openapi_apps_v1.json", "openapi_batch_v1.json", "openapi_core_v1.json"} {
+	for _, name := range []string{
+		"openapi_apps_v1.json",
+		"openapi_autoscaling_v2.json",
+		"openapi_batch_v1.json",
+		"openapi_core_v1.json",
+		"openapi_networking_v1.json",
+		"openapi_policy_v1.json",
+		"openapi_rbac_v1.json",
+	} {
 		raw, err := vendored.ReadFile(name)
 		if err != nil {
 			return nil, fmt.Errorf("k8s: read vendored %s: %w", name, err)

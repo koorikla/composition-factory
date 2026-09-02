@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/index"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
 // manageVerbs is the verb set granted for every rule this endpoint reports.
@@ -142,6 +144,10 @@ func resolveIndexKind(idx *index.Index, res blueprint.Resource, wantNamespaced b
 	if fallback != nil {
 		return index.Kind{}, fmt.Errorf("resource %q: kind %q has no %s variant in the index (only %s in %s); "+
 			"a %s XRD composes the matching variant", res.Name, res.Kind, scope, fallback.Scope, fallback.Group, scope)
+	}
+	if res.Provider == blueprint.NativeProvider {
+		return index.Kind{}, fmt.Errorf("resource %q: kind %q is not one of the vendored native Kubernetes kinds (%s): "+
+			"provider %q serves the subset pinned to Kubernetes %s", res.Name, res.Kind, strings.Join(k8s.KindNames(), ", "), blueprint.NativeProvider, k8s.Version)
 	}
 	return index.Kind{}, fmt.Errorf("resource %q: kind %q not found in any cached provider; run cf provider add",
 		res.Name, res.Kind)

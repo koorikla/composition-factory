@@ -82,6 +82,37 @@ var groups = []struct {
 			"io.k8s.api.core.v1.ConfigMap",
 			"io.k8s.api.core.v1.Secret",
 			"io.k8s.api.core.v1.ServiceAccount",
+			"io.k8s.api.core.v1.PersistentVolumeClaim",
+		},
+	},
+	{
+		upstream: "apis__networking.k8s.io__v1_openapi.json",
+		out:      "openapi_networking_v1.json",
+		roots: []string{
+			"io.k8s.api.networking.v1.Ingress",
+			"io.k8s.api.networking.v1.NetworkPolicy",
+		},
+	},
+	{
+		upstream: "apis__autoscaling__v2_openapi.json",
+		out:      "openapi_autoscaling_v2.json",
+		roots: []string{
+			"io.k8s.api.autoscaling.v2.HorizontalPodAutoscaler",
+		},
+	},
+	{
+		upstream: "apis__policy__v1_openapi.json",
+		out:      "openapi_policy_v1.json",
+		roots: []string{
+			"io.k8s.api.policy.v1.PodDisruptionBudget",
+		},
+	},
+	{
+		upstream: "apis__rbac.authorization.k8s.io__v1_openapi.json",
+		out:      "openapi_rbac_v1.json",
+		roots: []string{
+			"io.k8s.api.rbac.v1.Role",
+			"io.k8s.api.rbac.v1.RoleBinding",
 		},
 	},
 }

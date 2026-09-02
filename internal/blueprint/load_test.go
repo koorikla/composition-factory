@@ -1560,3 +1560,91 @@ func TestValidateAPIVersionAndKind(t *testing.T) {
 		t.Errorf("expected kind validation error, got: %v", err)
 	}
 }
+
+func TestValidateAllowsOmittingProviderNameForNativeOnlyCompositions(t *testing.T) {
+	tests := []struct {
+		name       string
+		parameters map[string]Parameter
+		resources  []Resource
+		wantErr    bool
+	}{
+		{
+			name: "pure native with no providerName parameter",
+			parameters: map[string]Parameter{
+				"image": {Type: "string", Required: true},
+			},
+			resources: []Resource{
+				{
+					Name: "web", Kind: "Deployment", Provider: NativeProvider,
+					Fields: map[string]Field{
+						"spec.template.spec.containers[0].name":  {Value: "web"},
+						"spec.template.spec.containers[0].image": {From: "params.image"},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "pure native with optional providerName parameter",
+			parameters: map[string]Parameter{
+				"providerName": {Type: "string"},
+				"image":        {Type: "string", Required: true},
+			},
+			resources: []Resource{
+				{
+					Name: "web", Kind: "Deployment", Provider: NativeProvider,
+					Fields: map[string]Field{
+						"spec.template.spec.containers[0].name":  {Value: "web"},
+						"spec.template.spec.containers[0].image": {From: "params.image"},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "mixed native and managed without providerName parameter",
+			parameters: map[string]Parameter{
+				"image": {Type: "string", Required: true},
+			},
+			resources: []Resource{
+				{
+					Name: "web", Kind: "Deployment", Provider: NativeProvider,
+					Fields: map[string]Field{
+						"spec.template.spec.containers[0].name":  {Value: "web"},
+						"spec.template.spec.containers[0].image": {From: "params.image"},
+					},
+				},
+				{
+					Name: "main-queue", Kind: "Queue",
+					Fields: map[string]Field{"region": {Value: "eu-north-1"}},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &Blueprint{
+				APIVersion: APIVersion,
+				Kind:       Kind,
+				Metadata:   Metadata{Name: "xapp"},
+				Spec: Spec{
+					XRD: XRD{
+						Group: "platform.sparky.ee", Kind: "XApp", Plural: "xapps",
+						Version: "v1alpha1", Scope: "Namespaced",
+						Parameters: tt.parameters,
+					},
+					Resources: tt.resources,
+				},
+			}
+			err := b.Validate()
+			if tt.wantErr && err == nil {
+				t.Fatal("Validate() = nil, want error requiring providerName for blueprint with managed resource")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("Validate() = %v, want valid for native-only blueprint", err)
+			}
+		})
+	}
+}

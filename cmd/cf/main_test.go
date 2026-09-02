@@ -29,3 +29,23 @@ func TestVersionCommand(t *testing.T) {
 		t.Errorf("version output = %q, want it to contain %q", out.String(), "cf ")
 	}
 }
+
+func TestVersionFlag(t *testing.T) {
+	var cli CLI
+	var out bytes.Buffer
+	opts := append(kongOptions(), kong.Exit(func(int) {}), kong.Writers(&out, &out))
+	parser, err := kong.New(&cli, opts...)
+	if err != nil {
+		t.Fatalf("kong.New: %v", err)
+	}
+	exited := false
+	opts = append(kongOptions(), kong.Exit(func(code int) { exited = true }), kong.Writers(&out, &out))
+	parser, _ = kong.New(&cli, opts...)
+	_, _ = parser.Parse([]string{"--version"})
+	if !exited {
+		t.Error("expected exit on --version")
+	}
+	if !strings.Contains(out.String(), "cf ") {
+		t.Errorf("version output = %q, want it to contain %q", out.String(), "cf ")
+	}
+}

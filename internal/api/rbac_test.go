@@ -1,10 +1,15 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
 // TestRBACGoldenForTheDemoBlueprint pins GET /api/rbac's whole response for
@@ -136,5 +141,51 @@ func TestRBACIsDeterministicAndDeduplicated(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("rbac = %+v, want the duplicate Queue collapsed: %+v", got, want)
+	}
+}
+
+func TestRBACReportsAllSupportedKindsOnUnknownNativeKind(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	unknownBlueprint := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue
+spec:
+  xrd:
+    group: platform.sparky.ee
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters: {}
+  resources:
+    - name: bad-res
+      kind: FakeNativeObject
+      provider: k8s
+      fields: {}
+`
+	if err := os.WriteFile(path, []byte(unknownBlueprint), 0o644); err != nil {
+		t.Fatalf("write blueprint: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/rbac", nil))
+	if rec.Code != 400 {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	var got struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal error body: %v\n%s", err, rec.Body.String())
+	}
+	if !strings.Contains(got.Error, "is not one of the vendored native Kubernetes kinds") {
+		t.Errorf("got error %q, want mention of vendored native Kubernetes kinds", got.Error)
+	}
+	for _, k := range k8s.KindNames() {
+		if !strings.Contains(got.Error, k) {
+			t.Errorf("got error %q, missing native kind %q", got.Error, k)
+		}
 	}
 }

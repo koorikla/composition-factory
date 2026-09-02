@@ -266,12 +266,12 @@ func TestNativeKindRequiresExplicitProvider(t *testing.T) {
 
 func TestUnknownKindUnderK8sProviderNamesThePin(t *testing.T) {
 	b := nativeTestBlueprint()
-	b.Spec.Resources[1].Kind = "Ingress" // real kind, not in the vendored subset
+	b.Spec.Resources[1].Kind = "Certificate" // real kind, not in the vendored subset
 	_, err := Composition(b, nativeTestCRDs(t))
 	if err == nil {
 		t.Fatal("Composition resolved a kind the vendored subset does not carry")
 	}
-	for _, want := range []string{"Ingress", "vendored", k8s.Version} {
+	for _, want := range []string{"Certificate", "vendored", k8s.Version} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %v, want it to contain %q", err, want)
 		}
@@ -484,5 +484,127 @@ func TestNativeWhenAndForEachCompose(t *testing.T) {
 	want = []string{"main-queue", "web-svc"}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("composition-resource-name annotations (-want +got):\n%s", diff)
+	}
+}
+
+func TestNativeUnknownKindListsAllSupportedKinds(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xwebapp"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XWebApp", Plural: "xwebapps",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"image": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "invalid-res", Kind: "UnknownNativeKind", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{},
+				},
+			},
+		},
+	}
+	_, err := Composition(b, nativeTestCRDs(t))
+	if err == nil {
+		t.Fatal("want error for unknown native kind")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "is not one of the vendored native Kubernetes kinds") {
+		t.Errorf("err = %q, want it to mention not one of vendored native Kubernetes kinds", errMsg)
+	}
+	for _, k := range k8s.KindNames() {
+		if !strings.Contains(errMsg, k) {
+			t.Errorf("err = %q, missing supported kind %q", errMsg, k)
+		}
+	}
+}
+
+func TestNewNativeKindsRenderInComposition(t *testing.T) {
+	newKinds := []struct {
+		kind   string
+		fields map[string]blueprint.Field
+	}{
+		{
+			kind: "Ingress",
+			fields: map[string]blueprint.Field{
+				"spec.rules[0].host": {Value: "example.com"},
+			},
+		},
+		{
+			kind: "HorizontalPodAutoscaler",
+			fields: map[string]blueprint.Field{
+				"spec.minReplicas": {Raw: "2"},
+				"spec.maxReplicas": {Raw: "10"},
+			},
+		},
+		{
+			kind: "PersistentVolumeClaim",
+			fields: map[string]blueprint.Field{
+				"spec.accessModes": {Raw: "[ReadWriteOnce]"},
+			},
+		},
+		{
+			kind: "NetworkPolicy",
+			fields: map[string]blueprint.Field{
+				"spec.podSelector.matchLabels": {Raw: "{app: web}"},
+			},
+		},
+		{
+			kind: "PodDisruptionBudget",
+			fields: map[string]blueprint.Field{
+				"spec.minAvailable": {Value: "1"},
+			},
+		},
+		{
+			kind: "Role",
+			fields: map[string]blueprint.Field{
+				"rules[0].verbs": {Raw: `["get", "list"]`},
+			},
+		},
+		{
+			kind: "RoleBinding",
+			fields: map[string]blueprint.Field{
+				"roleRef.kind": {Value: "Role"},
+				"roleRef.name": {Value: "reader"},
+			},
+		},
+	}
+
+	for _, nk := range newKinds {
+		t.Run(nk.kind, func(t *testing.T) {
+			b := &blueprint.Blueprint{
+				APIVersion: "factory.crossplane.io/v1alpha1",
+				Kind:       "Blueprint",
+				Metadata:   blueprint.Metadata{Name: "xtest"},
+				Spec: blueprint.Spec{
+					XRD: blueprint.XRD{
+						Group: "platform.sparky.ee", Kind: "XTest", Plural: "xtests",
+						Version: "v1alpha1", Scope: "Namespaced",
+						Parameters: map[string]blueprint.Parameter{},
+					},
+					Resources: []blueprint.Resource{
+						{
+							Name: "my-" + strings.ToLower(nk.kind), Kind: nk.kind, Provider: blueprint.NativeProvider,
+							Fields: nk.fields,
+						},
+					},
+				},
+			}
+			if err := b.Validate(); err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+			comp, err := Composition(b, nativeTestCRDs(t))
+			if err != nil {
+				t.Fatalf("Composition: %v", err)
+			}
+			docs := renderedNativeDocs(t, comp, map[string]any{})
+			if _, ok := docs[nk.kind]; !ok {
+				t.Errorf("rendered docs missing %s", nk.kind)
+			}
+		})
 	}
 }

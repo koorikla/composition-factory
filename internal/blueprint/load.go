@@ -626,7 +626,15 @@ func (b *Blueprint) Validate() error {
 	// Required (not merely declared) because the guard the Composition gives
 	// optional parameters (hasKey) is not applied to this one; the XRD gate
 	// is what makes the bare dereference safe.
-	if x.Scope == "Namespaced" {
+	hasManaged := false
+	for _, r := range b.Spec.Resources {
+		if r.Provider != NativeProvider {
+			hasManaged = true
+			break
+		}
+	}
+
+	if x.Scope == "Namespaced" && hasManaged {
 		p, ok := x.Parameters["providerName"]
 		switch {
 		case !ok:
