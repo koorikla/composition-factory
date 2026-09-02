@@ -35,8 +35,7 @@ func (b *Blueprint) deepCopy() *Blueprint {
 
 	cp.Spec.XRD.Parameters = make(map[string]Parameter, len(b.Spec.XRD.Parameters))
 	for name, p := range b.Spec.XRD.Parameters {
-		p.Enum = append([]string(nil), p.Enum...)
-		cp.Spec.XRD.Parameters[name] = p
+		cp.Spec.XRD.Parameters[name] = copyParameter(p)
 	}
 
 	cp.Spec.Resources = make([]Resource, len(b.Spec.Resources))
@@ -57,6 +56,23 @@ func (b *Blueprint) deepCopy() *Blueprint {
 	}
 
 	return &cp
+}
+
+// copyParameter returns a copy of p sharing no mutable state with it: the
+// enum slice and — for a typed object parameter — the member map, member
+// declarations included. Recursive so a (validation-refused, but
+// representable) deeper nesting still cannot alias; the recursion terminates
+// because the declaration is a finite tree.
+func copyParameter(p Parameter) Parameter {
+	p.Enum = append([]string(nil), p.Enum...)
+	if p.Properties != nil {
+		props := make(map[string]Parameter, len(p.Properties))
+		for name, member := range p.Properties {
+			props[name] = copyParameter(member)
+		}
+		p.Properties = props
+	}
+	return p
 }
 
 // whenParam returns the parameter a when expression references, or "" when
@@ -89,10 +105,13 @@ func (b *Blueprint) referencingResources(name string) []string {
 	return refs
 }
 
-// anyFrom reports whether any entry in fields wires from want.
+// anyFrom reports whether any entry in fields wires from want — exactly, or
+// through a member reference below it (want == "params.obj" matches
+// "params.obj.member": a member wire references the parameter as surely as a
+// whole-value wire does, so deleting the parameter would dangle it).
 func anyFrom(fields map[string]Field, want string) bool {
 	for _, f := range fields {
-		if f.From == want {
+		if f.From == want || strings.HasPrefix(f.From, want+".") {
 			return true
 		}
 	}
@@ -115,6 +134,20 @@ func (b *Blueprint) statusReferencingResources(name string) []string {
 		}
 	}
 	return refs
+}
+
+// renameParamRef rewrites a from: reference from oldRef (params.<old>) to
+// newRef when it references that parameter — exactly, or through a member
+// (oldRef + "." + member). Any other value, including a params.<old>X
+// lookalike sharing the prefix as a string, comes back unchanged.
+func renameParamRef(from, oldRef, newRef string) (string, bool) {
+	if from == oldRef {
+		return newRef, true
+	}
+	if rest, ok := strings.CutPrefix(from, oldRef+"."); ok {
+		return newRef + "." + rest, true
+	}
+	return from, false
 }
 
 // RenameResource renames a composed resource and rewrites every
@@ -285,9 +318,14 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 				cp.Spec.Resources[i].When = fmt.Sprintf("%s %s %q", newRef, op, literal)
 			}
 		}
+		// The rewrite covers member references too (params.<from>.<member>):
+		// there are no member-level rename routes in v1, so the
+		// parameter-level rename is the one rewrite member wires get, and it
+		// rewrites the PREFIX. renameParamRef is exact about the boundary —
+		// params.<from>X is a different parameter, never rewritten.
 		for path, f := range r.Fields {
-			if f.From == oldRef {
-				f.From = newRef
+			if rewritten, changed := renameParamRef(f.From, oldRef, newRef); changed {
+				f.From = rewritten
 				cp.Spec.Resources[i].Fields[path] = f
 			}
 		}
@@ -296,8 +334,8 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 		// parameter that no longer exists, unrenderable under
 		// missingkey=error.
 		for path, f := range r.Envelope {
-			if f.From == oldRef {
-				f.From = newRef
+			if rewritten, changed := renameParamRef(f.From, oldRef, newRef); changed {
+				f.From = rewritten
 				cp.Spec.Resources[i].Envelope[path] = f
 			}
 		}

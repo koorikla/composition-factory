@@ -103,12 +103,28 @@ type XRD struct {
 
 // Parameter is one spec field of the composite API. It is single-source: this
 // declaration produces both the XRD schema and the template default.
+//
+// Properties, valid ONLY on type: object, declares typed members: the
+// parameter stops being the v1 free-form string map (additionalProperties:
+// string) and becomes a real nested schema, one member per entry. Members
+// are scalar (string, integer, number, boolean — no object or array members)
+// and nest exactly one level in v1: a member may not declare properties of
+// its own (deeper nesting is planned work, not a permanent ruling). Each
+// member takes the same required/default/enum/description declarations a
+// top-level parameter does, under the same validation rules, and is wired
+// into a resource with from: params.<name>.<member>. An object parameter
+// WITHOUT properties keeps today's free-form map semantics untouched.
+//
+// omitempty is load-bearing: the HTTP API re-marshals every parameter on
+// every edit, and without it every scalar parameter in every blueprint would
+// gain a literal `properties: null` the first time anyone touched the file.
 type Parameter struct {
-	Type        string   `json:"type"`
-	Required    bool     `json:"required"`
-	Enum        []string `json:"enum"`
-	Default     string   `json:"default"`
-	Description string   `json:"description"`
+	Type        string               `json:"type"`
+	Required    bool                 `json:"required"`
+	Enum        []string             `json:"enum"`
+	Default     string               `json:"default"`
+	Description string               `json:"description"`
+	Properties  map[string]Parameter `json:"properties,omitempty"`
 }
 
 // PipelineStep is one blueprint-declared Composition pipeline step, placed
@@ -250,6 +266,22 @@ type Field struct {
 	Value    string `json:"value"`
 	Raw      string `json:"raw"`
 	Template string `json:"template"`
+}
+
+// ParamRef splits a params.<name>[.<member>] reference into its parameter
+// name and member. ok is false when ref does not carry the params. prefix at
+// all (a resources. status reference, say). member is "" for a plain
+// top-level reference. The member half is NOT validated here — it may be
+// empty ("params.obj.") or dotted ("params.obj.a.b"); Validate is the layer
+// that turns those into specific errors, and every other caller runs after
+// Validate.
+func ParamRef(ref string) (param, member string, ok bool) {
+	rest, found := strings.CutPrefix(ref, "params.")
+	if !found {
+		return "", "", false
+	}
+	param, member, _ = strings.Cut(rest, ".")
+	return param, member, true
 }
 
 // statusRefPrefix marks a Field.From cross-resource status reference.

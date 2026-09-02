@@ -92,20 +92,30 @@ func validateResourceEnvelope(x XRD, r Resource) error {
 					"cross-resource status wires are supported in fields:, not in envelope entries, in v1",
 					r.Name, p, f.From)
 			}
-			decl, exists := x.Parameters[param]
-			if !exists {
-				return fmt.Errorf("resource %q envelope %q: references unknown parameter %q",
-					r.Name, p, param)
+			// resolveParamRef returns the governing declaration — the
+			// member's for params.<name>.<member> (a scalar by member
+			// validation), the parameter's own otherwise — the same
+			// resolution a field's from gets.
+			decl, err := resolveParamRef(x, fmt.Sprintf("resource %q envelope %q", r.Name, p), param)
+			if err != nil {
+				return err
 			}
 			// Same rule as a field's from, same failure mode: a bare
 			// {{ $spec.x }} renders a composite with Go's fmt ("map[k:v]",
 			// "[a b c]") — legal YAML, silently wrong.
 			if compositeTypes[decl.Type] {
+				name, _, _ := ParamRef(f.From)
+				if decl.Type == "object" && len(decl.Properties) > 0 {
+					return fmt.Errorf("resource %q envelope %q: parameter %q is a typed object — a from: "+
+						"mapping cannot render the whole object; wire one of its declared members "+
+						"instead (params.%s.<member>; declared members: %s)",
+						r.Name, p, name, name, strings.Join(sortedMemberNames(decl), ", "))
+				}
 				return fmt.Errorf("resource %q envelope %q: parameter %q has type %q, and a from: "+
 					"mapping cannot render a composite value in M1 — it emits a bare "+
 					"{{ $spec.%s }}, which Go's template engine formats with fmt. "+
 					"Use a scalar parameter, or set the entry with raw:",
-					r.Name, p, param, decl.Type, param)
+					r.Name, p, name, decl.Type, name)
 			}
 		}
 	}

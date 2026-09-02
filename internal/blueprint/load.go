@@ -29,6 +29,15 @@ var validTypes = map[string]bool{
 // A `from:` mapping cannot render one correctly in M1 (see Validate).
 var compositeTypes = map[string]bool{"object": true, "array": true}
 
+// memberTypes are the types an object parameter's member may declare in v1:
+// scalars only. An object member would be a second nesting level (refused —
+// one level in v1), and an array member has both of the problems that keep
+// type: array off the top level (no items: schema, Go-fmt rendering behind
+// from:).
+var memberTypes = map[string]bool{
+	"string": true, "integer": true, "number": true, "boolean": true,
+}
+
 // Identifier formats, checked because every one of these values reaches
 // emitted output as a raw YAML map key or a structural value (an OpenAPI
 // property name, a CRD names.kind/plural/... field, or a
@@ -145,6 +154,150 @@ func checkScalar(fieldPath, s string) error {
 func groupIsBareKeyword(group string) bool {
 	segments := strings.Split(group, ".")
 	return len(segments) == 1 && yamlKeywords[strings.ToLower(segments[0])]
+}
+
+// validateParameterScalars checks the free-text scalar declarations shared
+// by top-level parameters and object members — description, default and enum
+// content (see checkScalar), and the default-vs-type rule. fieldPath names
+// the parameter or member in errors (e.g. spec.xrd.parameters.tuning, or
+// spec.xrd.parameters.tuning.properties.maxSize). One helper rather than two
+// copies: a member takes the SAME declarations a top-level parameter does,
+// and two hand-synchronised rule sets would drift the first time one gained
+// a case.
+func validateParameterScalars(fieldPath string, p Parameter) error {
+	// Description, default and every enum entry are user-authored free text
+	// that internal/emit/xrd.go writes straight into the XRD. See checkScalar:
+	// a newline in any of them grows the XRD a bogus top-level key while
+	// leaving it parseable.
+	if err := checkScalar(fieldPath+".description", p.Description); err != nil {
+		return err
+	}
+	if err := checkScalar(fieldPath+".default", p.Default); err != nil {
+		return err
+	}
+	for i, e := range p.Enum {
+		if err := checkScalar(fmt.Sprintf("%s.enum[%d]", fieldPath, i), e); err != nil {
+			return err
+		}
+	}
+	// The XRD emitter honours Default, emitting it quoted for type:
+	// string and unquoted for integer/number/boolean. It has no
+	// sensible handling for a default on type: object or array, and
+	// there is nothing to stop it from writing an unparseable
+	// integer/number token or a non-boolean boolean unvalidated -- both
+	// would produce an invalid CRD schema. Catch it here, at the
+	// source, rather than in the emitter guessing.
+	if p.Default != "" {
+		switch p.Type {
+		case "object", "array":
+			return fmt.Errorf("%s: default is not valid for type %q "+
+				"(only string, integer, number and boolean defaults are supported)", fieldPath, p.Type)
+		case "boolean":
+			if p.Default != "true" && p.Default != "false" {
+				return fmt.Errorf("%s: default %q is not a valid boolean "+
+					`(must be "true" or "false")`, fieldPath, p.Default)
+			}
+		case "integer":
+			if _, err := strconv.ParseInt(p.Default, 10, 64); err != nil {
+				return fmt.Errorf("%s: default %q is not a valid integer", fieldPath, p.Default)
+			}
+		case "number":
+			if _, err := strconv.ParseFloat(p.Default, 64); err != nil {
+				return fmt.Errorf("%s: default %q is not a valid number", fieldPath, p.Default)
+			}
+		}
+	}
+	return nil
+}
+
+// validateParameterMembers checks a typed object parameter's declared
+// members: identifier-shaped names (each becomes a raw YAML map key in the
+// emitted XRD schema, the same position a parameter name occupies), scalar
+// types only, no nesting past one level, and the same scalar/default rules
+// top-level parameters get. Members are visited in sorted order so the same
+// blueprint names the same problem first, every time.
+func validateParameterMembers(paramPath string, p Parameter) error {
+	names := make([]string, 0, len(p.Properties))
+	for m := range p.Properties {
+		names = append(names, m)
+	}
+	sort.Strings(names)
+	for _, m := range names {
+		mPath := paramPath + ".properties." + m
+		if !paramNameRE.MatchString(m) || yamlKeywords[strings.ToLower(m)] {
+			return fmt.Errorf("%s: invalid member name "+
+				"(must be camelCase, e.g. maxMessageSize, and not a YAML keyword like yes/no/true/false)", mPath)
+		}
+		mp := p.Properties[m]
+		// Checked before the type, so an object member that also declares
+		// properties gets the nesting ruling — the one that names what the
+		// author was actually reaching for.
+		if len(mp.Properties) > 0 {
+			return fmt.Errorf("%s: a member cannot declare properties of its own — typed object "+
+				"parameters nest one level in v1 (deeper nesting is planned work, not a permanent "+
+				"restriction)", mPath)
+		}
+		if !memberTypes[mp.Type] {
+			if mp.Type == "object" || mp.Type == "array" {
+				return fmt.Errorf("%s: member type %q is not supported in v1 — members are scalar "+
+					"(string, integer, number or boolean)", mPath, mp.Type)
+			}
+			return fmt.Errorf("%s: unknown type %q", mPath, mp.Type)
+		}
+		if err := validateParameterScalars(mPath, mp); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveParamRef resolves a from: parameter reference — params.<name> or
+// params.<name>.<member> — against the declared parameters, returning the
+// declaration whose type governs the wire: the member's for a member
+// reference, the parameter's own otherwise. context prefixes every error
+// (e.g. `resource "q" field "x"`). The params. prefix must already be
+// stripped by the caller, whose own fallback error names its full grammar.
+func resolveParamRef(x XRD, context, ref string) (Parameter, error) {
+	param, member, hasMember := strings.Cut(ref, ".")
+	decl, exists := x.Parameters[param]
+	if !exists {
+		return Parameter{}, fmt.Errorf("%s: references unknown parameter %q", context, param)
+	}
+	if !hasMember {
+		return decl, nil
+	}
+	if strings.Contains(member, ".") {
+		return Parameter{}, fmt.Errorf("%s: params.%s.%s reaches more than one level below the "+
+			"parameter — typed object parameters nest one level in v1, so a member reference is "+
+			"exactly params.<name>.<member>", context, param, member)
+	}
+	if decl.Type != "object" {
+		return Parameter{}, fmt.Errorf("%s: parameter %q has type %q, not \"object\" — a member "+
+			"reference (params.%s.%s) needs an object parameter with declared properties",
+			context, param, decl.Type, param, member)
+	}
+	if len(decl.Properties) == 0 {
+		return Parameter{}, fmt.Errorf("%s: parameter %q declares no properties — a member reference "+
+			"needs a typed object parameter; declare the member under spec.xrd.parameters.%s.properties",
+			context, param, param)
+	}
+	mdecl, ok := decl.Properties[member]
+	if !ok {
+		return Parameter{}, fmt.Errorf("%s: references unknown member %q of parameter %q "+
+			"(declared members: %s)", context, member, param, strings.Join(sortedMemberNames(decl), ", "))
+	}
+	return mdecl, nil
+}
+
+// sortedMemberNames lists a typed object parameter's members, sorted, for
+// error messages and the XRD emitter's deterministic iteration.
+func sortedMemberNames(p Parameter) []string {
+	out := make([]string, 0, len(p.Properties))
+	for m := range p.Properties {
+		out = append(out, m)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ReadError indicates that the blueprint file itself could not be read (the
@@ -322,46 +475,21 @@ func (b *Blueprint) Validate() error {
 		if !validTypes[p.Type] {
 			return fmt.Errorf("spec.xrd.parameters.%s: unknown type %q", n, p.Type)
 		}
-		// Description, default and every enum entry are user-authored free
-		// text that internal/emit/xrd.go writes straight into the XRD. See
-		// checkScalar: a newline in any of them grows the XRD a bogus
-		// top-level key while leaving it parseable.
-		if err := checkScalar("spec.xrd.parameters."+n+".description", p.Description); err != nil {
+		// Description, default and enum are validated by the same helper an
+		// object member's are — one set of rules, one code path.
+		if err := validateParameterScalars("spec.xrd.parameters."+n, p); err != nil {
 			return err
 		}
-		if err := checkScalar("spec.xrd.parameters."+n+".default", p.Default); err != nil {
-			return err
-		}
-		for i, e := range p.Enum {
-			if err := checkScalar(fmt.Sprintf("spec.xrd.parameters.%s.enum[%d]", n, i), e); err != nil {
-				return err
+		// properties turns an object parameter into a typed one; on any other
+		// type there is no member schema for it to describe, so it is a
+		// mistake to refuse loudly rather than a declaration to ignore.
+		if len(p.Properties) > 0 {
+			if p.Type != "object" {
+				return fmt.Errorf("spec.xrd.parameters.%s: properties is only valid on type \"object\" "+
+					"(got type %q) — only an object parameter has members to declare", n, p.Type)
 			}
-		}
-		// The XRD emitter honours Default, emitting it quoted for type:
-		// string and unquoted for integer/number/boolean. It has no
-		// sensible handling for a default on type: object or array, and
-		// there is nothing to stop it from writing an unparseable
-		// integer/number token or a non-boolean boolean unvalidated -- both
-		// would produce an invalid CRD schema. Catch it here, at the
-		// source, rather than in the emitter guessing.
-		if p.Default != "" {
-			switch p.Type {
-			case "object", "array":
-				return fmt.Errorf("spec.xrd.parameters.%s: default is not valid for type %q "+
-					"(only string, integer, number and boolean defaults are supported)", n, p.Type)
-			case "boolean":
-				if p.Default != "true" && p.Default != "false" {
-					return fmt.Errorf("spec.xrd.parameters.%s: default %q is not a valid boolean "+
-						`(must be "true" or "false")`, n, p.Default)
-				}
-			case "integer":
-				if _, err := strconv.ParseInt(p.Default, 10, 64); err != nil {
-					return fmt.Errorf("spec.xrd.parameters.%s: default %q is not a valid integer", n, p.Default)
-				}
-			case "number":
-				if _, err := strconv.ParseFloat(p.Default, 64); err != nil {
-					return fmt.Errorf("spec.xrd.parameters.%s: default %q is not a valid number", n, p.Default)
-				}
+			if err := validateParameterMembers("spec.xrd.parameters."+n, p); err != nil {
+				return err
 			}
 		}
 	}
@@ -521,6 +649,15 @@ func (b *Blueprint) Validate() error {
 				return fmt.Errorf("resource %q: forEach must reference a parameter as params.<name> (got %q)",
 					r.Name, r.ForEach)
 			}
+			// Loop bounds stay top-level in v1: a member is addressable by a
+			// field's from:, but not as a repetition count. Rejected with the
+			// scope named rather than falling through to a confusing
+			// unknown-parameter error for "obj.member".
+			if name, member, nested := strings.Cut(param, "."); nested {
+				return fmt.Errorf("resource %q: forEach cannot reference member %q of parameter %q — "+
+					"loop bounds stay top-level integer parameters in v1 (got %q)",
+					r.Name, member, name, r.ForEach)
+			}
 			decl, exists := x.Parameters[param]
 			if !exists {
 				return fmt.Errorf("resource %q: forEach references unknown parameter %q", r.Name, param)
@@ -549,6 +686,15 @@ func (b *Blueprint) Validate() error {
 		if r.When != "" {
 			if err := checkScalar(fmt.Sprintf("spec.resources[%d].when", i), r.When); err != nil {
 				return err
+			}
+			// Conditions stay top-level in v1, like loop bounds. ParseWhen's
+			// grammar already refuses a dotted parameter, but its generic
+			// grammar error would send the author to the wrong fix — the
+			// member-shaped case gets the ruling named instead.
+			if head, _, _ := strings.Cut(r.When, " "); strings.HasPrefix(head, "params.") &&
+				strings.Contains(strings.TrimPrefix(head, "params."), ".") {
+				return fmt.Errorf("resource %q: when cannot reference an object member (got %q) — "+
+					"conditions reference top-level parameters only in v1", r.Name, head)
 			}
 			param, op, literal, err := ParseWhen(r.When)
 			if err != nil {
@@ -657,15 +803,19 @@ func (b *Blueprint) Validate() error {
 					}
 					continue
 				}
-				param, ok := strings.CutPrefix(f.From, "params.")
+				ref, ok := strings.CutPrefix(f.From, "params.")
 				if !ok {
-					return fmt.Errorf("resource %q field %q: from must be params.<name> or "+
-						"resources.<name>.status.<path> (got %q)", r.Name, p, f.From)
+					return fmt.Errorf("resource %q field %q: from must be params.<name>, "+
+						"params.<name>.<member> or resources.<name>.status.<path> (got %q)", r.Name, p, f.From)
 				}
-				decl, exists := x.Parameters[param]
-				if !exists {
-					return fmt.Errorf("resource %q field %q: references unknown parameter %q",
-						r.Name, p, param)
+				// resolveParamRef returns the governing declaration: the
+				// member's for a params.<name>.<member> reference (always a
+				// scalar, by member validation above), the parameter's own
+				// otherwise — so the composite check below applies to exactly
+				// the type the wire would render.
+				decl, err := resolveParamRef(x, fmt.Sprintf("resource %q field %q", r.Name, p), ref)
+				if err != nil {
+					return err
 				}
 				// A from: mapping becomes a bare `{{ $spec.<param> }}` in the
 				// template body, which Go's template engine renders with fmt.
@@ -676,6 +826,15 @@ func (b *Blueprint) Validate() error {
 				// wrong. See the type: array branch above; the M2 fix for
 				// both is `{{ $spec.x | toYaml | nindent N }}`.
 				if compositeTypes[decl.Type] {
+					param, _, _ := ParamRef(f.From)
+					// A typed object has a working alternative — say so
+					// instead of dead-ending at the generic composite ruling.
+					if decl.Type == "object" && len(decl.Properties) > 0 {
+						return fmt.Errorf("resource %q field %q: parameter %q is a typed object — a from: "+
+							"mapping cannot render the whole object; wire one of its declared members "+
+							"instead (params.%s.<member>; declared members: %s)",
+							r.Name, p, param, param, strings.Join(sortedMemberNames(decl), ", "))
+					}
 					return fmt.Errorf("resource %q field %q: parameter %q has type %q, and a from: "+
 						"mapping cannot render a composite value in M1 -- it emits a bare "+
 						"{{ $spec.%s }}, which Go's template engine formats with fmt "+
