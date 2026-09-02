@@ -47,23 +47,31 @@ func crdSourceFixture(t *testing.T) (*blueprint.Blueprint, []schema.CRD) {
 		Kind:       "Blueprint",
 		Metadata:   blueprint.Metadata{Name: "xapp"},
 		Spec: blueprint.Spec{
-			Sources: []blueprint.Source{{CRDs: "crds/xdatabase.yaml"}},
+			Sources: []blueprint.Source{
+				{CRDs: "crds/xdatabase.yaml"},
+			},
 			XRD: blueprint.XRD{
-				Group: "platform.example.org", Kind: "XApp", Plural: "xapps",
-				Version: "v1alpha1", Scope: "Namespaced",
+				Group:   "platform.example.org",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
 				Parameters: map[string]blueprint.Parameter{
-					"dbEngine": {Type: "string", Required: true},
+					"dbEngine":     {Type: "string", Required: true},
 					"providerName": {Type: "string", Required: true},
 				},
 			},
-			Resources: []blueprint.Resource{{
-				Name: "db", Kind: "XDatabase",
-				Provider: "crds/xdatabase.yaml",
-				Fields: map[string]blueprint.Field{
-					"spec.engine": {From: "params.dbEngine"},
-					"spec.sizeGB": {Value: "20"},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "db",
+					Kind:     "XDatabase",
+					Provider: "crds/xdatabase.yaml",
+					Fields: map[string]blueprint.Field{
+						"spec.engine": {From: "params.dbEngine"},
+						"spec.sizeGB": {Value: "20"},
+					},
 				},
-			}},
+			},
 		},
 	}
 	return b, scanned
