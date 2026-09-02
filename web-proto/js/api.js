@@ -69,6 +69,18 @@ export function getKinds(q) {
 }
 
 /**
+ * GET /api/kinds/{apiVersion}/{kind} — identity, envelope, and status fields.
+ * @param {string} apiVersion
+ * @param {string} kind
+ * @returns {Promise<{kind: Object, envelope: Array<Object>, status: Array<Object>}>}
+ * @throws {ApiError}
+ */
+export function getKind(apiVersion, kind) {
+  return request("GET",
+    "/api/kinds/" + encodeURIComponent(apiVersion) + "/" + encodeURIComponent(kind));
+}
+
+/**
  * GET /api/kinds/{apiVersion}/{kind}/fields
  * @param {string} apiVersion e.g. "sqs.aws.m.upbound.io/v1beta1" (encoded here — pass it raw)
  * @param {string} kind       e.g. "Queue"

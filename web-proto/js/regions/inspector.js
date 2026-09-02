@@ -36,6 +36,7 @@ var renderToken = 0;
 
 var kindsPromise = null;         // cached GET /api/kinds
 var fieldsCache = {};            // "apiVersion|kind" -> {fields,total}
+var kindDetailCache = {};        // "apiVersion|kind" -> {kind, envelope, status}
 
 /* ---------------- helpers ---------------- */
 
@@ -48,15 +49,14 @@ function esc(s) {
 function selectedResource() {
   var doc = store.state.doc, sel = store.state.selectedResource;
   if (!doc || !sel || sel === "xrd") return null;
-  var rs = doc.spec && doc.spec.resources || [];
-  for (var i = 0; i < rs.length; i++) if (rs[i].name === sel) return rs[i];
+  var list = doc.spec && doc.spec.resources || [];
+  for (var i = 0; i < list.length; i++) if (list[i].name === sel) return list[i];
   return null;
 }
 
-/** Normalize a doc field entry: "" means absent (server pads). */
 function entryOf(res, path) {
-  var f = res.fields && res.fields[path];
-  if (!f) return null;
+  var f = res && res.fields && res.fields[path];
+  if (!f || typeof f !== "object") return null;
   var from = typeof f.from === "string" ? f.from : "";
   var value = typeof f.value === "string" ? f.value : "";
   var raw = typeof f.raw === "string" ? f.raw : "";
@@ -65,25 +65,23 @@ function entryOf(res, path) {
 }
 
 function docMode(entry) {
-  if (!entry) return null;
+  if (!entry) return "v";
   if (entry.from) return "w";
   if (entry.raw) return "r";
   return "v";
 }
 
 function compatible(paramType, fieldType) {
-  if (fieldType === "string") return paramType === "string";
-  if (fieldType === "number" || fieldType === "integer")
-    return paramType === "number" || paramType === "integer";
-  if (fieldType === "boolean") return paramType === "boolean";
-  if (fieldType === "map" || fieldType === "object") return paramType === "object";
-  return true; // unknown/array field types: don't block wiring
+  if (!fieldType || !paramType) return true;
+  if (fieldType === paramType) return true;
+  if (fieldType === "number" && paramType === "integer") return true;
+  return false;
 }
 
 function suggestedParamType(fieldType) {
+  if (fieldType === "integer") return "integer";
   if (fieldType === "number") return "number";
   if (fieldType === "boolean") return "boolean";
-  if (fieldType === "map" || fieldType === "object") return "object";
   return "string";
 }
 
@@ -119,6 +117,14 @@ async function fieldsFor(apiVersion, kind) {
   return fieldsCache[key];
 }
 
+async function kindDetail(apiVersion, kind) {
+  var key = apiVersion + "|" + kind;
+  if (!kindDetailCache[key]) {
+    kindDetailCache[key] = await api.getKind(apiVersion, kind).catch(function () { return null; });
+  }
+  return kindDetailCache[key];
+}
+
 /**
  * Run a store operation, capturing the "error" the store emits for it so the
  * inspector can show the server's message verbatim in its warnbar.
@@ -150,24 +156,48 @@ function warnHtml() {
 }
 
 function modeButtons(path, pressed) {
-  var titles = { v: "Literal value", w: "Wire from a parameter", r: "Raw go-template" };
+  var titles = { v: "Literal value", w: "Wire from a parameter or resource status", r: "Raw go-template" };
   return '<span class="modes">' + ["v", "w", "r"].map(function (x) {
     return '<button data-m="' + x + '" data-path="' + esc(path) + '" aria-pressed="' +
       (pressed === x) + '" title="' + titles[x] + '">' + x.toUpperCase() + "</button>";
   }).join("") + "</span>";
 }
 
-function wireSelectHtml(path, fieldType, params) {
+function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap) {
   var names = Object.keys(params).filter(function (n) {
     return compatible(params[n].type, fieldType);
   });
   var h = '<div class="bound"><span style="color:var(--faint)">&#8592;</span>' +
     '<select class="tsel" data-wire="' + esc(path) + '" style="flex:1">' +
-    '<option value="">wire to&#8230;</option>' +
-    names.map(function (n) {
-      return '<option value="' + esc(n) + '">params.' + esc(n) + "</option>";
-    }).join("") +
-    '<option value="__new__">new parameter&#8230;</option></select></div>';
+    '<option value="">wire to&#8230;</option>';
+
+  if (names.length > 0) {
+    h += '<optgroup label="XRD Parameters">';
+    names.forEach(function (n) {
+      h += '<option value="params.' + esc(n) + '">params.' + esc(n) + "</option>";
+    });
+    h += '</optgroup>';
+  }
+
+  if (otherResources && otherResources.length > 0) {
+    h += '<optgroup label="Resource Status">';
+    otherResources.forEach(function (r) {
+      var sfs = (otherStatusMap && otherStatusMap[r.name]) || [
+        { path: "atProvider.url", type: "string" },
+        { path: "atProvider.arn", type: "string" },
+        { path: "atProvider.id", type: "string" },
+      ];
+      sfs.forEach(function (sf) {
+        if (!fieldType || compatible(sf.type, fieldType)) {
+          var wireVal = "resources." + r.name + ".status." + sf.path;
+          h += '<option value="' + esc(wireVal) + '">' + esc(wireVal) + "</option>";
+        }
+      });
+    });
+    h += '</optgroup>';
+  }
+
+  h += '<option value="__new__">+ new XRD parameter&#8230;</option></select></div>';
   if (pendingNewParam === path) {
     h += '<div class="frow" style="margin-top:4px;margin-bottom:0">' +
       '<input class="tin" data-npname="' + esc(path) + '" placeholder="parameterName" aria-label="New parameter name">' +
@@ -181,7 +211,7 @@ function wireSelectHtml(path, fieldType, params) {
   return h;
 }
 
-function fieldRow(res, f, params) {
+function fieldRow(res, f, params, otherResources, otherStatusMap) {
   var entry = entryOf(res, f.path);
   var dm = docMode(entry);
   var m = uiMode[f.path] || dm;
@@ -190,6 +220,7 @@ function fieldRow(res, f, params) {
   if (filter === "set" && !entry) return "";
 
   var wired = m === "w" && dm === "w" && !uiMode[f.path];
+  var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
   var h = '<div class="fld' + (dm === "w" ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
     '<div class="fld-h"><span class="n">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
     (f.required ? '<span class="rq">req</span>' : "") +
@@ -198,11 +229,13 @@ function fieldRow(res, f, params) {
 
   if (m === "w") {
     if (dm === "w" && !uiMode[f.path]) {
-      h += '<div class="bound"><span style="color:var(--faint)">&#8592;</span>' +
-        '<span class="src">' + esc(entry.from) + "</span>" +
+      var wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
+      var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
+      h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
+        '<span class="src" style="color:' + wireCol + '">' + esc(entry.from) + "</span>" +
         '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
     } else {
-      h += wireSelectHtml(f.path, f.type, params);
+      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap);
     }
   } else if (m === "r") {
     h += '<textarea class="val raw" data-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
@@ -217,13 +250,33 @@ function fieldRow(res, f, params) {
 async function renderResource(res) {
   var t = renderToken;
   var doc = store.state.doc;
-  var meta = null, flds = null, loadErr = null;
+  var meta = null, flds = null, detail = null, loadErr = null;
   try {
     meta = await kindMeta(res);
-    if (meta) flds = await fieldsFor(meta.apiVersion, res.kind);
+    if (meta) {
+      flds = await fieldsFor(meta.apiVersion, res.kind);
+      detail = await kindDetail(meta.apiVersion, res.kind);
+    }
   } catch (e) {
     loadErr = e && e.message || String(e);
   }
+  if (t !== renderToken) return;
+
+  var otherResources = (doc && doc.spec && doc.spec.resources || []).filter(function (r) {
+    return r.name !== res.name && !r.forEach;
+  });
+
+  // Prefetch other resources' kind status schemas in parallel
+  var otherStatusMap = {};
+  await Promise.all(otherResources.map(async function (or) {
+    try {
+      var om = await kindMeta(or);
+      if (om) {
+        var od = await kindDetail(om.apiVersion, or.kind);
+        if (od && od.status) otherStatusMap[or.name] = od.status;
+      }
+    } catch (_) {}
+  }));
   if (t !== renderToken) return;
 
   var h = warnHtml();
@@ -256,8 +309,22 @@ async function renderResource(res) {
     h += '<div class="empty">No schema found for kind ' + esc(res.kind) + ".</div>";
   } else {
     var params = paramsOf(doc);
-    var body = fields.map(function (f) { return fieldRow(res, f, params); }).join("");
+    var body = fields.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap); }).join("");
     h += body || '<div class="empty">No fields match this filter.</div>';
+
+    // Status outputs section
+    if (detail && detail.status && detail.status.length > 0) {
+      h += '<div class="insp-sec" style="margin-top:14px;padding:8px 12px;border-top:1px solid var(--rule);background:var(--surface-2)">' +
+        '<div style="font-size:11px;font-weight:600;color:var(--wire-status);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Status Outputs</div>' +
+        '<div style="font-size:11px;color:var(--faint);margin-bottom:6px">Other resources can wire from this object\'s status:</div>' +
+        detail.status.slice(0, 10).map(function (sf) {
+          return '<div style="display:flex;align-items:center;justify-content:space-between;padding:2px 0;font-size:11px">' +
+            '<code style="color:var(--wire-status);font-family:var(--mono)">status.' + esc(sf.path) + '</code>' +
+            '<span style="color:var(--faint)">' + esc(sf.type) + '</span>' +
+            '</div>';
+        }).join("") +
+        '</div>';
+    }
   }
   box.innerHTML = h;
 }
@@ -481,7 +548,8 @@ function onBoxChange(e) {
     var v = t.value;
     if (v === "__new__") { pendingNewParam = path; render(); return; }
     if (!v) return;
-    setField(path, { from: "params." + v, value: "", raw: "" })
+    var fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
+    setField(path, { from: fromVal, value: "", raw: "" })
       .then(function (r) { if (r !== null) { delete uiMode[path]; pendingNewParam = null; } });
     return;
   }

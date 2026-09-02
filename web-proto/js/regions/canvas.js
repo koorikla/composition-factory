@@ -15,7 +15,7 @@
 
 import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
-import { listWires, fanOut } from "../wires.js";
+import { listWires, fanOut, parseFrom } from "../wires.js";
 
 const XR_ID = "xrd"; // store.selectedResource / positions key for the composite node
 
@@ -196,11 +196,15 @@ function resourceCardHTML(d, r, sel) {
     const f = fields[p] || null;
     const form = formOf(f);
     const sf = schema ? schema.byPath[p] : null;
-    const wired = form === "from" && f.from.indexOf("params.") === 0;
-    const param = wired ? f.from.slice("params.".length) : null;
-    const dot = wired
-      ? (fanOut(d, param) > 1 ? "var(--shared)" : COLORS.xrd)
-      : "var(--rule-2)";
+    const parsed = form === "from" ? parseFrom(f.from) : null;
+    let dot = "var(--rule-2)";
+    if (parsed) {
+      if (parsed.kind === "param") {
+        dot = fanOut(d, parsed.param) > 1 ? "var(--shared)" : COLORS.xrd;
+      } else if (parsed.kind === "status") {
+        dot = "var(--wire-status)";
+      }
+    }
     h += portRow(r.name, p, {
       dir: "in",
       dotColor: dot,
@@ -209,6 +213,24 @@ function resourceCardHTML(d, r, sel) {
       label: shortPath(p),
       title: p + (sf ? " \u00b7 " + sf.type + (sf.required ? " \u00b7 required" : "") : "") +
         (sf && sf.description ? "\n" + sf.description : ""),
+    });
+  });
+
+  // Outgoing status wires from this resource
+  const outStatusWires = listWires(d).filter(function (w) {
+    return w.kind === "status" && w.srcResource === r.name;
+  });
+  const seenStatus = {};
+  outStatusWires.forEach(function (w) {
+    if (seenStatus[w.srcPath]) return;
+    seenStatus[w.srcPath] = true;
+    h += portRow(r.name, "status." + w.srcPath, {
+      dir: "out",
+      dotColor: "var(--wire-status)",
+      req: false,
+      ty: "",
+      label: "status." + shortPath(w.srcPath),
+      title: r.name + ".status." + w.srcPath + " (status output)",
     });
   });
   h += '</div>';
@@ -267,20 +289,30 @@ function drawWires() {
   if (!d) { wiresEl.innerHTML = ""; return; }
   const ws = listWires(d);
   const fans = {};
-  ws.forEach(function (w) { fans[w.param] = (fans[w.param] || 0) + 1; });
+  ws.forEach(function (w) { if (w.kind === "param") fans[w.param] = (fans[w.param] || 0) + 1; });
   let s = "";
   ws.forEach(function (w) {
-    const a = portPos(XR_ID, w.param);
-    const b = portPos(w.resource, w.path);
+    let a, b, cls, col, title;
+    if (w.kind === "status") {
+      a = portPos(w.srcResource, "status." + w.srcPath) || portPos(w.srcResource, w.srcPath);
+      b = portPos(w.resource, w.path);
+      cls = "wire-status";
+      col = "var(--wire-status)";
+      title = esc(w.srcResource) + ".status." + esc(w.srcPath) + " \u2192 " + esc(w.resource) + "." + esc(w.path);
+    } else {
+      a = portPos(XR_ID, w.param);
+      b = portPos(w.resource, w.path);
+      const shared = fans[w.param] > 1;
+      cls = shared ? "wire-shared" : "wire-xrd";
+      col = shared ? "var(--shared)" : "var(--wire-xrd)";
+      title = "$" + esc(w.param) + " \u2192 " + esc(w.resource) + "." + esc(w.path);
+    }
     if (!a || !b) return;
     const dx = Math.max(34, Math.abs(b.x - a.x) * 0.42);
-    const shared = fans[w.param] > 1;
-    const cls = shared ? "wire-shared" : "wire-xrd";
-    const col = shared ? "var(--shared)" : "var(--wire-xrd)";
     s += '<path class="' + cls + '" d="M' + a.x + ',' + a.y +
       ' C' + (a.x + dx) + ',' + a.y + ' ' + (b.x - dx) + ',' + b.y +
       ' ' + b.x + ',' + b.y + '" stroke="' + col + '" pointer-events="stroke">' +
-      '<title>$' + esc(w.param) + ' \u2192 ' + esc(w.resource) + '.' + esc(w.path) + '</title></path>';
+      '<title>' + title + '</title></path>';
   });
   wiresEl.innerHTML = s;
 }

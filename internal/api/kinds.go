@@ -91,7 +91,20 @@ func (srv *server) handleKind(w http.ResponseWriter, r *http.Request) {
 		envelope = []index.Field{}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"kind": kind, "envelope": envelope})
+	statusNodes, err := crd.Status()
+	if err != nil {
+		statusNodes = nil
+	}
+	status := index.Fields(statusNodes, index.FieldQuery{})
+	if status == nil {
+		status = []index.Field{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"kind":     kind,
+		"envelope": envelope,
+		"status":   status,
+	})
 }
 
 // handleKindFields serves GET

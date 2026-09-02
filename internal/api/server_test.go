@@ -76,6 +76,12 @@ spec:
                 type: object
                 properties:
                   name: {type: string}
+          status:
+            properties:
+              atProvider:
+                properties:
+                  arn: {type: string}
+                  url: {type: string}
 `), []byte(`
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition

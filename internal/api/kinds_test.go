@@ -59,6 +59,7 @@ func TestGetKindReturnsIdentityAndEnvelope(t *testing.T) {
 	var got struct {
 		Kind     index.Kind
 		Envelope []index.Field
+		Status   []index.Field
 	}
 	if code := getJSON(t, testHandler(t), "/api/kinds/"+esc+"/Queue", &got); code != 200 {
 		t.Fatalf("status %d", code)
@@ -91,6 +92,21 @@ func TestGetKindReturnsIdentityAndEnvelope(t *testing.T) {
 	}
 	if hasDeletionPolicy {
 		t.Errorf("envelope = %v, must not contain deletionPolicy (a legacy v1 field this fixture's schema does not have)", paths)
+	}
+
+	// Status fields must also be returned from the real CRD status schema.
+	var statusPaths []string
+	for _, f := range got.Status {
+		statusPaths = append(statusPaths, f.Path)
+	}
+	hasURL := false
+	for _, p := range statusPaths {
+		if p == "atProvider.url" {
+			hasURL = true
+		}
+	}
+	if !hasURL {
+		t.Errorf("status = %v, want it to contain atProvider.url", statusPaths)
 	}
 }
 
