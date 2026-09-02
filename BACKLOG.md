@@ -62,7 +62,7 @@
       only once env exists). Engine: tree.go/API change; GUI: Required filter
       semantics. Regression net already merged (required_test.go). Blocked on
       the engine-batch integration landing (tree.go is hot).
-- [ ] Typed object parameters (engine): an object param with declared member
+- [x] Typed object parameters (engine+GUI): an object param with declared member
       fields ("+ then string/boolean/int") — real XRD sub-properties instead of
       the v1 free-form string map. Emit properties/required, wire members as
       params.obj.member. — user request 2026-09-02
