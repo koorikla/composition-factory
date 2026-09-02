@@ -102,6 +102,15 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		if err := checkStatusRefs(r, b, crds, wantNamespaced); err != nil {
 			return nil, err
 		}
+		// Annotations are planned up front, like fields, so a bad entry errors
+		// before a single line of this resource's document is written. The
+		// plan is written into the shared metadata.annotations block below —
+		// BEFORE the native/managed fork, because annotations exist on both
+		// families identically (see annotations.go).
+		annPlan, err := planAnnotations(r, b, crds, wantNamespaced)
+		if err != nil {
+			return nil, err
+		}
 		// forEach wraps the resource's WHOLE document in a range over the
 		// loop count, so every line below — separator, envelope,
 		// providerConfigRef — repeats per iteration; fields render exactly
@@ -155,6 +164,11 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		} else {
 			d.Line(ti, "    {{ setResourceNameAnnotation %q }}", r.Name)
 		}
+		// Blueprint-authored annotations follow the function-set line, sorted
+		// by key. The setResourceNameAnnotation line above is unconditional,
+		// so this block can never render empty however many entries are
+		// guarded — no writeMapField-style {} fallback is needed here.
+		writeAnnotations(d, ti, annPlan)
 		// Conventions fill in matching fields the blueprint does NOT set
 		// explicitly; an explicit field always wins — that IS the override
 		// mechanism. The merge happens on a copy, never on r.Fields itself.
@@ -655,10 +669,11 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 				return nil, fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
 			}
 			if ref.Resource != "" {
-				guard, rhs, err := statusWire(ref, r, p, b, crds, wantNamespaced)
+				guard, expr, err := statusWire(ref, r, fmt.Sprintf("field %q", p), b, crds, wantNamespaced)
 				if err != nil {
 					return nil, err
 				}
+				rhs := "{{ " + expr + " }}"
 				// A status wire is ALWAYS conditional: the value does not
 				// exist until the referenced resource has been observed
 				// (first reconcile, a fresh XR, `crossplane composition
@@ -716,18 +731,22 @@ var scalarStatusTypes = map[string]bool{
 	"string": true, "integer": true, "number": true, "boolean": true,
 }
 
-// statusWire resolves one resources.<name>.status.<path> wire for field p on
-// resource r: it checks the path against the SOURCE resource's CRD status
-// schema (the only layer that can — blueprint.Validate has no CRDs) and
-// returns the render-time guard condition plus the value expression.
-//
-// The path must resolve to a scalar LEAF of the status tree. The wired
-// value itself is interpolated bare, exactly like a params wire: its type
-// is schema-checked here at generation time, and the observed value arrives
+// statusWire resolves one resources.<name>.status.<path> wire on resource r:
+// it checks the path against the SOURCE resource's CRD status schema (the
+// only layer that can — blueprint.Validate has no CRDs) and returns the
+// render-time guard condition plus the bare value EXPRESSION (no {{ }}), so
+// each caller wraps it for its own surface: planFields interpolates it bare
+// (the field's type is schema-checked here, and the observed value arrives
 // from the provider's own controller conforming to that same CRD — the
-// pre-existing, documented quoting decision for from: values (see
-// planFields), not a new one.
-func statusWire(ref blueprint.FromRef, r blueprint.Resource, p string, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) (guard, rhs string, err error) {
+// pre-existing, documented quoting decision for from: values), while
+// planAnnotations pipes it through quote, because an annotation value must
+// be a string whatever scalar type the status leaf declares.
+//
+// The path must resolve to a scalar LEAF of the status tree. what names
+// where the wire sits on r, preformatted (`field "queueUrl"`,
+// `annotation "eks.amazonaws.com/role-arn"`), so one resolver serves both
+// surfaces without the field messages changing a byte.
+func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) (guard, expr string, err error) {
 	var src *blueprint.Resource
 	for i := range b.Spec.Resources {
 		if b.Spec.Resources[i].Name == ref.Resource {
@@ -738,20 +757,20 @@ func statusWire(ref blueprint.FromRef, r blueprint.Resource, p string, b *bluepr
 	if src == nil {
 		// Validate refuses this before any emitter runs; kept as a defensive
 		// error because planFields is reachable from in-memory blueprints.
-		return "", "", fmt.Errorf("resource %q field %q: references the status of unknown resource %q",
-			r.Name, p, ref.Resource)
+		return "", "", fmt.Errorf("resource %q %s: references the status of unknown resource %q",
+			r.Name, what, ref.Resource)
 	}
 	crd, err := resolveKind(crds, *src, wantNamespaced)
 	if err != nil {
-		return "", "", fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
+		return "", "", fmt.Errorf("resource %q %s: %w", r.Name, what, err)
 	}
 	nodes, err := crd.Status()
 	if err != nil {
-		return "", "", fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
+		return "", "", fmt.Errorf("resource %q %s: %w", r.Name, what, err)
 	}
 	if len(nodes) == 0 {
-		return "", "", fmt.Errorf("resource %q field %q: kind %q declares no status schema in its CRD; "+
-			"nothing can be wired from resource %q's status", r.Name, p, src.Kind, ref.Resource)
+		return "", "", fmt.Errorf("resource %q %s: kind %q declares no status schema in its CRD; "+
+			"nothing can be wired from resource %q's status", r.Name, what, src.Kind, ref.Resource)
 	}
 
 	path := strings.Join(ref.StatusPath, ".")
@@ -770,28 +789,28 @@ func statusWire(ref blueprint.FromRef, r blueprint.Resource, p string, b *bluepr
 	}
 	switch {
 	case leaf == nil && branches[path]:
-		return "", "", fmt.Errorf("resource %q field %q: status path %q on %s addresses an object "+
+		return "", "", fmt.Errorf("resource %q %s: status path %q on %s addresses an object "+
 			"subtree, not a scalar leaf -- interpolating it would render Go's fmt of the map, "+
-			"which is valid YAML and silently wrong", r.Name, p, path, crd.Kind)
+			"which is valid YAML and silently wrong", r.Name, what, path, crd.Kind)
 	case leaf == nil:
 		if s := closestPath(path, suggestions); s != "" {
-			return "", "", fmt.Errorf("resource %q field %q: status path %q is not in %s's status "+
-				"schema; did you mean %q?", r.Name, p, path, crd.Kind, s)
+			return "", "", fmt.Errorf("resource %q %s: status path %q is not in %s's status "+
+				"schema; did you mean %q?", r.Name, what, path, crd.Kind, s)
 		}
-		return "", "", fmt.Errorf("resource %q field %q: status path %q is not in %s's status schema",
-			r.Name, p, path, crd.Kind)
+		return "", "", fmt.Errorf("resource %q %s: status path %q is not in %s's status schema",
+			r.Name, what, path, crd.Kind)
 	case !scalarStatusTypes[leaf.Type]:
 		typ := leaf.Type
 		if typ == "" {
 			typ = "untyped"
 		}
-		return "", "", fmt.Errorf("resource %q field %q: status path %q on %s is %s, and a wire can "+
+		return "", "", fmt.Errorf("resource %q %s: status path %q on %s is %s, and a wire can "+
 			"only carry a scalar (string, integer, number, boolean) -- a composite would render "+
-			"Go's fmt of the value", r.Name, p, path, crd.Kind, typ)
+			"Go's fmt of the value", r.Name, what, path, crd.Kind, typ)
 	}
 
-	guard, rhs = statusGuard(ref.Resource, ref.StatusPath)
-	return guard, rhs, nil
+	guard, expr = statusGuard(ref.Resource, ref.StatusPath)
+	return guard, expr, nil
 }
 
 // statusGuard builds the render-time guard for a status wire, plus the
@@ -818,7 +837,11 @@ func statusWire(ref blueprint.FromRef, r blueprint.Resource, p string, b *bluepr
 //     half-populated or hand-written observed fixture (`status:` with
 //     nothing under it) must degrade to "field omitted", never to a failed
 //     render of the whole composition.
-func statusGuard(resName string, segs []string) (guard, rhs string) {
+//
+// The expression comes back BARE (no {{ }}): the field surface interpolates
+// it as-is, the annotation surface pipes it through quote first — see
+// statusWire's doc comment for why the two differ.
+func statusGuard(resName string, segs []string) (guard, expr string) {
 	entry := fmt.Sprintf("(index $.observed.resources %q)", resName)
 	conds := []string{
 		`(hasKey $.observed "resources")`,
@@ -834,7 +857,7 @@ func statusGuard(resName string, segs []string) (guard, rhs string) {
 			fmt.Sprintf("(hasKey %s %q)", cur, seg))
 		cur += "." + seg
 	}
-	return "(and " + strings.Join(conds, " ") + ")", "{{ " + cur + " }}"
+	return "(and " + strings.Join(conds, " ") + ")", cur
 }
 
 // writeMapField emits "key:" (or "key: {}") at keyIndent, plus plan's fields

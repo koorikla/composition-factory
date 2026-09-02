@@ -1,0 +1,11 @@
+# An XIrsa claim for the acceptance render. namespace is deliberately
+# OMITTED: the XRD schema defaults it to "default", and the trust policy's
+# ServiceAccount subject proves the defaulting really ran.
+apiVersion: platform.sparky.ee/v1alpha1
+kind: XIrsa
+metadata:
+  name: demo-irsa
+  namespace: default
+spec:
+  providerName: aws-main
+  oidcProviderArn: arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-north-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE

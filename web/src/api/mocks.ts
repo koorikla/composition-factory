@@ -107,11 +107,12 @@ function silentlyDropped(existing: Parameter, present: Set<string>): string[] {
 function referencingResources(name: string): string[] {
   const refs: string[] = []
   for (const r of blueprintState.spec.resources) {
-    for (const f of Object.values(r.fields)) {
-      if (f.from === `params.${name}`) {
-        refs.push(r.name)
-        break
-      }
+    // Fields AND annotations, mirroring the server's referencingResources
+    // (internal/api/blueprint.go): an annotation wire keeps its parameter
+    // undeletable exactly as a field wire does.
+    const assignments = [...Object.values(r.fields), ...Object.values(r.annotations ?? {})]
+    if (assignments.some(f => f.from === `params.${name}`)) {
+      refs.push(r.name)
     }
   }
   return refs

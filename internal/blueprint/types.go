@@ -194,6 +194,45 @@ type Resource struct {
 	// never declared the key must not gain a literal `envelope: null` when the
 	// document is persisted back.
 	Envelope map[string]Field `json:"envelope,omitempty"`
+	// Annotations sets metadata.annotations entries on the composed document —
+	// valid on BOTH families, because the annotations block is part of the
+	// shared metadata the emitter writes before the native/managed fork (a
+	// native ServiceAccount carrying eks.amazonaws.com/role-arn is the
+	// motivating case: nothing else in the field surface can author it, since
+	// top-level metadata is deliberately not a settable field path).
+	//
+	// Keys are free-form annotation keys, validated to the Kubernetes
+	// qualified-name shape (an optional DNS-subdomain prefix + '/' + a name of
+	// at most 63 chars; see validateResourceAnnotations) — NEVER the camelCase
+	// path grammar fields use, because dots and slashes are the norm here, not
+	// path separators. Two keys are reserved and refused: the
+	// composition-resource-name annotation (both its crossplane.io spelling and
+	// the gotemplating.fn.crossplane.io one the emitted
+	// setResourceNameAnnotation call writes) — the emitter owns that key as
+	// node identity, and a blueprint entry for it would silently collide with
+	// the function-set value.
+	//
+	// Entries use the same exactly-one-of {value|from|raw|template} Field
+	// forms as Fields. Annotation values are ALWAYS strings, which shapes the
+	// rendering (see internal/emit/annotations.go): value is quoted literally,
+	// and a from: wire — params.<name> (scalar) or
+	// resources.<name>.status.<path> (scalar leaf), with exactly the guard
+	// discipline field wires get — is piped through `quote` so a numeric or
+	// boolean scalar still lands as the string the API server requires. An
+	// absent optional parameter or an unobserved status source omits the KEY
+	// cleanly (never an empty-valued entry, never "<no value>").
+	//
+	// template: is legal on native resources here, unlike in Fields: the
+	// fields refusal exists because a template call's output re-indents to the
+	// fixed forProvider column, which a native field at an arbitrary nesting
+	// depth breaks — but every annotation entry sits at ONE fixed column
+	// (metadata.annotations children), the same for both families, so the
+	// mechanical reason does not apply.
+	//
+	// omitempty for the same reason Envelope has it; an empty map means the
+	// same as an absent one (it authors nothing), so nothing is lost when the
+	// two collapse on persist — the same documented ruling as Spec.Pipeline.
+	Annotations map[string]Field `json:"annotations,omitempty"`
 }
 
 // when grammar, compiled once. The literal character class excludes '"' and

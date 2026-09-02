@@ -656,7 +656,7 @@ func (b *Blueprint) Validate() error {
 					return fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
 				}
 				if ref.Resource != "" {
-					if err := b.validateStatusRef(r, p, f.From); err != nil {
+					if err := b.validateStatusRef(r, fmt.Sprintf("field %q", p), f.From); err != nil {
 						return err
 					}
 					continue
@@ -691,6 +691,11 @@ func (b *Blueprint) Validate() error {
 		if err := validateResourceEnvelope(x, r); err != nil {
 			return err
 		}
+		// Annotations too (see annotations.go): key grammar and value forms
+		// here, status-schema checks at emit time.
+		if err := b.validateResourceAnnotations(r); err != nil {
+			return err
+		}
 	}
 
 	// spec.pipeline last: its checks are self-contained (see pipeline.go), so
@@ -708,16 +713,20 @@ func (b *Blueprint) Validate() error {
 // is a structural requirement, not a style rule). The CRD-schema half — does
 // <path> name a scalar leaf in the referenced kind's declared status —
 // belongs to internal/emit, which holds the CRDs.
-func (b *Blueprint) validateStatusRef(r Resource, fieldPath, from string) error {
+//
+// what names where the reference sits on r, preformatted (`field "podSpec"`,
+// `annotation "eks.amazonaws.com/role-arn"`), so one checker serves both wire
+// surfaces without the field messages changing a byte.
+func (b *Blueprint) validateStatusRef(r Resource, what, from string) error {
 	target, path, ok := StatusRef(from)
 	if !ok {
-		return fmt.Errorf("resource %q field %q: a resources. reference must be "+
+		return fmt.Errorf("resource %q %s: a resources. reference must be "+
 			"resources.<name>.status.<path>, e.g. resources.main-queue.status.atProvider.url (got %q)",
-			r.Name, fieldPath, from)
+			r.Name, what, from)
 	}
 	if target == r.Name {
-		return fmt.Errorf("resource %q field %q: references its own status -- a resource cannot be "+
-			"wired to itself; the value it would read is the one its own document produces", r.Name, fieldPath)
+		return fmt.Errorf("resource %q %s: references its own status -- a resource cannot be "+
+			"wired to itself; the value it would read is the one its own document produces", r.Name, what)
 	}
 	var decl *Resource
 	for i := range b.Spec.Resources {
@@ -727,19 +736,19 @@ func (b *Blueprint) validateStatusRef(r Resource, fieldPath, from string) error 
 		}
 	}
 	if decl == nil {
-		return fmt.Errorf("resource %q field %q: references unknown resource %q", r.Name, fieldPath, target)
+		return fmt.Errorf("resource %q %s: references unknown resource %q", r.Name, what, target)
 	}
 	if decl.ForEach != "" {
-		return fmt.Errorf("resource %q field %q: resource %q is looped (forEach: %s), so its composed "+
+		return fmt.Errorf("resource %q %s: resource %q is looped (forEach: %s), so its composed "+
 			"documents are named %s-0, %s-1, ... and the un-indexed key %q never appears in the observed "+
 			"resources map -- the reference could never resolve. Reference an unlooped resource",
-			r.Name, fieldPath, target, decl.ForEach, target, target, target)
+			r.Name, what, target, decl.ForEach, target, target, target)
 	}
 	for _, seg := range strings.Split(path, ".") {
 		if !paramNameRE.MatchString(seg) {
-			return fmt.Errorf("resource %q field %q: status path segment %q in %q is not a valid "+
+			return fmt.Errorf("resource %q %s: status path segment %q in %q is not a valid "+
 				"field name (must be camelCase, e.g. atProvider.url) -- each segment is written into "+
-				"the emitted template as a dereference and a hasKey guard", r.Name, fieldPath, seg, from)
+				"the emitted template as a dereference and a hasKey guard", r.Name, what, seg, from)
 		}
 	}
 	return nil

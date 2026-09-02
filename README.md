@@ -142,46 +142,56 @@ A blueprint combines an XRD definition and composed resources into a single decl
 apiVersion: factory.crossplane.io/v1alpha1
 kind: Blueprint
 metadata:
-  name: xirsa
+  name: irsa
 spec:
   sources:
     - provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
   xrd:
     group: platform.sparky.ee
-    kind: XIRSA
+    kind: XIrsa
     plural: xirsas
     version: v1alpha1
     scope: Namespaced
     parameters:
       providerName:    {type: string, required: true}
-      policyArn:       {type: string, required: true}
-      oidcIssuer:      {type: string, required: true}
       oidcProviderArn: {type: string, required: true}
+      namespace:       {type: string, default: default}
+  templates:
+    # The output is single-quoted so the rendered assumeRolePolicy is a JSON
+    # STRING, and the OIDC issuer is derived from the provider ARN.
+    trust-policy: >-
+      '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ regexReplaceAll "^.*:oidc-provider/" .spec.oidcProviderArn "" }}:sub":"system:serviceaccount:{{ .spec.namespace }}:{{ .xr }}"}}}]}'
   resources:
-    - name: iam-role
+    - name: role
       kind: Role
       provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
       fields:
-        description:      {value: "IAM Role for Service Account"}
-        assumeRolePolicy: {raw: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ $spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ $spec.oidcIssuer }}:sub":"system:serviceaccount:{{ $xr.metadata.namespace }}:{{ $xr.metadata.name }}"}}}]}'}
-    - name: policy-attachment
-      kind: RolePolicyAttachment
-      provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
-      fields:
-        policyArn: {from: params.policyArn}
-        role:      {from: resources.iam-role.status.atProvider.id}
+        description:      {value: IAM role assumed by a Kubernetes ServiceAccount via IRSA}
+        assumeRolePolicy: {template: trust-policy}
     - name: sa
       kind: ServiceAccount
       provider: k8s
       fields:
         automountServiceAccountToken: {raw: "true"}
+      annotations:
+        # A cross-resource status wire into a native object's annotation: the
+        # key is cleanly absent until AWS reports the Role's ARN, then
+        # Crossplane fills it in on a later reconcile.
+        eks.amazonaws.com/role-arn: {from: resources.role.status.atProvider.arn}
 ```
+
+The full, commented version of this blueprint lives at `testdata/irsa.cf.yaml`.
 
 ### Field Modes
 
 - **`value`**: Literal scalar value (emitted quoted for strings).
 - **`from`**: Parameter or cross-resource reference (`params.<name>` or `resources.<name>.status.<field>`). Required parameters dereference directly; optional parameters are automatically wrapped in `hasKey` guards.
 - **`raw`**: Verbatim template expression or complex JSON/YAML block.
+- **`template`**: Calls a named `spec.templates` entry; its output becomes the value.
+
+### Annotations
+
+`resources[*].annotations` authors `metadata.annotations` on the composed document — on native and managed kinds alike — with the same `{value|from|raw|template}` forms as fields. Keys are free-form annotation keys (dots and slashes legal, validated to the Kubernetes qualified-name shape); values always land as strings, wires included. A wired annotation whose source is absent omits the key entirely.
 
 ### Flow Control
 

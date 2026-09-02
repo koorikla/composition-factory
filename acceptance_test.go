@@ -2,6 +2,7 @@ package main_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -999,6 +1000,200 @@ func TestAcceptanceEnvelopeRenders(t *testing.T) {
 			t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
 		}
 	}
+}
+
+// TestAcceptanceIRSARenders is the annotations gate, on the motivating use
+// case: an IAM Role (provider-aws-iam, managed) whose observed
+// status.atProvider.arn flows into a native v1 ServiceAccount's
+// eks.amazonaws.com/role-arn annotation — the IRSA handshake — rendered
+// through the real crossplane composition render, both ways:
+//
+//   - WITHOUT observed state the ServiceAccount renders with the annotation
+//     KEY cleanly absent (the Role has no ARN yet; Crossplane fills it on a
+//     later reconcile) — never empty-valued, never "<no value>";
+//   - WITH --observed-resources supplying the Role's ARN, the value lands in
+//     the ServiceAccount's annotation verbatim.
+//
+// Along the way it proves the surrounding discipline for real: the trust
+// policy template renders an assumeRolePolicy that is a JSON *string* (not a
+// YAML mapping the API server would reject against type: string) carrying
+// the OIDC issuer derived from the provider ARN and the schema-DEFAULTED
+// namespace, the native ServiceAccount carries no Crossplane envelope, and
+// two generate runs agree byte for byte.
+func TestAcceptanceIRSARenders(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+
+	// Build to bin/cf for the same test-what-you-ship reason
+	// TestAcceptanceXQueueRenders documents.
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	bin := filepath.Join(repoRoot, "bin", "cf")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
+		t.Fatalf("build cf: %v\n%s", err, out)
+	}
+
+	cacheDir := filepath.Join(dir, "cache")
+	lock := filepath.Join(dir, ".cf.lock")
+
+	add := exec.Command(bin, "provider", "add",
+		"ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0", "--cache-dir", cacheDir, "--lock", lock)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("cf provider add: %v\n%s", err, out)
+	}
+
+	// Generate twice into separate directories: determinism is a correctness
+	// requirement, so the two runs must agree byte for byte.
+	outDir := filepath.Join(dir, "out")
+	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
+		gen := exec.Command(bin, "gen", "testdata/irsa.cf.yaml", "-o", o, "--cache-dir", cacheDir)
+		if out, err := gen.CombinedOutput(); err != nil {
+			t.Fatalf("cf gen into %s: %v\n%s", o, err, out)
+		}
+	}
+	for _, rel := range []string{
+		filepath.Join("compositions", "xirsas.platform.sparky.ee.yaml"),
+		filepath.Join("xrds", "xirsas.platform.sparky.ee.yaml"),
+		"functions.yaml",
+	} {
+		first, err := os.ReadFile(filepath.Join(outDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		second, err := os.ReadFile(filepath.Join(dir, "out2", rel))
+		if err != nil {
+			t.Fatalf("read second-run %s: %v", rel, err)
+		}
+		if !bytes.Equal(first, second) {
+			t.Errorf("%s: two generate runs over the same blueprint produced different bytes", rel)
+		}
+	}
+	chk := exec.Command(bin, "gen", "testdata/irsa.cf.yaml", "-o", outDir, "--cache-dir", cacheDir, "--check")
+	if out, err := chk.CombinedOutput(); err != nil {
+		t.Fatalf("cf gen --check right after gen should exit 0: %v\n%s", err, out)
+	}
+
+	comp := filepath.Join(outDir, "compositions", "xirsas.platform.sparky.ee.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xirsas.platform.sparky.ee.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+	const roleARN = "arn:aws:iam::123456789012:role/demo-irsa"
+
+	// saAnnotations pulls the ServiceAccount's rendered annotations map.
+	saAnnotations := func(t *testing.T, docs map[string]map[string]any, rendered []byte) map[string]any {
+		t.Helper()
+		sa, ok := docs["ServiceAccount"]
+		if !ok {
+			t.Fatalf("no ServiceAccount among rendered documents\n---\n%s", rendered)
+		}
+		anns, ok := digAny(sa, "metadata", "annotations").(map[string]any)
+		if !ok {
+			t.Fatalf("ServiceAccount metadata.annotations = %v, want a map\n---\n%s",
+				digAny(sa, "metadata", "annotations"), rendered)
+		}
+		return anns
+	}
+
+	t.Run("unobserved: the annotation key is cleanly absent", func(t *testing.T) {
+		rendered, err := renderComposition(t, "testdata/xr-irsa.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
+		if err != nil {
+			t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+		}
+		docs := decodeRenderedDocs(t, rendered)
+
+		anns := saAnnotations(t, docs, rendered)
+		if v, present := anns["eks.amazonaws.com/role-arn"]; present {
+			t.Errorf("eks.amazonaws.com/role-arn = %v — the key must be omitted entirely while the "+
+				"Role is unobserved, never rendered empty", v)
+		}
+		if got := anns["crossplane.io/composition-resource-name"]; got != "sa" {
+			t.Errorf("composition-resource-name = %v, want sa — the function-set annotation must "+
+				"survive beside authored ones", got)
+		}
+		sa := docs["ServiceAccount"]
+		if got := sa["automountServiceAccountToken"]; got != true {
+			t.Errorf("automountServiceAccountToken = %v (%T), want true", got, got)
+		}
+		if _, has := sa["spec"]; has {
+			t.Errorf("ServiceAccount grew a spec — a native object carries no Crossplane envelope\n---\n%s", rendered)
+		}
+
+		role, ok := docs["Role"]
+		if !ok {
+			t.Fatalf("no Role among rendered documents\n---\n%s", rendered)
+		}
+		policy, ok := digAny(role, "spec", "forProvider", "assumeRolePolicy").(string)
+		if !ok {
+			t.Fatalf("assumeRolePolicy = %T (%v), want a JSON *string* — an unquoted template body "+
+				"would render a YAML mapping the API server rejects against type: string\n---\n%s",
+				digAny(role, "spec", "forProvider", "assumeRolePolicy"),
+				digAny(role, "spec", "forProvider", "assumeRolePolicy"), rendered)
+		}
+		var trust struct {
+			Version   string `json:"Version"`
+			Statement []struct {
+				Effect    string `json:"Effect"`
+				Action    string `json:"Action"`
+				Principal struct {
+					Federated string `json:"Federated"`
+				} `json:"Principal"`
+				Condition struct {
+					StringEquals map[string]string `json:"StringEquals"`
+				} `json:"Condition"`
+			} `json:"Statement"`
+		}
+		if err := json.Unmarshal([]byte(policy), &trust); err != nil {
+			t.Fatalf("assumeRolePolicy is not valid JSON: %v\n---\n%s", err, policy)
+		}
+		if len(trust.Statement) != 1 || trust.Statement[0].Action != "sts:AssumeRoleWithWebIdentity" {
+			t.Fatalf("trust policy statement = %+v, want one sts:AssumeRoleWithWebIdentity statement", trust)
+		}
+		const oidcARN = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-north-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE"
+		if trust.Statement[0].Principal.Federated != oidcARN {
+			t.Errorf("Federated = %q, want the XR's oidcProviderArn", trust.Statement[0].Principal.Federated)
+		}
+		// The issuer key proves regexReplaceAll derived it from the ARN; the
+		// subject proves schema defaulting injected namespace AND that .xr
+		// carried the composite's name into the template.
+		const issuerSub = "oidc.eks.eu-north-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE:sub"
+		if got := trust.Statement[0].Condition.StringEquals[issuerSub]; got != "system:serviceaccount:default:demo-irsa" {
+			t.Errorf("Condition[%q] = %q, want system:serviceaccount:default:demo-irsa "+
+				"(namespace from the XRD default, name from the XR)", issuerSub, got)
+		}
+		if got := digAny(role, "spec", "providerConfigRef", "name"); got != "aws-main" {
+			t.Errorf("Role providerConfigRef.name = %v, want aws-main — the managed half keeps its envelope", got)
+		}
+		for _, bad := range []string{"<no value>", "<nil>"} {
+			if strings.Contains(string(rendered), bad) {
+				t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+			}
+		}
+	})
+
+	t.Run("observed: the ARN lands in the annotation", func(t *testing.T) {
+		rendered, err := renderComposition(t, "testdata/xr-irsa.yaml", comp, fns, "--xrd", xrd,
+			"--observed-resources", "testdata/observed-role.yaml", "--timeout", "5m")
+		if err != nil {
+			t.Fatalf("crossplane composition render --observed-resources: %v\n%s", err, rendered)
+		}
+		docs := decodeRenderedDocs(t, rendered)
+		anns := saAnnotations(t, docs, rendered)
+		if got := anns["eks.amazonaws.com/role-arn"]; got != roleARN {
+			t.Errorf("eks.amazonaws.com/role-arn = %v, want %q — the observed ARN did not flow "+
+				"across the wire\n---\n%s", got, roleARN, rendered)
+		}
+		for _, bad := range []string{"<no value>", "<nil>"} {
+			if strings.Contains(string(rendered), bad) {
+				t.Errorf("observed render contains %q", bad)
+			}
+		}
+	})
 }
 
 // renderComposition runs `crossplane composition render` under the

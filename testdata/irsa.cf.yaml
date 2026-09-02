@@ -1,0 +1,81 @@
+# IRSA — IAM Roles for Service Accounts, the canonical cross-family wire.
+#
+# One blueprint composes both halves of the EKS IRSA handshake:
+#
+#   - an AWS IAM Role (a managed resource from provider-aws-iam) whose trust
+#     policy lets the cluster's OIDC provider issue it to one ServiceAccount;
+#   - the native Kubernetes ServiceAccount itself, whose
+#     eks.amazonaws.com/role-arn annotation must carry the Role's ARN.
+#
+# The ARN only exists once AWS has created the Role, so the annotation is a
+# cross-resource status wire: `from: resources.role.status.atProvider.arn`.
+# The generated Composition guards it with the hasKey chain every status wire
+# gets — on the first reconcile (Role not yet observed) the ServiceAccount
+# renders WITHOUT the annotation key, cleanly, and Crossplane fills it in on
+# a later reconcile once the Role reports its ARN. Never an empty value,
+# never "<no value>".
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: irsa
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+  xrd:
+    group: platform.sparky.ee
+    kind: XIrsa
+    plural: xirsas
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: ProviderConfig to reconcile the composed resources against.
+      oidcProviderArn:
+        type: string
+        required: true
+        description: ARN of the cluster's IAM OIDC provider (arn:aws:iam::<account>:oidc-provider/<issuer>).
+      namespace:
+        type: string
+        default: default
+        description: Namespace of the ServiceAccount the trust policy binds to.
+  # The trust policy is a template so it stays ONE declaration: a real
+  # AssumeRoleWithWebIdentity document, scoped to exactly one ServiceAccount
+  # subject. Two mechanics worth naming:
+  #
+  #   - the OIDC issuer is derived from the provider ARN (everything after
+  #     ":oidc-provider/"), so the XR carries one ARN, not the ARN plus a
+  #     second, silently-divergent issuer string;
+  #   - the body's output is wrapped in single quotes, which is what makes
+  #     the rendered assumeRolePolicy a JSON *string* — unquoted, YAML would
+  #     read the {...} as a mapping and the API server would reject it
+  #     against the CRD's type: string.
+  #
+  # .spec.namespace is safe to dereference bare: the parameter carries a
+  # default, so schema defaulting injects it into any XR that omits it. The
+  # ServiceAccount subject is named after the XR (.xr is the composite's
+  # metadata.name) — the convention this demo's SA resource follows too.
+  templates:
+    trust-policy: >-
+      '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ regexReplaceAll "^.*:oidc-provider/" .spec.oidcProviderArn "" }}:sub":"system:serviceaccount:{{ .spec.namespace }}:{{ .xr }}"}}}]}'
+  resources:
+    # The IAM Role: a managed resource, full Crossplane envelope
+    # (providerConfigRef derived from providerName), trust policy from the
+    # template above.
+    - name: role
+      kind: Role
+      provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+      fields:
+        description: {value: IAM role assumed by a Kubernetes ServiceAccount via IRSA}
+        assumeRolePolicy: {template: trust-policy}
+    # The ServiceAccount: a native Kubernetes object — no forProvider, no
+    # providerConfigRef, the composed document IS the ServiceAccount. Its
+    # role-arn annotation is the wire this whole blueprint exists for.
+    - name: sa
+      kind: ServiceAccount
+      provider: k8s
+      fields:
+        automountServiceAccountToken: {raw: "true"}
+      annotations:
+        eks.amazonaws.com/role-arn: {from: resources.role.status.atProvider.arn}

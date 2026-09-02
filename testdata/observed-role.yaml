@@ -1,0 +1,13 @@
+# Observed state for the IRSA acceptance render: the IAM Role as a provider
+# would report it once AWS has created it — status.atProvider.arn is the
+# value the ServiceAccount's role-arn annotation wire carries.
+apiVersion: iam.aws.m.upbound.io/v1beta1
+kind: Role
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: role
+  name: demo-irsa-role
+  namespace: default
+status:
+  atProvider:
+    arn: arn:aws:iam::123456789012:role/demo-irsa
