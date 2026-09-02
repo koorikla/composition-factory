@@ -1,9 +1,9 @@
 # Backlog
 
-Open work only — 61 items, each verified against the code or reproduced by hand
+Open work only — 60 items, each verified against the code or reproduced by hand
 when it was written.
 
-Completed work is not here. 150 closed items, with their original wording and
+Completed work is not here. 151 closed items, with their original wording and
 reasoning, live in [docs/backlog-archive.md](docs/backlog-archive.md); full
 history is in `git log -p BACKLOG.md`. Tick an item by moving it there, not by
 leaving an `[x]` behind — this file is read into an agent's context on every
@@ -80,12 +80,6 @@ real-world compositions; E: SQS queue + DLQ built purely through MCP and HTTP. A
 re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogfood-*/`
 (blueprints, outputs, renders, REPORT.md). Items marked (repro) were reproduced by hand.
 
-### P0 — generated output is wrong at apply time; render does not catch it
-
-- [ ] `crossplane composition render` and POST /api/render report ok on output the API server
-      would reject (all of the above). Add schema validation of the rendered composed
-      resources against the cached CRDs in `cf gen`, `/api/render` and the Validate chip; agent
-      A's typecheck.py against `crossplane xpkg extract` output is the reference.
 
 ### P1 — alternative engines are broken for real blueprints
 

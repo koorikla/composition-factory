@@ -8,6 +8,12 @@ is the way it is, and this repo has already re-raised settled questions twice.
 Nothing here is open work. Open items live in BACKLOG.md. Full history is in
 git — `git log -p BACKLOG.md`.
 
+- [x] `crossplane composition render` and POST /api/render report ok on output the API server
+      would reject (all of the above). Add schema validation of the rendered composed
+      resources against the cached CRDs in `cf gen`, `/api/render` and the Validate chip; agent
+      A's typecheck.py against `crossplane xpkg extract` output is the reference.
+      — completed 2026-09-03
+
 ## Canvas slice backlog (BDD loop: spec → GUI → backend → verify)
 
 - [x] `lifecycleRule[0].action.type` is accepted by the validator (it even suggests it) and

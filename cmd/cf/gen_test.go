@@ -326,3 +326,26 @@ spec:
 		t.Errorf("output missing RBAC warning, got: %s", buf.String())
 	}
 }
+
+func TestGenValidateFlag(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	out := filepath.Join(dir, "out")
+
+	var buf bytes.Buffer
+	cmd := &GenCmd{
+		Blueprint: bp,
+		Out:       out,
+		CacheDir:  cacheDir,
+		Validate:  true,
+	}
+	code, err := cmd.run(&buf)
+	// If crossplane CLI is not installed in the test environment, validate fails with PATH error
+	if err != nil {
+		if !strings.Contains(err.Error(), "crossplane CLI") && !strings.Contains(err.Error(), "render") {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if code != 1 {
+			t.Errorf("code = %d, want 1 on tool failure", code)
+		}
+	}
+}

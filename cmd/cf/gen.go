@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -20,6 +21,7 @@ type GenCmd struct {
 	Out       string `short:"o" help:"Output directory." default:"."`
 	CacheDir  string `help:"Schema cache directory." default:"${cachedir}"`
 	Check     bool   `help:"Do not write. Exit 0 if in sync, 2 if the tree has drifted."`
+	Validate  bool   `help:"Validate rendered output against CRD schemas."`
 
 	// filesystem ships the go-template body as a templates/ folder (one
 	// object per file), ConfigMaps under the ~1MiB cap, and a
@@ -89,6 +91,64 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 	outputs, err := emit.Generate(b, crds, c.Out)
 	if err != nil {
 		return 1, err
+	}
+
+	if c.Validate {
+		if _, err := exec.LookPath("crossplane"); err != nil {
+			return 1, fmt.Errorf("crossplane CLI not found on PATH: %w", err)
+		}
+		tempDir, err := os.MkdirTemp("", "cf-gen-validate-")
+		if err != nil {
+			return 1, err
+		}
+		defer os.RemoveAll(tempDir)
+
+		tempOutputs, err := emit.Generate(b, crds, tempDir)
+		if err != nil {
+			return 1, err
+		}
+
+		var compPath, fnsPath, xrdPath string
+		for _, o := range tempOutputs {
+			if err := os.MkdirAll(filepath.Dir(o.Path), 0o755); err != nil {
+				return 1, err
+			}
+			if err := os.WriteFile(o.Path, o.Body, 0o644); err != nil {
+				return 1, err
+			}
+			switch {
+			case filepath.Base(filepath.Dir(o.Path)) == "compositions":
+				compPath = o.Path
+			case filepath.Base(filepath.Dir(o.Path)) == "xrds":
+				xrdPath = o.Path
+			case filepath.Base(o.Path) == "functions.yaml":
+				fnsPath = o.Path
+			}
+		}
+
+		sampleXRBytes, err := emit.SampleXR(b)
+		if err != nil {
+			return 1, err
+		}
+		xrPath := filepath.Join(tempDir, "xr.yaml")
+		if err := os.WriteFile(xrPath, sampleXRBytes, 0o644); err != nil {
+			return 1, err
+		}
+
+		cmd := exec.Command("crossplane", "composition", "render", xrPath, compPath, fnsPath, "--xrd", xrdPath, "--timeout", "5m")
+		renderOut, err := cmd.CombinedOutput()
+		if err != nil {
+			msg := strings.TrimSpace(string(renderOut))
+			if msg == "" {
+				msg = err.Error()
+			}
+			return 1, fmt.Errorf("render failed: %s", msg)
+		}
+
+		if err := emit.ValidateRendered(renderOut, crds); err != nil {
+			return 1, fmt.Errorf("render validation failed:\n%w", err)
+		}
+		fmt.Fprintln(out, "render validation ok")
 	}
 
 	if c.Check {

@@ -418,3 +418,87 @@ func TestRenderIntegrationRealCrossplane(t *testing.T) {
 		t.Errorf("resources = %d, want 1 (the test blueprint composes exactly main-queue)", resp.Resources)
 	}
 }
+
+// TestRenderCatchesSchemaValidationErrors verifies that POST /api/render reports
+// schema validation failures (such as unknown fields in rendered composed resources)
+// as renderResponse with OK: false and line/path diagnostics in Error, even if the
+// CLI render command itself exited 0.
+func TestRenderCatchesSchemaValidationErrors(t *testing.T) {
+	const invalidRenderStream = `---
+apiVersion: platform.sparky.ee/v1alpha1
+kind: XQueue
+metadata:
+  name: render-check
+  namespace: default
+spec:
+  providerName: sample
+---
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: main-queue
+  generateName: render-check-
+spec:
+  forProvider:
+    region: eu-north-1
+    visibiltyTimeoutSeconds: 45
+`
+	h, _ := testRenderServer(t, func(context.Context, string, string, string, string) ([]byte, error) {
+		return []byte(invalidRenderStream), nil
+	})
+
+	rec := do(t, h, "POST", "/api/render", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	resp := decodeRenderResponse(t, rec)
+	if resp.OK {
+		t.Fatal("response OK = true, want false when rendered resource has invalid field")
+	}
+	if !strings.Contains(resp.Error, "visibiltyTimeoutSeconds") {
+		t.Errorf("expected error to mention visibiltyTimeoutSeconds, got: %s", resp.Error)
+	}
+	if !strings.Contains(resp.Error, "line 19") {
+		t.Errorf("expected error to mention line 19, got: %s", resp.Error)
+	}
+}
+
+// TestRenderCatchesTypeMismatches verifies that field type mismatches in rendered
+// output are caught by POST /api/render.
+func TestRenderCatchesTypeMismatches(t *testing.T) {
+	const typeMismatchStream = `---
+apiVersion: platform.sparky.ee/v1alpha1
+kind: XQueue
+metadata:
+  name: render-check
+  namespace: default
+spec:
+  providerName: sample
+---
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: main-queue
+  generateName: render-check-
+spec:
+  forProvider:
+    region: 12345
+`
+	h, _ := testRenderServer(t, func(context.Context, string, string, string, string) ([]byte, error) {
+		return []byte(typeMismatchStream), nil
+	})
+
+	rec := do(t, h, "POST", "/api/render", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	resp := decodeRenderResponse(t, rec)
+	if resp.OK {
+		t.Fatal("response OK = true, want false on type mismatch")
+	}
+	if !strings.Contains(resp.Error, "invalid type") || !strings.Contains(resp.Error, "expected string") {
+		t.Errorf("expected type mismatch error, got: %s", resp.Error)
+	}
+}
