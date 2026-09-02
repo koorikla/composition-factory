@@ -1400,32 +1400,6 @@ func TestAcceptanceIRSARenders(t *testing.T) {
 	})
 }
 
-// renderComposition runs `crossplane composition render` under the
-// machine-wide render lock (internal/rendertest), retrying exactly once on
-// the CLI's known pinned-container race: generated functions.yaml pins
-// render.crossplane.io/runtime-docker-name so renders reuse one container
-// per function, and a render starting moments after another finishes can
-// find that container still attached to the previous render's dying network
-// ("is not connected to Docker network ..."). dockerd settles the previous
-// network's teardown asynchronously AFTER the previous crossplane process
-// has exited, so no amount of test-side serialization closes the window
-// completely; removing the stale containers and retrying once does. The
-// retry is gated on that exact error text — any other failure surfaces
-// immediately, unretried.
-func renderComposition(t *testing.T, args ...string) ([]byte, error) {
-	t.Helper()
-	release := rendertest.Lock(t)
-	defer release()
-	full := append([]string{"composition", "render"}, args...)
-	rendered, err := exec.Command("crossplane", full...).CombinedOutput()
-	if err != nil && bytes.Contains(rendered, []byte("is not connected to Docker network")) {
-		t.Logf("retrying render once after the pinned-container/network race:\n%s", rendered)
-		_ = exec.Command("docker", "rm", "-f", "cf-function-go-templating", "cf-function-auto-ready").Run()
-		rendered, err = exec.Command("crossplane", full...).CombinedOutput()
-	}
-	return rendered, err
-}
-
 // decodeRenderedDocs splits `crossplane composition render`'s multi-document
 // stream and decodes each document, keyed by kind (each kind appears once in
 // this fixture).
