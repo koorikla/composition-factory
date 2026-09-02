@@ -20,21 +20,32 @@ spec:
     kind: <composite-kind>
     plural: <composite-plural>
     version: <api-version>
-    scope: Namespaced | Cluster
+    scope: Namespaced # Note: "Cluster" is refused in M1 ("use Namespaced")
     parameters:
       <param-name>:
-        type: string | integer | boolean | object
+        type: string | integer | number | boolean | object
         required: true | false
         default: <default-val>
         enum: [<val1>, <val2>]
         description: <doc-string>
-        properties: # nested for type: object
-          <member-name>: {type: string, ...}
+        properties: # nested definitions for type: object
+          <member-name>:
+            type: string | integer | number | boolean | object
+            required: true | false
+            properties: { ... }
+  pipeline: # optional custom composition pipeline steps
+    steps:
+      - step: auto-ready
+        functionRef:
+          name: function-auto-ready
+      - step: environment-configs
+        functionRef:
+          name: function-environment-configs
   templates:
     <template-name>: |
       <go-template-body>
   conventions:
-    - match: <field-name>
+    - match: <field-suffix> # Suffix match on field name (refused on native kinds)
       template: <template-name>
   resources:
     - name: <resource-name>
@@ -42,22 +53,37 @@ spec:
       provider: <provider-ref | k8s>
       fields:
         <path>: {value | from | raw | template}
+        <mapField>[<key>]: {value | from | raw} # Bracket grammar for map entries
       envelope:
-        <envelope-path>: {value | from | raw | template}
+        <envelope-path>: {value | from | raw} # Note: status wires and template: are refused in envelope
       annotations:
         <annotation-key>: {value | from | raw | template}
-      when: params.<boolParam>
+      when: params.<boolParam> | params.<param> == "<lit>" | params.<param> != "<lit>"
       forEach: params.<intParam> | resources.<name>.status.atProvider.<field>
 ```
 
 ---
 
+## Parameter Types
+
+Parameters in `spec.xrd.parameters` define the OpenAPI schema for the XRD and claim:
+
+- **`string`**: String value, with optional `enum` list.
+- **`integer`**: 64-bit integer value.
+- **`number`**: Floating point / decimal number value.
+- **`boolean`**: Boolean flag (`true` / `false`).
+- **`object`**: Structured object. Supports arbitrary nesting via recursive `properties` definitions. Members are wired in fields via `params.<object>.<member>`.
+
+*(Note: `type: "array"` is explicitly refused in M1).*
+
+---
+
 ## Field Modes
 
-Every field path in `resources[*].fields` and `resources[*].envelope` supports exactly one of four authoring forms:
+Every field in `resources[*].fields` supports exactly one of four authoring forms:
 
 ### 1. `value`
-Assigns a literal scalar or primitive value. Strings are automatically quoted in generated YAML.
+Assigns a literal scalar or primitive value.
 ```yaml
 fields:
   region: {value: "eu-north-1"}
@@ -65,10 +91,10 @@ fields:
 ```
 
 ### 2. `from`
-Wires a parameter or cross-resource reference:
-- **XRD Parameter binding**: `params.<name>` or `params.<object>.<member>`
+Wires an XRD parameter or upstream resource status output:
+- **XRD Parameter binding**: `params.<name>` or nested member `params.<obj>.<member>`
   - Required parameters dereference directly: `{{ .spec.<name> }}`
-  - Optional parameters are wrapped in Go-template `hasKey` guards to prevent runtime evaluation errors.
+  - Optional parameters are wrapped in Go-template `hasKey` guards to prevent missing key errors.
 - **Cross-Resource Status reference**: `resources.<name>.status.atProvider.<field>`
   - Generates guarded status dereferencing so unobserved upstream resources omit the field cleanly on early reconcile passes.
 ```yaml
@@ -78,7 +104,7 @@ fields:
 ```
 
 ### 3. `raw`
-Emits verbatim YAML or Go template expressions. Useful for complex nested blocks or map objects:
+Emits verbatim YAML or Go template expressions:
 ```yaml
 fields:
   spec.selector.matchLabels: {raw: "{app: web}"}
@@ -97,12 +123,21 @@ resources:
     fields:
       assumeRolePolicy: {template: trust-policy}
 ```
+*(Note: `template:` is refused on native Kubernetes resource fields like `Deployment.spec`, but is fully supported in `annotations`).*
+
+### Map-Entry Bracket Grammar
+Map fields support direct key subscripting using bracket grammar:
+```yaml
+fields:
+  labels[environment]: {value: "production"}
+  selector.matchLabels[app]: {from: params.appName}
+```
 
 ---
 
 ## Annotations Authoring
 
-The `annotations` block maps directly to `metadata.annotations` on the emitted resource (for both managed and native Kubernetes kinds):
+The `annotations` block maps directly to `metadata.annotations` on the emitted resource (supporting managed and native Kubernetes kinds):
 
 ```yaml
 resources:
@@ -111,9 +146,10 @@ resources:
     provider: k8s
     annotations:
       eks.amazonaws.com/role-arn: {from: resources.role.status.atProvider.arn}
+      custom.io/policy: {template: trust-policy}
 ```
 
-If the referenced status value is not yet available, the generated Composition skips rendering the annotation key cleanly rather than rendering an invalid or empty string.
+If the referenced status value is not yet available, the generated Composition skips rendering the annotation key cleanly rather than rendering empty or invalid strings.
 
 ---
 
@@ -132,19 +168,34 @@ resources:
       managementPolicies:                  {value: "Observe, Create, Update, Delete, LateInitialize"}
 ```
 
+#### Envelope Rules:
+- Supports `value`, `from` (with `params.<name>`), and `raw`.
+- Status wires (`resources.<name>.status...`) and `template:` are refused in `envelope`.
+- Array-typed envelope leaves (such as `managementPolicies`) accept comma-separated strings in `value` (e.g. `value: "Observe, Create, Update"`) or literal lists in `raw`.
+
 ---
 
 ## Flow Control: Loops and Conditionals
 
 ### Conditional Inclusion (`when:`)
-Conditionally renders a resource based on a boolean parameter:
+Conditionally renders a resource based on a boolean parameter or literal comparison:
 ```yaml
 resources:
   - name: backup-vault
     kind: BackupVault
     provider: ghcr.io/crossplane-contrib/provider-aws-backup:v2.7.0
     when: params.enableBackups
+
+  - name: regional-config
+    kind: ConfigMap
+    provider: k8s
+    when: params.environment == "prod"
 ```
+
+Grammar supported:
+- `params.<boolParam>`: evaluated as truthy boolean flag.
+- `params.<param> == "<literal>"`: equality comparison against a literal string.
+- `params.<param> != "<literal>"`: inequality comparison against a literal string.
 
 ### Resource Loops (`forEach:`)
 Replicates a resource N times driven by an integer parameter or upstream observed count:
@@ -156,6 +207,36 @@ resources:
     forEach: params.nodeCount
 ```
 Emits indexed resource names and `setResourceNameAnnotation` bindings for each replica in the loop.
+
+---
+
+## Conventions (`spec.conventions`)
+
+Conventions apply a named template to any field across resources that matches a given suffix:
+
+```yaml
+conventions:
+  - match: tags
+    template: standard-tags
+```
+
+- `match` performs a case-sensitive suffix match against field paths (e.g., `tags` matches `tags` and `spec.tags`).
+- Conventions are refused on native Kubernetes kinds (`provider: k8s`).
+
+---
+
+## Composition Pipeline (`spec.pipeline`)
+
+Custom pipeline steps can be declared in `spec.pipeline.steps` to run alongside or in addition to function steps:
+
+```yaml
+spec:
+  pipeline:
+    steps:
+      - step: auto-ready
+        functionRef:
+          name: function-auto-ready
+```
 
 ---
 
@@ -175,3 +256,17 @@ spec:
 - **`engine: python`**: Generates `function-python` (`python.fn.crossplane.io/v1beta1` `Script`) pipeline step with native Python composition logic (`req: fnv1.RunFunctionRequest, rsp: fnv1.RunFunctionResponse`), desired resource mappings, and readiness signals, automatically configured in `functions.yaml` and `package.yaml`.
 - **`templateSource: FileSystem`**: Emits one template file per object in a `templates/` folder packed into ConfigMaps and mounted via a `DeploymentRuntimeConfig`.
 
+---
+
+## Common Errors & Diagnostics
+
+The `cf` generator validates blueprints strictly and returns actionable error messages:
+
+| Error Message | Cause & Remedy |
+|---|---|
+| `spec.xrd.scope: Cluster is not supported in M1 -- use Namespaced.` | M1 requires Namespaced composite resource definitions. Change `scope: Namespaced`. |
+| `spec.xrd.parameters.<param>: type "array" is not supported in M1.` | Array parameter types are not supported. Use scalar types (`string`, `integer`, `number`, `boolean`) or `object` with nested properties. |
+| `resource "<name>" field "<path>": unknown path -- did you mean "<suggestion>"?` | Field path does not exist in CRD schema. Check typo or update to suggested schema path. |
+| `resource "<name>" field "<path>": template: fields are not supported on a native Kubernetes kind...` | `template:` references are only supported on managed provider fields or in `annotations:`. Use `value:`, `from:`, or `raw:` on native fields. |
+| `resource "<name>" envelope "<path>": status wires (...) are not supported in envelope` | `from: resources.<name>.status...` is not permitted in `envelope`. Status references can only be wired into `fields:` or `annotations:`. |
+| `resource "<name>": conventions cannot match native Kubernetes kind` | `conventions` can only target managed provider resources, not native Kubernetes resources. |

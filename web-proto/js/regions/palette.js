@@ -414,23 +414,28 @@ export function init(rootEl, deps) {
           '<button class="btn sm" data-guide-example="sqs-queue" style="justify-content:flex-start">📬 AWS SQS Queue with DLQ</button>' +
         '</div>') +
       sec("The loop",
-        "Drag a kind from KINDS onto the canvas, wire XR parameters to resource fields, " +
-        "edit values in the inspector \u2014 the generated YAML below updates live and is " +
-        "written by <b>cf gen</b> byte-for-byte the same.") +
+        "1. <b>Discover &amp; Add Sources:</b> Add provider packages in SOURCES or scan live cluster CRDs.<br>" +
+        "2. <b>Compose Kinds:</b> Drag a kind from KINDS onto the canvas \u2014 every field validates against real provider schemas.<br>" +
+        "3. <b>Wire Parameters &amp; Status:</b> Drag parameter dots onto resource cards to bind inputs, or status ports to dependent fields.<br>" +
+        "4. <b>Inspect &amp; Refine:</b> Edit values, envelopes, pipeline steps, and conditionals in the inspector.<br>" +
+        "5. <b>Live Generation:</b> The generated YAML below updates live and is written by <b>cf gen</b> byte-for-byte the same.") +
       sec("Wires",
-        '<span style="color:var(--wire-xrd)">\u2500\u2500</span> XRD spec \u00b7 ' +
-        '<span style="color:var(--shared)">\u2500\u2500</span> shared (one parameter feeding ' +
-        "several fields) \u00b7 status and native-ref wires arrive with the engine work.") +
-      sec("Keyboard",
+        '<span style="color:var(--wire-xrd)">\u2500\u2500</span> XRD spec (params.X) \u00b7 ' +
+        '<span style="color:var(--shared)">\u2500\u2500</span> shared (one parameter feeding multiple fields) \u00b7 ' +
+        '<span style="color:var(--wire-status)">\u2500\u2500</span> status wire (resources.A.status.atProvider.X) \u00b7 ' +
+        '<span style="color:var(--wire-ref)">\u2500\u2500</span> native ref (Kubernetes references)') +
+      sec("Keyboard &amp; Gestures",
         kbd(mod + "C") + " / " + kbd(mod + "V") + " copy &amp; paste to duplicate a resource \u00b7 " +
-        kbd("Delete") + " remove (confirms when wires would drop) \u00b7 " +
-        "wheel zooms to the cursor, " + kbd("Shift+wheel") + " pans (or drag the empty ground), " + kbd("\u2302") + " resets.") +
+        kbd(mod + "Z") + " / " + kbd("Shift+" + mod + "Z") + " undo &amp; redo \u00b7 " +
+        kbd("Delete") + " remove card or selected wire \u00b7 " +
+        kbd("Ctrl+B") + " toggle File Tree Explorer \u00b7 " +
+        "wheel zooms to the cursor, " + kbd("Shift+wheel") + " pans (or drag the empty ground), " + kbd("\u2302") + " resets zoom.") +
       sec("Validate",
         "Runs a real <b>crossplane composition render</b> against a sample XR synthesized " +
         "from your XRD \u2014 the chip reports the composed resource count or the engine's " +
         "error verbatim.") +
       sec("Files",
-        "Generate writes compositions/, xrds/ and functions.yaml to the output directory " +
+        "Generate writes compositions/, xrds/, functions.yaml, and providerconfigs/ to the output directory " +
         "cf serve was started with; the blueprint file is the single source of truth.");
   }
 

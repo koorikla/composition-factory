@@ -331,12 +331,16 @@ func wrap(h http.Handler) http.Handler {
 		// error or 304 — declares that.
 		header.Set("Vary", "Accept-Encoding")
 
-		// The ETag is computed over the exact bytes of every response, so
+		// The ETag is computed over the exact bytes of every response (unless
+		// already precomputed by the handler, such as the static catalogue), so
 		// even an error response carries a validator a client can quote
 		// back. Whether that validator is allowed to turn the response into
 		// a 304 is a separate, much narrower question — see below.
-		etag := etagFor(body)
-		header.Set("ETag", etag)
+		etag := header.Get("ETag")
+		if etag == "" {
+			etag = etagFor(body)
+			header.Set("ETag", etag)
+		}
 
 		// Fix round 2 (Important): If-None-Match was previously honoured on
 		// every method and every status, which is wrong twice over.

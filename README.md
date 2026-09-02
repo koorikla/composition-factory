@@ -56,7 +56,7 @@
 
 ![Floating panels and flexible docking](docs/screenshots/floating.gif)
 
-*Floating & Movable Panels — pop the Inspector or Code Editor into free-floating windows, drag them across large topologies, collapse to titlebars, and dock them back into place with keyboard shortcuts (`Ctrl+B`).*
+*Floating & Movable Panels — pop the Inspector or Code Editor into free-floating windows, drag them across large topologies, collapse to titlebars, and dock them back into place. Toggle the File Tree Explorer with keyboard shortcut (`Ctrl+B`).*
 
 One engine, `internal/emit`, powers all interfaces: the **`cf gen` CLI**, the **`cf serve` visual canvas**, and the **`cf mcp` AI agent server** produce 100% byte-identical, deterministic YAML ready for GitOps.
 
@@ -179,7 +179,7 @@ crossplane composition render testdata/xr.yaml \
 - **Reusable Templates & Conventions:** Named go-template blocks (`cf.tags`) applied by convention to every matching field, explicit values override; typed object parameters with member wiring (`params.tuning.retention`).
 - **Native Kubernetes Support:** Compose native `Deployment`, `Service`, `ConfigMap`, `Secret`, and `ServiceAccount` alongside cloud resources.
 - **Live Render Check:** The **Validate** button runs a real `crossplane composition render` against a sample XR synthesized from your XRD and reports the composed resource count or the engine's error verbatim.
-- **Provider Discovery:** A built-in catalogue of 476 OSS providers (upjet families resolved to per-service packages) — search and one-click add; per-provider kind picker filters the palette; ProviderConfig scaffolds and an RBAC rule list generate alongside your compositions.
+- **Provider Discovery:** A built-in catalogue of 476 OSS providers (upjet families resolved to per-service packages) — search and one-click add; per-provider kind picker filters the palette; ProviderConfig scaffolds generate alongside your compositions (`out/providerconfigs/`), and RBAC rule definitions are queryable via `GET /api/rbac`.
 - **Live-Cluster Schema Source:** Point at a kind/k3s (or any) cluster to discover installed CRDs beyond packaged providers — strictly opt-in (`--cluster`/`--kubeconfig`).
 - **Deterministic GitOps Output:** Emits normalized YAML (LF line endings, sorted keys, header provenance comments) to prevent Git churn and ArgoCD sync loops.
 - **MCP Server for AI Agents:** Full authoring and schema inspection support for LLMs and coding assistants. See [MCP Server Guide](docs/mcp.md).
@@ -206,9 +206,12 @@ Requires Go 1.25+ and Node.js for Playwright e2e tests.
 ```sh
 make build          # Build bin/cf
 make test           # Run unit tests (no Docker required)
+make test-race      # Run unit tests with race detector
 make test-docker    # Run acceptance tests with Docker + crossplane CLI
 make test-e2e       # Run Playwright browser tests
 make lint           # Check formatting and vet
+make serve          # Launch local visual canvas on port 8080
+make clean          # Remove build artifacts and test outputs
 ```
 
 ### Local Kubernetes with Skaffold

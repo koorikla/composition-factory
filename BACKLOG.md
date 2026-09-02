@@ -494,7 +494,7 @@ and these are the places it made me stop and think.
       missing, crossplane CLI absent — that is what a laptop hits first) from
       composition errors, and give the environment case a fix hint. Make the
       chip clickable to open the full message.
-- [ ] Guide tab still says "status and native-ref wires arrive with the
+- [x] Guide tab still says "status and native-ref wires arrive with the
       engine work" and omits undo/redo, Ctrl+B, Escape, wire delete. It is a
       hardcoded HTML string in palette.js:398-435 while docs/guide.md is a
       second hand-maintained copy; the backlog ticked "generate the Guide
@@ -521,18 +521,18 @@ and these are the places it made me stop and think.
 
 ### Docs drift (verified against code)
 
-- [ ] README:59 "dock them back with Ctrl+B" — Ctrl+B toggles the file tree;
+- [x] README:59 "dock them back with Ctrl+B" — Ctrl+B toggles the file tree;
       README:182 "RBAC rule list generates alongside" — cf gen emits no RBAC
       file (only GET /api/rbac); Development section omits make serve,
       test-race, clean.
-- [ ] docs/cli.md: lists rbac/clusterrole.yaml that is never written; omits
+- [x] docs/cli.md: lists rbac/clusterrole.yaml that is never written; omits
       runtime/ and templates/ (FileSystem mode); omits --engine,
       --template-source, --cache-dir on gen; omits --blueprint, --out,
       --context, --i-know-this-is-unauthenticated on serve (the README's
       Docker command needs it); omits --yaml on package; says
       ~/.cache/compositionfactory (macOS is ~/Library/Caches/…); no cf adopt,
       no cf version.
-- [ ] docs/dsl.md: `scope: Cluster` documented but refused ("not supported in
+- [x] docs/dsl.md: `scope: Cluster` documented but refused ("not supported in
       M1"); parameter type `number` missing; envelope claims all four forms +
       status wires (only value|from|raw, status wires refused); `when` ==/!=
       literal form undocumented; spec.pipeline not mentioned at all;
@@ -541,17 +541,17 @@ and these are the places it made me stop and think.
       case-sensitive suffix match, refused on native kinds; array envelope
       leaves take comma-separated `value`. Add a "Common errors" section
       quoting the real cf gen messages.
-- [ ] docs/superpowers/specs/2026-09-02-addendum.md: engine named "gotpl"
+- [x] docs/superpowers/specs/2026-09-02-addendum.md: engine named "gotpl"
       (code accepts only go-templating); claims M1–M5 complete while M5 in
       the spec includes cf index export + cosign verification that do not
       exist. Original spec line 3 still "draft for review"; §11/§12 list
       never-built CLI/MCP surface with no supersede pointer.
-- [ ] docs/mcp.md closing paragraph omits /api/rbac and /api/sources/crds
+- [x] docs/mcp.md closing paragraph omits /api/rbac and /api/sources/crds
       from the tool-less list.
-- [ ] AGENTS.md lacks: the port contract (8080 human, 8081 suite, 8086 demo
+- [x] AGENTS.md lacks: the port contract (8080 human, 8081 suite, 8086 demo
       recorder), the make targets (it says `go test ./...`, which skips e2e),
       and the no-AI-attribution commit rule. Add the one-driver rule above.
-- [ ] No CONTRIBUTING.md / first-contribution path. `make clean` misses
+- [x] No CONTRIBUTING.md / first-contribution path. `make clean` misses
       test-results/, playwright-report/ and the stale untracked web/ dist.
 
 ### Cleanup and performance

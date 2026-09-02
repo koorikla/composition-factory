@@ -1353,9 +1353,6 @@ function onWireDragDown(e, portEl) {
   }
 
   function up(ev) {
-    document.removeEventListener("pointermove", mv);
-    document.removeEventListener("pointerup", up);
-    document.removeEventListener("pointercancel", up);
     if (previewPath) { previewPath.remove(); previewPath = null; }
     clearHovers();
     gestureEnd();
