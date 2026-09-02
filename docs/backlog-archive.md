@@ -13,6 +13,29 @@ git — `git log -p BACKLOG.md`.
 The original slice queue, worked from 2026-09-01. Every item shipped with a
 Playwright behavior.
 
+- [x] Nested forProvider paths are emitted as literal dotted keys (repro): `settings.tier:
+      {from: params.tier}` → `settings.tier: {{ $spec.tier }}` under forProvider, and the API
+      server prunes it on apply. The validator accepts the path (it exists in the CRD) and the
+      writer never re-nests it; only native kinds get a tree (emit/native.go buildNativeTree).
+      Build the same tree for provider kinds (composition.go planFields → writer) with the
+      hasKey guards moved to the leaf. Golden: DatabaseInstance settings.tier +
+      settings.ipConfiguration.ipv4Enabled renders as a nested map. Found by A and C.
+      — completed 2026-09-03
+- [x] `resolveKind` ignores `provider:` (composition.go:1263 matches Kind only): `kind: Instance`
+      with provider-aws-rds silently resolves to ec2 Instance because ec2 was listed first.
+      Match on the resource's declared provider, error on ambiguity. Found by A.
+      — completed 2026-09-03
+- [x] Only nine kinds are vendored (Deployment, Service, ConfigMap, Secret, ServiceAccount,
+      StatefulSet, Job, CronJob, DaemonSet); Ingress, HPA, PVC, NetworkPolicy, PDB, Role and
+      RoleBinding are refused and the refusal does not list the set. Workaround was
+      hand-written CRD stubs via `sources: - crds:`. Vendor the rest of core and name the set
+      in the error. Found by B.
+      — completed 2026-09-03
+- [x] `providerName` is mandatory even with zero managed resources and is never consumed by
+      a native-only composition. `cf gen` emits a Deployment with no selector/template
+      without warning (only `requiredBranches` in the API knows). `cf --version` errors.
+      `crossplane xpkg extract` needs `--from-xpkg` (docs omit it). Found by B.
+      — completed 2026-09-03
 - [x] `value:` is always a quoted string (structured.go:43 quoteYAML) regardless of the CRD
       leaf type: `enableDnsHostnames: "true"`, `allocatedStorage: "20"`; and string params are
       emitted bare so `engineVersion: 16.3` becomes a float. Emit typed literals from the leaf

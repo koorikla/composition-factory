@@ -82,16 +82,6 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
 
 ### P0 — generated output is wrong at apply time; render does not catch it
 
-- [ ] Nested forProvider paths are emitted as literal dotted keys (repro): `settings.tier:
-      {from: params.tier}` → `settings.tier: {{ $spec.tier }}` under forProvider, and the API
-      server prunes it on apply. The validator accepts the path (it exists in the CRD) and the
-      writer never re-nests it; only native kinds get a tree (emit/native.go buildNativeTree).
-      Build the same tree for provider kinds (composition.go planFields → writer) with the
-      hasKey guards moved to the leaf. Golden: DatabaseInstance settings.tier +
-      settings.ipConfiguration.ipv4Enabled renders as a nested map. Found by A and C.
-- [ ] `resolveKind` ignores `provider:` (composition.go:1263 matches Kind only): `kind: Instance`
-      with provider-aws-rds silently resolves to ec2 Instance because ec2 was listed first.
-      Match on the resource's declared provider, error on ambiguity. Found by A.
 - [ ] `lifecycleRule[0].action.type` is accepted by the validator (it even suggests it) and
       listed by /api/kinds/…/fields, then emitted as the literal key
       `'lifecycleRule[0].action.type'`. Implement array-element emission or refuse the grammar
@@ -110,11 +100,6 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
       deterministic `metadata.name` for native kinds (or `<xr>-<resource>`), make
       `metadata.name`, `metadata.labels`, `metadata.annotations` settable, and support
       `from: resources.<n>.metadata.name` so references resolve. Found by B.
-- [ ] Only nine kinds are vendored (Deployment, Service, ConfigMap, Secret, ServiceAccount,
-      StatefulSet, Job, CronJob, DaemonSet); Ingress, HPA, PVC, NetworkPolicy, PDB, Role and
-      RoleBinding are refused and the refusal does not list the set. Workaround was
-      hand-written CRD stubs via `sources: - crds:`. Vendor the rest of core and name the set
-      in the error. Found by B.
 - [ ] `cf gen` writes no RBAC and never warns; `/api/rbac` is bare rule JSON (no ClusterRole
       object, no aggregation label, includes the XR's own resource and the four pre-granted
       kinds). Verified on Crossplane 2.4: the rules are correct and complete, and the
@@ -125,10 +110,6 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
       with … FileSystem`) and cannot be rendered locally (`cannot read tmpl from the folder
       /templates`) with no hint that only in-cluster works; the `when:` guard is split across
       two files (`{{- if }}` ends 005-ingress.yaml, `{{- end }}` ends 006-hpa.yaml). Found by B.
-- [ ] `providerName` is mandatory even with zero managed resources and is never consumed by
-      a native-only composition. `cf gen` emits a Deployment with no selector/template
-      without warning (only `requiredBranches` in the API knows). `cf --version` errors.
-      `crossplane xpkg extract` needs `--from-xpkg` (docs omit it). Found by B.
 
 ### P1 — alternative engines are broken for real blueprints
 
