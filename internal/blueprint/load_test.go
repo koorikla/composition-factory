@@ -958,8 +958,17 @@ func TestValidateStillAcceptsTheOnDiskFixtureWithSourcesAndProvider(t *testing.T
 	if len(b.Spec.Sources) != 1 || b.Spec.Sources[0].Provider == "" {
 		t.Fatalf("Spec.Sources = %+v, want one source with a provider", b.Spec.Sources)
 	}
-	if len(b.Spec.Resources) != 1 || b.Spec.Resources[0].Provider == "" {
-		t.Fatalf("Spec.Resources = %+v, want one resource with a provider", b.Spec.Resources)
+	if len(b.Spec.Resources) == 0 {
+		t.Fatal("Spec.Resources is empty, want at least one resource")
+	}
+	// Every resource in the fixture pins its provider explicitly; the count
+	// is deliberately NOT pinned here, so growing the acceptance scenario
+	// (it gained a status-wired queue-policy for E1) does not break a test
+	// whose subject is validation, not the scenario's size.
+	for i, r := range b.Spec.Resources {
+		if r.Provider == "" {
+			t.Errorf("Spec.Resources[%d] (%s) has no provider; the fixture pins every resource's provider", i, r.Name)
+		}
 	}
 }
 

@@ -164,7 +164,7 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		}
 		rc := r
 		rc.Fields = fields
-		plan, err := planFields(rc, b)
+		plan, err := planFields(rc, b, crds, wantNamespaced)
 		if err != nil {
 			return nil, err
 		}
@@ -599,7 +599,7 @@ func editDistance(a, b string) int {
 // forProviderField is one blueprint field resolved to a template line,
 // ready to write. guard, when non-empty, is the template condition the line
 // must be gated on ({{- if <guard> }} ... {{- end }}) — a hasKey check for an
-// optional parameter, or a hasKey chain over $.observed.resources for a
+// optional parameter, or a hasKey/kindIs chain over $.observed.resources for a
 // cross-resource status reference. An empty guard means the line always
 // renders — see writeMapField.
 type forProviderField struct {
@@ -629,7 +629,7 @@ type forProviderField struct {
 // is emitted as a bare `{{ $spec.param }}` template expression, not a
 // literal string, so it isn't a quoting candidate here either — its value
 // arrives at render time from the composite's own (schema-typed) spec.
-func planFields(r blueprint.Resource, b *blueprint.Blueprint) ([]forProviderField, error) {
+func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) ([]forProviderField, error) {
 	paths := make([]string, 0, len(r.Fields))
 	for p := range r.Fields {
 		paths = append(paths, p)
@@ -650,22 +650,25 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint) ([]forProviderFiel
 			}
 			plan = append(plan, forProviderField{path: p, rhs: templateCallRHS(f.Template, r.Name, p)})
 		case f.From != "":
-			// A cross-resource status reference: the value lives on another
-			// composed resource's observed status, which does not exist until
-			// Crossplane has reconciled that resource at least once. The
-			// whole dereference is gated on a hasKey chain (statusRefGuard)
-			// so an unobserved target omits the field cleanly — Crossplane
-			// fills it in on a later reconcile — instead of hard-failing the
-			// render (missingkey=error) or, worse, writing "<no value>".
-			if target, statusPath, isStatus := blueprint.StatusRef(f.From); isStatus {
-				plan = append(plan, forProviderField{
-					path:  p,
-					rhs:   fmt.Sprintf("{{ %s }}", statusRefExpr(target, statusPath)),
-					guard: statusRefGuard(target, statusPath),
-				})
+			ref, err := blueprint.ParseFrom(f.From)
+			if err != nil {
+				return nil, fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
+			}
+			if ref.Resource != "" {
+				guard, rhs, err := statusWire(ref, r, p, b, crds, wantNamespaced)
+				if err != nil {
+					return nil, err
+				}
+				// A status wire is ALWAYS conditional: the value does not
+				// exist until the referenced resource has been observed
+				// (first reconcile, a fresh XR, `crossplane composition
+				// render` with no --observed-resources), so the field is
+				// omitted while unobserved and Crossplane fills it on a
+				// later reconcile.
+				plan = append(plan, forProviderField{path: p, rhs: rhs, guard: guard})
 				continue
 			}
-			param := strings.TrimPrefix(f.From, "params.")
+			param := ref.Param
 			decl, ok := b.Spec.XRD.Parameters[param]
 			if !ok {
 				return nil, fmt.Errorf("resource %q field %q: unknown parameter %q", r.Name, p, param)
@@ -702,54 +705,136 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint) ([]forProviderFiel
 	return plan, nil
 }
 
-// statusRefExpr is the dereference for resources.<target>.status.<path>:
-// the observed resource's status walked one validated camelCase segment at a
-// time. index (the text/template builtin) rather than field access for the
-// resource lookup: a resource name is a DNS label and may contain hyphens,
-// which the template field-access grammar does not admit; the path segments
-// are validated camelCase identifiers, so plain field access is exact for
-// them. Only evaluated inside the statusRefGuard branch, where every key on
-// the chain provably exists — Go templates never evaluate an untaken branch.
-func statusRefExpr(target, path string) string {
-	return fmt.Sprintf("(index $.observed.resources %q).resource.status.%s", target, path)
+// scalarStatusTypes are the status-leaf types a wire may carry. Object,
+// array and map leaves are refused because a bare interpolation renders
+// Go's fmt of the composite ("map[k:v]", "[a b c]") — valid YAML, silently
+// wrong — the same rule blueprint.Validate applies to composite parameters
+// behind from:. An untyped leaf ({} in the schema) is refused too: it
+// cannot be proven scalar, and guessing is how fmt-of-a-map reaches a live
+// resource.
+var scalarStatusTypes = map[string]bool{
+	"string": true, "integer": true, "number": true, "boolean": true,
 }
 
-// statusRefGuard is the render-time condition for a cross-resource status
-// reference: a hasKey conjunction over every level of
-// $.observed.resources.<target>.resource.status.<path>.
+// statusWire resolves one resources.<name>.status.<path> wire for field p on
+// resource r: it checks the path against the SOURCE resource's CRD status
+// schema (the only layer that can — blueprint.Validate has no CRDs) and
+// returns the render-time guard condition plus the value expression.
 //
-// Each link matters, and each is a real state, not paranoia:
+// The path must resolve to a scalar LEAF of the status tree. The wired
+// value itself is interpolated bare, exactly like a params wire: its type
+// is schema-checked here at generation time, and the observed value arrives
+// from the provider's own controller conforming to that same CRD — the
+// pre-existing, documented quoting decision for from: values (see
+// planFields), not a new one.
+func statusWire(ref blueprint.FromRef, r blueprint.Resource, p string, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) (guard, rhs string, err error) {
+	var src *blueprint.Resource
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Name == ref.Resource {
+			src = &b.Spec.Resources[i]
+			break
+		}
+	}
+	if src == nil {
+		// Validate refuses this before any emitter runs; kept as a defensive
+		// error because planFields is reachable from in-memory blueprints.
+		return "", "", fmt.Errorf("resource %q field %q: references the status of unknown resource %q",
+			r.Name, p, ref.Resource)
+	}
+	crd, err := resolveKind(crds, *src, wantNamespaced)
+	if err != nil {
+		return "", "", fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
+	}
+	nodes, err := crd.Status()
+	if err != nil {
+		return "", "", fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
+	}
+	if len(nodes) == 0 {
+		return "", "", fmt.Errorf("resource %q field %q: kind %q declares no status schema in its CRD; "+
+			"nothing can be wired from resource %q's status", r.Name, p, src.Kind, ref.Resource)
+	}
+
+	path := strings.Join(ref.StatusPath, ".")
+	leaves := schema.Leaves(nodes, "")
+	branches := make(map[string]bool, len(leaves))
+	suggestions := make([]string, 0, len(leaves))
+	var leaf *schema.Node
+	for _, l := range leaves {
+		suggestions = append(suggestions, l.Path)
+		if l.Path == path {
+			leaf = l.Node
+		}
+		for _, ancestor := range ancestorPaths(l.Path) {
+			branches[ancestor] = true
+		}
+	}
+	switch {
+	case leaf == nil && branches[path]:
+		return "", "", fmt.Errorf("resource %q field %q: status path %q on %s addresses an object "+
+			"subtree, not a scalar leaf -- interpolating it would render Go's fmt of the map, "+
+			"which is valid YAML and silently wrong", r.Name, p, path, crd.Kind)
+	case leaf == nil:
+		if s := closestPath(path, suggestions); s != "" {
+			return "", "", fmt.Errorf("resource %q field %q: status path %q is not in %s's status "+
+				"schema; did you mean %q?", r.Name, p, path, crd.Kind, s)
+		}
+		return "", "", fmt.Errorf("resource %q field %q: status path %q is not in %s's status schema",
+			r.Name, p, path, crd.Kind)
+	case !scalarStatusTypes[leaf.Type]:
+		typ := leaf.Type
+		if typ == "" {
+			typ = "untyped"
+		}
+		return "", "", fmt.Errorf("resource %q field %q: status path %q on %s is %s, and a wire can "+
+			"only carry a scalar (string, integer, number, boolean) -- a composite would render "+
+			"Go's fmt of the value", r.Name, p, path, crd.Kind, typ)
+	}
+
+	guard, rhs = statusGuard(ref.Resource, ref.StatusPath)
+	return guard, rhs, nil
+}
+
+// statusGuard builds the render-time guard for a status wire, plus the
+// value expression it protects. The value lives at
+// $.observed.resources.<name>.resource.status.<path> — but nothing on that
+// chain is guaranteed to exist (the whole resources key is absent until
+// something is observed, and each level below appears as the resource
+// converges), and under missingkey=error every unguarded dereference of a
+// missing key is a hard render failure. So the guard is a single short-
+// circuiting `and` (text/template evaluates and/or lazily — measured, not
+// assumed) that proves each level with `hasKey` before the next level
+// touches it, exactly the spec §8 idiom; `{{- with }}` is banned there for
+// hard-failing the same case.
 //
-//   - hasKey $.observed "resources": function-go-templating hands the
-//     template its RunFunctionRequest via protojson, which OMITS an empty
-//     map — on the very first reconcile, before anything is observed,
-//     the resources key itself is absent, and dereferencing it under
-//     options: ["missingkey=error"] hard-fails the whole render.
-//   - hasKey $.observed.resources <target>: the target resource has not
-//     been created/observed yet (it may simply be later in its own
-//     first-reconcile lifecycle than this one).
-//   - hasKey ... "status" and every path segment: a managed resource is
-//     observed before its controller has written status.atProvider — status
-//     appears field by field across reconciles.
+// Two mechanics that are invisible in the output but load-bearing:
 //
-// The conjunction short-circuits (text/template's and stops at the first
-// false argument since Go 1.18), so a later link's dereference is never
-// evaluated when an earlier link is absent. The result: an unobserved value
-// omits the field cleanly and Crossplane fills it in on a later reconcile —
-// never "<no value>", never a failed render.
-func statusRefGuard(target, path string) string {
-	base := fmt.Sprintf("(index $.observed.resources %q).resource", target)
+//   - The resource name is dereferenced with `index`, never `.name`: a
+//     composition-resource-name is a DNS label and may carry dashes, which
+//     template field-access syntax cannot address.
+//   - Each descent below the entry also proves `kindIs "map"` before the
+//     next hasKey, because hasKey's argument is typed map[string]any and a
+//     nil (or non-map) intermediate is a "wrong type for value" execution
+//     error, not a false — measured against the real engine. A
+//     half-populated or hand-written observed fixture (`status:` with
+//     nothing under it) must degrade to "field omitted", never to a failed
+//     render of the whole composition.
+func statusGuard(resName string, segs []string) (guard, rhs string) {
+	entry := fmt.Sprintf("(index $.observed.resources %q)", resName)
 	conds := []string{
 		`(hasKey $.observed "resources")`,
-		fmt.Sprintf("(hasKey $.observed.resources %q)", target),
-		fmt.Sprintf(`(hasKey %s "status")`, base),
+		`(kindIs "map" $.observed.resources)`,
+		fmt.Sprintf("(hasKey $.observed.resources %q)", resName),
+		fmt.Sprintf(`(kindIs "map" %s)`, entry),
+		fmt.Sprintf(`(hasKey %s "resource")`, entry),
 	}
-	at := base + ".status"
-	for _, seg := range strings.Split(path, ".") {
-		conds = append(conds, fmt.Sprintf("(hasKey %s %q)", at, seg))
-		at = at + "." + seg
+	cur := entry + ".resource"
+	for _, seg := range append([]string{"status"}, segs...) {
+		conds = append(conds,
+			fmt.Sprintf(`(kindIs "map" %s)`, cur),
+			fmt.Sprintf("(hasKey %s %q)", cur, seg))
+		cur += "." + seg
 	}
-	return "and " + strings.Join(conds, " ")
+	return "(and " + strings.Join(conds, " ") + ")", "{{ " + cur + " }}"
 }
 
 // writeMapField emits "key:" (or "key: {}") at keyIndent, plus plan's fields
@@ -795,10 +880,9 @@ func writeMapField(d *Doc, keyIndent int, key string, childIndent int, plan []fo
 		return
 	}
 
-	// Every field is conditional (an optional parameter, or a cross-resource
-	// status reference that has not been observed yet): without this wrapper
-	// an XR that renders none of them produces a bare key with nothing under
-	// it. See the function comment above.
+	// Every field is optional: without this wrapper an XR that sets none of
+	// them renders a bare key with nothing under it. See the function
+	// comment above.
 	conds := make([]string, len(plan))
 	for i, fld := range plan {
 		conds[i] = "(" + fld.guard + ")"
@@ -812,15 +896,15 @@ func writeMapField(d *Doc, keyIndent int, key string, childIndent int, plan []fo
 	d.Line(childIndent, "{{- end }}")
 }
 
-// writeField emits one resolved field, gated on its guard when it has one.
+// writeField emits one resolved field, gated on its guard when non-empty.
 func writeField(d *Doc, indent int, fld forProviderField) {
-	if fld.guard == "" {
-		d.Line(indent, "%s: %s", fld.path, fld.rhs)
-		return
+	if fld.guard != "" {
+		d.Line(indent, "{{- if %s }}", fld.guard)
 	}
-	d.Line(indent, "{{- if %s }}", fld.guard)
 	d.Line(indent, "%s: %s", fld.path, fld.rhs)
-	d.Line(indent, "{{- end }}")
+	if fld.guard != "" {
+		d.Line(indent, "{{- end }}")
+	}
 }
 
 // resolveKind finds the CRD for r's kind, matching on (kind, provider): a

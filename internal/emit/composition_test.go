@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -176,16 +177,29 @@ func extractTemplate(t *testing.T, doc []byte) string {
 // acceptance test renders the same template through the real engine.
 func renderTemplate(t *testing.T, tmplBody string, xrSpec map[string]any) (string, error) {
 	t.Helper()
-	data := map[string]any{
-		"observed": map[string]any{
-			"composite": map[string]any{
-				"resource": map[string]any{
-					"metadata": map[string]any{"name": "my-xqueue"},
-					"spec":     xrSpec,
-				},
+	return renderTemplateObserved(t, tmplBody, xrSpec, nil)
+}
+
+// renderTemplateObserved is renderTemplate with observed composed resources:
+// observedResources becomes .observed.resources, keyed by
+// composition-resource-name, each entry carrying the object under .resource
+// — the shape function-go-templating hands the template. nil means the
+// resources key is ABSENT entirely (what protojson produces for an empty
+// map), which is exactly the case a status-wire guard must survive.
+func renderTemplateObserved(t *testing.T, tmplBody string, xrSpec map[string]any, observedResources map[string]any) (string, error) {
+	t.Helper()
+	observed := map[string]any{
+		"composite": map[string]any{
+			"resource": map[string]any{
+				"metadata": map[string]any{"name": "my-xqueue"},
+				"spec":     xrSpec,
 			},
 		},
 	}
+	if observedResources != nil {
+		observed["resources"] = observedResources
+	}
+	data := map[string]any{"observed": observed}
 	return renderTemplateData(t, tmplBody, data)
 }
 
@@ -199,6 +213,9 @@ func renderTemplateData(t *testing.T, tmplBody string, data map[string]any) (str
 		"hasKey": func(d map[string]any, key string) bool {
 			_, ok := d[key]
 			return ok
+		},
+		"kindIs": func(kind string, v any) bool {
+			return reflect.ValueOf(v).Kind().String() == kind
 		},
 		"setResourceNameAnnotation": func(name string) string {
 			return "crossplane.io/composition-resource-name: " + name

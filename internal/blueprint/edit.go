@@ -99,16 +99,20 @@ func anyFrom(fields map[string]Field, want string) bool {
 	return false
 }
 
-// statusReferencingResources returns the names of every resource that
-// references resources.<name>.status.<...> through a field's From, in
-// resource order, each resource named at most once. It is the cross-resource
-// mirror of referencingResources: the same discipline params refs and
-// forEach refs get, applied to status wires.
+// statusReferencingResources returns the names of every resource with a
+// field whose From wires from resources.<name>'s status, in resource order.
+// It is the resources.<name>.status.* counterpart of referencingResources,
+// and matches by parsing each From with the same grammar the validator uses
+// rather than by substring, so a params reference (a different namespace)
+// or a name that merely shares a prefix can never match.
 func (b *Blueprint) statusReferencingResources(name string) []string {
 	var refs []string
 	for _, r := range b.Spec.Resources {
 		for _, f := range r.Fields {
-			if target, _, ok := StatusRef(f.From); ok && target == name {
+			if f.From == "" {
+				continue
+			}
+			if ref, err := ParseFrom(f.From); err == nil && ref.Resource == name {
 				refs = append(refs, r.Name)
 				break
 			}
@@ -117,45 +121,40 @@ func (b *Blueprint) statusReferencingResources(name string) []string {
 	return refs
 }
 
-// RenameResource renames a composed resource and rewrites every
-// cross-resource status reference (resources.<from>.status.<path>) to point
-// at the new name. Field keys and every other reference grammar are
-// untouched — only the resource-name half of a status reference changes. It
-// fails if from is not declared, if to is already declared (unless
-// to == from — a blur-submit UI resubmits an unchanged name, exactly as
-// RenameParameter documents), or if the resulting blueprint does not
-// validate; in every failure case the receiver is left unchanged.
-//
-// This matters for the same reason RenameParameter's rewrite does: a
-// dangling resources.<old>.status.<path> reference would emit a Composition
-// whose hasKey guard chain looks up an observed key that can never exist
-// again — the field silently stops materialising, forever, with every gate
-// green.
-func (b *Blueprint) RenameResource(from, to string) error {
-	idx := -1
-	for i := range b.Spec.Resources {
-		if b.Spec.Resources[i].Name == from {
-			idx = i
-			break
+// resourceIndex returns the position of the resource named name, or -1.
+func (b *Blueprint) resourceIndex(name string) int {
+	for i, r := range b.Spec.Resources {
+		if r.Name == name {
+			return i
 		}
 	}
-	if idx == -1 {
+	return -1
+}
+
+// RenameResource renames a composed resource and rewrites every status wire
+// (resources.<from>.status.<path>) to point at the new name — the same
+// contract RenameParameter has for params.<name> references. Params
+// references are a different namespace and are never touched. It fails if
+// from is not declared, if to is already declared (unless to == from — the
+// same blur-submit no-op RenameParameter absorbs), or if the resulting
+// blueprint does not validate (e.g. to is not a DNS label); in every failure
+// case the receiver is left unchanged.
+func (b *Blueprint) RenameResource(from, to string) error {
+	idx := b.resourceIndex(from)
+	if idx < 0 {
 		return fmt.Errorf("rename resource: %q is not declared", from)
 	}
 	if from == to {
 		return nil
 	}
-	for i := range b.Spec.Resources {
-		if b.Spec.Resources[i].Name == to {
-			return fmt.Errorf("rename resource: %q is already declared", to)
-		}
+	if b.resourceIndex(to) >= 0 {
+		return fmt.Errorf("rename resource: %q is already declared", to)
 	}
 
 	cp := b.deepCopy()
 	cp.Spec.Resources[idx].Name = to
-
-	oldPrefix := statusRefPrefix + from + ".status."
-	newPrefix := statusRefPrefix + to + ".status."
+	oldPrefix := "resources." + from + ".status."
+	newPrefix := "resources." + to + ".status."
 	for i, r := range cp.Spec.Resources {
 		for path, f := range r.Fields {
 			if rest, ok := strings.CutPrefix(f.From, oldPrefix); ok {
@@ -173,28 +172,14 @@ func (b *Blueprint) RenameResource(from, to string) error {
 	return nil
 }
 
-// DeleteResource removes a composed resource. It refuses when any other
-// resource still references its status (naming every referencing resource,
-// the same one-round-trip courtesy DeleteParameter gives), when the resource
-// is not declared, or when the resulting blueprint does not validate. In
-// every failure case the receiver is left unchanged.
-//
-// spec.pipeline steps are deliberately NOT scanned: a step's input is an
-// opaque typed YAML object (see PipelineStep.Input and ParsePipelineInput) —
-// the blueprint grammar defines no way for it to reference a composed
-// resource by name, so a resource name appearing inside one is just a string
-// the function may or may not interpret. Refusing the delete on a substring
-// match would be guessing; if a resource-reference grammar for inputs ever
-// exists, this scan is where it gets enforced.
+// DeleteResource removes a composed resource. It refuses while any other
+// resource still wires from the deleted resource's status (naming every
+// referencing resource, the same one-round-trip contract DeleteParameter
+// has), when the resource is not declared, or when the resulting blueprint
+// does not validate. In every failure case the receiver is left unchanged.
 func (b *Blueprint) DeleteResource(name string) error {
-	idx := -1
-	for i := range b.Spec.Resources {
-		if b.Spec.Resources[i].Name == name {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
+	idx := b.resourceIndex(name)
+	if idx < 0 {
 		return fmt.Errorf("delete resource: %q is not declared", name)
 	}
 	if refs := b.statusReferencingResources(name); len(refs) > 0 {
@@ -202,7 +187,7 @@ func (b *Blueprint) DeleteResource(name string) error {
 		for i, r := range refs {
 			quoted[i] = fmt.Sprintf("%q", r)
 		}
-		return fmt.Errorf("delete resource %q: its status is still referenced by resources %s",
+		return fmt.Errorf("delete resource %q: its status is still wired into resources %s",
 			name, strings.Join(quoted, ", "))
 	}
 

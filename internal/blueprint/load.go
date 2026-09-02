@@ -407,14 +407,26 @@ func (b *Blueprint) Validate() error {
 		return err
 	}
 
-	// seenResources catches a duplicate resource name at the source. Node
-	// identity is the composition-resource-name annotation (§7), which is
-	// r.Name verbatim — two resources sharing one name would emit two
-	// documents with the SAME annotation, which Crossplane keys by, silently
-	// collapsing them into one composed resource. It also makes a
-	// cross-resource reference (resources.<name>.status.<path>) ambiguous.
-	seenResources := make(map[string]int, len(b.Spec.Resources))
-
+	// The full resource-name set is built before the per-resource loop
+	// because a status wire may legally reference a resource declared LATER
+	// in the list (observed.resources is keyed by name at render time, so
+	// declaration order carries no meaning), and the existence check below
+	// needs every name up front. Uniqueness is enforced here too: a
+	// resources.<name> reference must be unambiguous, and the name is also
+	// the composition-resource-name annotation — node identity (spec §7) —
+	// so two resources sharing one name would silently collapse into one
+	// composed resource.
+	resourceNames := make(map[string]bool, len(b.Spec.Resources))
+	for i, r := range b.Spec.Resources {
+		if resourceNames[r.Name] {
+			return fmt.Errorf("spec.resources[%d]: duplicate resource name %q -- the name is the "+
+				"composition-resource-name annotation (node identity) and the key status wires "+
+				"reference, so it must be unique", i, r.Name)
+		}
+		if r.Name != "" {
+			resourceNames[r.Name] = true
+		}
+	}
 	for i, r := range b.Spec.Resources {
 		if r.Name == "" || r.Kind == "" {
 			switch {
@@ -429,12 +441,6 @@ func (b *Blueprint) Validate() error {
 		if !resourceNameRE.MatchString(r.Name) {
 			return fmt.Errorf("spec.resources[%d] %q: invalid resource name (must be a DNS label, e.g. main-queue)", i, r.Name)
 		}
-		if prev, dup := seenResources[r.Name]; dup {
-			return fmt.Errorf("spec.resources[%d] %q: duplicate resource name (already used by spec.resources[%d]) -- "+
-				"the name becomes the composition-resource-name annotation, which Crossplane keys composed "+
-				"resources by, so two resources sharing it silently collapse into one", i, r.Name, prev)
-		}
-		seenResources[r.Name] = i
 		// r.Kind is looked up against resolveKind's list of cached CRDs by
 		// exact string equality (internal/emit/composition.go), so a bogus
 		// value fails loudly there ("kind %q not found in any cached
@@ -645,23 +651,17 @@ func (b *Blueprint) Validate() error {
 				}
 			}
 			if f.From != "" {
-				// A cross-resource status reference gets its own validation
-				// path; see validateStatusRef. The CRD-schema half of the
-				// check (does <path> exist in the referenced kind's status,
-				// and is it a scalar leaf) lives in internal/emit, which is
-				// the layer that holds the CRDs — the same split as field
-				// paths, which checkFieldPaths validates there.
-				if strings.HasPrefix(f.From, statusRefPrefix) {
+				ref, err := ParseFrom(f.From)
+				if err != nil {
+					return fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
+				}
+				if ref.Resource != "" {
 					if err := b.validateStatusRef(r, p, f.From); err != nil {
 						return err
 					}
 					continue
 				}
-				param, ok := strings.CutPrefix(f.From, "params.")
-				if !ok {
-					return fmt.Errorf("resource %q field %q: from must be params.<name> or "+
-						"resources.<name>.status.<path> (got %q)", r.Name, p, f.From)
-				}
+				param := ref.Param
 				decl, exists := x.Parameters[param]
 				if !exists {
 					return fmt.Errorf("resource %q field %q: references unknown parameter %q",

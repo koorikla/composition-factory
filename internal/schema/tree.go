@@ -178,18 +178,17 @@ func (c CRD) FieldTree() ([]*Node, error) {
 	return BuildTree(rest, nil), nil
 }
 
-// Status returns the status subtree, the way ForProvider returns
-// spec.forProvider: BuildTree over openAPIV3Schema.properties.status. This is
-// what a cross-resource reference (resources.<name>.status.<path>) is
-// validated against — the provider's own declaration of what its controller
-// writes back, so a typo'd status path is caught at generation time instead
-// of rendering nothing forever. Native Kubernetes kinds carry their vendored
-// status subtrees too (Deployment.status and friends), so the same check
-// covers a reference into a native target.
+// Status returns the top-level .status subtree of the preferred version's
+// schema, built the same way ForProvider builds spec.forProvider. It is the
+// schema a cross-resource status wire (`from:
+// resources.<name>.status.<path>`) resolves its path against.
 //
-// nil with no error is legitimate: a CRD may declare no status at all, and
-// the caller (internal/emit) turns that into its own, more specific error
-// naming the resource and kind.
+// Nothing here assumes an upjet envelope: the tree is whatever the CRD's own
+// status schema declares (for upjet that is atProvider plus the Crossplane
+// machinery fields; a native-shaped resource carries whatever it carries).
+// A CRD with no status schema returns nil, not an error — mirroring
+// ForProvider's contract for a missing forProvider — because only the
+// caller knows whether anything is actually being wired from it.
 func (c CRD) Status() ([]*Node, error) {
 	v, err := c.Preferred()
 	if err != nil {

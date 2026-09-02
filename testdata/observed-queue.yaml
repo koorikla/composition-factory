@@ -1,0 +1,19 @@
+# Observed-state fixture for the acceptance render: the main-queue Queue as
+# the provider would report it after a successful reconcile, carrying the
+# status.atProvider.url that testdata/xqueue.cf.yaml's queue-policy resource
+# wires into its forProvider.queueUrl. `crossplane composition render
+# --observed-resources` matches it to the composed resource by the
+# crossplane.io/composition-resource-name annotation.
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metadata:
+  name: demo-main-queue
+  namespace: default
+  annotations:
+    crossplane.io/composition-resource-name: main-queue
+spec:
+  forProvider:
+    region: eu-north-1
+status:
+  atProvider:
+    url: https://sqs.eu-north-1.amazonaws.com/000000000000/demo-main-queue

@@ -1257,3 +1257,84 @@ func TestPutBlueprintWithInvalidPipelineIs400(t *testing.T) {
 		t.Error("the blueprint file changed despite a rejected PUT")
 	}
 }
+
+// A status wire (from: resources.<name>.status.<path>) is part of the
+// blueprint document contract: PUT accepts it, the persisted file loads,
+// and GET surfaces it verbatim — the frontend's wireKind classifies the
+// string itself (".status." -> "status"), so any normalization here would
+// silently change what the canvas draws.
+func TestStatusWireSurvivesPutAndGetVerbatim(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	rec := do(t, h, "GET", "/api/blueprint", "")
+	if rec.Code != 200 {
+		t.Fatalf("GET status %d: %s", rec.Code, rec.Body)
+	}
+	var doc blueprint.Blueprint
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("GET body: %v", err)
+	}
+
+	const wire = "resources.main-queue.status.atProvider.url"
+	doc.Spec.Resources = append(doc.Spec.Resources, blueprint.Resource{
+		Name: "queue-policy", Kind: "QueuePolicy",
+		Fields: map[string]blueprint.Field{
+			"queueUrl": {From: wire},
+		},
+	})
+	body, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := do(t, h, "PUT", "/api/blueprint", string(body)); rec.Code != 200 {
+		t.Fatalf("PUT status %d: %s", rec.Code, rec.Body)
+	}
+
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("blueprint on disk no longer loads: %v", err)
+	}
+	if got := reloaded.Spec.Resources[1].Fields["queueUrl"].From; got != wire {
+		t.Errorf("wire on disk = %q, want %q verbatim", got, wire)
+	}
+
+	rec = do(t, h, "GET", "/api/blueprint", "")
+	var after blueprint.Blueprint
+	if err := json.Unmarshal(rec.Body.Bytes(), &after); err != nil {
+		t.Fatalf("GET after PUT: %v", err)
+	}
+	if got := after.Spec.Resources[1].Fields["queueUrl"].From; got != wire {
+		t.Errorf("wire from GET = %q, want %q verbatim", got, wire)
+	}
+}
+
+// A PUT whose status wire names an undeclared resource is a validation
+// failure: 400, file untouched — the same contract every other invalid
+// document gets.
+func TestStatusWireToUnknownResourceIs400OnPut(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	before, _ := os.ReadFile(path)
+
+	rec := do(t, h, "GET", "/api/blueprint", "")
+	var doc blueprint.Blueprint
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("GET body: %v", err)
+	}
+	doc.Spec.Resources[0].Fields["policy"] = blueprint.Field{
+		From: "resources.no-such-thing.status.atProvider.id",
+	}
+	body, _ := json.Marshal(doc)
+
+	rec = do(t, h, "PUT", "/api/blueprint", string(body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "no-such-thing") {
+		t.Errorf("error does not name the missing resource: %s", rec.Body)
+	}
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Error("the blueprint file changed despite a rejected PUT")
+	}
+}
