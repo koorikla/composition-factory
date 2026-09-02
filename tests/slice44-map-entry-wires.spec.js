@@ -54,7 +54,7 @@ test.describe('First-Class Map-Entry Wires in Fields', () => {
     await page.click('#tabs button[data-t="comp"]');
     await expect(page.locator('#code')).toContainText('tags:');
     await expect(page.locator('#code')).toContainText("Team: 'infrastructure'");
-    await expect(page.locator('#code')).toContainText('Environment: {{ $spec.region }}');
+    await expect(page.locator('#code')).toContainText('Environment: {{ $spec.region | quote }}');
 
     // Delete tags[Team] entry
     await page.click('button[data-del-map-entry="tags[Team]"]');

@@ -21,6 +21,7 @@ test.describe('package.yaml in and out', () => {
     // export the pristine doc's package.yaml
     const res = await request.get(ENGINE + '/api/package?format=yaml');
     expect(res.ok()).toBeTruthy();
+    fs.mkdirSync('.testrun', { recursive: true });
     fs.writeFileSync('.testrun/export.package.yaml', await res.text());
 
     // move the doc to a different blueprint entirely (the YAML door is the

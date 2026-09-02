@@ -5,7 +5,12 @@
 const { test } = require('@playwright/test')
 const pristine = require('./fixtures/pristine-doc.json')
 const crypto = require('crypto')
+const fs = require('fs')
 const { execSync } = require('child_process')
+
+if (!fs.existsSync('.testrun')) {
+  fs.mkdirSync('.testrun', { recursive: true })
+}
 
 function getEngineURL() {
   if (process.env.CF_E2E_PORT) {

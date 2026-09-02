@@ -23,6 +23,7 @@ test('crossing the narrow breakpoint keeps a selected inspector visible', async 
 test('a drag survives a doc change that lands mid-gesture', async ({ page }) => {
   await page.goto('/')
   const card = page.locator('.node[data-id="dead-letter"]')
+  await expect(card).toBeVisible()
   const before = await card.boundingBox()
   await page.mouse.move(before.x + 60, before.y + 8)
   await page.mouse.down()

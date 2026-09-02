@@ -22,11 +22,9 @@ test('a GUIDE tab explains the loop, the shortcuts and the wire colors', async (
 test('field rows and wires carry informative mouseover text', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('.node[data-id="work-queue"]')).toBeVisible()
-  const portTitle = await page
-    .locator('.node[data-id="work-queue"] .port[data-path="region"]')
-    .getAttribute('title')
-  expect(portTitle).toMatch(/region/)
-  expect(portTitle).toMatch(/string/)
+  const port = page.locator('.node[data-id="work-queue"] .port[data-path="region"]')
+  await expect(port).toHaveAttribute('title', /region/)
+  await expect(port).toHaveAttribute('title', /string/)
   const wireTip = await page.evaluate(() => {
     const t = document.querySelector('#wires path title')
     return t ? t.textContent : null

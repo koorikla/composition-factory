@@ -8,6 +8,10 @@ test.beforeEach(async ({ request, page }) => {
   const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
   delete doc.spec.conventions
   delete doc.spec.templates
+  const dl = doc.spec.resources?.find(r => r.name === 'dead-letter')
+  if (dl && dl.fields && dl.fields.tags) {
+    delete dl.fields.tags
+  }
   await request.put(ENGINE + '/api/blueprint', { data: doc })
   await page.goto('/')
   await expect(page.locator('.node[data-id="work-queue"]')).toBeVisible()

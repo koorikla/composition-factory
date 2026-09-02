@@ -24,7 +24,7 @@ module.exports = defineConfig({
   timeout: 15000,
   use: { baseURL },
   webServer: {
-    command: `sh -c "make build && rm -rf ${scratchDir} && mkdir -p ${scratchDir}/out && cp tests/fixtures/pristine-doc.json ${scratchDir}/doc.cf.yaml && ./bin/cf serve --addr 127.0.0.1:${port} --blueprint ${scratchDir}/doc.cf.yaml --out ${scratchDir}/out --lock ${scratchDir}/.cf.lock"`,
+    command: `sh -c "make build && rm -rf ${scratchDir} && mkdir -p ${scratchDir}/out && mkdir -p .testrun && cp tests/fixtures/pristine-doc.json ${scratchDir}/doc.cf.yaml && ./bin/cf serve --addr 127.0.0.1:${port} --blueprint ${scratchDir}/doc.cf.yaml --out ${scratchDir}/out --lock ${scratchDir}/.cf.lock"`,
     url: `${baseURL}/healthz`,
     reuseExistingServer: false,
   },

@@ -26,6 +26,7 @@ spec:
 
 test('uploading a CRD manifest makes its kinds droppable objects', async ({ page, request }) => {
   await resetDoc(request);
+  fs.mkdirSync('.testrun', { recursive: true });
   fs.writeFileSync('.testrun/xdatabase-crd.yaml', xrCRD);
 
   await page.goto('/');

@@ -30,6 +30,7 @@ test('importing a blueprint yaml replaces the doc and is undoable', async ({ pag
 test('an invalid file surfaces the server error verbatim; doc untouched', async ({ page, request }) => {
   await page.goto('/')
   const bad = path.resolve('.testrun/bad-import.yaml')
+  require('fs').mkdirSync(path.dirname(bad), { recursive: true })
   require('fs').writeFileSync(bad, 'apiVersion: factory.crossplane.io/v1alpha1\nkind: Blueprint\nmetadata: {name: x}\nspec:\n  xrd: {group: g, kind: bad!, plural: bads, version: v1, scope: Namespaced}\n')
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser'),
