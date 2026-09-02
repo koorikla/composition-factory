@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+
 	"github.com/koorikla/compositionfactory/internal/api"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/cluster"
 	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	k8s "github.com/koorikla/compositionfactory/internal/schema/k8s"
@@ -14,28 +17,7 @@ import (
 // front doors — `cf serve` (HTTP) and `cf mcp` (stdio) — construct their
 // server from. Extracted from ServeCmd.run when `cf mcp` arrived, so the two
 // commands cannot drift apart in how they wire the engine.
-//
-// INVARIANT, carried from Task 6's review (this is a requirement, not a
-// style preference): Options.Index and Options.Store MUST be built from
-// the SAME CRD load, over exactly the providers named in the blueprint's
-// spec.sources.
-//
-// internal/api's own tests deliberately diverge the two -- testIndex and
-// the Store testHandlerWithPath seeds cover different CRD shapes for the
-// same provider ref (see internal/api/server_test.go's
-// testGenerateFixtureCRDs comment) -- and that is fine there, because it
-// is the only way to exercise /api/kinds and /api/generate against
-// independently-crafted fixtures without one test file's needs
-// contorting the other's. It is NOT fine here: a production server whose
-// index (what /api/kinds shows the canvas) disagrees with its store
-// (what /api/generate actually reads when rendering) could advertise a
-// field the browser lets someone add and then fail, or silently render
-// against a different schema than the one just browsed. So: load each
-// source provider's CRDs from the store exactly once into byProvider,
-// build the index from that same map, and hand api.New that same store
-// instance -- never a second, independently-loaded map or store for
-// either side.
-func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string) (api.Options, error) {
+func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string, cl *cluster.Client, syncClusterNow bool) (api.Options, error) {
 	b, err := blueprint.Load(blueprintPath)
 	if err != nil {
 		return api.Options{}, err
@@ -65,6 +47,20 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string) (api.Opti
 		refs = append(refs, s.Provider)
 	}
 
+	// If cluster client is provided, load or sync live cluster CRDs
+	if cl != nil {
+		if syncClusterNow {
+			if clusterCRDs, err := cl.FetchCRDs(context.Background()); err == nil && len(clusterCRDs) > 0 {
+				_ = store.SaveCRDs(cluster.ProviderLabel, cl.Context(), clusterCRDs)
+				byProvider[cluster.ProviderLabel] = clusterCRDs
+				refs = append(refs, cluster.ProviderLabel)
+			}
+		} else if clusterCRDs, err := store.Load(cluster.ProviderLabel); err == nil && len(clusterCRDs) > 0 {
+			byProvider[cluster.ProviderLabel] = clusterCRDs
+			refs = append(refs, cluster.ProviderLabel)
+		}
+	}
+
 	// The vendored native Kubernetes kinds are always in the index, under
 	// their own provider label — no source entry names them (they are
 	// compiled into the binary, pinned to one Kubernetes version) and no
@@ -84,12 +80,13 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string) (api.Opti
 	}
 
 	return api.Options{
-		Index:     idx,
-		Store:     store,
-		Blueprint: blueprintPath,
-		OutDir:    outDir,
-		Lock:      lockPath,
-		Providers: refs,
-		Version:   version,
+		Index:         idx,
+		Store:         store,
+		Blueprint:     blueprintPath,
+		OutDir:        outDir,
+		Lock:          lockPath,
+		Providers:     refs,
+		Version:       version,
+		ClusterClient: cl,
 	}, nil
 }

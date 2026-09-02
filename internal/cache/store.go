@@ -91,11 +91,16 @@ type Entry struct {
 
 // Save writes the parsed CRDs for pkg, along with pkg.Ref and pkg.Digest, into the cache.
 func (s *Store) Save(pkg *xpkg.Package, crds []schema.CRD) error {
-	dir := filepath.Join(s.Root, slug(pkg.Ref))
+	return s.SaveCRDs(pkg.Ref, pkg.Digest, crds)
+}
+
+// SaveCRDs writes parsed CRDs for an arbitrary provider ref and digest into the cache.
+func (s *Store) SaveCRDs(ref, digest string, crds []schema.CRD) error {
+	dir := filepath.Join(s.Root, slug(ref))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create cache dir: %w", err)
 	}
-	entry := Entry{Ref: pkg.Ref, Digest: pkg.Digest, CRDs: crds}
+	entry := Entry{Ref: ref, Digest: digest, CRDs: crds}
 	body, err := json.MarshalIndent(entry, "", " ")
 	if err != nil {
 		return fmt.Errorf("encode cache entry: %w", err)

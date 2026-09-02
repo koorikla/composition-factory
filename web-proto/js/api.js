@@ -247,3 +247,19 @@ export function getRBAC() {
 export function getVersion() {
   return request("GET", "/api/version");
 }
+
+/** GET /api/cluster — live cluster connection status. */
+export function getCluster() {
+  return request("GET", "/api/cluster");
+}
+
+/** POST /api/cluster/sync — discover and cache CRDs from the connected cluster. */
+export function syncCluster() {
+  return request("POST", "/api/cluster/sync");
+}
+
+/** POST /api/cluster/connect — connect or switch cluster context and discover CRDs. */
+export function connectCluster(body) {
+  return request("POST", "/api/cluster/connect", body || {});
+}
+

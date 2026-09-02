@@ -18,14 +18,14 @@ import * as defaultApi from "../api.js";
 import { fanOut } from "../wires.js";
 
 /* Node color families, exactly as the prototype's COLORS map. */
-const COLORS = { aws: "var(--wire-ref)", k8s: "var(--wire-status)" };
+const COLORS = { aws: "var(--wire-ref)", k8s: "var(--wire-status)", cluster: "#06b6d4" };
 
 const HINT_KINDS =
   'Drag a kind onto the canvas. Schemas load per-kind — <span class="mono">4.5 KB</span> median.';
 const HINT_SHARED =
   'Wires are explicit in the doc — <span class="mono">from: params.X</span> on a resource field. Badge = fan-out.';
 const HINT_SRC =
-  'Pinned by digest in <span class="mono">.cf.lock</span>. Same blueprint + same lock = same YAML, forever.';
+  'Pinned by digest in <span class="mono">.cf.lock</span> or discovered live from your cluster.';
 
 let booted = false;
 
@@ -37,6 +37,7 @@ function esc(s) {
 
 /** Color family for a live kind row (heuristic: provider/group naming). */
 function famOf(k) {
+  if (k && k.provider === "cluster") return "cluster";
   const g = (k && k.group || "") + " " + (k && k.provider || "");
   return /(^|[^a-z])aws|upbound\.io/.test(g) ? "aws" : "k8s";
 }
@@ -118,6 +119,9 @@ export function init(rootEl, deps) {
       h += '<div class="grp"><span class="lbl">' + esc(g) + '</span><span class="n">' + items.length + "</span></div>";
       items.forEach(function (k) {
         const fam = famOf(k);
+        const clusterTag = k.provider === "cluster"
+          ? '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:rgba(6,182,212,0.12);color:#06b6d4;border-radius:3px;margin-right:4px">cluster</span>'
+          : "";
         h += '<div class="kind" draggable="true"' +
           ' data-kind="' + esc(k.kind) + '"' +
           ' data-av="' + esc(k.apiVersion) + '"' +
@@ -125,6 +129,7 @@ export function init(rootEl, deps) {
           ' data-fam="' + esc(fam) + '">' +
           '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
           '<span class="nm" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(k.kind) + '">' + esc(k.kind) + '</span>' +
+          clusterTag +
           '<span class="req">' + (k.required | 0) + " req</span></div>";
       });
     });
@@ -209,6 +214,19 @@ export function init(rootEl, deps) {
   let catTimer = null;
   let expandedProvider = null; // ref whose detail row is open
   let providerKinds = null;    // kinds of the expanded provider, null = loading
+  let clusterInfo = null;      // live cluster connection status
+  let clusterLoading = false;
+  let clusterErr = null;
+
+  function loadCluster() {
+    api.getCluster().then(function (info) {
+      clusterInfo = info;
+      if (rail === "src") drawRail();
+    }).catch(function (e) {
+      clusterInfo = { connected: false, error: e && e.message || String(e) };
+      if (rail === "src") drawRail();
+    });
+  }
 
   function loadProviders() {
     api.getProviders().then(function (r) {
@@ -282,6 +300,24 @@ export function init(rootEl, deps) {
       });
     }
     if (providersErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(providersErr) + "</div>";
+
+    // Live Cluster section
+    h += '<div class="grp"><span class="lbl">Live Cluster</span></div>';
+    if (clusterLoading) {
+      h += '<div class="empty">Syncing CRDs with cluster\u2026</div>';
+    } else if (clusterInfo && clusterInfo.connected) {
+      h += '<div class="src-row" style="cursor:default">' +
+        '<span class="sw" style="width:5px;height:22px;border-radius:1.5px;background:#06b6d4"></span>' +
+        '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(clusterInfo.context || "connected") + '</span>' +
+        '<span class="dg">' + esc(clusterInfo.server || "") + ' \u00b7 ' + (clusterInfo.crdCount || 0) + ' CRDs</span></span>' +
+        '<button class="btn sm" id="cluster-sync-btn" title="Sync CRDs from cluster">Sync</button></div>';
+    } else {
+      h += '<div style="padding:6px 10px;display:flex;flex-direction:column;gap:6px">' +
+        '<div class="dg" style="color:var(--faint);font-size:10.5px">' + (clusterInfo && clusterInfo.error ? esc(clusterInfo.error) : "Not connected to a live Kubernetes cluster.") + '</div>' +
+        '<button class="btn sm" id="cluster-sync-btn" style="align-self:flex-start">Connect &amp; Sync</button>' +
+        '</div>';
+    }
+    if (clusterErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(clusterErr) + "</div>";
     return h;
   }
 
@@ -346,7 +382,10 @@ export function init(rootEl, deps) {
     const b = e.target.closest("button");
     if (!b) return;
     rail = b.getAttribute("data-r");
-    if (rail === "src" && providers === null) loadProviders();
+    if (rail === "src") {
+      if (providers === null) loadProviders();
+      loadCluster();
+    }
     [].forEach.call(tabsEl.children, function (c) {
       c.setAttribute("aria-pressed", String(c === b));
     });
@@ -396,6 +435,22 @@ export function init(rootEl, deps) {
   });
 
   railEl.addEventListener("click", function (e) {
+    if (e.target.closest("#cluster-sync-btn")) {
+      clusterLoading = true;
+      clusterErr = null;
+      drawRail();
+      api.syncCluster().then(function (info) {
+        clusterLoading = false;
+        clusterInfo = info;
+        loadKinds();
+        loadProviders();
+      }).catch(function (err) {
+        clusterLoading = false;
+        clusterErr = err && err.message || String(err);
+        drawRail();
+      });
+      return;
+    }
     if (e.target.closest("#src-remove-btn") && expandedProvider) {
       const ref = expandedProvider;
       if (!window.confirm("Remove " + ref + " from the cache?")) return;

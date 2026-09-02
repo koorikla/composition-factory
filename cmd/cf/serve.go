@@ -17,6 +17,7 @@ import (
 	"github.com/alecthomas/kong"
 
 	"github.com/koorikla/compositionfactory/internal/api"
+	"github.com/koorikla/compositionfactory/internal/cluster"
 	webproto "github.com/koorikla/compositionfactory/web-proto"
 )
 
@@ -48,6 +49,9 @@ type ServeCmd struct {
 	Out                        string `short:"o" help:"Output directory that POST /api/generate writes into." default:"."`
 	CacheDir                   string `help:"Schema cache directory." default:"${cachedir}"`
 	Lock                       string `help:"Lockfile path that POST /api/providers pins newly added providers into." default:".cf.lock"`
+	Cluster                    bool   `help:"Discover CRDs from the live Kubernetes cluster on startup."`
+	Kubeconfig                 string `help:"Path to kubeconfig file." default:""`
+	KubeContext                string `name:"context" help:"Kubernetes context name to use." default:""`
 	NoUI                       bool   `help:"Serve only the API: do not serve the embedded canvas GUI at /."`
 	IKnowThisIsUnauthenticated bool   `help:"Allow binding a non-loopback address. This server has no authentication and writes files to disk on your behalf -- only set this if you understand and accept that a non-loopback bind exposes both to your network."`
 
@@ -142,7 +146,13 @@ func (c *ServeCmd) run(ctx context.Context, out io.Writer) error {
 
 	// The single-load invariant (index and store built from one CRD load)
 	// lives in buildAPIOptions, shared with `cf mcp` — see cmd/cf/options.go.
-	o, err := buildAPIOptions(c.Blueprint, c.CacheDir, c.Out, c.Lock)
+	var cl *cluster.Client
+	if c.Kubeconfig != "" || c.KubeContext != "" || c.Cluster {
+		cl, _ = cluster.NewClient(c.Kubeconfig, c.KubeContext)
+	} else {
+		cl, _ = cluster.NewClient("", "")
+	}
+	o, err := buildAPIOptions(c.Blueprint, c.CacheDir, c.Out, c.Lock, cl, c.Cluster)
 	if err != nil {
 		return err
 	}

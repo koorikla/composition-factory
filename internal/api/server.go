@@ -26,6 +26,7 @@ import (
 	"sync"
 
 	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/cluster"
 	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
@@ -45,8 +46,9 @@ type Options struct {
 	Store     *cache.Store
 	Blueprint string   // path to the blueprint file on disk
 	OutDir    string   // where generate writes
-	Lock      string   // path to the lockfile POST /api/providers pins digests into
-	Providers []string // xpkg refs Index was built over, in blueprint-source order
+	Lock          string          // path to the lockfile POST /api/providers pins digests into
+	Providers     []string        // xpkg refs Index was built over, in blueprint-source order
+	ClusterClient *cluster.Client // optional live Kubernetes cluster client
 
 	// fetch is swapped in tests so POST /api/providers never hits the
 	// network — the same unexported seam ProviderAddCmd carries in
@@ -184,6 +186,9 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("DELETE /api/providers/{ref}", srv.handleDeleteProvider)
 	mux.HandleFunc("GET /api/rbac", srv.handleRBAC)
 	mux.HandleFunc("GET /api/catalogue", handleCatalogue)
+	mux.HandleFunc("GET /api/cluster", srv.handleGetCluster)
+	mux.HandleFunc("POST /api/cluster/sync", srv.handleSyncCluster)
+	mux.HandleFunc("POST /api/cluster/connect", srv.handleConnectCluster)
 	mux.HandleFunc("POST /api/generate", srv.handleGenerate)
 	mux.HandleFunc("POST /api/render", srv.handleRender)
 
