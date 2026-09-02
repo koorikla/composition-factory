@@ -25,15 +25,28 @@ echo "==> Generating k8s-workload example with --group-suffix=${WORKSPACE_GROUP_
 echo "==> Ensuring namespace ${WORKSPACE_NAMESPACE} exists..."
 kubectl create namespace "${WORKSPACE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
-# 3. Apply XRD, Composition, functions
-echo "==> Applying XRD, Composition, and functions to cluster..."
+# 3. Apply XRD first and wait for it to become Established
+echo "==> Applying XRD to cluster..."
 kubectl apply -f "${OUT_DIR}/xrds/"
-kubectl apply -f "${OUT_DIR}/compositions/"
-kubectl apply -f "${OUT_DIR}/functions.yaml"
 
 XRD_NAME="xworkloads.workloads.sparky.ee.${WORKSPACE_GROUP_SUFFIX}"
 echo "==> Waiting for XRD ${XRD_NAME} to become Established..."
 kubectl wait --for=condition=Established "xrd/${XRD_NAME}" --timeout=60s
+
+# 4. Apply Composition and functions
+echo "==> Applying Composition and functions to cluster..."
+kubectl apply -f "${OUT_DIR}/compositions/"
+kubectl apply -f "${OUT_DIR}/functions.yaml"
+
+COMP_NAME="xworkloads.workloads.sparky.ee.${WORKSPACE_GROUP_SUFFIX}"
+echo "==> Waiting for CompositionRevision for ${COMP_NAME}..."
+for i in {1..30}; do
+  if kubectl get compositionrevision -l "crossplane.io/composition-name=${COMP_NAME}" 2>/dev/null | grep -q "${COMP_NAME}"; then
+    echo "    Found CompositionRevision for ${COMP_NAME}."
+    break
+  fi
+  sleep 1
+done
 
 # 4. Create XR in workspace namespace
 XR_MANIFEST="${OUT_DIR}/xr-instance.yaml"
@@ -72,7 +85,14 @@ done
 
 if [ "$DEPLOYMENT_FOUND" = false ]; then
   echo "ERROR: Composed Deployment did not appear in namespace ${WORKSPACE_NAMESPACE}"
+  echo "=== XWorkload ==="
   kubectl get xworkload -n "${WORKSPACE_NAMESPACE}" -o yaml || true
+  echo "=== Compositions ==="
+  kubectl get composition -o yaml || true
+  echo "=== CompositionRevisions ==="
+  kubectl get compositionrevision -o yaml || true
+  echo "=== Crossplane logs ==="
+  kubectl logs -n crossplane-system deployment/crossplane --tail=100 || true
   exit 1
 fi
 

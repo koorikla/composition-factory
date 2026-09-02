@@ -29,11 +29,6 @@ test('uploading a CRD manifest makes its kinds droppable objects', async ({ page
   fs.mkdirSync('.testrun', { recursive: true });
   fs.writeFileSync('.testrun/xdatabase-crd.yaml', xrCRD);
 
-  page.on('response', async res => {
-    if (res.url().includes('/api/blueprint') && res.request().method() === 'PUT') {
-      console.log('PUT /api/blueprint status:', res.status(), await res.text());
-    }
-  });
   await page.goto('/');
   await expect(page.locator('.node')).toHaveCount(3);
 
@@ -43,7 +38,10 @@ test('uploading a CRD manifest makes its kinds droppable objects', async ({ page
     page.waitForEvent('filechooser'),
     page.click('#addCrdsBtn'),
   ]);
-  await chooser.setFiles('.testrun/xdatabase-crd.yaml');
+  await Promise.all([
+    page.waitForResponse(res => res.url().includes('/api/sources/crds') && res.status() === 200),
+    chooser.setFiles('.testrun/xdatabase-crd.yaml'),
+  ]);
 
   // the scanned kind lands in the KINDS rail
   await page.click('#rtabs button[data-r="kinds"]');

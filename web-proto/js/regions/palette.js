@@ -156,6 +156,8 @@ export function init(rootEl, deps) {
       items.sort(function (a, b) { return (a.kind || "").localeCompare(b.kind || ""); });
 
       const isClusterGroup = isNamespacedXRD && items.length > 0 && items.every(function (k) {
+        if (k.namespaced === true || k.scope === "Namespaced") return false;
+        if (k.provider === "cluster" || /\.ya?ml$/.test(k.provider || "")) return false;
         return k.scope === "Cluster" || k.namespaced === false || (!/\.m\./.test(k.apiVersion || "") && !/\.m\./.test(k.group || "") && k.provider !== "k8s");
       });
       const clusterTag = isClusterGroup

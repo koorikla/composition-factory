@@ -143,10 +143,13 @@ test.describe('Live-Cluster Schema Source', () => {
     await expect(rail).toContainText('3 CRDs')
 
     // Click Sync
-    await page.click('#cluster-sync-btn')
+    await Promise.all([
+      page.waitForResponse(res => res.url().includes('/api/cluster/sync') && res.status() === 200),
+      page.click('#cluster-sync-btn'),
+    ]);
 
     // Switch back to KINDS tab
-    await page.click('#rtabs button[data-r="kinds"]')
+    await page.click('#rtabs button[data-r="kinds"]');
     const kindRow = page.locator('.kind[data-kind="Certificate"]')
     await expect(kindRow).toBeVisible()
     await expect(kindRow).toContainText('cluster')

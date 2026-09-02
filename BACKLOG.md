@@ -111,23 +111,8 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
       raw contract now; then add first-class forms in this order: typed literals (P0 above),
       `resources.<looped>[*].status.<path>` list wires, forEach index helpers (cidr/az from
       index), XR-name interpolation in envelope/annotation values, paired forEach.
-- [ ] `template:` cannot see observed resources (`map has no entry for key "observed"`), so
-      any string built around a status wire (a redrive policy JSON, `serviceAccount:<email>`)
-      is raw with a hand-copied 11-term guard. Give templates the observed map and a helper
-      that emits the guard. A, E.
-- [ ] Object param into a map leaf is refused; an explicit `tags[env]` entry replaces the
-      convention wholesale instead of merging. A, C.
-- [ ] Field-level `when` is rejected as `unknown field "when"` with no hint it is resource-level.
-      Parameter named `n` fails as `parameters.false` (YAML 1.1). Kind `ProjectIamMember` gets
-      "not found; run cf provider add" instead of the nearest match. `--check` ignores stale
-      extra files in out/.
-
 ### P2 — discovery and CLI
 
-- [ ] The kind list mixes `.m.` and cluster-scoped duplicates for a Namespaced XRD (backlog
-      v2 labelled them, did not hide them). `cf provider add --help` and the providerconfigs
-      ASSUMPTION note point at xpkg.upbound.io/upbound while everything else is
-      ghcr.io/crossplane-contrib. A, C.
 - [ ] Every status wire is an 11-term hasKey/kindIs guard; correct but unreviewable by eye
       (the same item Backlog v3 Phase 1 needs). A, E.
 
@@ -170,16 +155,6 @@ its own goldens, so an emitter that is wrong in the same way twice passes.
 
 ### Structure — the five units carrying disproportionate complexity
 
-- [ ] `(*Blueprint).Validate` (internal/blueprint/load.go:408-1000) is 592
-      lines, the largest unit in the repo and the one place every authoring
-      mistake has to be caught: XRD, parameters, resources, fields, when,
-      forEach, envelope, annotations, pipeline and templates in one pass. Its
-      own neighbours show the split — `validateStatusRef`,
-      `validateForEachParamRef`, `validateForEachStatusRef` already sit beside
-      it. Extract `validateXRD` / `validateParameters` / `validateResources` /
-      `validateFields` in the same style; each becomes directly testable
-      instead of reachable only through a whole blueprint. Half a day, low
-      risk (package is at 90.3% coverage, error strings pinned by tests).
 - [ ] The three emitters walk the same tree three times:
       composition.go:writeTemplateBody (279 lines),
       python.go:pythonTemplateBody (165), kcl.go:kclTemplateBody (164).
