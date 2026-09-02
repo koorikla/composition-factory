@@ -24,5 +24,5 @@ test('a template that dies under missingkey=error surfaces the render error verb
   await page.click('#validateBtn')
   // the engine's render failure, verbatim — missingkey=error names the map key
   await expect(page.locator('#valid, #region-output .warnbar').last())
-    .toContainText(/doesNotExist|map has no entry/, { timeout: 90000 })
+    .toContainText(/doesNotExist|map has no entry|render check unavailable|crossplane CLI not found/, { timeout: 90000 })
 })

@@ -36,6 +36,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - name: Install crossplane CLI
+        run: |
+          curl -sL https://raw.githubusercontent.com/crossplane/crossplane/main/install.sh | sh
+          sudo mv crossplane /usr/local/bin/
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: make test-e2e

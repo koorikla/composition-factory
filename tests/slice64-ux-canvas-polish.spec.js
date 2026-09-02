@@ -134,10 +134,15 @@ test("examples modal traps focus on Tab and closes cleanly", async ({ page }) =>
 
 test("drag-to-wire picker warns on type mismatch", async ({ page }) => {
   await page.goto("/")
-  const paramPort = page.locator('.port[data-owner="xrd"][data-path="region"] .d')
+  const paramPort = page.locator('.port[data-owner="xrd"][data-path="region"]')
+  await expect(paramPort).toBeVisible({ timeout: 10000 })
+  const card = page.locator('.node[data-id="dead-letter"]')
+  await expect(card).toBeVisible({ timeout: 10000 })
+
   const paramBox = await paramPort.boundingBox()
-  const card = page.locator('.node[data-id="dead-letter"] .node-h')
   const cardBox = await card.boundingBox()
+  expect(paramBox).toBeTruthy()
+  expect(cardBox).toBeTruthy()
 
   await page.mouse.move(paramBox.x + paramBox.width / 2, paramBox.y + paramBox.height / 2)
   await page.mouse.down()
@@ -145,7 +150,7 @@ test("drag-to-wire picker warns on type mismatch", async ({ page }) => {
   await page.mouse.up()
 
   const picker = page.locator("#wire-picker")
-  await expect(picker).toBeVisible()
+  await expect(picker).toBeVisible({ timeout: 10000 })
 
   // Search for integer field delaySeconds (param is string)
   await page.fill("#wire-picker-search", "delaySeconds")

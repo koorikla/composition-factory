@@ -45,7 +45,7 @@ test.describe('Editable blueprint tab', () => {
 
     await editor.fill('{not yaml: [');
     await page.click('#code-apply');
-    await expect(page.locator('[role="alert"]')).toContainText(/yaml|parse|unmarshal/i);
+    await expect(page.locator('#import-warn')).toContainText(/yaml|parse|unmarshal/i);
     await expect(editor).toBeVisible(); // the edit is kept so it can be fixed
     expect(await docName(request)).toBe('xnotify');
 

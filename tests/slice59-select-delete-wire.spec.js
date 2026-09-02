@@ -42,12 +42,12 @@ test.describe('Select and delete wires on canvas', () => {
     await page.locator('svg.wires .wire-del-btn').click({ force: true });
 
     // Wire count decreases to 2
-    await expect(page.locator('svg.wires path.wire-path')).toHaveCount(2);
+    await expect.poll(async () => await page.locator('svg.wires path.wire-path').count()).toBe(2);
     await expect(page.locator('svg.wires .wire-del-btn')).toHaveCount(0);
 
     // Undo restores the wire
-    await page.keyboard.press('Meta+z');
-    await expect(page.locator('svg.wires path.wire-path')).toHaveCount(3);
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect.poll(async () => await page.locator('svg.wires path.wire-path').count()).toBe(3);
   });
 
   test('pressing Delete or Backspace removes the selected wire', async ({ page }) => {
@@ -63,7 +63,7 @@ test.describe('Select and delete wires on canvas', () => {
     await page.keyboard.press('Backspace');
 
     // Wire is deleted
-    await expect(page.locator('svg.wires path.wire-path')).toHaveCount(2);
+    await expect.poll(async () => await page.locator('svg.wires path.wire-path').count()).toBe(2);
 
     // Select another wire and press Delete key
     await page.locator('svg.wires path.wire-path').first().click({ force: true });
@@ -71,13 +71,13 @@ test.describe('Select and delete wires on canvas', () => {
     await page.keyboard.press('Delete');
 
     // Wire count is now 1
-    await expect(page.locator('svg.wires path.wire-path')).toHaveCount(1);
+    await expect.poll(async () => await page.locator('svg.wires path.wire-path').count()).toBe(1);
 
     // Undo restores both
-    await page.keyboard.press('Meta+z');
-    await expect(page.locator('svg.wires path.wire-path')).toHaveCount(2);
-    await page.keyboard.press('Meta+z');
-    await expect(page.locator('svg.wires path.wire-path')).toHaveCount(3);
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect.poll(async () => await page.locator('svg.wires path.wire-path').count()).toBe(2);
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect.poll(async () => await page.locator('svg.wires path.wire-path').count()).toBe(3);
   });
 
   test('right-clicking a wire opens context menu with delete option', async ({ page }) => {

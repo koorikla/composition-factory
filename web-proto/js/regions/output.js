@@ -523,7 +523,6 @@ export function init(rootEl, deps) {
       bar = document.createElement("div");
       bar.id = "render-warn";
       bar.className = "warnbar";
-      bar.setAttribute("role", "alert");
       var vp = document.getElementById("code-viewport") || el.code;
       if (vp && vp.parentNode) vp.parentNode.insertBefore(bar, vp);
       else if (rootEl) rootEl.appendChild(bar);
