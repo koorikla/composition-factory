@@ -640,38 +640,26 @@ func (b *Blueprint) Validate() error {
 		// into the XR's spec by schema defaulting before the composition
 		// function ever sees it. A parameter that is neither can be
 		// genuinely absent at render time, so it cannot be a loop bound.
+		// A second forEach form reads the loop bound from another resource's
+		// OBSERVED status (resources.<name>.status.<path>) — the same
+		// reference grammar as a field's from:, with the CRD-schema half (the
+		// path names an integer/number status leaf) checked in internal/emit,
+		// which holds the CRDs. The observed bound needs none of the
+		// required-or-default machinery below: it is dereferenced BEHIND the
+		// same hasKey guard chain a status wire uses, so an unobserved source
+		// renders zero instances instead of hard-failing (see
+		// internal/emit/composition.go).
 		if r.ForEach != "" {
 			if err := checkScalar(fmt.Sprintf("spec.resources[%d].forEach", i), r.ForEach); err != nil {
 				return err
 			}
-			param, ok := strings.CutPrefix(r.ForEach, "params.")
-			if !ok {
-				return fmt.Errorf("resource %q: forEach must reference a parameter as params.<name> (got %q)",
-					r.Name, r.ForEach)
-			}
-			// Loop bounds stay top-level in v1: a member is addressable by a
-			// field's from:, but not as a repetition count. Rejected with the
-			// scope named rather than falling through to a confusing
-			// unknown-parameter error for "obj.member".
-			if name, member, nested := strings.Cut(param, "."); nested {
-				return fmt.Errorf("resource %q: forEach cannot reference member %q of parameter %q — "+
-					"loop bounds stay top-level integer parameters in v1 (got %q)",
-					r.Name, member, name, r.ForEach)
-			}
-			decl, exists := x.Parameters[param]
-			if !exists {
-				return fmt.Errorf("resource %q: forEach references unknown parameter %q", r.Name, param)
-			}
-			if decl.Type != "integer" {
-				return fmt.Errorf("resource %q: forEach parameter %q has type %q, want integer -- "+
-					"the loop bound renders as until (int $spec.%s), a repetition count",
-					r.Name, param, decl.Type, param)
-			}
-			if !decl.Required && decl.Default == "" {
-				return fmt.Errorf("resource %q: forEach parameter %q must be required or carry a default -- "+
-					`the loop bound is dereferenced unguarded, and under options: ["missingkey=error"] `+
-					"an absent key hard-fails the whole render; only the XRD's required gate or its "+
-					"schema default makes the key's presence unconditional", r.Name, param)
+			if strings.HasPrefix(r.ForEach, statusRefPrefix) {
+				// The parameter rules below are the params form's alone.
+				if err := b.validateForEachStatusRef(r); err != nil {
+					return err
+				}
+			} else if err := validateForEachParamRef(x, r); err != nil {
+				return err
 			}
 		}
 		// when wraps the resource's whole rendered document in a template
@@ -895,6 +883,100 @@ func (b *Blueprint) validateStatusRef(r Resource, fieldPath, from string) error 
 			return fmt.Errorf("resource %q field %q: status path segment %q in %q is not a valid "+
 				"field name (must be camelCase, e.g. atProvider.url) -- each segment is written into "+
 				"the emitted template as a dereference and a hasKey guard", r.Name, fieldPath, seg, from)
+		}
+	}
+	return nil
+}
+
+// validateForEachParamRef checks the params.<name> forEach form: the loop
+// bound is an integer XRD parameter that is required or carries a default.
+// The Composition dereferences this bound UNGUARDED, and under
+// options: ["missingkey=error"] an absent key is a hard render failure — so
+// the parameter must be one whose presence in the observed composite's spec
+// is unconditional. Two XRD gates provide that, and only those two: a
+// required parameter is present on any XR the API server admits, and a
+// defaulted parameter is injected into the XR's spec by schema defaulting
+// before the composition function ever sees it.
+func validateForEachParamRef(x XRD, r Resource) error {
+	param, ok := strings.CutPrefix(r.ForEach, "params.")
+	if !ok {
+		return fmt.Errorf("resource %q: forEach must reference a parameter as params.<name>, "+
+			"or another resource's observed status as resources.<name>.status.<path> (got %q)",
+			r.Name, r.ForEach)
+	}
+	// Loop bounds stay top-level in v1: a member is addressable by a
+	// field's from:, but not as a repetition count. Rejected with the
+	// scope named rather than falling through to a confusing
+	// unknown-parameter error for "obj.member".
+	if name, member, nested := strings.Cut(param, "."); nested {
+		return fmt.Errorf("resource %q: forEach cannot reference member %q of parameter %q — "+
+			"loop bounds stay top-level integer parameters in v1 (got %q)",
+			r.Name, member, name, r.ForEach)
+	}
+	decl, exists := x.Parameters[param]
+	if !exists {
+		return fmt.Errorf("resource %q: forEach references unknown parameter %q", r.Name, param)
+	}
+	if decl.Type != "integer" {
+		return fmt.Errorf("resource %q: forEach parameter %q has type %q, want integer -- "+
+			"the loop bound renders as until (int $spec.%s), a repetition count",
+			r.Name, param, decl.Type, param)
+	}
+	if !decl.Required && decl.Default == "" {
+		return fmt.Errorf("resource %q: forEach parameter %q must be required or carry a default -- "+
+			`the loop bound is dereferenced unguarded, and under options: ["missingkey=error"] `+
+			"an absent key hard-fails the whole render; only the XRD's required gate or its "+
+			"schema default makes the key's presence unconditional", r.Name, param)
+	}
+	return nil
+}
+
+// validateForEachStatusRef checks the blueprint-level half of an
+// observed-count loop bound (forEach: resources.<name>.status.<path>):
+// grammar, that the target resource is declared, that it is not the resource
+// itself, that it is not itself forEach-looped, and that every path segment
+// is a clean identifier — the same rules, for the same reasons, as a status
+// wire's (validateStatusRef above). The CRD-schema half — <path> names an
+// integer/number status leaf in the target kind's declared status — belongs
+// to internal/emit, which holds the CRDs.
+//
+// Unlike the params form there is no required-or-default rule here: an
+// observed value CANNOT be made unconditional by any XRD gate (nothing is
+// observed until the cluster reports), so the emitter instead wraps the
+// whole range in the status-wire hasKey guard chain and an unobserved source
+// fans out to zero instances.
+func (b *Blueprint) validateForEachStatusRef(r Resource) error {
+	target, path, ok := StatusRef(r.ForEach)
+	if !ok {
+		return fmt.Errorf("resource %q: a resources. forEach bound must be "+
+			"resources.<name>.status.<path>, e.g. resources.cluster.status.atProvider.nodeCount (got %q)",
+			r.Name, r.ForEach)
+	}
+	if target == r.Name {
+		return fmt.Errorf("resource %q: forEach references its own status -- a resource cannot fan "+
+			"out over a count only its own instances could report; reference another resource", r.Name)
+	}
+	var decl *Resource
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Name == target {
+			decl = &b.Spec.Resources[i]
+			break
+		}
+	}
+	if decl == nil {
+		return fmt.Errorf("resource %q: forEach references unknown resource %q", r.Name, target)
+	}
+	if decl.ForEach != "" {
+		return fmt.Errorf("resource %q: resource %q is looped (forEach: %s), so its composed "+
+			"documents are named %s-0, %s-1, ... and the un-indexed key %q never appears in the observed "+
+			"resources map -- the loop bound could never resolve. Reference an unlooped resource",
+			r.Name, target, decl.ForEach, target, target, target)
+	}
+	for _, seg := range strings.Split(path, ".") {
+		if !paramNameRE.MatchString(seg) {
+			return fmt.Errorf("resource %q: forEach status path segment %q in %q is not a valid "+
+				"field name (must be camelCase, e.g. atProvider.nodeCount) -- each segment is written "+
+				"into the emitted template as a dereference and a hasKey guard", r.Name, seg, r.ForEach)
 		}
 	}
 	return nil

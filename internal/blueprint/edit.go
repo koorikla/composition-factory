@@ -118,15 +118,25 @@ func anyFrom(fields map[string]Field, want string) bool {
 	return false
 }
 
-// statusReferencingResources returns the names of every resource with a
-// field whose From wires from resources.<name>'s status, in resource order.
-// It is the resources.<name>.status.* counterpart of referencingResources,
-// and matches by parsing each From with the same grammar the validator uses
-// rather than by substring, so a params reference (a different namespace)
-// or a name that merely shares a prefix can never match.
+// statusReferencingResources returns the names of every resource that
+// references resources.<name>'s status — through a field's From, or through
+// its own forEach loop bound (forEach: resources.<name>.status.<path>) — in
+// resource order. It is the resources.<name>.status.* counterpart of
+// referencingResources, and matches by parsing each reference with the same
+// grammar the validator uses rather than by substring, so a params reference
+// (a different namespace) or a name that merely shares a prefix can never
+// match.
 func (b *Blueprint) statusReferencingResources(name string) []string {
 	var refs []string
 	for _, r := range b.Spec.Resources {
+		// An observed-count loop bound references the target's status as
+		// surely as a field wire does: deleting the target would leave a
+		// forEach whose guard chain stays false forever — a resource that
+		// silently never fans out.
+		if target, _, ok := StatusRef(r.ForEach); ok && target == name {
+			refs = append(refs, r.Name)
+			continue
+		}
 		for _, f := range r.Fields {
 			if f.From == "" {
 				continue
@@ -194,6 +204,15 @@ func (b *Blueprint) RenameResource(from, to string) error {
 				f.From = newPrefix + rest
 				cp.Spec.Resources[i].Fields[path] = f
 			}
+		}
+		// An observed-count loop bound (forEach:
+		// resources.<from>.status.<path>) references the renamed resource
+		// exactly the way a field wire does, and a dangling one would leave a
+		// guard chain that stays false forever — a fan-out that silently
+		// never happens. Same prefix-exact rewrite, same namespace rules: a
+		// params.<name> forEach is never touched.
+		if rest, ok := strings.CutPrefix(r.ForEach, oldPrefix); ok {
+			cp.Spec.Resources[i].ForEach = newPrefix + rest
 		}
 	}
 

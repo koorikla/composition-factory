@@ -527,14 +527,19 @@ func resourceDeclared(b *blueprint.Blueprint, name string) bool {
 }
 
 // statusReferencingResources returns the names of every resource that
-// references resources.<name>.status.<...> through a field's From, in
-// resource order. It mirrors blueprint.Blueprint's unexported
-// statusReferencingResources (see internal/blueprint/edit.go) exactly, over
-// the same exported Resource/Field data — the same one-check duplicate
-// referencingResources below is, for the same 409-classification reason.
+// references resources.<name>.status.<...> — through a field's From, or
+// through its own forEach loop bound — in resource order. It mirrors
+// blueprint.Blueprint's unexported statusReferencingResources (see
+// internal/blueprint/edit.go) exactly, over the same exported Resource/Field
+// data — the same one-check duplicate referencingResources below is, for the
+// same 409-classification reason.
 func statusReferencingResources(b *blueprint.Blueprint, name string) []string {
 	var refs []string
 	for _, res := range b.Spec.Resources {
+		if target, _, ok := blueprint.StatusRef(res.ForEach); ok && target == name {
+			refs = append(refs, res.Name)
+			continue
+		}
 		for _, f := range res.Fields {
 			if target, _, ok := blueprint.StatusRef(f.From); ok && target == name {
 				refs = append(refs, res.Name)

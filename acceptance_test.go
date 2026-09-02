@@ -306,6 +306,119 @@ func TestAcceptanceForEachRenders(t *testing.T) {
 	}
 }
 
+// TestAcceptanceForEachStatusRenders is the observed-count forEach gate: a
+// blueprint whose replica-queue carries `forEach:
+// resources.main-queue.status.atProvider.maxMessageSize` — a NUMBER leaf in
+// the real .m. Queue CRD, which is exactly why the loop-bound check admits
+// number alongside integer — generated and rendered through the real
+// crossplane composition render. Proven both ways on the rendered ARTIFACT:
+//
+//   - with --observed-resources reporting maxMessageSize: 3, the fan-out is
+//     exactly three instances with DISTINCT composition-resource-name
+//     annotations (real protojson float64 through the real sprig int/until);
+//   - without observed state the render SUCCEEDS with ZERO instances — the
+//     source resource alone, no "<no value>", no render error. Nothing of
+//     the looped resource exists until the cluster says how many; Crossplane
+//     creates the instances on a later reconcile.
+func TestAcceptanceForEachStatusRenders(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	bin := filepath.Join(repoRoot, "bin", "cf")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
+		t.Fatalf("build cf: %v\n%s", err, out)
+	}
+
+	cacheDir := filepath.Join(dir, "cache")
+	lock := filepath.Join(dir, ".cf.lock")
+
+	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("cf provider add: %v\n%s", err, out)
+	}
+
+	// Generate twice into separate directories: determinism is a correctness
+	// requirement, so the two runs must agree byte for byte.
+	outDir := filepath.Join(dir, "out")
+	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
+		gen := exec.Command(bin, "gen", "testdata/xqueue-foreach-status.cf.yaml", "-o", o, "--cache-dir", cacheDir)
+		if out, err := gen.CombinedOutput(); err != nil {
+			t.Fatalf("cf gen into %s: %v\n%s", o, err, out)
+		}
+	}
+	for _, rel := range []string{
+		filepath.Join("compositions", "xqueuefans.platform.sparky.ee.yaml"),
+		filepath.Join("xrds", "xqueuefans.platform.sparky.ee.yaml"),
+		"functions.yaml",
+	} {
+		first, err := os.ReadFile(filepath.Join(outDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		second, err := os.ReadFile(filepath.Join(dir, "out2", rel))
+		if err != nil {
+			t.Fatalf("read second-run %s: %v", rel, err)
+		}
+		if !bytes.Equal(first, second) {
+			t.Errorf("%s: two generate runs over the same blueprint produced different bytes", rel)
+		}
+	}
+
+	comp := filepath.Join(outDir, "compositions", "xqueuefans.platform.sparky.ee.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xqueuefans.platform.sparky.ee.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+
+	t.Run("observed count 3 fans out to 3 instances", func(t *testing.T) {
+		rendered, err := renderComposition(t,
+			"testdata/xr-foreach-status.yaml", comp, fns, "--xrd", xrd,
+			"--observed-resources", "testdata/observed-fan-queue.yaml", "--timeout", "5m")
+		if err != nil {
+			t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+		}
+		got := renderedResourceNames(t, rendered)
+		sort.Strings(got)
+		want := []string{"main-queue", "replica-queue-0", "replica-queue-1", "replica-queue-2"}
+		if !slices.Equal(got, want) {
+			t.Errorf("composition-resource-name annotations = %v, want %v\n---\n%s",
+				got, want, rendered)
+		}
+		for _, bad := range []string{"<no value>", "<nil>"} {
+			if strings.Contains(string(rendered), bad) {
+				t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+			}
+		}
+	})
+
+	t.Run("unobserved source fans out to zero instances", func(t *testing.T) {
+		rendered, err := renderComposition(t,
+			"testdata/xr-foreach-status.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
+		if err != nil {
+			t.Fatalf("render must succeed with the source unobserved — the guard chain failed: %v\n%s",
+				err, rendered)
+		}
+		got := renderedResourceNames(t, rendered)
+		sort.Strings(got)
+		if !slices.Equal(got, []string{"main-queue"}) {
+			t.Errorf("composition-resource-name annotations = %v, want the source alone: an unobserved "+
+				"loop bound must fan out to ZERO instances\n---\n%s", got, rendered)
+		}
+		for _, bad := range []string{"<no value>", "<nil>"} {
+			if strings.Contains(string(rendered), bad) {
+				t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+			}
+		}
+	})
+}
+
 // TestAcceptanceWhenRenders is the when gate: one blueprint carrying a
 // string-comparison guard (audit-queue on tier == "pro") and a bare-boolean
 // guard composed with forEach (replica-queue), generated once and rendered
