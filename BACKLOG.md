@@ -118,9 +118,9 @@
       /docs to keep the main README quick to read; make the gif-recorder
       flow part of it; use /docs content to GENERATE the in-app Guide tab(s)
       and improve them.
-- [ ] Startup example chooser (user request 2026-09-02): pick between a few
+- [x] Startup example chooser (user request 2026-09-02): pick between a few
       starting blueprints on first load — IRSA, an RDS composition, and a
-      k8s app composition that uses both.
+      k8s app composition that uses both. — completed 2026-09-02
 - [ ] Ansible provider support (user backlog 2026-09-02): explore converting
       a runbook/role into a composition.
 - [ ] (back-backlog) Generate compositions in other languages — KCL, Python

@@ -26,6 +26,7 @@
     <button class="btn" id="packageBtn" title="Download this blueprint as a Crossplane Configuration package (.xpkg)">Package</button>
     <button class="btn" id="importBtn" title="Import a blueprint .yaml (replaces the current document; undoable)">Import</button>
     <input type="file" id="importFile" accept=".yaml,.yml" hidden>
+    <button class="btn" id="examplesBtn" title="Choose a starter blueprint (IRSA, RDS, K8s App...)">Examples</button>
     <button class="btn" id="themeBtn">Theme</button>
     <button class="btn" id="validateBtn" disabled title="Run a real crossplane composition render of this blueprint against a sample XR">Validate</button>
     <button class="btn pri" id="generateBtn" disabled title="Regenerate composition.yaml and definition.yaml from the blueprint now">Generate</button>
@@ -91,7 +92,23 @@
     <div class="warnbar" id="warn" hidden></div>
     <pre class="code" id="code"></pre>
   </div>
-  <!-- =============== END REGION: OUTPUT =============== -->
+  <!-- ================= MODAL: EXAMPLES CHOOSER ================= -->
+  <div class="modal-overlay" id="examplesOverlay" hidden>
+    <div class="modal-box" id="examplesModal" role="dialog" aria-modal="true" aria-labelledby="examplesModalTitle">
+      <div class="modal-h">
+        <div class="modal-title-wrap">
+          <span class="lbl" style="color:var(--wire-xrd)">Starter Blueprints</span>
+          <h2 id="examplesModalTitle" class="modal-title">Choose an Example Blueprint</h2>
+        </div>
+        <button class="del modal-close" id="examplesCloseBtn" title="Close modal">×</button>
+      </div>
+      <p class="modal-desc">
+        Select a curated starter blueprint to explore Crossplane v2 compositions, dependency auto-layout, status annotation wires, and envelope fields.
+      </p>
+      <div class="examples-grid" id="examplesGrid"></div>
+    </div>
+  </div>
+  <!-- =============== END MODAL: EXAMPLES =============== -->
 
 </div>
 

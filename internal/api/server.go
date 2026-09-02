@@ -188,6 +188,8 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("POST /api/providers", srv.handleAddProvider)
 	mux.HandleFunc("DELETE /api/providers/{ref}", srv.handleDeleteProvider)
 	mux.HandleFunc("GET /api/rbac", srv.handleRBAC)
+	mux.HandleFunc("GET /api/examples", srv.handleExamples)
+	mux.HandleFunc("GET /api/examples/{id}", srv.handleExample)
 	mux.HandleFunc("GET /api/catalogue", handleCatalogue)
 	mux.HandleFunc("GET /api/cluster", srv.handleGetCluster)
 	mux.HandleFunc("POST /api/cluster/sync", srv.handleSyncCluster)

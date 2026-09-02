@@ -203,3 +203,112 @@ store.loadDoc();
     a.remove();
   });
 })();
+
+
+/* ---- startup example chooser: modal + direct blueprint loader ---- */
+(function () {
+  var btn = document.getElementById("examplesBtn");
+  var overlay = document.getElementById("examplesOverlay");
+  var closeBtn = document.getElementById("examplesCloseBtn");
+  var grid = document.getElementById("examplesGrid");
+  if (!btn || !overlay || !grid) return;
+
+  var cachedExamples = null;
+
+  function iconOf(id) {
+    if (id === "irsa") return { label: "IAM", color: "var(--wire-ref)" };
+    if (id === "rds-postgres") return { label: "RDS", color: "#d97706" };
+    if (id === "k8s-app") return { label: "K8S", color: "var(--wire-status)" };
+    return { label: "EX", color: "var(--wire-xrd)" };
+  }
+
+  function esc(s) {
+    return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function renderExamples(list) {
+    if (!list || !list.length) {
+      grid.innerHTML = '<div class="empty">No starter examples available.</div>';
+      return;
+    }
+    var html = "";
+    list.forEach(function (ex) {
+      var ic = iconOf(ex.id);
+      var tagsHtml = (ex.tags || []).map(function (t) {
+        return '<span class="example-tag">' + esc(t) + '</span>';
+      }).join("");
+      var resLabel = ex.resourceCount ? (ex.resourceCount + " resources") : "";
+
+      html += '<div class="example-card" data-id="' + esc(ex.id) + '">' +
+        '<div class="example-card-h">' +
+          '<span class="example-icon" style="background:' + ic.color + '">' + ic.label + '</span>' +
+          '<div style="min-width:0;flex:1">' +
+            '<div class="example-title">' + esc(ex.name) + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="example-desc">' + esc(ex.description) + '</div>' +
+        '<div class="example-tags">' +
+          (resLabel ? '<span class="example-tag" style="background:var(--wire-xrd-soft);color:var(--wire-xrd)">' + esc(resLabel) + '</span>' : '') +
+          tagsHtml +
+        '</div>' +
+        '<button class="btn pri sm example-btn" data-load-id="' + esc(ex.id) + '">Load Blueprint</button>' +
+      '</div>';
+    });
+    grid.innerHTML = html;
+  }
+
+  function loadExamples() {
+    if (cachedExamples) {
+      renderExamples(cachedExamples);
+      return;
+    }
+    grid.innerHTML = '<div class="empty">Loading examples…</div>';
+    api.getExamples().then(function (data) {
+      cachedExamples = data && data.examples || [];
+      renderExamples(cachedExamples);
+    }).catch(function (err) {
+      grid.innerHTML = '<div class="empty">Failed to load examples: ' + esc(err.message) + '</div>';
+    });
+  }
+
+  function openModal() {
+    overlay.hidden = false;
+    loadExamples();
+  }
+
+  function closeModal() {
+    overlay.hidden = true;
+  }
+
+  btn.addEventListener("click", openModal);
+  if (closeBtn) closeBtn.addEventListener("click", closeModal);
+  overlay.addEventListener("click", function (e) {
+    if (e.target === overlay) closeModal();
+  });
+
+  addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !overlay.hidden) {
+      closeModal();
+    }
+  });
+
+  grid.addEventListener("click", function (e) {
+    var loadBtn = e.target.closest("[data-load-id]");
+    if (!loadBtn) return;
+    var id = loadBtn.getAttribute("data-load-id");
+    var ex = (cachedExamples || []).find(function (item) { return item.id === id; });
+    if (!ex || !ex.yaml) return;
+
+    loadBtn.disabled = true;
+    loadBtn.textContent = "Loading…";
+    store.importBlueprint(ex.yaml).then(function (doc) {
+      if (doc) store.select(null);
+      closeModal();
+    }).finally(function () {
+      loadBtn.disabled = false;
+      loadBtn.textContent = "Load Blueprint";
+    });
+  });
+})();
+

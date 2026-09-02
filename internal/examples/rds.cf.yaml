@@ -1,0 +1,54 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xpostgres
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0
+  xrd:
+    group: database.sparky.ee
+    kind: XPostgresInstance
+    plural: xpostgresinstances
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: ProviderConfig reference to reconcile against.
+      region:
+        type: string
+        default: eu-north-1
+        description: AWS region where the database is provisioned.
+      dbName:
+        type: string
+        required: true
+        description: PostgreSQL database name.
+      instanceClass:
+        type: string
+        default: db.t4g.micro
+        description: RDS DB compute and memory capacity class.
+      allocatedStorage:
+        type: integer
+        default: "20"
+        description: Storage amount to allocate in gigabytes (GB).
+      multiAz:
+        type: boolean
+        default: "false"
+        description: Specifies if the RDS instance is a multi-AZ deployment.
+  resources:
+    - name: db-instance
+      kind: Instance
+      provider: ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0
+      envelope:
+        writeConnectionSecretToRef.name: {from: params.dbName}
+        writeConnectionSecretToRef.namespace: {value: "default"}
+      fields:
+        region: {from: params.region}
+        dbName: {from: params.dbName}
+        instanceClass: {from: params.instanceClass}
+        allocatedStorage: {from: params.allocatedStorage}
+        engine: {value: "postgres"}
+        engineVersion: {value: "15.4"}
+        multiAz: {from: params.multiAz}
+        skipFinalSnapshot: {value: true}

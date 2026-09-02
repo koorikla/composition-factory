@@ -336,7 +336,14 @@ export function init(rootEl, deps) {
     }
     function kbd(k) { return '<b style="font-family:var(--mono);font-size:10px">' + k + "</b>"; }
     const mod = /Mac/.test(navigator.platform) ? "\u2318" : "Ctrl";
-    return sec("The loop",
+    return sec("Starter Blueprints",
+        "Explore canonical compositions (click to load):" +
+        '<div style="margin-top:6px;display:flex;flex-direction:column;gap:5px">' +
+          '<button class="btn sm" data-guide-example="irsa" style="justify-content:flex-start">⚡ AWS IRSA (Role + ServiceAccount)</button>' +
+          '<button class="btn sm" data-guide-example="rds-postgres" style="justify-content:flex-start">🗄️ AWS RDS PostgreSQL</button>' +
+          '<button class="btn sm" data-guide-example="k8s-app" style="justify-content:flex-start">📦 K8s App (Deployment + SQS + IAM)</button>' +
+        '</div>') +
+      sec("The loop",
         "Drag a kind from KINDS onto the canvas, wire XR parameters to resource fields, " +
         "edit values in the inspector \u2014 the generated YAML below updates live and is " +
         "written by <b>cf gen</b> byte-for-byte the same.") +
@@ -494,6 +501,23 @@ export function init(rootEl, deps) {
       }).catch(function (err) {
         providersErr = err && err.message || String(err);
         drawRail();
+      });
+      return;
+    }
+    const guideExBtn = e.target.closest("button[data-guide-example]");
+    if (guideExBtn) {
+      const exId = guideExBtn.getAttribute("data-guide-example");
+      guideExBtn.disabled = true;
+      api.getExample(exId).then(function (res) {
+        if (res && res.example && res.example.yaml) {
+          return store.importBlueprint(res.example.yaml).then(function (doc) {
+            if (doc) store.select(null);
+          });
+        }
+      }).catch(function (err) {
+        if (hintEl) hintEl.innerHTML = '<span style="color:var(--err)">Failed to load example: ' + esc(err.message) + '</span>';
+      }).finally(function () {
+        guideExBtn.disabled = false;
       });
       return;
     }

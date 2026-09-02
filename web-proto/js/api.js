@@ -311,3 +311,14 @@ export function addCRDSource(name, yamlText) {
     return body;
   });
 }
+
+/** GET /api/examples — list curated starter blueprints. */
+export function getExamples() {
+  return request("GET", "/api/examples");
+}
+
+/** GET /api/examples/{id} — get a specific starter blueprint by id. */
+export function getExample(id) {
+  return request("GET", "/api/examples/" + encodeURIComponent(id));
+}
+
