@@ -146,11 +146,14 @@ func (c *ServeCmd) run(ctx context.Context, out io.Writer) error {
 
 	// The single-load invariant (index and store built from one CRD load)
 	// lives in buildAPIOptions, shared with `cf mcp` — see cmd/cf/options.go.
+	// The cluster client exists ONLY when the operator opted in: without
+	// --cluster/--kubeconfig/--context the server must never construct a
+	// client from ~/.kube/config — the UI probes /api/cluster on ordinary
+	// tab opens, and an implicit client would turn that into an outbound
+	// call against whatever the user's current kubectl context points at.
 	var cl *cluster.Client
 	if c.Kubeconfig != "" || c.KubeContext != "" || c.Cluster {
 		cl, _ = cluster.NewClient(c.Kubeconfig, c.KubeContext)
-	} else {
-		cl, _ = cluster.NewClient("", "")
 	}
 	o, err := buildAPIOptions(c.Blueprint, c.CacheDir, c.Out, c.Lock, cl, c.Cluster)
 	if err != nil {

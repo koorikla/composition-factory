@@ -714,9 +714,27 @@ function renderXRD() {
 
 /* ---------------- render dispatch ---------------- */
 
+var renderDeferredForEdit = false;
+
 function render() {
-  renderToken++;
   if (!box) return;
+  // Never replace the inspector's DOM out from under an active edit: the
+  // async re-render used to land mid-typing, discard the focused input and
+  // repaint the last-committed value — the "my change silently reverted"
+  // class. Defer until the edit ends.
+  var ae = document.activeElement;
+  if (ae && box.contains(ae) &&
+      (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) {
+    if (!renderDeferredForEdit) {
+      renderDeferredForEdit = true;
+      ae.addEventListener("blur", function () {
+        renderDeferredForEdit = false;
+        render();
+      }, { once: true });
+    }
+    return;
+  }
+  renderToken++;
   var doc = store.state.doc;
   if (!doc) { box.innerHTML = '<div class="empty">No blueprint loaded.</div>'; return; }
   var sel = store.state.selectedResource;
