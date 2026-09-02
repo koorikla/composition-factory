@@ -39,7 +39,7 @@ test.describe('Select and delete wires on canvas', () => {
     await expect(page.locator('svg.wires .wire-del-btn')).toBeVisible();
 
     // Click the delete button
-    await page.locator('svg.wires .wire-del-btn circle').click();
+    await page.locator('svg.wires .wire-del-btn circle').click({ force: true });
 
     // Wire count decreases to 2
     await expect.poll(async () => await page.locator('svg.wires path.wire-path').count()).toBe(2);

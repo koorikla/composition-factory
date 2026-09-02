@@ -17,6 +17,7 @@ import (
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/cluster"
 	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/schema/k8s"
@@ -142,5 +143,14 @@ func (srv *server) loadSourceCRDs(b *blueprint.Blueprint) ([]schema.CRD, error) 
 	if err != nil {
 		return nil, err
 	}
-	return append(crds, native...), nil
+	all := append(crds, native...)
+	for _, p := range srv.Providers {
+		if p == cluster.ProviderLabel {
+			if clusterCRDs, err := srv.Store.Load(cluster.ProviderLabel); err == nil {
+				all = append(all, clusterCRDs...)
+			}
+			break
+		}
+	}
+	return all, nil
 }

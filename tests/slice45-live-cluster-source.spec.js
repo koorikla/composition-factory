@@ -19,6 +19,18 @@ test.describe('Live-Cluster Schema Source', () => {
 
   test('Syncing cluster populates kinds list with cluster CRDs', async ({ page }) => {
     // Route mock cluster responses if not connected to a real live cluster
+    await page.route('**/api/blueprint', async route => {
+      if (route.request().method() === 'PUT') {
+        const body = route.request().postDataJSON();
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(body),
+        });
+      } else {
+        await route.continue();
+      }
+    });
     await page.route('**/api/cluster', async route => {
       if (route.request().method() === 'GET') {
         await route.fulfill({

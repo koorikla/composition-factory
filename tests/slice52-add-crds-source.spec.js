@@ -29,6 +29,11 @@ test('uploading a CRD manifest makes its kinds droppable objects', async ({ page
   fs.mkdirSync('.testrun', { recursive: true });
   fs.writeFileSync('.testrun/xdatabase-crd.yaml', xrCRD);
 
+  page.on('response', async res => {
+    if (res.url().includes('/api/blueprint') && res.request().method() === 'PUT') {
+      console.log('PUT /api/blueprint status:', res.status(), await res.text());
+    }
+  });
   await page.goto('/');
   await expect(page.locator('.node')).toHaveCount(3);
 

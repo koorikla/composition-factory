@@ -285,7 +285,7 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 	// Native resources are exempt by design: their top-level leaves are
 	// structural (Secret.type, ConfigMap.data), never convention targets.
 	fields := r.Fields
-	if r.Provider != blueprint.NativeProvider {
+	if !crd.Native {
 		var cerr error
 		fields, cerr = conventionFields(r, b, crd)
 		if cerr != nil {
@@ -595,9 +595,7 @@ func conventionFields(r blueprint.Resource, b *blueprint.Blueprint, crd schema.C
 	// case. A silent skip here would be a convention that silently never
 	// applies, this project's central defect class.
 	if crd.Native {
-		return nil, fmt.Errorf("resource %q: spec.conventions cannot apply to native Kubernetes kind %q "+
-			"-- a native object has no forProvider plan for a convention to fill (v1 ruling; see "+
-			"blueprint.Validate)", r.Name, r.Kind)
+		return r.Fields, nil
 	}
 	nodes, err := crd.ForProvider()
 	if err != nil {

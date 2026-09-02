@@ -8,6 +8,15 @@ test.describe('Drag to object popup field picker', () => {
   });
 
   test('dragging a parameter onto a resource card opens popup showing spec fields, envelope, and annotations', async ({ page, request }) => {
+    page.on('response', async res => {
+      if (res.url().includes('/api/blueprint') && res.request().method() === 'PUT') {
+        console.log('PUT /api/blueprint status:', res.status(), await res.text())
+      }
+    })
+    page.on('dialog', async d => {
+      console.log('DIALOG:', d.type(), d.message())
+      await d.accept()
+    })
     await page.goto('/');
     await expect(page.locator('.node')).toHaveCount(3);
 

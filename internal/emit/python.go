@@ -89,7 +89,7 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 		}
 
 		fields := r.Fields
-		if r.Provider != blueprint.NativeProvider {
+		if !crd.Native {
 			var cerr error
 			fields, cerr = conventionFields(r, b, crd)
 			if cerr != nil {

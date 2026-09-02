@@ -90,7 +90,7 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 		}
 
 		fields := r.Fields
-		if r.Provider != blueprint.NativeProvider {
+		if !crd.Native {
 			var cerr error
 			fields, cerr = conventionFields(r, b, crd)
 			if cerr != nil {

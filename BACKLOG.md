@@ -94,56 +94,11 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
       `{{ }}` is masked as a quoted scalar, so block-level actions become YAML values.
       Decide: fix adopt's masking to treat control-flow lines as opaque blocks, or fold adopt
       into the Backlog v3 reader (which must read cf's dialect anyway). Found by C and D.
-- [ ] function-patch-and-transform `input.resources` is discarded with no warning
-      (`resources: []`), and a package `…function-patch-and-transform:v0.1.0` is invented.
-      docs/cli.md claims classic P&T support; only pre-2.0 `spec.resources` is parsed. Found
-      by C and D.
-- [ ] XRD parsing ignores the schema when parameters sit flat under `spec` (cf's own XRDs,
-      Crossplane v2 style): `required`, types, defaults, descriptions, nested objects all lost;
-      arrays refuse (`type "array" is not supported`); `claimNames`/`connectionSecretKeys`
-      dropped. Found by D.
-- [ ] Every patch `fromFieldPath` becomes a parameter name (`metadata.uid`, `status.eks.oidc`
-      → "invalid parameter name"), resource names are not normalised to DNS labels, block
-      scalars are put in `value:` and then refused for containing `\n`. Adopt of
-      platform-ref-aws XEKS needed five successive manual edits and still failed. Found by D.
 - [ ] Non-param mustache lands in `value:` and gen single-quotes it (`tags: '{{ toYaml … }}'`);
       `.observed.composite.resource.spec.X` is not recognised as a param; nested maps are
       flattened to dotted paths gen then refuses; arrays/objects serialised via fmt.Sprint
       (`'[map[conditionStatus:False …]]'`); composed apiVersion is rebound to `--provider`
       (cluster-scoped `iam.aws.upbound.io` → `.m.`); without `--provider`, `sources: null`.
-- [ ] No loss report at all — only "Adopted blueprint written to …". Print what was dropped,
-      write `# adopt: dropped …` comments, exit 2 when lossy, validate the adopted blueprint
-      against the schema before writing. `--cache-dir` is not accepted by `cf adopt`; output
-      is padded with `from: ""`, `raw: ""`, `conventions: null`, `enum: null`.
-
-### P1 — API and MCP contract
-
-- [ ] PUT /api/blueprint and replace_blueprint are not atomic: a document whose new source
-      fails to fetch (`MANIFEST_UNKNOWN`) is persisted anyway, and every later call fails with
-      the same fetch error. Sync sources before persist; roll back on failure. Found by E.
-- [ ] add_provider / POST /api/providers caches the schemas but does not declare the source in
-      `spec.sources`; the first resource using it is refused. Declare it (idempotently). E.
-- [ ] Unknown field paths and status paths pass PUT/replace with 200 and fail only at
-      generate; docs/mcp.md promises refusal at replace time. Validate at PUT with the same
-      did-you-mean; nested unknown paths currently get no suggestion at all. E.
-- [ ] Resource rename/delete ignore `raw:` references: rename leaves the old name inside raw
-      guards; delete of a raw-referenced resource succeeds and generates a guard that is
-      false forever (from: wires are protected). Scan raw text for `"<name>"` in observed
-      lookups, or warn. E.
-- [ ] HTTP ignores unknown query params (`?search=` silently returns everything; kinds use
-      `q`); POST /api/render ignores an `xr` body key silently; /api/blueprint/import wants raw
-      YAML while /adopt wants `{"manifest"}`. Return 400 on unknown params, accept `search` as
-      an alias, document bodies (an /api/openapi or route list). C and E.
-- [ ] render_check reports Docker transients (`container is marked for removal`) as a
-      blueprint `error`; classify daemon/runtime failures as `unavailable`. E.
-- [ ] `cf mcp` exits when `--blueprint` does not exist while `cf serve` scaffolds; parameter
-      `default` accepts non-strings and enum/default mismatches; MCP errors give CLI advice
-      (`run: cf provider add`) instead of the tool name; the persisted document drifts to
-      `sources: null` and every field carries `from: "" raw: "" template: "" value: ""`. E.
-- [ ] get_kind_fields lacks `enum`, `default`, `minimum`/`maximum`, `format` (they exist only
-      as prose in descriptions) and there is no status view, so an agent wiring
-      `resources.x.status.atProvider.arn` guesses. MCP has no resource add/update/rename/
-      delete tools — structural edits are whole-document replace only. E.
 
 ### P2 — DSL expressiveness gaps every scenario hit
 
