@@ -133,17 +133,13 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
 
 ### v2 half-fixes (verifier, 14 of 46 ticked items partially done)
 
-- [ ] Engines list: index.html still hardcodes the three `<option>`s so the /api/version path
-      is dead code; touch: `pointerdown` + `touchstart` both pan on one finger (no
-      `pointerType` guard, no touch spec); api.js header still says it throws a plain object;
-      `resourceFromMap` returns an error it never produces; `make clean` leaves web/ dist;
-      design spec still "draft for review" with §11/§12 unsuperseded.
-- [ ] Drag-to-wire type warning ships but "change parameter type" does not; scope-mismatched
-      KINDS group labelled but not collapsed; catalogue-add spinner/toast/tab-switch and the
-      managementPolicies "more" button have no real spec coverage (the latter's spec passes
-      vacuously); inspector "env:" vs canvas "envelope." namespaces still split; output.js
-      splitter still hand-rolled; `crds:` sources still re-read per generate; api/server_test
-      still retypes the Queue CRD; the Guide tab is still a hardcoded copy of docs/guide.md.
+- [ ] Design spec still "draft for review" with §11/§12 unsuperseded.
+- [ ] Drag-to-wire type warning ships but "change parameter type" does not;
+      catalogue-add spinner/toast/tab-switch and the managementPolicies "more" button have
+      no real spec coverage (the latter's spec passes vacuously); inspector "env:" vs canvas
+      "envelope." namespaces still split; output.js splitter still hand-rolled; `crds:` sources
+      still re-read per generate; api/server_test still retypes the Queue CRD; the Guide tab
+      is still a hardcoded copy of docs/guide.md.
 
 ## Backlog v5 — whole-tree code audit (2026-09-02, main @ ee61f82)
 
@@ -217,9 +213,6 @@ its own goldens, so an emitter that is wrong in the same way twice passes.
       only one that talks to a live API server. Bring its error paths
       (unreadable kubeconfig, unreachable server, partial CRD listings) up as
       part of the kind-cluster work above, not after it.
-- [ ] `make test-race` exists and passes but no CI lane invokes it. Add it to
-      lane A or a nightly — the API server has a shared index and memoised
-      schema trees, which is exactly what the race detector is for.
 
 ### Workspace hygiene (needs a decision, not a delete)
 

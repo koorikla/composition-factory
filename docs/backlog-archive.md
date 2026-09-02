@@ -1,5 +1,16 @@
 # Backlog archive — completed items
 
+- [x] `make test-race` exists and passes but no CI lane invokes it. Add it to
+      lane A or a nightly — the API server has a shared index and memoised
+      schema trees, which is exactly what the race detector is for.
+      — completed 2026-09-03
+- [x] Engines list: index.html still hardcodes the three `<option>`s so the /api/version path
+      is dead code; touch: `pointerdown` + `touchstart` both pan on one finger (no
+      `pointerType` guard, no touch spec); api.js header still says it throws a plain object;
+      `resourceFromMap` returns an error it never produces; `make clean` leaves web/ dist;
+      scope-mismatched KINDS group labelled but not collapsed.
+      — completed 2026-09-03
+
 Work that is done, moved out of BACKLOG.md on 2026-09-03 so it stops costing
 every agent a thousand lines of context on read. Kept whole rather than
 deleted: several of these items are the only written record of *why* something

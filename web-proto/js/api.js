@@ -5,9 +5,10 @@
  * http://127.0.0.1:8080, so every call is same-origin.
  *
  * Every wrapper returns the parsed JSON body on success. On any non-2xx
- * response (or network failure) it THROWS a plain object:
+ * response (or network failure) it throws an ApiError (an Error instance
+ * with an attached status property):
  *
- *   { status: number, message: string }
+ *   Error { status: number, message: string }
  *
  * where `message` is the server's error text VERBATIM (the `error` field of
  * the JSON body when present, otherwise the raw body). 400 validation
