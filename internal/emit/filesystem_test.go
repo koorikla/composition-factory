@@ -431,3 +431,103 @@ func TestInlineModeUnchangedByEmitKey(t *testing.T) {
 		t.Errorf("templateSource: Inline differs from absent (-absent +explicit):\n%s", diff)
 	}
 }
+
+func TestFileSystemGuardedResourcesSelfContained(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xmulti"},
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{{Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.0.0"}},
+			XRD: blueprint.XRD{
+				Group: "platform.example.org", Kind: "XMulti", Plural: "xmultis",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+					"enableQueue":  {Type: "boolean", Required: true, Default: "true"},
+					"enableAudit":  {Type: "boolean", Required: true, Default: "false"},
+					"replicaCount": {Type: "integer", Required: true, Default: "2"},
+				},
+			},
+			Emit: &blueprint.Emit{TemplateSource: blueprint.TemplateSourceFileSystem},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "primary-queue",
+					Kind:     "Queue",
+					Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.0.0",
+					When:     "params.enableQueue",
+					Fields: map[string]blueprint.Field{
+						"region": {Value: "us-east-1"},
+					},
+				},
+				{
+					Name:     "audit-queue",
+					Kind:     "Queue",
+					Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.0.0",
+					When:     "params.enableAudit",
+					Fields: map[string]blueprint.Field{
+						"region": {Value: "us-west-2"},
+					},
+				},
+				{
+					Name:     "worker-queue",
+					Kind:     "Queue",
+					Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.0.0",
+					ForEach:  "params.replicaCount",
+					Fields: map[string]blueprint.Field{
+						"region": {Value: "eu-west-1"},
+					},
+				},
+			},
+		},
+	}
+	crds := fsCRDs(t)
+	files, err := TemplateFiles(b, crds)
+	if err != nil {
+		t.Fatalf("TemplateFiles failed: %v", err)
+	}
+
+	if len(files) != 4 {
+		t.Fatalf("expected 4 template files (context + 3 resources), got %d", len(files))
+	}
+
+	// 000-context.yaml must NOT contain any {{- if or {{- end tags
+	ctxBody := string(files[0].Body)
+	if strings.Contains(ctxBody, "{{- if") || strings.Contains(ctxBody, "{{- end") {
+		t.Errorf("context file must not contain resource when guards:\n%s", ctxBody)
+	}
+
+	// Each resource file must be self-contained and closed
+	for i, f := range files[1:] {
+		body := string(f.Body)
+		openCount := strings.Count(body, "{{- if") + strings.Count(body, "{{- range")
+		closeCount := strings.Count(body, "{{- end")
+		if openCount != closeCount {
+			t.Errorf("file %s has unbalanced template control blocks (%d opens, %d ends):\n%s", f.Name, openCount, closeCount, body)
+		}
+		if i == 0 { // primary-queue with When
+			if !strings.HasPrefix(body, "{{- if $spec.enableQueue }}\n---\n") {
+				t.Errorf("primary-queue must start with its own when guard:\n%s", body)
+			}
+			if !strings.HasSuffix(body, "{{- end }}\n") {
+				t.Errorf("primary-queue must end with its closing {{- end }}:\n%s", body)
+			}
+		}
+		if i == 1 { // audit-queue with When
+			if !strings.HasPrefix(body, "{{- if $spec.enableAudit }}\n---\n") {
+				t.Errorf("audit-queue must start with its own when guard:\n%s", body)
+			}
+			if !strings.HasSuffix(body, "{{- end }}\n") {
+				t.Errorf("audit-queue must end with its closing {{- end }}:\n%s", body)
+			}
+		}
+		if i == 2 { // worker-queue with ForEach
+			if !strings.HasPrefix(body, "{{- range $i := until (int $spec.replicaCount) }}\n---\n") {
+				t.Errorf("worker-queue must start with its own forEach range:\n%s", body)
+			}
+			if !strings.HasSuffix(body, "{{- end }}\n") {
+				t.Errorf("worker-queue must end with its closing {{- end }}:\n%s", body)
+			}
+		}
+	}
+}

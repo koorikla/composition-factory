@@ -35,45 +35,24 @@ func inlineTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, erro
 // `---` separator). Concatenating these in lexical order reproduces the inline
 // body exactly.
 func TemplateFiles(b *blueprint.Blueprint, crds []schema.CRD) ([]TemplateFile, error) {
-	body, err := inlineTemplateBody(b, crds)
-	if err != nil {
-		return nil, err
-	}
-	lines := strings.Split(string(body), "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
+	wantNamespaced := b.Spec.XRD.Scope == "Namespaced"
+	files := make([]TemplateFile, len(b.Spec.Resources)+1)
+
+	d0 := NewDoc()
+	writeTemplatePreamble(d0, 0, b)
+	files[0] = TemplateFile{
+		Name: "000-context.yaml",
+		Body: d0.Bytes(),
 	}
 
-	var chunks [][]string
-	var cur []string
-	for _, l := range lines {
-		if l == "---" {
-			chunks = append(chunks, cur)
-			cur = []string{"---"}
-			continue
+	for i, r := range b.Spec.Resources {
+		dr := NewDoc()
+		if err := writeResourceTemplate(dr, 0, r, b, crds, wantNamespaced); err != nil {
+			return nil, err
 		}
-		cur = append(cur, l)
-	}
-	chunks = append(chunks, cur)
-
-	if len(chunks) != len(b.Spec.Resources)+1 {
-		return nil, fmt.Errorf("template body has %d documents for %d resources; "+
-			"the per-resource split invariant is broken", len(chunks), len(b.Spec.Resources))
-	}
-
-	files := make([]TemplateFile, len(chunks))
-	for i, c := range chunks {
-		name := "000-context.yaml"
-		if i > 0 {
-			name = fmt.Sprintf("%03d-%s.yaml", i, b.Spec.Resources[i-1].Name)
-		}
-		joined := strings.Join(c, "\n")
-		if !strings.HasSuffix(joined, "\n") {
-			joined += "\n"
-		}
-		files[i] = TemplateFile{
-			Name: name,
-			Body: []byte(joined),
+		files[i+1] = TemplateFile{
+			Name: fmt.Sprintf("%03d-%s.yaml", i+1, r.Name),
+			Body: dr.Bytes(),
 		}
 	}
 	return files, nil
