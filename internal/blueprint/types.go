@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // NativeProvider is the provider label for native Kubernetes kinds — the
@@ -31,6 +32,30 @@ type Blueprint struct {
 	Kind       string   `json:"kind"`
 	Metadata   Metadata `json:"metadata"`
 	Spec       Spec     `json:"spec"`
+}
+
+var sourcePaths sync.Map // *Blueprint -> string
+
+// SourcePath returns the path the blueprint was loaded from, if known.
+func (b *Blueprint) SourcePath() string {
+	if b == nil {
+		return ""
+	}
+	if v, ok := sourcePaths.Load(b); ok {
+		return v.(string)
+	}
+	return ""
+}
+
+// SetSourcePath sets the file path this blueprint was loaded from or saved to.
+func (b *Blueprint) SetSourcePath(p string) {
+	if b != nil {
+		if p == "" {
+			sourcePaths.Delete(b)
+		} else {
+			sourcePaths.Store(b, p)
+		}
+	}
 }
 
 type Metadata struct {

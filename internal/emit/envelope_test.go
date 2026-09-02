@@ -117,7 +117,7 @@ spec:
     kind: ClusterProviderConfig
     name: {{ $spec.providerName }}
   writeConnectionSecretToRef:
-    name: {{ $spec.secretName }}
+    name: {{ $spec.secretName | quote }}
 `
 	if diff := cmp.Diff(want, extractTemplate(t, got)); diff != "" {
 		t.Errorf("template body drifted (-want +got):\n%s", diff)
@@ -364,7 +364,7 @@ func TestEnvelopeTypeRules(t *testing.T) {
 			name:     "providerConfigRef.name wired to custom parameter",
 			envelope: map[string]blueprint.Field{"providerConfigRef.name": {From: "params.customProvider"}},
 			params:   map[string]blueprint.Parameter{"customProvider": {Type: "string", Required: true}},
-			wantLine: `    name: {{ $spec.customProvider }}`,
+			wantLine: `    name: {{ $spec.customProvider | quote }}`,
 		},
 		{
 			name:     "providerConfigRef.name set to literal value",
@@ -482,7 +482,7 @@ func TestMultipleResourcesDifferentProviderConfigs(t *testing.T) {
 		t.Errorf("template missing default providerName:\n%s", tmpl)
 	}
 	// backup-queue should have backupProviderName
-	if !strings.Contains(tmpl, "name: {{ $spec.backupProviderName }}") {
+	if !strings.Contains(tmpl, "name: {{ $spec.backupProviderName | quote }}") {
 		t.Errorf("template missing backupProviderName wire:\n%s", tmpl)
 	}
 	// static-queue should have dedicated-infra-pc and ProviderConfig

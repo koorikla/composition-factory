@@ -94,7 +94,7 @@ spec:
 	if !strings.Contains(s, "{{- if hasKey $spec \"env\" }}") {
 		t.Errorf("expected conditional hasKey for env, got:\n%s", s)
 	}
-	if !strings.Contains(s, "Environment: {{ $spec.env }}") {
+	if !strings.Contains(s, "Environment: {{ $spec.env | quote }}") {
 		t.Errorf("expected Environment tag from param, got:\n%s", s)
 	}
 }
