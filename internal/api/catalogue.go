@@ -8,6 +8,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -23,10 +24,28 @@ import (
 // at CI time — fails only the specific requests that need it with a 500,
 // rather than a broken embed crashing server startup for routes that never
 // touch the catalogue at all.
+//
+// Unfiltered responses are additionally pre-marshaled, pre-hashed (ETag)
+// and pre-compressed (gzip) to eliminate repeat runtime overhead entirely.
 var (
 	catalogueEntries, catalogueErr = catalogue.Load()
 	unfilteredCatalogueMap         = map[string]any{"providers": catalogueEntries}
+	unfilteredCatalogueJSON        []byte
+	unfilteredCatalogueETag        string
+	unfilteredCatalogueGzip        []byte
 )
+
+func init() {
+	if catalogueErr == nil {
+		if data, err := json.Marshal(unfilteredCatalogueMap); err == nil {
+			unfilteredCatalogueJSON = data
+			unfilteredCatalogueETag = etagFor(data)
+			if gz, ok := gzipBytes(data); ok {
+				unfilteredCatalogueGzip = gz
+			}
+		}
+	}
+}
 
 // handleCatalogue serves GET /api/catalogue?q=: {"providers":[...]},
 // optionally filtered to entries whose name or description contains q as a
@@ -46,7 +65,16 @@ func handleCatalogue(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(r.URL.Query().Get("q"))
 	typ := strings.ToLower(r.URL.Query().Get("type")) // "function", "provider", or ""
 	if q == "" && typ == "" {
-		writeJSON(w, http.StatusOK, unfilteredCatalogueMap)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", unfilteredCatalogueETag)
+		if acceptsGzip(r) && len(unfilteredCatalogueGzip) > 0 {
+			w.Header().Set("Content-Encoding", "gzip")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(unfilteredCatalogueGzip)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(unfilteredCatalogueJSON)
 		return
 	}
 

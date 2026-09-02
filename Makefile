@@ -33,4 +33,4 @@ serve: build
 	./$(BIN) serve --blueprint $(BLUEPRINT) --out $(OUT)
 
 clean:
-	rm -rf bin $(OUT) .testrun .demorun
+	rm -rf bin $(OUT) .testrun .demorun test-results playwright-report

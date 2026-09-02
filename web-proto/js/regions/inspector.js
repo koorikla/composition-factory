@@ -50,8 +50,9 @@ function selectedResource() {
   return null;
 }
 
-function entryOf(res, path) {
-  var f = res && res.fields && res.fields[path];
+function entryOf(res, path, isEnvelope) {
+  var map = isEnvelope ? (res && res.envelope) : (res && res.fields);
+  var f = map && map[path];
   if (!f || typeof f !== "object") return null;
   var from = typeof f.from === "string" ? f.from : "";
   var value = typeof f.value === "string" ? f.value : "";
@@ -61,13 +62,7 @@ function entryOf(res, path) {
 }
 
 function envelopeEntryOf(res, path) {
-  var f = res && res.envelope && res.envelope[path];
-  if (!f || typeof f !== "object") return null;
-  var from = typeof f.from === "string" ? f.from : "";
-  var value = typeof f.value === "string" ? f.value : "";
-  var raw = typeof f.raw === "string" ? f.raw : "";
-  if (!from && !value && !raw) return null;
-  return { from: from, value: value, raw: raw };
+  return entryOf(res, path, true);
 }
 
 function docMode(entry) {
