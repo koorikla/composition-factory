@@ -83,3 +83,6 @@
 - [ ] Palette required-count badges still show RAW counts (Deployment "250 req")
       — adopt effective (chain+branch) counts; needs index.Kind or a cheap
       per-kind fetch. — observed 2026-09-02
+- [ ] Drag-to-wire: drag a line from an XR parameter dot onto a card → popup
+      menu of type-compatible input fields to bind (params.X → chosen field).
+      — user request 2026-09-02
