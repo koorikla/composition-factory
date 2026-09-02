@@ -153,7 +153,17 @@ function xrCardHTML(d, sel) {
       fan: n > 1 ? '<span class="fan">×' + n + '</span>' : "",
     });
   });
-  h += '</div><button class="node-add" data-addxr="1">+ add field</button></div>';
+  h += '</div>';
+  if (xrAddOpen) {
+    h += '<div class="xr-add-row" id="xr-add-row">' +
+      '<input class="xr-add-input" id="xr-add-input" placeholder="parameterName" autofocus aria-label="Parameter name">' +
+      '<button class="btn sm pri" id="xr-add-submit" style="padding:1px 6px">Add</button>' +
+      '<button class="btn sm" id="xr-add-cancel" style="padding:1px 5px">×</button>' +
+      '</div>';
+  } else {
+    h += '<button class="node-add" data-addxr="1">+ add field</button>';
+  }
+  h += '</div>';
   return h;
 }
 
@@ -426,6 +436,15 @@ function render() {
   (d.spec.resources || []).forEach(function (r) {
     h += resourceCardHTML(d, r, sel);
   });
+  if ((d.spec.resources || []).length === 0) {
+    h += '<div class="canvas-empty-state" id="canvas-empty-state">' +
+      '<div class="canvas-empty-title">1. Add a provider in SOURCES  2. Drag kinds onto canvas to compose</div>' +
+      '<div class="canvas-empty-steps">' +
+        '<div class="canvas-empty-step"><span class="step-num">1</span> Add a provider in <strong>SOURCES</strong></div>' +
+        '<div class="canvas-empty-step"><span class="step-num">2</span> Drag kinds onto canvas to compose</div>' +
+      '</div>' +
+    '</div>';
+  }
   canvasEl.innerHTML = h;
   // measured layout pass for cards that have no stored position
   const freshCards = (d.spec.resources || []).some(function (r) { return !S.getPosition(r.name); }) ||
@@ -466,6 +485,7 @@ function portPos(owner, path) {
   return { x: r.left - cw.left + r.width / 2, y: r.top - cw.top + r.height / 2 };
 }
 
+let xrAddOpen = false;
 let selectedWire = null;
 
 function wireKey(w) {
@@ -535,7 +555,7 @@ function drawWires() {
       ' C' + (a.x + dx) + ',' + a.y + ' ' + (b.x - dx) + ',' + b.y +
       ' ' + b.x + ',' + b.y;
     s += '<path class="wire-path ' + cls + (isSel ? " wire-selected" : "") + '" d="' + dPath +
-      '" stroke="' + col + '" data-wire-idx="' + idx + '" pointer-events="stroke">' +
+      '" stroke="' + col + '" data-wire-idx="' + idx + '" pointer-events="stroke" tabindex="0" role="button" aria-label="' + esc(title) + '">' +
       '<title>' + title + '</title></path>';
 
     if (isSel) {
@@ -845,8 +865,44 @@ function removeResource(name) {
 
 function onKeyDown(e) {
   const t = e.target;
+  if (t && t.id === "xr-add-input") {
+    if (e.key === "Enter") {
+      const val = (t.value || "").trim();
+      if (val) {
+        xrAddOpen = false;
+        S.addParameter(val, { type: "string", required: false }).then(function () {
+          S.select(XR_ID);
+        });
+      }
+    } else if (e.key === "Escape") {
+      xrAddOpen = false;
+      render();
+    }
+    return;
+  }
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
   if (String(window.getSelection && window.getSelection())) return; // real text copy wins
+
+  // Keyboard navigation on focused wire path
+  if (t && t.classList && t.classList.contains("wire-path")) {
+    const idx = Number(t.getAttribute("data-wire-idx"));
+    const ws = listWires(doc());
+    if (ws[idx]) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectedWire = ws[idx];
+        drawWires();
+        return;
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        const toDel = ws[idx];
+        selectedWire = null;
+        deleteWire(toDel);
+        return;
+      }
+    }
+  }
 
   if (selectedWire && (e.key === "Delete" || e.key === "Backspace")) {
     e.preventDefault();
@@ -916,8 +972,27 @@ function onCanvasClick(e) {
   if (e.target.closest("[data-addxr]")) {
     const d = doc();
     if (!d) return;
+    xrAddOpen = true;
     S.select(XR_ID);
-    S.addParameter(uniqueParamName(d), { type: "string", required: false });
+    render();
+    const inp = canvasEl.querySelector("#xr-add-input");
+    if (inp) inp.focus();
+    return;
+  }
+  if (e.target.closest("#xr-add-cancel")) {
+    xrAddOpen = false;
+    render();
+    return;
+  }
+  if (e.target.closest("#xr-add-submit")) {
+    const inp = canvasEl.querySelector("#xr-add-input");
+    const val = (inp && inp.value || "").trim();
+    if (val) {
+      xrAddOpen = false;
+      S.addParameter(val, { type: "string", required: false }).then(function () {
+        S.select(XR_ID);
+      });
+    }
     return;
   }
   const n = e.target.closest(".node");
@@ -1053,10 +1128,14 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
         lastCat = item.category;
         h += '<div class="wire-picker-cat">' + esc(lastCat) + '</div>';
       }
+      const mismatchBadge = item.typeMismatch
+        ? '<span class="wire-picker-mismatch" title="Type mismatch: $' + esc(srcPath) + ' is ' + esc(item.srcType) + ', but field expects ' + esc(item.targetType) + '">mismatch: ' + esc(item.srcType) + ' ≠ ' + esc(item.targetType) + '</span>'
+        : '';
       h += '<div class="wire-picker-item' + (idx === selectedIndex ? ' active' : '') + (item.suggested ? ' match' : '') + '" data-idx="' + idx + '">' +
         '<span style="font-family:var(--mono);color:' + (item.color || 'inherit') + '">' + esc(item.label || item.path) + '</span>' +
         '<span class="dg">' + esc(item.type || "") + '</span>' +
         (item.required ? '<span class="rq">req</span>' : '') +
+        mismatchBadge +
         (item.description ? '<span class="desc" title="' + esc(item.description) + '">' + esc(item.description) + '</span>' : '') +
         '</div>';
     });
@@ -1068,6 +1147,20 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
     const items = [];
     const srcTerm = srcPath.toLowerCase().replace(/[^a-z0-9]/g, "");
 
+    let srcType = "string";
+    if (srcOwner === XR_ID) {
+      const pObj = (d.spec.xrd && d.spec.xrd.parameters && d.spec.xrd.parameters[srcPath]) || {};
+      srcType = pObj.type || "string";
+    }
+
+    function isTypeMatch(targetType) {
+      if (!srcType || !targetType) return true;
+      if (srcType === targetType) return true;
+      if ((srcType === "integer" || srcType === "number") && (targetType === "integer" || targetType === "number")) return true;
+      if ((srcType === "map" || srcType === "object") && (targetType === "map" || targetType === "object")) return true;
+      return false;
+    }
+
     // 1. Spec / forProvider fields
     (specFields || []).forEach(function (f) {
       const p = f.path;
@@ -1078,23 +1171,30 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
       if (q && pLower.indexOf(q) === -1 && descLower.indexOf(q) === -1) {
         return;
       }
+      const targetType = f.type || "string";
+      const typeMatch = isTypeMatch(targetType);
       const isReq = !!(f.requiredChain || f.required);
       const isMatch = srcTerm && (pNorm.indexOf(srcTerm) >= 0 || srcTerm.indexOf(pNorm) >= 0);
       let score = 20;
       if (isReq) score += 40;
-      if (isMatch) score += 100;
+      if (isMatch && typeMatch) score += 100;
+      else if (isMatch) score += 30;
+      if (!typeMatch) score -= 30;
       if (q) {
         if (pLower === q) score += 60;
         else if (pLower.startsWith(q)) score += 40;
         else if (pLower.indexOf(q) >= 0) score += 20;
       }
       items.push({
-        type: f.type || "string",
+        type: targetType,
         path: p,
         label: p,
-        category: isMatch && !q ? "Suggested Matches" : "Spec Fields",
+        category: isMatch && typeMatch && !q ? "Suggested Matches" : "Spec Fields",
         required: isReq,
-        suggested: isMatch,
+        suggested: isMatch && typeMatch,
+        typeMismatch: !typeMatch,
+        srcType: srcType,
+        targetType: targetType,
         description: desc,
         applyType: "field",
         score: score,
@@ -1213,6 +1313,12 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
   function selectItem(item) {
     if (!item) return;
     closeWirePicker();
+    if (item.typeMismatch && srcOwner === XR_ID && item.targetType) {
+      if (window.confirm("Parameter '$" + srcPath + "' is " + item.srcType + ", but '" + item.path + "' expects " + item.targetType + ".\n\nConvert parameter type to " + item.targetType + " and wire?")) {
+        const pObj = (d.spec.xrd && d.spec.xrd.parameters && d.spec.xrd.parameters[srcPath]) || {};
+        S.updateParameter(srcPath, Object.assign({}, pObj, { type: item.targetType }));
+      }
+    }
     if (item.applyType === "ann") {
       applyWire(srcOwner, srcPath, targetRes, "annotations." + item.path);
     } else if (item.applyType === "envelope") {
