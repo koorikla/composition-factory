@@ -160,3 +160,9 @@
       resource updates, field parameter bindings, status wires, loops, conditionals,
       and `fnv1.READY_TRUE`; auto-pins `function-python` in `functions.yaml` and `package.yaml`.
       CLI: `cf gen --engine=python`. — completed 2026-09-02
+- [x] Wire Selection & Deletion on Canvas:
+      Clicking any wire selects and highlights it with a glowing dashed stroke and
+      presents a floating `×` delete badge at the curve midpoint. Pressing `Delete` / `Backspace`,
+      clicking the delete badge, or right-clicking for the context menu deletes the wire
+      binding from fields, envelope, or annotations with full undo/redo support (`Cmd/Ctrl+Z`).
+      — user request 2026-09-02

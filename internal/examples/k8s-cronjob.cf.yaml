@@ -1,0 +1,65 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: k8s-cronjob
+spec:
+  sources: []
+  xrd:
+    group: batch.sparky.ee
+    kind: XCronTask
+    plural: xcrontasks
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: ProviderConfig reference to reconcile against.
+      image:
+        type: string
+        required: true
+        description: Batch worker container image.
+      schedule:
+        type: string
+        default: "0 * * * *"
+        description: Standard cron schedule expression for job execution.
+      concurrencyPolicy:
+        type: string
+        default: Forbid
+        enum:
+          - Allow
+          - Forbid
+          - Replace
+        description: Concurrency policy for scheduled jobs.
+      successfulJobsHistoryLimit:
+        type: integer
+        default: "3"
+        description: Number of successful finished jobs to retain.
+      failedJobsHistoryLimit:
+        type: integer
+        default: "1"
+        description: Number of failed finished jobs to retain.
+  resources:
+    - name: sa
+      kind: ServiceAccount
+      provider: k8s
+      fields:
+        automountServiceAccountToken: {value: true}
+    - name: config
+      kind: ConfigMap
+      provider: k8s
+      fields:
+        data[SCHEDULE]: {from: params.schedule}
+    - name: cron
+      kind: CronJob
+      provider: k8s
+      fields:
+        spec.schedule: {from: params.schedule}
+        spec.concurrencyPolicy: {from: params.concurrencyPolicy}
+        spec.successfulJobsHistoryLimit: {from: params.successfulJobsHistoryLimit}
+        spec.failedJobsHistoryLimit: {from: params.failedJobsHistoryLimit}
+        spec.jobTemplate.spec.template.spec.serviceAccountName: {value: sa}
+        spec.jobTemplate.spec.template.spec.restartPolicy: {value: OnFailure}
+        spec.jobTemplate.spec.template.spec.containers[0].name: {value: worker}
+        spec.jobTemplate.spec.template.spec.containers[0].image: {from: params.image}
+        spec.jobTemplate.spec.template.spec.containers[0].envFrom[0].configMapRef.name: {value: config}

@@ -440,7 +440,11 @@ store.loadDoc();
   function iconOf(id) {
     if (id === "irsa") return { label: "IAM", color: "var(--wire-ref)" };
     if (id === "rds-postgres") return { label: "RDS", color: "#d97706" };
-    if (id === "k8s-app") return { label: "K8S", color: "var(--wire-status)" };
+    if (id === "k8s-app") return { label: "APP", color: "var(--wire-status)" };
+    if (id === "k8s-workload") return { label: "K8S", color: "#0284c7" };
+    if (id === "k8s-cronjob") return { label: "CRON", color: "#7c3aed" };
+    if (id === "s3-bucket") return { label: "S3", color: "#059669" };
+    if (id === "sqs-queue") return { label: "SQS", color: "#e11d48" };
     return { label: "EX", color: "var(--wire-xrd)" };
   }
 

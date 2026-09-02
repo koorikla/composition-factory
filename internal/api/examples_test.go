@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
 
 func TestGetExamples(t *testing.T) {
@@ -91,7 +93,13 @@ func TestGetExampleByID(t *testing.T) {
 }
 
 func TestLoadExampleWithProviderAutoSync(t *testing.T) {
-	h := testHandler(t)
+	h, _, store, _ := testServerParts(t)
+
+	// Seed RDS provider in test cache to isolate test from network
+	rdsRef := "ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0"
+	if err := store.Save(&xpkg.Package{Ref: rdsRef, Digest: "sha256:rds-test"}, testGenerateFixtureCRDs(t)); err != nil {
+		t.Fatalf("seed rds cache: %v", err)
+	}
 
 	// Load RDS example
 	rec := do(t, h, "POST", "/api/examples/rds-postgres/load", "")

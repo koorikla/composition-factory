@@ -1,0 +1,60 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: s3-bucket
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0
+  xrd:
+    group: storage.sparky.ee
+    kind: XBucket
+    plural: xbuckets
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: ProviderConfig reference to reconcile against.
+      region:
+        type: string
+        default: eu-north-1
+        description: AWS region for S3 bucket.
+      bucketName:
+        type: string
+        required: true
+        description: Globally unique S3 bucket name.
+      versioning:
+        type: boolean
+        default: "true"
+        description: Whether object versioning is enabled on the bucket.
+      blockPublicAccess:
+        type: boolean
+        default: "true"
+        description: Whether to enforce AWS S3 Block Public Access.
+  resources:
+    - name: bucket
+      kind: Bucket
+      provider: ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0
+      fields:
+        region: {from: params.region}
+        objectLockEnabled: {value: false}
+    - name: versioning
+      kind: BucketVersioningConfiguration
+      provider: ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0
+      when: params.versioning
+      fields:
+        region: {from: params.region}
+        bucket: {from: resources.bucket.status.atProvider.id}
+        versioningConfiguration.status: {value: "Enabled"}
+    - name: public-access-block
+      kind: BucketPublicAccessBlock
+      provider: ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0
+      when: params.blockPublicAccess
+      fields:
+        region: {from: params.region}
+        bucket: {from: resources.bucket.status.atProvider.id}
+        blockPublicAcls: {value: true}
+        blockPublicPolicy: {value: true}
+        ignorePublicAcls: {value: true}
+        restrictPublicBuckets: {value: true}

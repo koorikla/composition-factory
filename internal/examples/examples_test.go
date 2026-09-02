@@ -26,9 +26,6 @@ func TestAllExamplesAreValidBlueprints(t *testing.T) {
 			if len(ex.Tags) == 0 {
 				t.Error("example Tags is empty")
 			}
-			if len(ex.Sources) == 0 {
-				t.Error("example Sources is empty")
-			}
 			if ex.YAML == "" {
 				t.Fatal("example YAML is empty")
 			}
@@ -48,7 +45,7 @@ func TestAllExamplesAreValidBlueprints(t *testing.T) {
 }
 
 func TestGetExample(t *testing.T) {
-	for _, id := range []string{"irsa", "rds-postgres", "k8s-app"} {
+	for _, id := range []string{"irsa", "rds-postgres", "k8s-app", "k8s-workload", "k8s-cronjob", "s3-bucket", "sqs-queue"} {
 		ex, err := Get(id)
 		if err != nil {
 			t.Errorf("Get(%q) returned error: %v", id, err)

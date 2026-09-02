@@ -24,17 +24,21 @@ spec:
         type: string
         default: platform
         description: Owning team — lands in every object's tags via the cf.tags convention.
-      sessionSeconds:
-        type: integer
-        default: "3600"
-        description: Maximum session duration for the assumed role, in seconds.
+      serviceAccountName:
+        type: string
+        default: sa
+        description: Name of the Kubernetes ServiceAccount to bind with IAM IRSA.
+      description:
+        type: string
+        default: IAM role assumed by a Kubernetes ServiceAccount via IRSA
+        description: Description metadata for the provisioned IAM Role.
       automountToken:
         type: boolean
         default: "true"
         description: Whether the ServiceAccount auto-mounts its API token.
   templates:
     trust-policy: >-
-      '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ regexReplaceAll "^.*:oidc-provider/" .spec.oidcProviderArn "" }}:sub":"system:serviceaccount:{{ .xrMeta.namespace }}:{{ .xr }}"}}}]}'
+      '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ regexReplaceAll "^.*:oidc-provider/" .spec.oidcProviderArn "" }}:sub":"system:serviceaccount:{{ .xrMeta.namespace }}:{{ default .xr .spec.serviceAccountName }}"}}}]}'
     cf.tags: |
       managed-by: crossplane
       team: {{ .spec.team | quote }}
@@ -46,9 +50,8 @@ spec:
       kind: Role
       provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
       fields:
-        description: {value: IAM role assumed by a Kubernetes ServiceAccount via IRSA}
+        description: {from: params.description}
         assumeRolePolicy: {template: trust-policy}
-        maxSessionDuration: {from: params.sessionSeconds}
     - name: role-policy
       kind: RolePolicy
       provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
@@ -62,3 +65,4 @@ spec:
         automountServiceAccountToken: {from: params.automountToken}
       annotations:
         eks.amazonaws.com/role-arn: {from: resources.role.status.atProvider.arn}
+        eks.amazonaws.com/sts-regional-endpoints: {value: "true"}

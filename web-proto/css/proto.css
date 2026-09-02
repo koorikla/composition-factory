@@ -109,11 +109,19 @@ html,body{height:100%;overflow:hidden}
 /* canvas */
 .canvas-wrap{position:relative;overflow:hidden;
   background:radial-gradient(circle at 1px 1px,var(--grid) 1px,transparent 0) 0 0/18px 18px,var(--ground)}
-.canvas{position:absolute;inset:0}
+.canvas{position:absolute;inset:0;pointer-events:none}
+.canvas .node{pointer-events:auto}
 svg.wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
-svg.wires path{fill:none;stroke-width:1.75;transition:stroke-width .12s,opacity .12s}
-svg.wires path.hot{stroke-width:3}
+svg.wires path{fill:none;stroke-width:2.25;transition:stroke-width .12s,opacity .12s;cursor:pointer;pointer-events:stroke}
+svg.wires path:hover{stroke-width:3.75}
+svg.wires path.hot{stroke-width:3.5}
 svg.wires .dim{opacity:.18}
+svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !important;stroke-dasharray:6 3;animation:wire-selected-dash .6s linear infinite;filter:drop-shadow(0 0 4px rgba(245, 158, 11, 0.7))}
+@keyframes wire-selected-dash{to{stroke-dashoffset:-9}}
+.wire-del-btn{cursor:pointer;transition:transform .12s ease;pointer-events:all}
+.wire-del-btn:hover{transform:scale(1.2)}
+.wire-del-btn circle{fill:#e11d48;stroke:var(--surface, #fff);stroke-width:1.5;filter:drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4))}
+.wire-del-btn text{fill:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:12px;font-weight:700;text-anchor:middle;dominant-baseline:central;user-select:none;pointer-events:none}
 
 .node{position:absolute;width:max-content;min-width:198px;max-width:340px;background:var(--surface);border:1px solid var(--rule-2);
   border-radius:7px;box-shadow:var(--shadow);user-select:none}

@@ -6,6 +6,7 @@ spec:
   sources:
     - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
     - provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+    - provider: ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0
   xrd:
     group: apps.sparky.ee
     kind: XApp
@@ -29,10 +30,26 @@ spec:
         type: integer
         default: "2"
         description: Number of application pod replicas.
+      containerPort:
+        type: integer
+        default: "8080"
+        description: Target listening port of the application container.
       region:
         type: string
         default: eu-north-1
-        description: AWS region for SQS queue.
+        description: AWS region for managed cloud resources.
+      dbName:
+        type: string
+        default: appdb
+        description: PostgreSQL database name.
+      dbInstanceClass:
+        type: string
+        default: db.t4g.micro
+        description: RDS PostgreSQL instance compute class.
+      dbAllocatedStorage:
+        type: integer
+        default: "20"
+        description: Storage allocated for the database in GB.
   templates:
     trust-policy: >-
       '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ regexReplaceAll "^.*:oidc-provider/" .spec.oidcProviderArn "" }}:sub":"system:serviceaccount:{{ .xrMeta.namespace }}:{{ .xr }}"}}}]}'
@@ -42,12 +59,33 @@ spec:
       provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
       fields:
         region: {from: params.region}
+        sqsManagedSseEnabled: {value: true}
     - name: role
       kind: Role
       provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
       fields:
         description: {value: IAM role for app service account}
         assumeRolePolicy: {template: trust-policy}
+    - name: role-policy
+      kind: RolePolicy
+      provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+      fields:
+        role: {from: resources.role.status.atProvider.id}
+        policy: {raw: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["sqs:SendMessage","sqs:ReceiveMessage","sqs:DeleteMessage","sqs:GetQueueAttributes"],"Resource":["arn:aws:sqs:*:*:*"]}]}'}
+    - name: db
+      kind: Instance
+      provider: ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0
+      envelope:
+        writeConnectionSecretToRef.name: {from: params.dbName}
+        managementPolicies: {value: "Observe, Create, Update, Delete, LateInitialize"}
+      fields:
+        region: {from: params.region}
+        dbName: {from: params.dbName}
+        instanceClass: {from: params.dbInstanceClass}
+        allocatedStorage: {from: params.dbAllocatedStorage}
+        engine: {value: "postgres"}
+        engineVersion: {value: "15.4"}
+        skipFinalSnapshot: {value: true}
     - name: sa
       kind: ServiceAccount
       provider: k8s
@@ -55,6 +93,7 @@ spec:
         automountServiceAccountToken: {value: true}
       annotations:
         eks.amazonaws.com/role-arn: {from: resources.role.status.atProvider.arn}
+        eks.amazonaws.com/sts-regional-endpoints: {value: "true"}
     - name: app-deploy
       kind: Deployment
       provider: k8s
@@ -65,9 +104,15 @@ spec:
         spec.template.spec.serviceAccountName: {value: sa}
         spec.template.spec.containers[0].name: {value: worker}
         spec.template.spec.containers[0].image: {from: params.image}
+        spec.template.spec.containers[0].ports[0].containerPort: {from: params.containerPort}
+        spec.template.spec.containers[0].env[0].name: {value: QUEUE_URL}
+        spec.template.spec.containers[0].env[0].value: {from: resources.queue.status.atProvider.url}
+        spec.template.spec.containers[0].env[1].name: {value: DB_NAME}
+        spec.template.spec.containers[0].env[1].value: {from: params.dbName}
     - name: app-svc
       kind: Service
       provider: k8s
       fields:
         spec.selector: {raw: "{app: worker}"}
-        spec.ports[0].port: {raw: "8080"}
+        spec.ports[0].port: {value: 80}
+        spec.ports[0].targetPort: {from: params.containerPort}

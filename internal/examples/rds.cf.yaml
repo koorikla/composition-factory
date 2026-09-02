@@ -32,23 +32,48 @@ spec:
         type: integer
         default: "20"
         description: Storage amount to allocate in gigabytes (GB).
+      maxAllocatedStorage:
+        type: integer
+        default: "100"
+        description: Upper limit in GB for RDS storage autoscaling.
+      engineVersion:
+        type: string
+        default: "15.4"
+        description: PostgreSQL engine version.
       multiAz:
         type: boolean
         default: "false"
         description: Specifies if the RDS instance is a multi-AZ deployment.
+      backupRetentionPeriod:
+        type: integer
+        default: "7"
+        description: Automated backup retention days.
+      publiclyAccessible:
+        type: boolean
+        default: "false"
+        description: Controls whether the database is publicly accessible.
+      deletionProtection:
+        type: boolean
+        default: "false"
+        description: Prevents accidental database deletion.
   resources:
     - name: db-instance
       kind: Instance
       provider: ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0
       envelope:
         writeConnectionSecretToRef.name: {from: params.dbName}
-        writeConnectionSecretToRef.namespace: {value: "default"}
+        managementPolicies: {value: "Observe, Create, Update, Delete, LateInitialize"}
       fields:
         region: {from: params.region}
         dbName: {from: params.dbName}
         instanceClass: {from: params.instanceClass}
         allocatedStorage: {from: params.allocatedStorage}
+        maxAllocatedStorage: {from: params.maxAllocatedStorage}
         engine: {value: "postgres"}
-        engineVersion: {value: "15.4"}
+        engineVersion: {from: params.engineVersion}
         multiAz: {from: params.multiAz}
+        backupRetentionPeriod: {from: params.backupRetentionPeriod}
+        publiclyAccessible: {from: params.publiclyAccessible}
+        deletionProtection: {from: params.deletionProtection}
+        autoMinorVersionUpgrade: {value: true}
         skipFinalSnapshot: {value: true}

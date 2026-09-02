@@ -480,6 +480,43 @@ function portPos(owner, path) {
   return { x: r.left - cw.left + r.width / 2, y: r.top - cw.top + r.height / 2 };
 }
 
+let selectedWire = null;
+
+function wireKey(w) {
+  if (!w) return "";
+  return (w.kind || "") + ":" + (w.srcResource || "") + ":" + (w.srcPath || "") + ":" + (w.param || "") + ":" + (w.resource || "") + ":" + (w.path || "");
+}
+
+function deleteWire(w) {
+  if (!w || !w.resource) return Promise.resolve();
+  return S.replaceDoc(function (d) {
+    const res = (d.spec.resources || []).find(function (r) { return r.name === w.resource; });
+    if (!res) return;
+    if (w.isAnnotation) {
+      const key = w.path.replace(/^annotations\./, "");
+      if (res.annotations && res.annotations[key]) {
+        delete res.annotations[key];
+        if (!Object.keys(res.annotations).length) delete res.annotations;
+      }
+    } else if (w.isEnvelope) {
+      const envPath = w.path.replace(/^envelope\./, "");
+      if (res.envelope && res.envelope[envPath]) {
+        delete res.envelope[envPath];
+        if (!Object.keys(res.envelope).length) delete res.envelope;
+      }
+    } else {
+      if (res.fields && res.fields[w.path]) {
+        delete res.fields[w.path];
+      }
+    }
+  }).then(function (ok) {
+    if (ok) {
+      selectedWire = null;
+      drawWires();
+    }
+  });
+}
+
 function drawWires() {
   if (!wiresEl) return;
   const d = doc();
@@ -488,7 +525,8 @@ function drawWires() {
   const fans = {};
   ws.forEach(function (w) { if (w.kind === "param") fans[w.param] = (fans[w.param] || 0) + 1; });
   let s = "";
-  ws.forEach(function (w) {
+  let delButtons = "";
+  ws.forEach(function (w, idx) {
     let a, b, cls, col, title;
     if (w.kind === "status") {
       a = portPos(w.srcResource, "status." + w.srcPath) || portPos(w.srcResource, w.srcPath);
@@ -505,13 +543,26 @@ function drawWires() {
       title = "$" + esc(w.param) + " \u2192 " + esc(w.resource) + "." + esc(w.path);
     }
     if (!a || !b) return;
+    const isSel = selectedWire && wireKey(selectedWire) === wireKey(w);
     const dx = Math.max(34, Math.abs(b.x - a.x) * 0.42);
-    s += '<path class="' + cls + '" d="M' + a.x + ',' + a.y +
+    const dPath = 'M' + a.x + ',' + a.y +
       ' C' + (a.x + dx) + ',' + a.y + ' ' + (b.x - dx) + ',' + b.y +
-      ' ' + b.x + ',' + b.y + '" stroke="' + col + '" pointer-events="stroke">' +
+      ' ' + b.x + ',' + b.y;
+    s += '<path class="wire-path ' + cls + (isSel ? " wire-selected" : "") + '" d="' + dPath +
+      '" stroke="' + col + '" data-wire-idx="' + idx + '" pointer-events="stroke">' +
       '<title>' + title + '</title></path>';
+
+    if (isSel) {
+      const midX = (a.x + b.x) / 2;
+      const midY = (a.y + b.y) / 2;
+      delButtons += '<g class="wire-del-btn" data-wire-idx="' + idx + '" transform="translate(' + midX + ',' + midY + ')" pointer-events="all">' +
+        '<circle r="9"></circle>' +
+        '<text y="-0.5">\u00d7</text>' +
+        '<title>Delete wire (Delete/Backspace)</title>' +
+        '</g>';
+    }
   });
-  wiresEl.innerHTML = s;
+  wiresEl.innerHTML = s + delButtons;
 }
 
 function scheduleWires() {
@@ -696,9 +747,52 @@ function openCtxMenu(x, y, resName) {
   document.body.appendChild(m);
 }
 
-function onContextMenu(e) {
-  const n = e.target.closest(".node");
+function openWireCtxMenu(x, y, w) {
   closeCtxMenu();
+  const m = document.createElement("div");
+  m.id = "ctx-menu";
+  m.style.cssText = "position:fixed;left:" + x + "px;top:" + y + "px;z-index:9999;" +
+    "background:var(--surface);border:1px solid var(--rule);border-radius:6px;" +
+    "box-shadow:var(--shadow-lg);padding:4px 0;min-width:170px;font-size:12px;";
+  const label = w.kind === "status"
+    ? (w.srcResource + "." + w.srcPath + " \u2192 " + w.resource + "." + w.path)
+    : ("$" + w.param + " \u2192 " + w.resource + "." + w.path);
+  const header = document.createElement("div");
+  header.style.cssText = "padding:5px 10px;color:var(--faint);font-size:10.5px;font-family:var(--mono);border-bottom:1px solid var(--rule);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;";
+  header.textContent = label;
+  m.appendChild(header);
+
+  const b = document.createElement("button");
+  b.type = "button";
+  b.style.cssText = "display:flex;align-items:center;justify-content:space-between;width:100%;" +
+    "padding:6px 12px;background:none;border:none;color:var(--warn);cursor:pointer;font-size:12px;text-align:left;";
+  b.innerHTML = '<span>Delete wire</span><span style="color:var(--faint);font-size:10.5px;font-family:var(--mono)">Del</span>';
+  b.addEventListener("click", function () {
+    closeCtxMenu();
+    deleteWire(w);
+  });
+  m.appendChild(b);
+  document.body.appendChild(m);
+}
+
+function onContextMenu(e) {
+  closeCtxMenu();
+  const delBtn = e.target.closest(".wire-del-btn");
+  const wireHit = e.target.closest(".wire-hit, .wire-path");
+  if (delBtn || wireHit) {
+    e.preventDefault();
+    const target = delBtn || wireHit;
+    const idx = Number(target.getAttribute("data-wire-idx"));
+    const ws = listWires(doc());
+    if (ws[idx]) {
+      selectedWire = ws[idx];
+      drawWires();
+      openWireCtxMenu(e.clientX, e.clientY, ws[idx]);
+    }
+    return;
+  }
+
+  const n = e.target.closest(".node");
   if (!n || n.getAttribute("data-id") === XR_ID) return; // native browser menu elsewhere
   e.preventDefault();
   const name = n.getAttribute("data-id");
@@ -772,6 +866,20 @@ function onKeyDown(e) {
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
   if (String(window.getSelection && window.getSelection())) return; // real text copy wins
+
+  if (selectedWire && (e.key === "Delete" || e.key === "Backspace")) {
+    e.preventDefault();
+    const toDel = selectedWire;
+    selectedWire = null;
+    deleteWire(toDel);
+    return;
+  }
+  if (selectedWire && e.key === "Escape") {
+    selectedWire = null;
+    drawWires();
+    return;
+  }
+
   const sel = S.state.selectedResource;
   if (!sel || sel === XR_ID) return;
   const d = doc();
@@ -780,6 +888,37 @@ function onKeyDown(e) {
   if (mod && e.key === "c" && res) { copiedResource = JSON.parse(JSON.stringify(res)); }
   else if (mod && e.key === "v" && copiedResource) { e.preventDefault(); duplicateResource(copiedResource); }
   else if ((e.key === "Delete" || e.key === "Backspace") && res) { e.preventDefault(); removeResource(sel); }
+}
+
+function onCwClick(e) {
+  const delBtn = e.target.closest(".wire-del-btn");
+  if (delBtn) {
+    const idx = Number(delBtn.getAttribute("data-wire-idx"));
+    const ws = listWires(doc());
+    if (ws[idx]) {
+      deleteWire(ws[idx]);
+    }
+    e.stopPropagation();
+    return;
+  }
+  const wireHit = e.target.closest(".wire-hit, .wire-path");
+  if (wireHit) {
+    const idx = Number(wireHit.getAttribute("data-wire-idx"));
+    const ws = listWires(doc());
+    if (ws[idx]) {
+      selectedWire = ws[idx];
+      S.select(null);
+      drawWires();
+    }
+    e.stopPropagation();
+    return;
+  }
+  if (!e.target.closest(".node") && !e.target.closest("#wire-picker") && !e.target.closest("#ctx-menu")) {
+    if (selectedWire) {
+      selectedWire = null;
+      drawWires();
+    }
+  }
 }
 
 function onCanvasClick(e) {
@@ -801,7 +940,10 @@ function onCanvasClick(e) {
     return;
   }
   const n = e.target.closest(".node");
-  if (n) S.select(n.getAttribute("data-id"));
+  if (n) {
+    selectedWire = null;
+    S.select(n.getAttribute("data-id"));
+  }
 }
 
 function onResizeDown(e) {
@@ -1438,6 +1580,11 @@ export function init(rootEl, deps) {
   wiresEl = cwEl.querySelector("#wires") || document.getElementById("wires");
   canvasEl = cwEl.querySelector("#canvas") || document.getElementById("canvas");
 
+  cwEl.addEventListener("click", onCwClick);
+  if (wiresEl) {
+    wiresEl.addEventListener("click", onCwClick);
+    wiresEl.addEventListener("contextmenu", onContextMenu);
+  }
   canvasEl.addEventListener("click", onCanvasClick);
   canvasEl.addEventListener("pointerdown", onPointerDown);
   cwEl.addEventListener("dragover", onDragOver);
@@ -1535,6 +1682,11 @@ export function init(rootEl, deps) {
   let lastSourcesSig = "";
   S.subscribe("doc", function () {
     const d = doc();
+    if (selectedWire) {
+      const ws = listWires(d);
+      const exists = ws.some(function (w) { return wireKey(w) === wireKey(selectedWire); });
+      if (!exists) selectedWire = null;
+    }
     const sig = ((d && d.spec && d.spec.sources) || [])
       .map(function (s) { return s.provider; }).join("|");
     if (sig !== lastSourcesSig) {
@@ -1549,6 +1701,7 @@ export function init(rootEl, deps) {
   // click anything" at human speed). Toggle classes in place instead.
   S.subscribe("selection", function () {
     const sel = S.state.selectedResource;
+    if (sel && selectedWire) selectedWire = null;
     let found = false;
     canvasEl.querySelectorAll(".node").forEach(function (el) {
       const is = el.getAttribute("data-id") === sel;

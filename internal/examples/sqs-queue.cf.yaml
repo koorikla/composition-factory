@@ -1,0 +1,58 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: sqs-queue
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: messaging.sparky.ee
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: ProviderConfig reference to reconcile against.
+      region:
+        type: string
+        default: eu-north-1
+        description: AWS region for SQS queues.
+      messageRetentionSeconds:
+        type: integer
+        default: "345600"
+        description: Seconds to retain messages (default 4 days).
+      maxMessageSize:
+        type: integer
+        default: "262144"
+        description: Maximum message size in bytes (default 256 KB).
+      enableDlq:
+        type: boolean
+        default: "true"
+        description: Whether to provision a Dead Letter Queue for failed deliveries.
+  resources:
+    - name: dlq
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      when: params.enableDlq
+      fields:
+        region: {from: params.region}
+        sqsManagedSseEnabled: {value: true}
+        messageRetentionSeconds: {value: 1209600}
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {from: params.region}
+        sqsManagedSseEnabled: {value: true}
+        maxMessageSize: {from: params.maxMessageSize}
+        messageRetentionSeconds: {from: params.messageRetentionSeconds}
+    - name: queue-policy
+      kind: QueuePolicy
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {from: params.region}
+        queueUrl: {from: resources.main-queue.status.atProvider.url}
+        policy: {raw: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"*"},"Action":"sqs:SendMessage","Resource":"*"}]}'}

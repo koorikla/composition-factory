@@ -40,9 +40,13 @@ Welcome to Composition Factory — the visual canvas and schema-aware generator 
 
 Composition Factory includes curated starter blueprints accessible via the **Examples** topbar button or the **Guide** tab:
 
-- ⚡ **AWS IRSA (IAM Role + EKS ServiceAccount)**: IAM Role with scoped assume-role trust policy template and native K8s ServiceAccount wired to the Role's observed ARN via `eks.amazonaws.com/role-arn` annotation.
-- 🗄️ **AWS RDS PostgreSQL**: AWS RDS DB Instance with storage, compute class, engine version, multi-AZ parameters, and credentials connection secret envelope.
-- 📦 **K8s Microservice App**: Full-stack application combining native Kubernetes `Deployment` & `Service` with an AWS `Queue` and IAM IRSA `Role`.
+- ⚡ **AWS IRSA (IAM Role + EKS ServiceAccount)**: Production-ready IAM Role with scoped assume-role trust policy template and native K8s ServiceAccount wired to the Role's observed ARN via `eks.amazonaws.com/role-arn` annotation and STS regional endpoints.
+- 🗄️ **AWS RDS PostgreSQL**: Production-grade AWS RDS PostgreSQL Instance with storage autoscaling, backup retention, engine versioning, deletion protection, and credentials connection secret envelope.
+- 📦 **Full-Stack Microservice App**: Full-stack application composition combining native Kubernetes `Deployment` & `Service` with an AWS `Queue`, IAM IRSA `Role`, and AWS RDS PostgreSQL database.
+- 🌐 **Cloud-Agnostic Web Workload**: Zero-dependency cloud-agnostic application composing native Kubernetes `Deployment`, `Service`, `ConfigMap`, and `ServiceAccount` with full environment & port wiring.
+- ⏱️ **Cloud-Agnostic Scheduled CronJob**: Periodic batch task orchestration composing native Kubernetes `CronJob`, `ConfigMap`, and `ServiceAccount` with cron scheduling and concurrency policies.
+- 🪣 **AWS S3 Secure Storage Bucket**: Secure AWS S3 Bucket with server-side encryption, versioning configuration, and strict public access block controls.
+- 📬 **AWS SQS Queue with Dead Letter Queue**: Resilient AWS SQS messaging topology with Main Queue, Dead Letter Queue (DLQ), and Queue Policy status wire.
 
 ---
 

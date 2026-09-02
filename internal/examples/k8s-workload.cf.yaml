@@ -1,0 +1,74 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: k8s-workload
+spec:
+  sources: []
+  xrd:
+    group: workloads.sparky.ee
+    kind: XWorkload
+    plural: xworkloads
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: ProviderConfig reference to reconcile against.
+      image:
+        type: string
+        required: true
+        description: Container image repository and tag.
+      replicas:
+        type: integer
+        default: "3"
+        description: Number of application pod replicas.
+      port:
+        type: integer
+        default: "8080"
+        description: Container listening port.
+      logLevel:
+        type: string
+        default: info
+        enum:
+          - debug
+          - info
+          - warn
+          - error
+        description: Application log verbosity level.
+      enableService:
+        type: boolean
+        default: "true"
+        description: Whether to expose the deployment via a Kubernetes Service.
+  resources:
+    - name: config
+      kind: ConfigMap
+      provider: k8s
+      fields:
+        data[LOG_LEVEL]: {from: params.logLevel}
+        data[PORT]: {from: params.port}
+    - name: sa
+      kind: ServiceAccount
+      provider: k8s
+      fields:
+        automountServiceAccountToken: {value: true}
+    - name: app
+      kind: Deployment
+      provider: k8s
+      fields:
+        spec.replicas: {from: params.replicas}
+        spec.selector.matchLabels: {raw: "{app: workload}"}
+        spec.template.metadata.labels: {raw: "{app: workload}"}
+        spec.template.spec.serviceAccountName: {value: sa}
+        spec.template.spec.containers[0].name: {value: app}
+        spec.template.spec.containers[0].image: {from: params.image}
+        spec.template.spec.containers[0].ports[0].containerPort: {from: params.port}
+        spec.template.spec.containers[0].envFrom[0].configMapRef.name: {value: config}
+    - name: svc
+      kind: Service
+      provider: k8s
+      when: params.enableService
+      fields:
+        spec.selector: {raw: "{app: workload}"}
+        spec.ports[0].port: {value: 80}
+        spec.ports[0].targetPort: {from: params.port}
