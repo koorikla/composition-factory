@@ -13,13 +13,12 @@ test('selecting one card leaves every other card element connected', async ({ pa
   await page.goto('/')
   const dl = await page.locator('.node[data-id="dead-letter"]').elementHandle()
   await page.click('.node[data-id="work-queue"] .node-h')
-  await page.waitForTimeout(150)
+  await expect(page.locator('.node.sel')).toHaveAttribute('data-id', 'work-queue')
   expect(await dl.evaluate(el => el.isConnected)).toBe(true)  // not rebuilt
   const wq = await page.locator('.node[data-id="work-queue"]').elementHandle()
   await page.click('.node[data-id="dead-letter"] .node-h')
-  await page.waitForTimeout(150)
-  expect(await wq.evaluate(el => el.isConnected)).toBe(true)
   await expect(page.locator('.node.sel')).toHaveAttribute('data-id', 'dead-letter')
+  expect(await wq.evaluate(el => el.isConnected)).toBe(true)
 })
 
 test('rapid alternating clicks always land (no dead clicks)', async ({ page }) => {

@@ -9,16 +9,8 @@ const { test, expect } = require('@playwright/test')
 const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
 guardPageErrors()
 
-let baseline = null
-
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)
-  let api
-  baseline = await (await request.get(ENGINE + '/api/blueprint')).json()
-})
-
-test.afterEach(async ({ request }) => {
-  if (baseline) await request.put(ENGINE + '/api/blueprint', { data: baseline })
 })
 
 test('palette lists the provider kinds from the live API, with server-side search', async ({ page }) => {

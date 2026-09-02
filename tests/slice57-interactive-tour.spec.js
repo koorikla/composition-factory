@@ -25,8 +25,12 @@ test.describe('Interactive tour', () => {
       }
       const next = page.locator('#tour-next');
       if (!(await overlay.isVisible())) break;
+      const prevStep = await page.locator('.tour-card').textContent();
       await next.click();
-      await page.waitForTimeout(120);
+      await expect.poll(async () => {
+        if (!(await overlay.isVisible())) return 'done';
+        return await page.locator('.tour-card').textContent();
+      }).not.toBe(prevStep);
     }
     expect(sawSources).toBe(true);
     await expect(overlay).toBeHidden(); // Done closes it

@@ -499,6 +499,13 @@ export function init(rootEl, deps) {
       api.getVersion().then(function (r) {
         el.ver.textContent = r.version;
         el.ver.title = "compositionfactory build " + r.version;
+        if (el.engineSel && Array.isArray(r.engines) && r.engines.length > 0) {
+          var curDocEngine = (store.state.doc && store.state.doc.spec && store.state.doc.spec.emit && store.state.doc.spec.emit.engine) || "go-templating";
+          el.engineSel.innerHTML = r.engines.map(function (eng) {
+            return '<option value="' + esc(eng) + '">' + esc(eng) + '</option>';
+          }).join("");
+          el.engineSel.value = curDocEngine;
+        }
       }).catch(function () { el.ver.textContent = ""; });
     }
     var bp = el.tabs.querySelector('[data-t="bp"]');
@@ -587,7 +594,7 @@ export function init(rootEl, deps) {
       var val = el.engineSel.value;
       store.replaceDoc(function (doc) {
         doc.spec = doc.spec || {};
-        if (val === "kcl" || val === "python") {
+        if (val && val !== "go-templating") {
           doc.spec.emit = doc.spec.emit || {};
           doc.spec.emit.engine = val;
         } else {

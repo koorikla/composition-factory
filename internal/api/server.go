@@ -174,7 +174,10 @@ func New(o Options) (http.Handler, error) {
 		if v == "" {
 			v = "dev"
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"version": v})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"version": v,
+			"engines": []string{blueprint.EngineGoTemplating, blueprint.EngineKCL, blueprint.EnginePython},
+		})
 	})
 	mux.HandleFunc("GET /api/kinds", srv.handleKinds)
 	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}", srv.handleKind)
