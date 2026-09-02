@@ -45,7 +45,7 @@ const shutdownTimeout = 10 * time.Second
 // via --i-know-this-is-unauthenticated.
 type ServeCmd struct {
 	Addr                       string `help:"Address to listen on. Must be loopback unless --i-know-this-is-unauthenticated is set." default:"127.0.0.1:8080"`
-	Blueprint                  string `help:"Path to the blueprint file to serve." required:""`
+	Blueprint                  string `help:"Path to the blueprint file to serve. Missing file: a blank blueprint is scaffolded there, so the canvas starts empty and schemas load only once sources are added." default:"doc.cf.yaml"`
 	Out                        string `short:"o" help:"Output directory that POST /api/generate writes into." default:"."`
 	CacheDir                   string `help:"Schema cache directory." default:"${cachedir}"`
 	Lock                       string `help:"Lockfile path that POST /api/providers pins newly added providers into." default:".cf.lock"`
@@ -155,6 +155,11 @@ func (c *ServeCmd) run(ctx context.Context, out io.Writer) error {
 	if c.Kubeconfig != "" || c.KubeContext != "" || c.Cluster {
 		cl, _ = cluster.NewClient(c.Kubeconfig, c.KubeContext)
 	}
+	if created, err := ensureBlueprint(c.Blueprint); err != nil {
+		return err
+	} else if created {
+		fmt.Fprintf(out, "cf serve: %s did not exist — starting with a blank blueprint\n", c.Blueprint)
+	}
 	o, err := buildAPIOptions(c.Blueprint, c.CacheDir, c.Out, c.Lock, cl, c.Cluster)
 	if err != nil {
 		return err
@@ -258,4 +263,48 @@ func noStore(h http.Handler) http.Handler {
 		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+// blankBlueprint is the scaffold a missing --blueprint path receives: a
+// valid, empty document — no sources, no resources — so `cf serve` starts
+// instantly on a blank canvas and provider schemas load only once the user
+// adds a source (the runtime auto-sync handles fetching from there).
+const blankBlueprint = `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: untitled
+spec:
+  sources: []
+  xrd:
+    group: platform.example.org
+    kind: XApp
+    plural: xapps
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: ProviderConfig to reconcile the composed resources against.
+  resources: []
+`
+
+// ensureBlueprint writes the blank scaffold when path does not exist and
+// reports whether it did. An existing file — whatever its content — is
+// never touched; loading and validating it stays buildAPIOptions' job.
+func ensureBlueprint(path string) (bool, error) {
+	if _, err := os.Stat(path); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return false, err
+		}
+	}
+	if err := os.WriteFile(path, []byte(blankBlueprint), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }

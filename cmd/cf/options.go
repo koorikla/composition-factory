@@ -63,11 +63,14 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string, cl *clust
 		}
 		crds, err := store.Load(s.Provider)
 		if err != nil {
-			// cache.Store.Load's own error already names the exact command
-			// to run ("provider %q is not in the cache; run: cf provider
-			// add %s") -- returning it unwrapped keeps that message intact
-			// rather than presenting an empty index with no explanation.
-			return api.Options{}, err
+			// A source missing from the cache no longer kills startup: the
+			// server comes up with a partial index and the runtime auto-sync
+			// (syncBlueprintSourcesLocked) fetches it on the next import,
+			// example load or provider add — cold starts need no pre-warmed
+			// cache and no network. The warning keeps Load's own message,
+			// which names the exact command to run.
+			fmt.Fprintf(os.Stderr, "cf: warning: %v — continuing without it; schemas load on demand\n", err)
+			continue
 		}
 		byProvider[s.Provider] = crds
 		refs = append(refs, s.Provider)
