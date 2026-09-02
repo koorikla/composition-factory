@@ -130,3 +130,39 @@ func TestCatalogueParticipatesInETagCaching(t *testing.T) {
 		t.Errorf("status = %d with matching If-None-Match, want 304", second.Code)
 	}
 }
+
+// TestCatalogueTypeFilter verifies filtering by type=function and type=provider.
+func TestCatalogueTypeFilter(t *testing.T) {
+	h := testHandler(t)
+
+	var fns struct {
+		Providers []catalogue.Provider `json:"providers"`
+	}
+	if code := getJSON(t, h, "/api/catalogue?type=function", &fns); code != 200 {
+		t.Fatalf("status %d", code)
+	}
+	if len(fns.Providers) == 0 {
+		t.Fatal("type=function returned 0 results")
+	}
+	for _, p := range fns.Providers {
+		if !strings.HasPrefix(p.Name, "function-") {
+			t.Errorf("type=function matched non-function: %s", p.Name)
+		}
+	}
+
+	var provs struct {
+		Providers []catalogue.Provider `json:"providers"`
+	}
+	if code := getJSON(t, h, "/api/catalogue?type=provider", &provs); code != 200 {
+		t.Fatalf("status %d", code)
+	}
+	if len(provs.Providers) == 0 {
+		t.Fatal("type=provider returned 0 results")
+	}
+	for _, p := range provs.Providers {
+		if strings.HasPrefix(p.Name, "function-") {
+			t.Errorf("type=provider matched function: %s", p.Name)
+		}
+	}
+}
+

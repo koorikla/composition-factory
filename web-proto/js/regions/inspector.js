@@ -260,6 +260,16 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
       });
     });
     h += '</optgroup>';
+
+    var isRefField = /Ref(\.name)?$|Refs(\[\d+\])?(\.name)?$|Selector(\.matchLabels)?$/i.test(path);
+    if (isRefField || fieldType === "string") {
+      h += '<optgroup label="Resource Name (*Ref)">';
+      otherResources.forEach(function (r) {
+        var wireVal = "resources." + r.name + ".status.atProvider.id";
+        h += '<option value="' + esc(wireVal) + '">' + esc(r.name) + ' (name / ID)</option>';
+      });
+      h += '</optgroup>';
+    }
   }
 
   h += '<option value="__new__">+ new XRD parameter&#8230;</option></select></div>';
@@ -435,6 +445,153 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
   return h + "</div>";
 }
 
+function workloadPresetHtml(res, doc, allParams, otherResources) {
+  if (!res || res.provider !== "k8s") return "";
+  var kind = res.kind;
+  if (kind !== "Deployment" && kind !== "StatefulSet" && kind !== "DaemonSet" && kind !== "Job" && kind !== "Service") {
+    return "";
+  }
+  var fields = res.fields || {};
+
+  if (kind === "Deployment" || kind === "StatefulSet" || kind === "DaemonSet") {
+    var replicasF = fields["spec.replicas"];
+    var replicasVal = replicasF ? (replicasF.value || (replicasF.raw || "")) : "1";
+    var replicasWired = replicasF && replicasF.from ? "params." + replicasF.from : "";
+    var imgF = fields["spec.template.spec.containers[0].image"];
+    var imgVal = imgF ? (imgF.value || (imgF.from ? "← " + imgF.from : (imgF.raw || ""))) : "";
+    var nameF = fields["spec.template.spec.containers[0].name"];
+    var nameVal = nameF ? (nameF.value || nameF.raw || "") : res.name;
+    var portF = fields["spec.template.spec.containers[0].ports[0].containerPort"];
+    var portVal = portF ? (portF.value || portF.raw || "") : "";
+
+    function extractApp(f) {
+      if (!f) return "";
+      if (f.value) return f.value;
+      if (f.raw) {
+        var m = /app:\s*([a-zA-Z0-9_-]+)/.exec(f.raw);
+        if (m) return m[1];
+        return f.raw;
+      }
+      return "";
+    }
+
+    var selAppF = fields["spec.selector.matchLabels"] || fields["spec.selector.matchLabels.app"] || fields["spec.selector.matchLabels[app]"];
+    var tmplAppF = fields["spec.template.metadata.labels"] || fields["spec.template.metadata.labels.app"] || fields["spec.template.metadata.labels[app]"];
+    var selAppVal = extractApp(selAppF);
+    var tmplAppVal = extractApp(tmplAppF);
+    var appLabel = selAppVal || tmplAppVal || res.name;
+    var isSynced = selAppVal && tmplAppVal && selAppVal === tmplAppVal;
+
+    var h = '<div class="insp-sec workload-card" style="margin:10px 0;padding:10px 12px;border:1px solid var(--wire-xrd);background:var(--surface-2);border-radius:6px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
+      '<span style="font-size:11px;font-weight:600;color:var(--wire-xrd);text-transform:uppercase;letter-spacing:0.5px">Workload Selectors &amp; Pod Spec</span>' +
+      (isSynced ? '<span class="chip-ok" style="font-size:10px">Selectors Aligned</span>' : '<span style="color:var(--warn);font-size:10px;font-weight:600">Sync Required</span>') +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--faint);margin-bottom:8px">Ensures <code>spec.selector.matchLabels</code> matches <code>spec.template.metadata.labels</code>:</div>' +
+      '<div class="frow" style="margin-bottom:6px;align-items:center">' +
+      '<span class="lbl" style="width:75px;font-size:10px">App Selector</span>' +
+      '<input class="tin" data-wl-app="' + esc(res.name) + '" value="' + esc(appLabel) + '" placeholder="e.g. ' + esc(res.name) + '" style="flex:1" title="Sets both spec.selector.matchLabels and spec.template.metadata.labels">' +
+      '<button class="btn sm pri" data-wl-sync-app="' + esc(res.name) + '" title="Sync App Label across Selector and Template">Sync</button>' +
+      '</div>' +
+      (kind === "DaemonSet" ? "" :
+      '<div class="frow" style="margin-bottom:6px;align-items:center">' +
+      '<span class="lbl" style="width:75px;font-size:10px">Replicas</span>' +
+      '<input class="tin" type="number" min="1" max="100" data-wl-replicas="' + esc(res.name) + '" value="' + esc(replicasVal) + '" placeholder="1" style="width:60px">' +
+      '<span class="dg" style="margin-left:8px;font-size:10.5px">spec.replicas</span>' +
+      '</div>') +
+      '<div class="frow" style="margin-bottom:6px;align-items:center">' +
+      '<span class="lbl" style="width:75px;font-size:10px">Image</span>' +
+      '<input class="tin" data-wl-image="' + esc(res.name) + '" value="' + esc(imgVal) + '" placeholder="nginx:alpine or repo/image:tag" style="flex:1">' +
+      '</div>' +
+      '<div class="frow" style="margin-bottom:2px;gap:6px">' +
+      '<div style="flex:1"><span class="lbl" style="display:block;font-size:9.5px;margin-bottom:2px">Container Name</span>' +
+      '<input class="tin" data-wl-cname="' + esc(res.name) + '" value="' + esc(nameVal) + '" placeholder="' + esc(res.name) + '" style="width:100%"></div>' +
+      '<div style="width:75px"><span class="lbl" style="display:block;font-size:9.5px;margin-bottom:2px">Port</span>' +
+      '<input class="tin" type="number" data-wl-cport="' + esc(res.name) + '" value="' + esc(portVal) + '" placeholder="8080" style="width:100%"></div>' +
+      '</div></div>';
+    return h;
+  }
+
+  if (kind === "Service") {
+    var selAppF = fields["spec.selector"] || fields["spec.selector.app"] || fields["spec.selector[app]"];
+    var selAppVal = "";
+    if (selAppF) {
+      if (selAppF.value) selAppVal = selAppF.value;
+      else if (selAppF.raw) {
+        var sm = /app:\s*([a-zA-Z0-9_-]+)/.exec(selAppF.raw);
+        selAppVal = sm ? sm[1] : selAppF.raw;
+      }
+    }
+    var portF = fields["spec.ports[0].port"];
+    var portVal = portF ? (portF.value || portF.raw || "") : "80";
+    var tgtPortF = fields["spec.ports[0].targetPort"];
+    var tgtPortVal = tgtPortF ? (tgtPortF.value || tgtPortF.raw || "") : "80";
+    var svcTypeF = fields["spec.type"];
+    var svcTypeVal = svcTypeF ? (svcTypeF.value || "") : "ClusterIP";
+
+    var candidateWorkloads = (doc.spec && doc.spec.resources || []).filter(function (r) {
+      return r.name !== res.name && (r.kind === "Deployment" || r.kind === "StatefulSet" || r.kind === "DaemonSet");
+    });
+
+    var h = '<div class="insp-sec service-card" style="margin:10px 0;padding:10px 12px;border:1px solid var(--wire-status);background:var(--surface-2);border-radius:6px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
+      '<span style="font-size:11px;font-weight:600;color:var(--wire-status);text-transform:uppercase;letter-spacing:0.5px">Service Selectors &amp; Ports</span>' +
+      (selAppVal ? '<span class="chip-ok" style="font-size:10px">Target: ' + esc(selAppVal) + '</span>' : '<span style="color:var(--warn);font-size:10px;font-weight:600">Unset Selector</span>') +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--faint);margin-bottom:8px">Routes traffic to pods matching <code>spec.selector</code>:</div>' +
+      '<div class="frow" style="margin-bottom:6px;align-items:center">' +
+      '<span class="lbl" style="width:75px;font-size:10px">Target Pod App</span>' +
+      '<input class="tin" data-svc-app="' + esc(res.name) + '" value="' + esc(selAppVal) + '" placeholder="app label" style="flex:1">' +
+      '</div>';
+
+    if (candidateWorkloads.length > 0) {
+      h += '<div style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">' +
+        '<span class="dg" style="font-size:10px">Quick match:</span>';
+      candidateWorkloads.forEach(function (cw) {
+        var cwFields = cw.fields || {};
+        var cwMatchF = cwFields["spec.selector.matchLabels"] || cwFields["spec.template.metadata.labels"];
+        var cwApp = "";
+        if (cwMatchF && cwMatchF.raw) {
+          var cwm = /app:\s*([a-zA-Z0-9_-]+)/.exec(cwMatchF.raw);
+          cwApp = cwm ? cwm[1] : cw.name;
+        } else {
+          cwApp = (cwFields["spec.selector.matchLabels.app"] && cwFields["spec.selector.matchLabels.app"].value) || cw.name;
+        }
+        h += '<button class="btn sm" data-svc-match-wl="' + esc(res.name) + '" data-match-app="' + esc(cwApp) + '" style="font-size:10px;padding:1px 6px">' + esc(cw.name) + ' (' + esc(cwApp) + ')</button>';
+      });
+      h += '</div>';
+    }
+
+    h += '<div class="frow" style="margin-bottom:2px;gap:6px">' +
+      '<div style="width:70px"><span class="lbl" style="display:block;font-size:9.5px;margin-bottom:2px">Port</span>' +
+      '<input class="tin" type="number" data-svc-port="' + esc(res.name) + '" value="' + esc(portVal) + '" placeholder="80" style="width:100%"></div>' +
+      '<div style="width:75px"><span class="lbl" style="display:block;font-size:9.5px;margin-bottom:2px">Target Port</span>' +
+      '<input class="tin" type="number" data-svc-tgtport="' + esc(res.name) + '" value="' + esc(tgtPortVal) + '" placeholder="80" style="width:100%"></div>' +
+      '<div style="flex:1"><span class="lbl" style="display:block;font-size:9.5px;margin-bottom:2px">Type</span>' +
+      '<select class="tsel" data-svc-type="' + esc(res.name) + '" style="width:100%">' +
+      ['ClusterIP', 'NodePort', 'LoadBalancer'].map(function (st) {
+        return '<option value="' + st + '"' + (svcTypeVal === st ? ' selected' : '') + '>' + st + '</option>';
+      }).join('') +
+      '</select></div>' +
+      '</div></div>';
+    return h;
+  }
+  return "";
+}
+
+function metadataConventionsHtml(res) {
+  var h = '<div class="insp-sec" style="margin-top:14px;padding:8px 12px;border-top:1px solid var(--rule);background:var(--surface)">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">' +
+    '<span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Naming &amp; Metadata Presets</span>' +
+    '</div>' +
+    '<div style="font-size:11px;color:var(--faint);margin-bottom:6px">Apply standard metadata, labels, and naming:</div>' +
+    '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px">' +
+    '<button class="btn sm" data-apply-std-labels="' + esc(res.name) + '" title="Add app.kubernetes.io/name, instance, and managed-by labels">+ Standard Labels</button>' +
+    '<button class="btn sm" data-apply-ext-name="' + esc(res.name) + '" title="Add crossplane.io/external-name annotation">+ External Name</button>' +
+    '</div></div>';
+  return h;
+}
+
 async function renderResource(res) {
   var t = renderToken;
   var doc = store.state.doc;
@@ -551,6 +708,9 @@ async function renderResource(res) {
             '<div class="fld-d">required object \u2014 set its member fields (expand via All / search)</div></div>';
         }).join("")
       : "";
+    var wlHtml = workloadPresetHtml(res, doc, params, otherResources);
+    h += wlHtml;
+
     var body = branchRows +
       fields.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap); }).join("");
     h += body || '<div class="empty">No fields match this filter.</div>';
@@ -572,6 +732,9 @@ async function renderResource(res) {
           '</div>';
       }
     }
+
+    // Conventions & Metadata Presets section
+    h += metadataConventionsHtml(res);
 
     // Annotations section: authored metadata entries with the same forms
     var anns = res.annotations || {};
@@ -1193,9 +1356,82 @@ function onBoxClick(e) {
     });
     return;
   }
+
+  var syncBtn = e.target.closest("[data-wl-sync-app]");
+  if (syncBtn) {
+    var rname = syncBtn.getAttribute("data-wl-sync-app");
+    var appInp = box.querySelector('[data-wl-app="' + rname + '"]');
+    var val = appInp ? appInp.value.trim() : "";
+    if (!val) val = rname;
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        delete r.fields["spec.selector.matchLabels.app"];
+        delete r.fields["spec.template.metadata.labels.app"];
+        r.fields["spec.selector.matchLabels"] = { raw: "{app: " + val + "}" };
+        r.fields["spec.template.metadata.labels"] = { raw: "{app: " + val + "}" };
+        if (!r.fields["spec.template.spec.containers[0].name"]) {
+          r.fields["spec.template.spec.containers[0].name"] = { value: rname };
+        }
+      });
+    });
+    return;
+  }
+
+  var svcMatchBtn = e.target.closest("[data-svc-match-wl]");
+  if (svcMatchBtn) {
+    var rname2 = svcMatchBtn.getAttribute("data-svc-match-wl");
+    var matchApp = svcMatchBtn.getAttribute("data-match-app") || "";
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname2; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        delete r.fields["spec.selector.app"];
+        r.fields["spec.selector"] = { raw: "{app: " + matchApp + "}" };
+        r.fields["spec.ports[0].port"] = { raw: "8080" };
+      });
+    });
+    return;
+  }
+
+  var stdLblBtn = e.target.closest("[data-apply-std-labels]");
+  if (stdLblBtn) {
+    var rname3 = stdLblBtn.getAttribute("data-apply-std-labels");
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname3; });
+        if (!r) return;
+        r.annotations = r.annotations || {};
+        r.annotations["app.kubernetes.io/managed-by"] = { value: "crossplane" };
+        r.annotations["app.kubernetes.io/name"] = { raw: "'{{ $xr }}'" };
+        r.annotations["app.kubernetes.io/instance"] = { raw: "'{{ $xr }}'" };
+      });
+    });
+    return;
+  }
+
+  var extNameBtn = e.target.closest("[data-apply-ext-name]");
+  if (extNameBtn) {
+    var rname4 = extNameBtn.getAttribute("data-apply-ext-name");
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname4; });
+        if (!r) return;
+        r.annotations = r.annotations || {};
+        r.annotations["crossplane.io/external-name"] = { raw: "'{{ $xr }}-" + rname4 + "'" };
+      });
+    });
+    return;
+  }
 }
 
 function onBoxChange(e) {
+  var t = e.target;
+  if (!t) return;
+  var doc = store.state.doc;
   if (e.target.matches("[data-when-param],[data-when-op],[data-when-val]")) {
     var wrn = e.target.getAttribute("data-when-param") ||
       e.target.getAttribute("data-when-op") || e.target.getAttribute("data-when-val");
@@ -1217,9 +1453,144 @@ function onBoxChange(e) {
     });
     return;
   }
-  var t = e.target;
-  var doc = store.state.doc;
-  if (!doc) return;
+  if (t.hasAttribute("data-wl-app")) {
+    var wlAppRname = t.getAttribute("data-wl-app");
+    var wlAppVal = t.value.trim();
+    if (wlAppVal) {
+      op(function () {
+        return store.replaceDoc(function (d) {
+          var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === wlAppRname; });
+          if (!r) return;
+          r.fields = r.fields || {};
+          delete r.fields["spec.selector.matchLabels.app"];
+          delete r.fields["spec.template.metadata.labels.app"];
+          r.fields["spec.selector.matchLabels"] = { raw: "{app: " + wlAppVal + "}" };
+          r.fields["spec.template.metadata.labels"] = { raw: "{app: " + wlAppVal + "}" };
+        });
+      });
+    }
+    return;
+  }
+
+  if (t.hasAttribute("data-wl-replicas")) {
+    var wlRepRname = t.getAttribute("data-wl-replicas");
+    var wlRepVal = t.value.trim();
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === wlRepRname; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        if (wlRepVal) r.fields["spec.replicas"] = { value: wlRepVal };
+        else delete r.fields["spec.replicas"];
+      });
+    });
+    return;
+  }
+
+  if (t.hasAttribute("data-wl-image")) {
+    var wlImgRname = t.getAttribute("data-wl-image");
+    var wlImgVal = t.value.trim();
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === wlImgRname; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        if (wlImgVal) r.fields["spec.template.spec.containers[0].image"] = { value: wlImgVal };
+        else delete r.fields["spec.template.spec.containers[0].image"];
+      });
+    });
+    return;
+  }
+
+  if (t.hasAttribute("data-wl-cname")) {
+    var wlCnRname = t.getAttribute("data-wl-cname");
+    var wlCnVal = t.value.trim();
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === wlCnRname; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        if (wlCnVal) r.fields["spec.template.spec.containers[0].name"] = { value: wlCnVal };
+        else delete r.fields["spec.template.spec.containers[0].name"];
+      });
+    });
+    return;
+  }
+
+  if (t.hasAttribute("data-wl-cport")) {
+    var wlCpRname = t.getAttribute("data-wl-cport");
+    var wlCpVal = t.value.trim();
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === wlCpRname; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        if (wlCpVal) r.fields["spec.template.spec.containers[0].ports[0].containerPort"] = { value: wlCpVal };
+        else delete r.fields["spec.template.spec.containers[0].ports[0].containerPort"];
+      });
+    });
+    return;
+  }
+
+  if (t.hasAttribute("data-svc-app")) {
+    var svcAppRname = t.getAttribute("data-svc-app");
+    var svcAppVal = t.value.trim();
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === svcAppRname; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        if (svcAppVal) r.fields["spec.selector.app"] = { value: svcAppVal };
+        else delete r.fields["spec.selector.app"];
+      });
+    });
+    return;
+  }
+
+  if (t.hasAttribute("data-svc-port")) {
+    var svcPortRname = t.getAttribute("data-svc-port");
+    var svcPortVal = t.value.trim();
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === svcPortRname; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        if (svcPortVal) r.fields["spec.ports[0].port"] = { value: svcPortVal };
+        else delete r.fields["spec.ports[0].port"];
+      });
+    });
+    return;
+  }
+
+  if (t.hasAttribute("data-svc-tgtport")) {
+    var svcTgtRname = t.getAttribute("data-svc-tgtport");
+    var svcTgtVal = t.value.trim();
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === svcTgtRname; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        if (svcTgtVal) r.fields["spec.ports[0].targetPort"] = { value: svcTgtVal };
+        else delete r.fields["spec.ports[0].targetPort"];
+      });
+    });
+    return;
+  }
+
+  if (t.hasAttribute("data-svc-type")) {
+    var svcTypeRname = t.getAttribute("data-svc-type");
+    var svcTypeVal = t.value;
+    op(function () {
+      return store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === svcTypeRname; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        if (svcTypeVal) r.fields["spec.type"] = { value: svcTypeVal };
+        else delete r.fields["spec.type"];
+      });
+    });
+    return;
+  }
 
   if (t.hasAttribute("data-v")) { commitValue(t.getAttribute("data-v"), "value", t.value); return; }
   if (t.hasAttribute("data-raw")) { commitValue(t.getAttribute("data-raw"), "raw", t.value); return; }

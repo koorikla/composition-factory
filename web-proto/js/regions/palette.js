@@ -217,6 +217,9 @@ export function init(rootEl, deps) {
   let providersErr = null;     // verbatim server error from the last add/list
   let catRows = null;          // catalogue search results, null = untouched
   let catTimer = null;
+  let fnRows = null;           // functions catalogue search results, null = untouched
+  let fnTimer = null;
+  let srcSubTab = "prov";      // "prov" | "fn" | "cls"
   let expandedProvider = null; // ref whose detail row is open
   let providerKinds = null;    // kinds of the expanded provider, null = loading
   let clusterInfo = null;      // live cluster connection status
@@ -243,17 +246,83 @@ export function init(rootEl, deps) {
     });
   }
 
+  function loadFunctions(q) {
+    api.getCatalogue(q || "", "function").then(function (r) {
+      fnRows = r.providers || [];
+      if (rail === "src") drawRail();
+    }).catch(function () {
+      fnRows = [];
+      if (rail === "src") drawRail();
+    });
+  }
+
   function drawSources() {
     const doc = store.state.doc;
     if (!doc) return '<div class="empty">No document loaded.</div>';
+
+    // Subtabs switcher
+    let h = '<div style="padding:6px 10px 4px">' +
+      '<div class="rtabs" id="src-subtabs">' +
+      '<button data-src-sub="prov" aria-pressed="' + (srcSubTab === "prov") + '">Providers</button>' +
+      '<button data-src-sub="fn" aria-pressed="' + (srcSubTab === "fn") + '">Functions</button>' +
+      '<button data-src-sub="cls" aria-pressed="' + (srcSubTab === "cls") + '">Cluster</button>' +
+      '</div></div>';
+
+    if (srcSubTab === "fn") {
+      h += '<div class="grp"><span class="lbl">Crossplane Functions</span></div>' +
+        '<div style="padding:0 10px 6px"><input id="fn-search" class="search" placeholder="Search functions (kcl, ready, extra\u2026)" aria-label="Search functions"></div>';
+      if (fnRows === null) {
+        loadFunctions("");
+        h += '<div class="empty">Loading functions catalogue\u2026</div>';
+      } else if (!fnRows.length) {
+        h += '<div class="empty">No function matches found.</div>';
+      } else {
+        h += '<div style="padding:0 10px 4px;font-size:10.5px;color:var(--faint)">Add steps to <code>spec.pipeline</code>:</div>';
+        fnRows.forEach(function (c) {
+          const isAdded = (doc.spec && doc.spec.pipeline || []).some(function (p) {
+            return p.functionRef === c.name || (p.package && p.package.indexOf(c.name) !== -1);
+          });
+          h += '<div class="cat-row src-row" style="cursor:default;align-items:flex-start;padding:6px 10px;gap:6px" title="' + esc(c.description || c.name) + '">' +
+            '<span class="sw" style="width:5px;height:24px;border-radius:1.5px;background:var(--wire-xrd);flex:0 0 auto;margin-top:2px"></span>' +
+            '<span style="min-width:0;flex:1"><span class="nm" style="display:block;font-weight:600">' + esc(c.name) + "</span>" +
+            '<span class="dg" style="display:block;font-size:10px;line-height:1.3;margin-top:1px;color:var(--muted)">' + esc(c.description || "") + '</span>' +
+            '<span class="dg" style="display:block;font-size:9.5px;margin-top:2px;color:var(--faint);word-break:break-all">' + esc(c.ref || "") + '</span></span>' +
+            (isAdded
+              ? '<span class="pill" style="font-size:9.5px;background:var(--wire-status-soft);color:var(--wire-status);align-self:center;flex:0 0 auto">Active</span>'
+              : '<button class="btn sm fn-add-pipe" data-add-fn-pipe="' + esc(c.name) + '|' + esc(c.ref || "") + '" style="align-self:center;flex:0 0 auto" title="Add step to pipeline">+ Pipe</button>') +
+            "</div>";
+        });
+      }
+      return h;
+    }
+
+    if (srcSubTab === "cls") {
+      h += '<div class="grp"><span class="lbl">Live Cluster</span></div>';
+      if (clusterLoading) {
+        h += '<div class="empty">Syncing CRDs with cluster\u2026</div>';
+      } else if (clusterInfo && clusterInfo.connected) {
+        h += '<div class="src-row" style="cursor:default;padding:8px 10px">' +
+          '<span class="sw" style="width:5px;height:22px;border-radius:1.5px;background:#06b6d4"></span>' +
+          '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(clusterInfo.context || "connected") + '</span>' +
+          '<span class="dg">' + esc(clusterInfo.server || "") + ' \u00b7 ' + (clusterInfo.crdCount || 0) + ' CRDs</span></span>' +
+          '<button class="btn sm" id="cluster-sync-btn" title="Sync CRDs from cluster">Sync</button></div>';
+      } else {
+        h += '<div style="padding:8px 10px;display:flex;flex-direction:column;gap:6px">' +
+          '<div class="dg" style="color:var(--faint);font-size:10.5px">' + (clusterInfo && clusterInfo.error ? esc(clusterInfo.error) : "Not connected to a live Kubernetes cluster.") + '</div>' +
+          '<button class="btn sm pri" id="cluster-sync-btn" style="align-self:flex-start">Connect &amp; Sync CRDs</button>' +
+          '</div>';
+      }
+      if (clusterErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(clusterErr) + "</div>";
+      return h;
+    }
+
+    // Providers tab
     let sources = providers !== null
       ? providers.map(function (p) { return { provider: p.ref, digest: p.digest, kinds: p.kinds }; })
       : (doc.spec && doc.spec.sources || []).slice();
-    // the native k8s pseudo-provider is a first-class row: its kinds are
-    // real palette entries and hiding "the primitives" happens here.
     const nativeCount = kinds.filter(function (k) { return k.provider === "k8s"; }).length;
     if (nativeCount) sources = sources.concat([{ provider: "k8s", digest: "", kinds: nativeCount, native: true }]);
-    let h = '<div class="grp"><span class="lbl">Providers</span><span class="n">' + sources.length + "</span></div>";
+    h += '<div class="grp"><span class="lbl">Installed Providers</span><span class="n">' + sources.length + "</span></div>";
     h += '<div style="padding:2px 10px 8px"><button class="btn" id="addCrdsBtn" ' +
       'title="Add any CRD-backed kind (an Argo Workflow, another composition\u2019s XR\u2026) from a CRD manifest file">+ Add CRDs from file</button>' +
       '<input type="file" id="addCrdsFile" accept=".yaml,.yml" hidden></div>';
@@ -292,7 +361,7 @@ export function init(rootEl, deps) {
     h += '<div style="padding:8px 10px;display:flex;gap:6px">' +
       '<input id="src-add-ref" class="search" style="flex:1;min-width:0" placeholder="ghcr.io/\u2026/provider-x:vN" aria-label="Provider ref">' +
       '<button class="btn sm" id="src-add-btn">Add</button></div>';
-    h += '<div class="grp"><span class="lbl">Catalogue</span></div>' +
+    h += '<div class="grp"><span class="lbl">Providers Catalogue</span></div>' +
       '<div style="padding:0 10px 6px"><input id="cat-search" class="search" placeholder="Search OSS providers\u2026" aria-label="Search catalogue"></div>';
     if (catRows === null) {
       h += '<div class="empty">Type to search the catalogue.</div>';
@@ -307,22 +376,20 @@ export function init(rootEl, deps) {
           "</div>";
       });
     }
-    if (providersErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(providersErr) + "</div>";
-
-    // Live Cluster section
+    // Live Kubernetes Cluster section
     h += '<div class="grp"><span class="lbl">Live Cluster</span></div>';
     if (clusterLoading) {
       h += '<div class="empty">Syncing CRDs with cluster\u2026</div>';
     } else if (clusterInfo && clusterInfo.connected) {
-      h += '<div class="src-row" style="cursor:default">' +
+      h += '<div class="src-row" style="cursor:default;padding:8px 10px">' +
         '<span class="sw" style="width:5px;height:22px;border-radius:1.5px;background:#06b6d4"></span>' +
         '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(clusterInfo.context || "connected") + '</span>' +
         '<span class="dg">' + esc(clusterInfo.server || "") + ' \u00b7 ' + (clusterInfo.crdCount || 0) + ' CRDs</span></span>' +
         '<button class="btn sm" id="cluster-sync-btn" title="Sync CRDs from cluster">Sync</button></div>';
     } else {
-      h += '<div style="padding:6px 10px;display:flex;flex-direction:column;gap:6px">' +
+      h += '<div style="padding:8px 10px;display:flex;flex-direction:column;gap:6px">' +
         '<div class="dg" style="color:var(--faint);font-size:10.5px">' + (clusterInfo && clusterInfo.error ? esc(clusterInfo.error) : "Not connected to a live Kubernetes cluster.") + '</div>' +
-        '<button class="btn sm" id="cluster-sync-btn" style="align-self:flex-start">Connect &amp; Sync</button>' +
+        '<button class="btn sm pri" id="cluster-sync-btn" style="align-self:flex-start">Connect &amp; Sync CRDs</button>' +
         '</div>';
     }
     if (clusterErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(clusterErr) + "</div>";
@@ -373,7 +440,7 @@ export function init(rootEl, deps) {
     else { h = drawSources(); hint = HINT_SRC; }
     // A re-render (e.g. the providers list arriving) must not eat what the
     // user is typing into the add-provider field.
-    var keepIds = ["src-add-ref", "cat-search", "param-add-name", "param-add-type", "param-add-req"];
+    var keepIds = ["src-add-ref", "cat-search", "fn-search", "param-add-name", "param-add-type", "param-add-req"];
     var kept = {};
     keepIds.forEach(function (id) {
       var el = railEl.querySelector("#" + id);
@@ -601,11 +668,43 @@ export function init(rootEl, deps) {
       });
       return;
     }
-    if (!e.target.closest("#src-add-btn")) return;
-    const input = railEl.querySelector("#src-add-ref");
-    const ref = input && input.value.trim();
-    if (!ref) return;
-    e.target.disabled = true;
+    const srcSubBtn = e.target.closest("#src-subtabs button[data-src-sub]");
+    if (srcSubBtn) {
+      srcSubTab = srcSubBtn.getAttribute("data-src-sub");
+      if (srcSubTab === "fn" && fnRows === null) loadFunctions("");
+      if (srcSubTab === "cls") loadCluster();
+      drawRail();
+      return;
+    }
+
+    const fnBtn = e.target.closest("[data-add-fn-pipe]");
+    if (fnBtn) {
+      const val = fnBtn.getAttribute("data-add-fn-pipe") || "";
+      const parts = val.split("|");
+      const fnName = parts[0];
+      let fnRef = parts[1];
+      if (!fnRef || !/:|@sha256:/.test(fnRef)) {
+        fnRef = "ghcr.io/crossplane-contrib/" + fnName + ":latest";
+      }
+      const stepName = fnName.replace(/^function-/, "");
+      const pos = (fnName === "function-auto-ready" || fnName === "function-sequencer") ? "after" : "before";
+      store.replaceDoc(function (d) {
+        d.spec = d.spec || {};
+        d.spec.pipeline = d.spec.pipeline || [];
+        if (!d.spec.pipeline.some(function (p) { return p.functionRef === fnName; })) {
+          d.spec.pipeline.push({
+            name: stepName,
+            functionRef: fnName,
+            package: fnRef,
+            position: pos
+          });
+        }
+      }).then(function () {
+        drawRail();
+      });
+      return;
+    }
+
     providersErr = null;
     api.addProvider(ref).then(function () {
       loadProviders();
@@ -617,6 +716,14 @@ export function init(rootEl, deps) {
   });
 
   railEl.addEventListener("input", function (e) {
+    if (e.target.id === "fn-search") {
+      const q = e.target.value.trim();
+      clearTimeout(fnTimer);
+      fnTimer = setTimeout(function () {
+        loadFunctions(q);
+      }, 200);
+      return;
+    }
     if (e.target.id !== "cat-search") return;
     const q = e.target.value.trim();
     clearTimeout(catTimer);

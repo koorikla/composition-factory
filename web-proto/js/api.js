@@ -51,6 +51,7 @@ async function request(method, path, body) {
   if (!res.ok) {
     const message = (data && typeof data.error === "string" && data.error)
       || text || (res.status + " " + res.statusText);
+    console.warn("[API ERROR]", res.status, path, message);
     throw { status: res.status, message };
   }
   return data;
@@ -223,11 +224,16 @@ export function removeProvider(ref) {
 }
 
 /**
- * Search the static provider catalogue (CI-built index of OSS providers).
+ * Search the static provider/function catalogue (CI-built index of OSS packages).
  * @param {string} q substring filter over name/description
+ * @param {string} [type] optional filter: "function" | "provider"
  */
-export function getCatalogue(q) {
-  return request("GET", "/api/catalogue" + (q ? "?q=" + encodeURIComponent(q) : ""));
+export function getCatalogue(q, type) {
+  var params = [];
+  if (q) params.push("q=" + encodeURIComponent(q));
+  if (type) params.push("type=" + encodeURIComponent(type));
+  var qs = params.length ? ("?" + params.join("&")) : "";
+  return request("GET", "/api/catalogue" + qs);
 }
 
 /**

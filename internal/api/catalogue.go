@@ -41,8 +41,16 @@ func handleCatalogue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := strings.ToLower(r.URL.Query().Get("q"))
+	typ := strings.ToLower(r.URL.Query().Get("type")) // "function", "provider", or ""
 	entries := make([]catalogue.Provider, 0, len(catalogueEntries))
 	for _, e := range catalogueEntries {
+		isFn := strings.HasPrefix(e.Name, "function-")
+		if typ == "function" && !isFn {
+			continue
+		}
+		if typ == "provider" && isFn {
+			continue
+		}
 		if q == "" || strings.Contains(strings.ToLower(e.Name), q) || strings.Contains(strings.ToLower(e.Description), q) {
 			entries = append(entries, e)
 		}

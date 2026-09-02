@@ -19,6 +19,7 @@ import { init as initInspector } from "./regions/inspector.js";
 import { init as initOutput } from "./regions/output.js";
 
 const deps = { store, api };
+window.store = store;
 initPalette(document.getElementById("region-palette"), deps);
 initCanvas(document.getElementById("cw"), deps);
 initInspector(document.getElementById("region-inspector"), deps);
