@@ -19,7 +19,6 @@ import (
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/index"
-	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
 
@@ -151,34 +150,9 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 			return xpkg.Fetch(r.Context(), ref)
 		}
 	}
-	pkg, err := fetch(req.Ref)
+	pkg, _, err := srv.Store.FetchAndSave(r.Context(), srv.Lock, req.Ref, fetch)
 	if err != nil {
-		// Verbatim: the fetch error names the registry's own reason (DNS,
-		// auth, a missing tag), and paraphrasing it would throw that away.
 		writeJSONError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	crds, err := schema.ParseCRDs(pkg.Docs)
-	if err != nil {
-		// The pull succeeded but the package's own content is bad — still
-		// the upstream's fault, wrapped with the ref exactly the way
-		// ProviderAddCmd reports the same failure.
-		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("%s: %v", req.Ref, err))
-		return
-	}
-
-	l, err := cache.ReadLock(srv.Lock)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	l.Set(req.Ref, pkg.Digest)
-	if err := l.Write(srv.Lock); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := srv.Store.Save(pkg, crds); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

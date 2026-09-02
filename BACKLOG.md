@@ -299,12 +299,12 @@ clean, Playwright 115 passed / 1 skipped.
       three planners (composition.go planFields, annotations.go
       planAnnotations, envelope.go planEnvelope) — the same extraction the
       KCL/Python fix above needs (`resolveRHS`). — completed 2026-09-02
-- [ ] `provider add` sequence (fetch → ParseCRDs → lock → Save) duplicated
+- [x] `provider add` sequence (fetch → ParseCRDs → lock → Save) duplicated
       between cmd/cf/provider.go:29-62 and internal/api/providers.go:141-185
       with the same comment pasted; `validateStatusRef` /
       `validateForEachStatusRef` (load.go:1001, 1095) are the same five
       checks; six+ linear "find resource by name" scans across packages —
-      add `(*Blueprint).ResourceNamed`.
+      add `(*Blueprint).ResourceNamed`. — completed 2026-09-02
 - [x] Same Queue CRD fixture retyped with drift in mcp/server_test.go:44,
       emit/composition_test.go:19, api/server_test.go:150-240 — an
       internal/testfixture package. `recorder` type duplicated in

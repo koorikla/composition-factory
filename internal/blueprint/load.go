@@ -1066,48 +1066,9 @@ func validateForEachParamRef(x XRD, r Resource) error {
 }
 
 // validateForEachStatusRef checks the blueprint-level half of an
-// observed-count loop bound (forEach: resources.<name>.status.<path>):
-// grammar, that the target resource is declared, that it is not the resource
-// itself, that it is not itself forEach-looped, and that every path segment
-// is a clean identifier — the same rules, for the same reasons, as a status
-// wire's (validateStatusRef above). The CRD-schema half — <path> names an
-// integer/number status leaf in the target kind's declared status — belongs
-// to internal/emit, which holds the CRDs.
-//
-// Unlike the params form there is no required-or-default rule here: an
-// observed value CANNOT be made unconditional by any XRD gate (nothing is
-// observed until the cluster reports), so the emitter instead wraps the
-// whole range in the status-wire hasKey guard chain and an unobserved source
-// fans out to zero instances.
+// observed-count loop bound (forEach: resources.<name>.status.<path>).
 func (b *Blueprint) validateForEachStatusRef(r Resource) error {
-	target, path, ok := StatusRef(r.ForEach)
-	if !ok {
-		return fmt.Errorf("resource %q: a resources. forEach bound must be "+
-			"resources.<name>.status.<path>, e.g. resources.cluster.status.atProvider.nodeCount (got %q)",
-			r.Name, r.ForEach)
-	}
-	if target == r.Name {
-		return fmt.Errorf("resource %q: forEach references its own status -- a resource cannot fan "+
-			"out over a count only its own instances could report; reference another resource", r.Name)
-	}
-	decl := b.ResourceNamed(target)
-	if decl == nil {
-		return fmt.Errorf("resource %q: forEach references unknown resource %q", r.Name, target)
-	}
-	if decl.ForEach != "" {
-		return fmt.Errorf("resource %q: resource %q is looped (forEach: %s), so its composed "+
-			"documents are named %s-0, %s-1, ... and the un-indexed key %q never appears in the observed "+
-			"resources map -- the loop bound could never resolve. Reference an unlooped resource",
-			r.Name, target, decl.ForEach, target, target, target)
-	}
-	for _, seg := range strings.Split(path, ".") {
-		if !paramNameRE.MatchString(seg) {
-			return fmt.Errorf("resource %q: forEach status path segment %q in %q is not a valid "+
-				"field name (must be camelCase, e.g. atProvider.nodeCount) -- each segment is written "+
-				"into the emitted template as a dereference and a hasKey guard", r.Name, seg, r.ForEach)
-		}
-	}
-	return nil
+	return b.validateStatusRef(r, "forEach", r.ForEach)
 }
 
 // ParseFieldPath parses a field path, separating the base path from an optional map key.

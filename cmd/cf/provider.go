@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/koorikla/compositionfactory/internal/cache"
-	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
 
@@ -27,38 +26,9 @@ type ProviderAddCmd struct {
 }
 
 func (c *ProviderAddCmd) Run(out io.Writer) error {
-	fetch := c.fetch
-	if fetch == nil {
-		fetch = func(ref string) (*xpkg.Package, error) {
-			return xpkg.Fetch(context.Background(), ref)
-		}
-	}
-	pkg, err := fetch(c.Ref)
+	store := cache.New(c.CacheDir)
+	pkg, crds, err := store.FetchAndSave(context.Background(), c.Lock, c.Ref, c.fetch)
 	if err != nil {
-		return err
-	}
-	crds, err := schema.ParseCRDs(pkg.Docs)
-	if err != nil {
-		return fmt.Errorf("%s: %w", c.Ref, err)
-	}
-	// Pin the lock BEFORE caching the schemas. If a step fails partway
-	// through (permissions, disk full), which of these two runs first
-	// decides what state that failure leaves behind. Cache-first would
-	// leave cached schemas that nothing pins — silently unpinned, which
-	// defeats the reproducibility guarantee the lockfile exists to
-	// provide. Lock-first instead leaves a pin with no cached entry, and
-	// Load then fails loudly with its own "run: cf provider add <ref>"
-	// message — a visible, recoverable state. Do not swap this order
-	// without re-reading that tradeoff.
-	l, err := cache.ReadLock(c.Lock)
-	if err != nil {
-		return err
-	}
-	l.Set(c.Ref, pkg.Digest)
-	if err := l.Write(c.Lock); err != nil {
-		return err
-	}
-	if err := cache.New(c.CacheDir).Save(pkg, crds); err != nil {
 		return err
 	}
 

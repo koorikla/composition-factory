@@ -3,6 +3,7 @@
 package cache
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -211,4 +212,45 @@ func (l *Lock) Write(path string) error {
 		return fmt.Errorf("encode lock: %w", err)
 	}
 	return os.WriteFile(path, append(body, '\n'), 0o644)
+}
+
+// FetchAndSave pulls an xpkg image, extracts its CRDs, pins the lock,
+// and saves the package and CRDs into the cache directory.
+func (s *Store) FetchAndSave(ctx context.Context, lockPath, ref string, fetch func(string) (*xpkg.Package, error)) (*xpkg.Package, []schema.CRD, error) {
+	if fetch == nil {
+		fetch = func(r string) (*xpkg.Package, error) {
+			return xpkg.Fetch(ctx, r)
+		}
+	}
+	pkg, err := fetch(ref)
+	if err != nil {
+		return nil, nil, err
+	}
+	crds, err := schema.ParseCRDs(pkg.Docs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", ref, err)
+	}
+
+	// Pin the lock BEFORE caching the schemas. If a step fails partway
+	// through (permissions, disk full), which of these two runs first
+	// decides what state that failure leaves behind. Cache-first would
+	// leave cached schemas that nothing pins — silently unpinned, which
+	// defeats the reproducibility guarantee the lockfile exists to
+	// provide. Lock-first instead leaves a pin with no cached entry, and
+	// Load then fails loudly with its own "run: cf provider add <ref>"
+	// message — a visible, recoverable state. Do not swap this order
+	// without re-reading that tradeoff.
+	l, err := ReadLock(lockPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	l.Set(ref, pkg.Digest)
+	if err := l.Write(lockPath); err != nil {
+		return nil, nil, err
+	}
+	if err := s.Save(pkg, crds); err != nil {
+		return nil, nil, err
+	}
+
+	return pkg, crds, nil
 }
