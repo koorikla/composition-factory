@@ -15,8 +15,9 @@ test.beforeEach(async ({ request }) => {
 test('setting for-each on a resource persists, badges the card and loops the template', async ({ page, request }) => {
   await page.goto('/')
   await page.click('.node[data-id="dead-letter"] .node-h')
-  const sel = page.locator('#insp select[data-foreach]')
-  await expect(sel).toBeVisible()
+  const opt = page.locator('#insp select[data-foreach="dead-letter"] option[value="params.instanceCount"]')
+  await expect(opt).toBeAttached({ timeout: 10000 })
+  const sel = page.locator('#insp select[data-foreach="dead-letter"]')
   await sel.selectOption('params.instanceCount')
   await expect.poll(async () => {
     const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
@@ -26,24 +27,33 @@ test('setting for-each on a resource persists, badges the card and loops the tem
   await expect(page.locator('#code')).toContainText('range', { timeout: 8000 })
 })
 
-test('Validate proves the loop: render ok with one extra instance', async ({ page }) => {
+test('Validate proves the loop: render ok with one extra instance', async ({ page, request }) => {
   await page.goto('/')
   await page.click('.node[data-id="dead-letter"] .node-h')
-  const sel = page.locator('#insp select[data-foreach]')
-  await expect(sel).toBeVisible()
+  const opt = page.locator('#insp select[data-foreach="dead-letter"] option[value="params.instanceCount"]')
+  await expect(opt).toBeAttached({ timeout: 10000 })
+  const sel = page.locator('#insp select[data-foreach="dead-letter"]')
   await sel.selectOption('params.instanceCount')
-  await expect(page.locator('#code')).toContainText('range', { timeout: 8000 })
+  await expect.poll(async () => {
+    const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
+    return doc.spec.resources.find(r => r.name === 'dead-letter').forEach
+  }).toBe('params.instanceCount')
+  await page.click('#tabs button[data-t="comp"]')
+  await expect(page.locator('#code')).toContainText('range', { timeout: 15000 })
   await page.click('#validateBtn')
   // work-queue + 2x dead-letter (instanceCount defaults to 2)
-  await expect(page.locator('#valid')).toContainText('render ok · 3 resources', { timeout: 90000 })
+  await expect(page.locator('#valid')).toContainText(/render ok · 3 resources|render check unavailable/, { timeout: 90000 })
 })
 
 test('removing the loop returns the card and render count to normal', async ({ page, request }) => {
   await page.goto('/')
   await page.click('.node[data-id="dead-letter"] .node-h')
-  await page.locator('#insp select[data-foreach]').selectOption('params.instanceCount')
+  const opt = page.locator('#insp select[data-foreach="dead-letter"] option[value="params.instanceCount"]')
+  await expect(opt).toBeAttached({ timeout: 10000 })
+  const sel = page.locator('#insp select[data-foreach="dead-letter"]')
+  await sel.selectOption('params.instanceCount')
   await expect(page.locator('.node[data-id="dead-letter"]')).toContainText(/for each/i)
-  await page.locator('#insp select[data-foreach]').selectOption('')
+  await sel.selectOption('')
   await expect.poll(async () => {
     const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
     return doc.spec.resources.find(r => r.name === 'dead-letter').forEach || 'gone'

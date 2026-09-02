@@ -205,10 +205,17 @@ func runCrossplaneRender(ctx context.Context, xr, comp, fns, xrd string) ([]byte
 // parameter. Non-required parameters are deliberately omitted so the render
 // exercises the composition's default-injection path for them — exactly
 // what a minimal real XR would do.
+// sampleXR synthesizes the composite resource the render is checked
+// against, from the blueprint's own XRD declaration: the XRD's
+// group/version/kind, a fixed name, a namespace only when the XRD is
+// Namespaced, and a type-appropriate placeholder for every REQUIRED parameter
+// or parameter driving a resource's forEach loop. Non-required parameters are
+// deliberately omitted so the render exercises the composition's
+// default-injection path for them — exactly what a minimal real XR would do.
 func sampleXR(b *blueprint.Blueprint) ([]byte, error) {
 	spec := map[string]any{}
 	for name, p := range b.Spec.XRD.Parameters {
-		if !p.Required {
+		if !p.Required && !isForEachParam(b, name) {
 			continue
 		}
 		spec[name] = placeholderValue(p)
@@ -226,13 +233,44 @@ func sampleXR(b *blueprint.Blueprint) ([]byte, error) {
 	})
 }
 
-// placeholderValue picks a value that satisfies p's declared type. An enum
-// wins over the type: its first value is, by the XRD's own schema, always
+func isForEachParam(b *blueprint.Blueprint, paramName string) bool {
+	target := "params." + paramName
+	for _, r := range b.Spec.Resources {
+		if r.ForEach == target {
+			return true
+		}
+	}
+	return false
+}
+
+// placeholderValue picks a value that satisfies p's declared type. If p has
+// a declared default, that value is parsed according to its type. An enum
+// wins next: its first value is, by the XRD's own schema, always
 // legal, where a generic placeholder might not be. A typed object (declared
-// properties) recurses into its REQUIRED members — an empty map would fail
-// the member schema's own required rule, and non-required members are
-// omitted for the same default-injection reason top-level ones are.
+// properties) recurses into its REQUIRED or defaulted members.
 func placeholderValue(p blueprint.Parameter) any {
+	if p.Default != "" {
+		switch p.Type {
+		case "integer":
+			var n int
+			if _, err := fmt.Sscanf(p.Default, "%d", &n); err == nil {
+				return n
+			}
+		case "number":
+			var f float64
+			if _, err := fmt.Sscanf(p.Default, "%f", &f); err == nil {
+				return f
+			}
+		case "boolean":
+			if p.Default == "true" {
+				return true
+			} else if p.Default == "false" {
+				return false
+			}
+		case "string":
+			return p.Default
+		}
+	}
 	if len(p.Enum) > 0 {
 		return p.Enum[0]
 	}
@@ -244,7 +282,7 @@ func placeholderValue(p blueprint.Parameter) any {
 	case "object":
 		obj := map[string]any{}
 		for name, member := range p.Properties {
-			if member.Required {
+			if member.Required || member.Default != "" {
 				obj[name] = placeholderValue(member)
 			}
 		}
@@ -262,7 +300,13 @@ func placeholderValue(p blueprint.Parameter) any {
 // the daemon stopped) and Docker Desktop's "error during connect" variant.
 func dockerUnavailable(output string) bool {
 	s := strings.ToLower(output)
-	for _, marker := range []string{"docker daemon", "docker.sock", "error during connect"} {
+	for _, marker := range []string{
+		"docker daemon",
+		"docker.sock",
+		"error during connect",
+		"runtime-docker-network",
+		"is not connected to docker network",
+	} {
 		if strings.Contains(s, marker) {
 			return true
 		}

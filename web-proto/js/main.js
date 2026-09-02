@@ -472,19 +472,19 @@ store.loadDoc();
 
       html += '<div class="example-card" data-id="' + esc(ex.id) + '">' +
         '<div class="example-card-h">' +
-          '<span class="example-icon" style="background:' + ic.color + '">' + ic.label + '</span>' +
-          '<div style="min-width:0;flex:1">' +
-            '<div class="example-title">' + esc(ex.name) + '</div>' +
-          '</div>' +
+        '<span class="example-icon" style="background:' + ic.color + '">' + ic.label + '</span>' +
+        '<div style="min-width:0;flex:1">' +
+        '<div class="example-title">' + esc(ex.name) + '</div>' +
+        '</div>' +
         '</div>' +
         '<div class="example-desc">' + esc(ex.description) + '</div>' +
         '<div class="example-tags">' +
-          (resLabel ? '<span class="example-tag" style="background:var(--wire-xrd-soft);color:var(--wire-xrd)">' + esc(resLabel) + '</span>' : '') +
-          tagsHtml +
+        (resLabel ? '<span class="example-tag" style="background:var(--wire-xrd-soft);color:var(--wire-xrd)">' + esc(resLabel) + '</span>' : '') +
+        tagsHtml +
         '</div>' +
         '<button class="btn pri sm example-btn" data-load-id="' + esc(ex.id) + '">Load Blueprint</button>' +
         '<div class="example-note" style="font-size:10px;color:var(--faint);text-align:center;margin-top:3px">(replaces current blueprint \u00b7 undoable)</div>' +
-      '</div>';
+        '</div>';
     });
     grid.innerHTML = html;
   }
@@ -508,6 +508,7 @@ store.loadDoc();
   function openModal() {
     lastFocusedElement = document.activeElement;
     overlay.hidden = false;
+    overlay.removeAttribute("hidden");
     loadExamples();
     setTimeout(function () {
       if (closeBtn) closeBtn.focus();

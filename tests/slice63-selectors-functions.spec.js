@@ -50,7 +50,7 @@ test('Functions catalogue search & 1-click pipeline addition', async ({ page }) 
   await expect(stepNameInp).toHaveValue('auto-ready')
 })
 
-test('Kubernetes workload selectors auto-match & pod spec helper', async ({ page }) => {
+test('Kubernetes workload selectors auto-match & pod spec helper', async ({ page, request }) => {
   page.on('console', msg => console.log('PAGE LOG 2:', msg.text()))
 
   // Click K8s App example from starter blueprints
@@ -88,8 +88,15 @@ test('Kubernetes workload selectors auto-match & pod spec helper', async ({ page
   await expect(extNameBtn).toBeVisible()
   await extNameBtn.click()
 
+  // Wait for doc PUT persistence
+  await expect.poll(async () => {
+    const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
+    const appDeploy = (doc.spec.resources || []).find(r => r.name === 'app-deploy')
+    return appDeploy && appDeploy.annotations && appDeploy.annotations['app.kubernetes.io/managed-by']
+  }).toBeTruthy()
+
   // Verify generated Composition YAML output reflects changes
   await page.click('#tabs button[data-t="comp"]')
-  await expect(page.locator('#code')).toContainText('app.kubernetes.io/managed-by')
-  await expect(page.locator('#code')).toContainText('crossplane.io/external-name')
+  await expect(page.locator('#code')).toContainText('app.kubernetes.io/managed-by', { timeout: 10000 })
+  await expect(page.locator('#code')).toContainText('crossplane.io/external-name', { timeout: 10000 })
 })

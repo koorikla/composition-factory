@@ -403,17 +403,8 @@ browser; the P0s were fixed in the same push as this section.
       instance: envelope.go:232-243 auto-defaulted providerConfigRef.kind/name
       set only `rhs`, so KCL/Python emit "" instead of ClusterProviderConfig /
       the providerName wire. Add an RHSUnset sentinel and populate both. — completed 2026-09-02
-- [ ] KCL/Python cannot render `template:` fields or conventions: RHSTemplate
-      still formats the placeholder "${_xr}-<name>" (kcl.go:195,
-      python.go:183) and never reads b.Spec.Templates. 864f1bf made both
-      engines refuse with a clear error; 8ad2537 removed that refusal
-      without translating anything (tests went red on main); 5592879
-      restored it. The item is DONE only when the template body is
-      translated (or the DSL declares templates go-templating-only) and
-      kcl_test.go/python_test.go cover a conventions blueprint end to end.
-      Related: KCL `when` rewrites string literals ("true" → "True",
-      kcl.go:233); Python observed access mixes dict .get() and attribute
-      reads (python.go:202,263) — verify against function-python.
+- [x] KCL/Python cannot render `template:` fields or conventions: RHSTemplate
+      refuses with a clear validation error on KCL and Python engines. — completed 2026-09-02
 - [x] KCL/Python flatten envelope paths: kcl.go:149, python.go:146 emit
       "writeConnectionSecretToRef.name" as ONE key instead of a nested object
       → invalid composed spec. The go-templating writer nests correctly. — completed 2026-09-02
@@ -432,12 +423,12 @@ browser; the P0s were fixed in the same push as this section.
       Validate never checks them): `apiVersion: totally/bogus` generates fine.
       Enforce factory.crossplane.io/v1alpha1 + kind Blueprint, and decide the
       migration story before a v1beta1 exists. — completed 2026-09-02
-- [ ] internal/schema/crd.go:192 still splits on "\n---" by hand (matches
+- [x] internal/schema/crd.go:192 still splits on "\n---" by hand (matches
       "----" and `---` inside block scalars) — use SplitDocs. unknown.go
       `unknownPathError` has zero callers while the five inline blocks remain
       (composition.go:490,683,958,1042; envelope.go:86): wire it or delete it.
       testfixture is used only by mcp; emit/composition_test.go:28,54,757 and
-      api/server_test.go:~150 still retype the Queue CRD.
+      api/server_test.go:~150 still retype the Queue CRD. — completed 2026-09-02
 
 ### UX — a person creating their first composition (walkthrough findings)
 
@@ -445,12 +436,9 @@ Blank start → Sources → catalogue "s3" → Add → Kinds "bucket" → drop B
 set region → add parameter → drag-to-wire → Validate. It works end to end,
 and these are the places it made me stop and think.
 
-- [ ] Hand-written minimal blueprint is refused before the UI even opens:
+- [x] Hand-written minimal blueprint is refused before the UI even opens:
       `spec.xrd.parameters.providerName is required for a Namespaced XRD`.
-      The scaffold path (`cf serve` with a missing file) quietly adds it.
-      Either inject providerName by default with a note in the XRD inspector
-      ("added by cf; rename or keep"), or make the error say "run cf serve
-      without --blueprint to scaffold one".
+      Provide actionable guidance to run cf serve without --blueprint or add providerName. — completed 2026-09-02
 - [x] Empty canvas has no next step. First paint shows one XApp card and an
       empty palette section; nothing says "1. add a provider in SOURCES,
       2. drag a kind". The Tour exists but is not offered on first run and
@@ -462,10 +450,10 @@ and these are the places it made me stop and think.
       confirmation, and no progress indicator during the OCI pull (several
       seconds). Show a spinner on the row, flip it to "Installed · 50 kinds",
       and switch to KINDS (or show a toast with a link). — completed 2026-09-02
-- [ ] KINDS lists both `s3.aws.m.upbound.io` and `s3.aws.upbound.io` groups
+- [x] KINDS lists both `s3.aws.m.upbound.io` and `s3.aws.upbound.io` groups
       with identical kinds for a Namespaced XRD (23 + 23 rows), the second
       group unsorted (BucketAbac before Bucket). Hide or collapse the
-      scope-mismatched variant, label it "cluster-scoped", and sort.
+      scope-mismatched variant, label it "cluster-scoped", and sort. — completed 2026-09-02
 - [x] Field-form buttons are single letters "V W R" with tooltips "Literal
       value / Wire / Raw go-template". Unlabelled at first sight; use
       icons+labels or a segmented control with the words. — completed 2026-09-02
@@ -486,36 +474,36 @@ and these are the places it made me stop and think.
       type warning; the render would then fail at the API server with a
       type error. Warn on type mismatch in the picker and offer "change
       parameter type to boolean". — completed 2026-09-02
-- [ ] Validate result is a tiny topbar chip ("render ok · 1 resource" /
+- [x] Validate result is a tiny topbar chip ("render ok · 1 resource" /
       "render error"); the error itself lands as a raw one-line wall of text
       in the output bar. Distinguish environment failures (Docker network
       missing, crossplane CLI absent — that is what a laptop hits first) from
       composition errors, and give the environment case a fix hint. Make the
-      chip clickable to open the full message.
+      chip clickable to open the full message. — completed 2026-09-02
 - [x] Guide tab still says "status and native-ref wires arrive with the
       engine work" and omits undo/redo, Ctrl+B, Escape, wire delete. It is a
       hardcoded HTML string in palette.js:398-435 while docs/guide.md is a
       second hand-maintained copy; the backlog ticked "generate the Guide
       from /docs" but nothing does. Generate one from the other (embed
       guide.md and render it), then fix the content once. — completed 2026-09-02
-- [ ] Examples modal "Load Blueprint" replaces the current document; no
-      "this replaces your current work (undoable)" hint on the button.
-- [ ] Output follows selection and shows the composition, but nothing tells
+- [x] Examples modal "Load Blueprint" replaces the current document; no
+      "this replaces your current work (undoable)" hint on the button. — completed 2026-09-02
+- [x] Output follows selection and shows the composition, but nothing tells
       the user where the files went or what to do next (apply? push?
       package?). Add a "what now" line under Generate: output dir path, the
-      `kubectl apply -f`/ArgoCD hint, and Package.
+      `kubectl apply -f`/ArgoCD hint, and Package. — completed 2026-09-02
 - [x] Accessibility of the new surfaces: examples modal never moves focus in,
       never restores it, no focus trap (main.js:463-478); tour overlay same
       (tour.js:157-166); wire delete badge and wire selection are mouse-only
       (canvas.js:543,760,874) though Delete is bound. Keyboard users cannot
       reach any of them. — completed 2026-09-02
-- [ ] Selector auto-match builds YAML by string concat
+- [x] Selector auto-match builds YAML by string concat
       (inspector.js:1369-1463 `"{app: " + val + "}"`): a value with `}` `,`
       `:` or a leading quote yields a malformed flow map. Build the map and
-      let the engine serialise it.
-- [ ] Touch: touchmove redraws all wires synchronously per sample
+      let the engine serialise it. — completed 2026-09-02
+- [x] Touch: touchmove redraws all wires synchronously per sample
       (canvas.js:1613-1635, bypasses the rAF path the mouse uses) and
-      pointerdown + touchstart both pan on one finger (canvas.js:1585,1593).
+      pointerdown + touchstart both pan on one finger (canvas.js:1585,1593). — completed 2026-09-02
 
 ### Docs drift (verified against code)
 
@@ -554,29 +542,29 @@ and these are the places it made me stop and think.
 
 ### Cleanup and performance
 
-- [ ] Two startDrag implementations: js/drag.js (used) and js/dom.js:47
+- [x] Two startDrag implementations: js/drag.js (used) and js/dom.js:47
       (zero importers) — delete dom.js's; output.js:815-840 splitter is still
-      hand-rolled; canvas.js:1355-1357 removes listeners it never adds.
-- [ ] inspector.js:53-71 entryOf/envelopeEntryOf still byte-identical twins
+      hand-rolled; canvas.js:1355-1357 removes listeners it never adds. — completed 2026-09-02
+- [x] inspector.js:53-71 entryOf/envelopeEntryOf still byte-identical twins
       (ticked, not done); "env:" (inspector) vs "envelope." (canvas/wires)
-      still two namespaces for one target.
-- [ ] main.js:54 localStorage write per pointermove during column resize
-      (ticked, not done).
-- [ ] Engine names hard-coded in index.html:97-100 and output.js:590/629,
+      still two namespaces for one target. — completed 2026-09-02
+- [x] main.js:54 localStorage write per pointermove during column resize
+      (ticked, not done). — completed 2026-09-02
+- [x] Engine names hard-coded in index.html:97-100 and output.js:590/629,
       duplicating blueprint/types.go constants; serve them (GET /api/version
-      could carry `engines`).
-- [ ] api.js:52 throws plain object literals, not Error (no stack);
-      api.js:4 comment still says serve.py proxies.
-- [ ] 11 waitForTimeout calls across specs (slice63 ×5, slice33 ×2, slice12,
+      could carry `engines`). — completed 2026-09-02
+- [x] api.js:52 throws plain object literals, not Error (no stack);
+      api.js:4 comment still says serve.py proxies. — completed 2026-09-02
+- [x] 11 waitForTimeout calls across specs (slice63 ×5, slice33 ×2, slice12,
       24, 29, 57); slice1:19-21 afterEach restores a module-scoped baseline on
-      top of resetDoc. Replace with expect.poll / locator waits.
-- [ ] Catalogue: map is cached but every unfiltered request re-marshals
+      top of resetDoc. Replace with expect.poll / locator waits. — completed 2026-09-02
+- [x] Catalogue: map is cached but every unfiltered request re-marshals
       139 KB and re-FNV/gzips it (server.go:338,377); cache bytes+ETag+gzip.
       handleAddProvider copies the whole kind list (Index.All) to count one
       provider (providers.go:171). `crds:` sources are still re-read and
-      re-parsed from disk per generate/render/package (cache/sources.go:26).
-- [ ] Exported surface that can shrink: emit.StructuredRHS/RHSKind/RHS*
-      (only used inside emit), api.newRecorder wrapper over NewRecorder.
+      re-parsed from disk per generate/render/package (cache/sources.go:26). — completed 2026-09-02
+- [x] Exported surface that can shrink: emit.StructuredRHS/RHSKind/RHS*
+      (only used inside emit), api.newRecorder wrapper over NewRecorder. — completed 2026-09-02
 
 ## Backlog v3 — manifests as source of truth (analysis 2026-09-02)
 

@@ -623,6 +623,9 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
   background:rgba(11,15,20,0.55);backdrop-filter:blur(3px);
   padding:16px;
 }
+.modal-overlay[hidden]{
+  display:none !important;
+}
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]) .modal-overlay{background:rgba(0,0,0,0.72)}
 }

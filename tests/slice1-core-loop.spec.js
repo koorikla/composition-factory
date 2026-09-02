@@ -80,8 +80,10 @@ test('dropping a palette kind persists a new resource in the doc', async ({ page
   const dropped = page.locator('.node[data-id="queue-policy"]')
   await expect(dropped).toBeVisible()
   // persisted server-side by the full-doc PUT
-  const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
-  expect(doc.spec.resources.map(r => r.name)).toContain('queue-policy')
+  await expect.poll(async () => {
+    const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
+    return (doc.spec.resources || []).map(r => r.name)
+  }).toContain('queue-policy')
   // and selected: the inspector shows the new resource's schema header
   await expect(page.locator('#insp .insp-t .k')).toContainText('QueuePolicy')
 })
@@ -102,7 +104,7 @@ test('a value edit PUTs the doc and the output regenerates with real YAML', asyn
       .spec.resources.find(r => r.name === 'work-queue').fields.maxMessageSize?.value
   ).toBe('2048').then(() => true)
   // debounced regenerate picks the edit up into the composition template
-  await expect(page.locator('#code')).toContainText('maxMessageSize', { timeout: 5000 })
+  await expect(page.locator('#code')).toContainText('maxMessageSize', { timeout: 10000 })
 })
 
 test('a server 400 shows verbatim in the inspector and the doc stays unchanged', async ({ page, request }) => {

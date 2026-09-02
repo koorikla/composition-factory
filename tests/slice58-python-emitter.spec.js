@@ -49,6 +49,7 @@ test('switching engine to python emits function-python composition and updates f
 })
 
 test('a reload keeps python engine select in sync with the persisted document', async ({ page }) => {
+  await page.goto('/')
   await page.click('#tabs button[data-t="comp"]')
   const engineSel = page.locator('#engineSel')
   await engineSel.selectOption('python')

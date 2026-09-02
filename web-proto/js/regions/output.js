@@ -486,7 +486,11 @@ export function init(rootEl, deps) {
       banner.className = "next-steps-banner";
       banner.style.cssText = "padding:6px 12px;background:rgba(16,185,129,0.08);border-bottom:1px solid rgba(16,185,129,0.2);font-family:var(--mono);font-size:11px;color:var(--ok);display:flex;align-items:center;gap:6px;flex-shrink:0";
       var vp = document.getElementById("code-viewport") || el.code;
-      vp.parentNode.insertBefore(banner, vp);
+      if (vp && vp.parentNode) {
+        vp.parentNode.insertBefore(banner, vp);
+      } else if (rootEl) {
+        rootEl.appendChild(banner);
+      }
     }
     if (result && result.outputs && result.outputs.length > 0) {
       var outPath = "out";
@@ -500,12 +504,14 @@ export function init(rootEl, deps) {
         outPath = parts.join("/") || "out";
       }
       banner.hidden = false;
+      banner.style.display = "flex";
       banner.innerHTML = '<span style="color:var(--ok)">✓</span> ' +
         'Output written to <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">' + esc(outPath) + '</code> ' +
         '\u00b7 Apply: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">kubectl apply -f ' + esc(outPath) + '</code> ' +
         '\u00b7 Package: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">cf package</code>';
     } else {
       banner.hidden = true;
+      banner.style.display = "none";
     }
   }
 
@@ -518,11 +524,17 @@ export function init(rootEl, deps) {
       bar.id = "render-warn";
       bar.className = "warnbar";
       bar.setAttribute("role", "alert");
-      bar.style.whiteSpace = "pre-wrap";
-      el.warn.parentNode.insertBefore(bar, el.warn.nextSibling);
+      var vp = document.getElementById("code-viewport") || el.code;
+      if (vp && vp.parentNode) vp.parentNode.insertBefore(bar, vp);
+      else if (rootEl) rootEl.appendChild(bar);
     }
-    bar.hidden = !message;
-    bar.textContent = message ? formatErrorMessage(message) : "";
+    if (message) {
+      bar.textContent = formatErrorMessage(message);
+      bar.hidden = false;
+    } else {
+      bar.textContent = "";
+      bar.hidden = true;
+    }
   }
 
   /* ---------- raw-template warnbar (prototype's exact copy) ---------- */
@@ -566,7 +578,7 @@ export function init(rootEl, deps) {
       api.getVersion().then(function (r) {
         el.ver.textContent = r.version;
         el.ver.title = "compositionfactory build " + r.version;
-        if (el.engineSel && Array.isArray(r.engines) && r.engines.length > 0) {
+        if (el.engineSel && el.engineSel.options.length === 0 && Array.isArray(r.engines) && r.engines.length > 0) {
           var curDocEngine = (store.state.doc && store.state.doc.spec && store.state.doc.spec.emit && store.state.doc.spec.emit.engine) || "go-templating";
           el.engineSel.innerHTML = r.engines.map(function (eng) {
             return '<option value="' + esc(eng) + '">' + esc(eng) + '</option>';
@@ -689,7 +701,7 @@ export function init(rootEl, deps) {
             }
           }
         }
-      });
+      }).then(function () { generateNow(); });
     });
   }
 
@@ -709,7 +721,7 @@ export function init(rootEl, deps) {
             }
           }
         }
-      });
+      }).then(function () { generateNow(); });
     });
   }
 

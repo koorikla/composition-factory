@@ -17,8 +17,10 @@ test('the SHARED rail adds a parameter that lands in the XRD and on the XR card'
   await page.check('#param-add-req')
   await page.click('#param-add-submit')
   await expect(page.locator('#lrail').getByText('$environment')).toBeVisible()
-  const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
-  expect(doc.spec.xrd.parameters.environment).toMatchObject({ type: 'string', required: true })
+  await expect.poll(async () => {
+    const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
+    return doc.spec.xrd && doc.spec.xrd.parameters && doc.spec.xrd.parameters.environment
+  }).toMatchObject({ type: 'string', required: true })
   await expect(page.locator('.node[data-id="xrd"] .port[data-path="environment"]')).toBeVisible()
 })
 

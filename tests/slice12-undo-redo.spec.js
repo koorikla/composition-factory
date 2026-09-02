@@ -43,7 +43,7 @@ test('Cmd/Ctrl+Z undoes on the canvas but never steals undo from a text field', 
   await input.click()                       // focus back in the text field
   await expect(input).toBeFocused()
   await page.keyboard.press('ControlOrMeta+z')
-  await expect.poll(() => serverValue(request, 'work-queue', 'maxMessageSize')).toBe('1234') // untouched
+  expect(await serverValue(request, 'work-queue', 'maxMessageSize')).toBe('1234') // untouched
   await page.click('#cw')                   // canvas focus
   await page.keyboard.press('ControlOrMeta+z')
   await expect.poll(() => serverValue(request, 'work-queue', 'maxMessageSize')).toBe(undefined)
