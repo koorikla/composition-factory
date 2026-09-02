@@ -76,42 +76,7 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 			d.Line(9, "type: string")
 		}
 		if p.Type == "object" && len(p.Properties) > 0 {
-			// Typed members render as a real nested schema: properties,
-			// per-member description/default/enum, a required list — and NO
-			// additionalProperties, because the members ARE the schema.
-			// Sorted throughout: determinism is a correctness requirement.
-			d.Line(8, "properties:")
-			members := make([]string, 0, len(p.Properties))
-			for m := range p.Properties {
-				members = append(members, m)
-			}
-			sort.Strings(members)
-			var requiredMembers []string
-			for _, m := range members {
-				mp := p.Properties[m]
-				if mp.Required {
-					requiredMembers = append(requiredMembers, m)
-				}
-				d.Line(9, "%s:", m)
-				d.Line(10, "type: %s", mp.Type)
-				if mp.Description != "" {
-					// Same quoting rule as a top-level description: ": " and
-					// " #" in free text change the document's meaning unquoted.
-					d.Line(10, "description: %s", quoteYAML(mp.Description))
-				}
-				if mp.Default != "" {
-					d.Line(10, "default: %s", defaultYAML(mp.Type, mp.Default))
-				}
-				if len(mp.Enum) > 0 {
-					d.Line(10, "enum:")
-					for _, e := range mp.Enum {
-						d.Line(10, "- %s", quoteYAML(e))
-					}
-				}
-			}
-			if len(requiredMembers) > 0 {
-				d.Line(8, "required: [%s]", strings.Join(requiredMembers, ", "))
-			}
+			writeObjectMembers(d, 8, p)
 		}
 	}
 	if req := requiredParams(x); len(req) > 0 {
@@ -178,4 +143,53 @@ func defaultYAML(paramType, value string) string {
 		return quoteYAML(value)
 	}
 	return value
+}
+
+// writeObjectMembers renders a typed object's member schema recursively:
+// properties, per-member description/default/enum, a required list per
+// level — and NO additionalProperties, because the members ARE the schema.
+// An object member with properties of its own recurses (arbitrary depth,
+// the openapi-editor shape); a propertyless object member keeps the v1
+// free-form string map. Sorted throughout: determinism is a correctness
+// requirement. ind is the column "properties:" itself lands on.
+func writeObjectMembers(d *Doc, ind int, p blueprint.Parameter) {
+	d.Line(ind, "properties:")
+	members := make([]string, 0, len(p.Properties))
+	for m := range p.Properties {
+		members = append(members, m)
+	}
+	sort.Strings(members)
+	var requiredMembers []string
+	for _, m := range members {
+		mp := p.Properties[m]
+		if mp.Required {
+			requiredMembers = append(requiredMembers, m)
+		}
+		d.Line(ind+1, "%s:", m)
+		d.Line(ind+2, "type: %s", mp.Type)
+		if mp.Description != "" {
+			// Same quoting rule as a top-level description: ": " and
+			// " #" in free text change the document's meaning unquoted.
+			d.Line(ind+2, "description: %s", quoteYAML(mp.Description))
+		}
+		if mp.Default != "" {
+			d.Line(ind+2, "default: %s", defaultYAML(mp.Type, mp.Default))
+		}
+		if len(mp.Enum) > 0 {
+			d.Line(ind+2, "enum:")
+			for _, e := range mp.Enum {
+				d.Line(ind+2, "- %s", quoteYAML(e))
+			}
+		}
+		if mp.Type == "object" && len(mp.Properties) == 0 {
+			d.Line(ind+2, "additionalProperties:")
+			d.Line(ind+3, "type: string")
+		}
+		if mp.Type == "object" && len(mp.Properties) > 0 {
+			writeObjectMembers(d, ind+2, mp)
+		}
+	}
+	if len(requiredMembers) > 0 {
+		d.Line(ind, "required: [%s]", strings.Join(requiredMembers, ", "))
+	}
 }

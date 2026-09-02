@@ -375,7 +375,7 @@ func TestCompositionRejectsUnknownMemberReference(t *testing.T) {
 	b := typedTestBlueprint()
 	b.Spec.Resources[0].Fields["maxMessageSize"] = blueprint.Field{From: "params.tuning.nope"}
 	_, err := Composition(b, typedTestCRDs(t))
-	if err == nil || !strings.Contains(err.Error(), `"nope"`) || !strings.Contains(err.Error(), `"tuning"`) {
+	if err == nil || !strings.Contains(err.Error(), `"nope"`) || !strings.Contains(err.Error(), "tuning") {
 		t.Fatalf("err = %v, want an error naming the unknown member and its parameter", err)
 	}
 }

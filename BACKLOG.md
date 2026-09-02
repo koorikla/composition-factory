@@ -102,9 +102,26 @@
       (the composed document IS the object) and resolve for any provider
       ending .yaml/.yml, "cluster" included — which also closes the
       cluster-kind drop→resolve gap. — completed 2026-09-02
-- [ ] OpenAPI-grade object parameters (user request 2026-09-02): the
-      inspector/SHARED editors handle `object` params awkwardly — grow the
-      GUI (and engine where needed) until any object-typed variable can be
-      added/modified at arbitrary nesting: nested members, member types
-      incl. object/array-of-scalar, required flags, defaults — basically an
-      openapi spec editor for parameters.
+- [x] OpenAPI-grade object parameters (user request 2026-09-02): members
+      now nest to arbitrary depth (engine: recursive Validate + XRD schema +
+      ParamChain guard chains; params.a.b.c wires). Inspector renders a
+      recursive member-tree editor (add/rename/type/required/default/delete
+      at any depth); wire dropdowns enumerate nested paths; paramFrom no
+      longer drops properties on unrelated updates. Arrays stay refused
+      with a clear error. — completed 2026-09-02
+- [ ] go-templating FileSystem source export (user request 2026-09-02): an
+      export option that emits templates as a folder structure (one object
+      per yaml file, helm-chart-style readability), wired for `source:
+      FileSystem` + ConfigMap mounts, splitting across multiple ConfigMaps
+      to stay under the ~1MiB object limit for big compositions.
+- [ ] Docs restructure (user request 2026-09-02): split README extras into
+      /docs to keep the main README quick to read; make the gif-recorder
+      flow part of it; use /docs content to GENERATE the in-app Guide tab(s)
+      and improve them.
+- [ ] Startup example chooser (user request 2026-09-02): pick between a few
+      starting blueprints on first load — IRSA, an RDS composition, and a
+      k8s app composition that uses both.
+- [ ] Ansible provider support (user backlog 2026-09-02): explore converting
+      a runbook/role into a composition.
+- [ ] (back-backlog) Generate compositions in other languages — KCL, Python
+      (function-kcl, function-python et al.) as alternative emitters.

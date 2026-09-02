@@ -746,24 +746,17 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 				guard = g
 			} else {
 				param, member, _ := blueprint.ParamRef(f.From)
-				decl, ok := b.Spec.XRD.Parameters[param]
-				if !ok {
-					return nil, fmt.Errorf("resource %q field %q: unknown parameter %q", r.Name, p, param)
-				}
+				chainRef := param
 				if member != "" {
-					mdecl, ok := decl.Properties[member]
-					if !ok {
-						return nil, fmt.Errorf("resource %q field %q: references unknown member %q of "+
-							"parameter %q", r.Name, p, member, param)
-					}
-					rhs = fmt.Sprintf("{{ $spec.%s.%s }}", param, member)
-					guard = memberGuard(param, member, decl.Required, mdecl.Required)
-				} else {
-					rhs = fmt.Sprintf("{{ $spec.%s }}", param)
-					if !decl.Required {
-						guard = fmt.Sprintf("hasKey $spec %q", param)
-					}
+					chainRef = param + "." + member
 				}
+				segs, chain, err := blueprint.ParamChain(b.Spec.XRD,
+					fmt.Sprintf("resource %q field %q", r.Name, p), chainRef)
+				if err != nil {
+					return nil, err
+				}
+				rhs = fmt.Sprintf("{{ $spec.%s }}", strings.Join(segs, "."))
+				guard = chainGuard(segs, chain)
 			}
 		}
 		leaves = append(leaves, leafItem{
@@ -848,6 +841,38 @@ func memberGuard(param, member string, paramRequired, memberRequired bool) strin
 	default:
 		return ""
 	}
+}
+
+// chainGuard generalizes memberGuard to arbitrary depth: from the first
+// non-required level onward every dereference is proven with hasKey (the
+// same conservative rule the two-level guard applies — once an ancestor is
+// optional, deeper required-ness is only meaningful when that ancestor is
+// present, so the whole tail stays guarded). An all-required chain needs no
+// guard at all. Two-level chains produce byte-identical guards to
+// memberGuard, so existing goldens hold.
+func chainGuard(segs []string, chain []blueprint.Parameter) string {
+	first := -1
+	for i, d := range chain {
+		if !d.Required {
+			first = i
+			break
+		}
+	}
+	if first == -1 {
+		return ""
+	}
+	links := make([]string, 0, len(segs)-first)
+	for i := first; i < len(segs); i++ {
+		prefix := "$spec"
+		if i > 0 {
+			prefix = "$spec." + strings.Join(segs[:i], ".")
+		}
+		links = append(links, fmt.Sprintf("hasKey %s %q", prefix, segs[i]))
+	}
+	if len(links) == 1 {
+		return links[0]
+	}
+	return "and (" + strings.Join(links, ") (") + ")"
 }
 
 // scalarStatusTypes are the status-leaf types a wire may carry. Object,

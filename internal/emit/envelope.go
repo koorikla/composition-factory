@@ -184,22 +184,21 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 			e.rhs = rhs
 		case f.From != "":
 			param, member, _ := blueprint.ParamRef(f.From)
-			decl, ok := b.Spec.XRD.Parameters[param]
-			if !ok {
-				return nil, fmt.Errorf("resource %q envelope %q: unknown parameter %q", r.Name, p, param)
+			chainRef := param
+			if member != "" {
+				chainRef = param + "." + member
+			}
+			segs, chain, err := blueprint.ParamChain(b.Spec.XRD,
+				fmt.Sprintf("resource %q envelope %q", r.Name, p), chainRef)
+			if err != nil {
+				return nil, err
 			}
 			// wireDecl is the declaration whose type governs the wire — the
-			// member's for a params.<name>.<member> reference, the
+			// leaf member's for a params.<name>.<member...> reference, the
 			// parameter's own otherwise. refName is how errors below name it.
-			wireDecl, refName, deref := decl, param, "$spec."+param
-			if member != "" {
-				mdecl, ok := decl.Properties[member]
-				if !ok {
-					return nil, fmt.Errorf("resource %q envelope %q: references unknown member %q of "+
-						"parameter %q", r.Name, p, member, param)
-				}
-				wireDecl, refName, deref = mdecl, param+"."+member, deref+"."+member
-			}
+			wireDecl := chain[len(chain)-1]
+			refName := strings.Join(segs, ".")
+			deref := "$spec." + refName
 			switch {
 			case n.Type == "array":
 				return nil, fmt.Errorf("resource %q: envelope %q is an array, and a from: wire cannot "+
@@ -222,13 +221,13 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 			e.rhs = fmt.Sprintf("{{ %s }}", deref)
 			switch {
 			case member != "":
-				// The three member guard shapes, exactly as forProvider member
-				// wires get them (see memberGuard in composition.go). A
-				// required-in-required member needs no guard at all.
-				if g := memberGuard(param, member, decl.Required, wireDecl.Required); g != "" {
+				// The same guard chain forProvider member wires get (see
+				// chainGuard in composition.go). A required-all-the-way
+				// chain needs no guard at all.
+				if g := chainGuard(segs, chain); g != "" {
 					e.optional, e.guard = true, g
 				}
-			case !decl.Required:
+			case !chain[0].Required:
 				// Same guard rule as planFields: only the XRD's required gate
 				// makes an unguarded dereference safe under missingkey=error.
 				// (A defaulted parameter is also always present after schema

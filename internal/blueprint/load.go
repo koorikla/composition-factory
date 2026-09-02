@@ -229,18 +229,28 @@ func validateParameterMembers(paramPath string, p Parameter) error {
 				"(must be camelCase, e.g. maxMessageSize, and not a YAML keyword like yes/no/true/false)", mPath)
 		}
 		mp := p.Properties[m]
-		// Checked before the type, so an object member that also declares
-		// properties gets the nesting ruling — the one that names what the
-		// author was actually reaching for.
+		// An object member recurses: members nest to arbitrary depth (the
+		// openapi-editor shape). Propertyless keeps the free-form string
+		// map the top-level rule gives it. Objects carry no default/enum —
+		// both are scalar concepts.
+		if mp.Type == "object" {
+			if mp.Default != "" || len(mp.Enum) > 0 {
+				return fmt.Errorf("%s: an object member takes no default or enum — those belong on "+
+					"its scalar members", mPath)
+			}
+			if err := validateParameterMembers(mPath, mp); err != nil {
+				return err
+			}
+			continue
+		}
 		if len(mp.Properties) > 0 {
-			return fmt.Errorf("%s: a member cannot declare properties of its own — typed object "+
-				"parameters nest one level in v1 (deeper nesting is planned work, not a permanent "+
-				"restriction)", mPath)
+			return fmt.Errorf("%s: properties are only valid on type: object members (this member is %q)",
+				mPath, mp.Type)
 		}
 		if !memberTypes[mp.Type] {
-			if mp.Type == "object" || mp.Type == "array" {
-				return fmt.Errorf("%s: member type %q is not supported in v1 — members are scalar "+
-					"(string, integer, number or boolean)", mPath, mp.Type)
+			if mp.Type == "array" {
+				return fmt.Errorf("%s: member type \"array\" is not supported — members are scalar "+
+					"(string, integer, number, boolean) or nested object", mPath)
 			}
 			return fmt.Errorf("%s: unknown type %q", mPath, mp.Type)
 		}
@@ -258,35 +268,44 @@ func validateParameterMembers(paramPath string, p Parameter) error {
 // (e.g. `resource "q" field "x"`). The params. prefix must already be
 // stripped by the caller, whose own fallback error names its full grammar.
 func resolveParamRef(x XRD, context, ref string) (Parameter, error) {
-	param, member, hasMember := strings.Cut(ref, ".")
-	decl, exists := x.Parameters[param]
+	_, chain, err := ParamChain(x, context, ref)
+	if err != nil {
+		return Parameter{}, err
+	}
+	return chain[len(chain)-1], nil
+}
+
+// ParamChain walks a dotted parameter reference (post-"params." — "obj",
+// "obj.member", "obj.a.b", any depth) through the declared parameter tree,
+// returning the segments and the declaration at every level. The chain is
+// what guard emission needs: a dereference is only safe past the last
+// all-required prefix, and each level's Required lives on its own decl.
+func ParamChain(x XRD, context, ref string) ([]string, []Parameter, error) {
+	segs := strings.Split(ref, ".")
+	decl, exists := x.Parameters[segs[0]]
 	if !exists {
-		return Parameter{}, fmt.Errorf("%s: references unknown parameter %q", context, param)
+		return nil, nil, fmt.Errorf("%s: references unknown parameter %q", context, segs[0])
 	}
-	if !hasMember {
-		return decl, nil
+	chain := []Parameter{decl}
+	for i := 1; i < len(segs); i++ {
+		cur := chain[i-1]
+		at := strings.Join(segs[:i], ".")
+		if cur.Type != "object" {
+			return nil, nil, fmt.Errorf("%s: params.%s has type %q, not \"object\" — a member "+
+				"reference needs an object with declared properties", context, at, cur.Type)
+		}
+		if len(cur.Properties) == 0 {
+			return nil, nil, fmt.Errorf("%s: params.%s declares no properties — a member reference "+
+				"needs a typed object; declare the member under its properties", context, at)
+		}
+		m, ok := cur.Properties[segs[i]]
+		if !ok {
+			return nil, nil, fmt.Errorf("%s: references unknown member %q of params.%s "+
+				"(declared members: %s)", context, segs[i], at, strings.Join(sortedMemberNames(cur), ", "))
+		}
+		chain = append(chain, m)
 	}
-	if strings.Contains(member, ".") {
-		return Parameter{}, fmt.Errorf("%s: params.%s.%s reaches more than one level below the "+
-			"parameter — typed object parameters nest one level in v1, so a member reference is "+
-			"exactly params.<name>.<member>", context, param, member)
-	}
-	if decl.Type != "object" {
-		return Parameter{}, fmt.Errorf("%s: parameter %q has type %q, not \"object\" — a member "+
-			"reference (params.%s.%s) needs an object parameter with declared properties",
-			context, param, decl.Type, param, member)
-	}
-	if len(decl.Properties) == 0 {
-		return Parameter{}, fmt.Errorf("%s: parameter %q declares no properties — a member reference "+
-			"needs a typed object parameter; declare the member under spec.xrd.parameters.%s.properties",
-			context, param, param)
-	}
-	mdecl, ok := decl.Properties[member]
-	if !ok {
-		return Parameter{}, fmt.Errorf("%s: references unknown member %q of parameter %q "+
-			"(declared members: %s)", context, member, param, strings.Join(sortedMemberNames(decl), ", "))
-	}
-	return mdecl, nil
+	return segs, chain, nil
 }
 
 // sortedMemberNames lists a typed object parameter's members, sorted, for

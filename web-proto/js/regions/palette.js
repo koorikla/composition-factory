@@ -144,6 +144,17 @@ export function init(rootEl, deps) {
     return lines.map(esc).join("\n");
   }
 
+  function memberSummary(props, depth) {
+    if (!props) return "";
+    return Object.keys(props).sort().map(function (mn) {
+      const mp = props[mn];
+      let row = '<div class="dg" style="padding-left:' + (depth * 8) + 'px">.' + esc(mn) + " \u00b7 " + esc(mp.type) +
+        (mp.required ? " req" : "") + (mp.default ? " = " + esc(mp.default) : "") + "</div>";
+      if (mp.type === "object") row += memberSummary(mp.properties, depth + 1);
+      return row;
+    }).join("");
+  }
+
   function drawShared() {
     const doc = store.state.doc;
     if (!doc) return '<div class="empty">No document loaded.</div>';
@@ -157,13 +168,7 @@ export function init(rootEl, deps) {
         '<span class="sp"></span><span class="bind">' + fanOut(doc, n) + " bound</span>" +
         '<button class="del" data-param-del="' + esc(n) + '" title="Delete parameter">\u00d7</button></div>' +
         '<div class="card-b">' + paramLines(params[n]) +
-        (params[n].properties
-          ? Object.keys(params[n].properties).sort().map(function (mn) {
-              const mp = params[n].properties[mn];
-              return '<div class="dg" style="padding-left:8px">.' + esc(mn) + " \u00b7 " + esc(mp.type) +
-                (mp.default ? " = " + esc(mp.default) : "") + "</div>";
-            }).join("")
-          : "") + "</div></div>";
+        memberSummary(params[n].properties, 1) + "</div></div>";
     });
     if (!paramFormOpen) {
       h += '<div style="padding:8px 10px"><button class="btn sm" id="param-add-btn">+ Add parameter</button></div>';
@@ -187,7 +192,7 @@ export function init(rootEl, deps) {
               return '<div style="display:flex;gap:4px;align-items:center">' +
                 '<input class="search" data-member-name data-mi="' + mi + '" placeholder="memberName" value="' + esc(m.name) + '" style="flex:1;min-width:0">' +
                 '<select class="search" data-member-type data-mi="' + mi + '" style="flex:0 0 auto">' +
-                ["string","integer","number","boolean"].map(function (t) {
+                ["string","integer","number","boolean","object"].map(function (t) {
                   return '<option' + (m.type === t ? " selected" : "") + ">" + t + "</option>";
                 }).join("") + "</select>" +
                 '<input class="search" data-member-default data-mi="' + mi + '" placeholder="default" value="' + esc(m.default || "") + '" style="flex:0 0 70px">' +
@@ -556,7 +561,9 @@ export function init(rootEl, deps) {
         paramMembers.forEach(function (m) {
           if (!m.name.trim()) return;
           const mp = { type: m.type };
-          if ((m.default || "").trim()) mp.default = m.default.trim();
+          // objects take no default (the engine refuses it); nested members
+          // are declared afterwards in the inspector's member tree
+          if ((m.default || "").trim() && m.type !== "object") mp.default = m.default.trim();
           props[m.name.trim()] = mp;
         });
         if (Object.keys(props).length) param.properties = props;

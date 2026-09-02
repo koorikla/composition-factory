@@ -135,9 +135,9 @@ func TestValidateRejectsPropertiesOnNonObjectType(t *testing.T) {
 	}
 }
 
-// One level deep in v1: a member may not itself declare properties. The
-// message keeps the door open — this is v1 scope, not a permanent ruling.
-func TestValidateRejectsNestedMemberProperties(t *testing.T) {
+// Members nest to arbitrary depth (the openapi-editor shape); properties on
+// a SCALAR member stay refused with an error naming the member's type.
+func TestValidateAcceptsNestedMemberProperties(t *testing.T) {
 	b := typedBlueprint(t, func(b *Blueprint) {
 		p := b.Spec.XRD.Parameters["tuning"]
 		p.Properties["nested"] = Parameter{
@@ -146,31 +146,39 @@ func TestValidateRejectsNestedMemberProperties(t *testing.T) {
 		}
 		b.Spec.XRD.Parameters["tuning"] = p
 	})
-	err := b.Validate()
-	if err == nil || !strings.Contains(err.Error(), "one level") {
-		t.Fatalf("err = %v, want the one-level-in-v1 refusal", err)
-	}
-	if !strings.Contains(err.Error(), "tuning") || !strings.Contains(err.Error(), "nested") {
-		t.Errorf("err = %v, want it to name the parameter and the member", err)
+	if err := b.Validate(); err != nil {
+		t.Fatalf("nested object member refused: %v", err)
 	}
 }
 
-func TestValidateRejectsObjectAndArrayMembers(t *testing.T) {
-	for _, typ := range []string{"object", "array"} {
-		t.Run(typ, func(t *testing.T) {
-			b := typedBlueprint(t, func(b *Blueprint) {
-				p := b.Spec.XRD.Parameters["tuning"]
-				p.Properties["bad"] = Parameter{Type: typ}
-				b.Spec.XRD.Parameters["tuning"] = p
-			})
-			err := b.Validate()
-			if err == nil || !strings.Contains(err.Error(), "scalar") {
-				t.Fatalf("err = %v, want a complaint that members are scalar in v1", err)
-			}
-			if !strings.Contains(err.Error(), `"bad"`) && !strings.Contains(err.Error(), ".bad") {
-				t.Errorf("err = %v, want it to name the member", err)
-			}
-		})
+func TestValidateRejectsPropertiesOnScalarMember(t *testing.T) {
+	b := typedBlueprint(t, func(b *Blueprint) {
+		p := b.Spec.XRD.Parameters["tuning"]
+		p.Properties["odd"] = Parameter{
+			Type:       "string",
+			Properties: map[string]Parameter{"deep": {Type: "string"}},
+		}
+		b.Spec.XRD.Parameters["tuning"] = p
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "only valid on type: object") {
+		t.Fatalf("err = %v, want the properties-on-scalar refusal", err)
+	}
+}
+
+func TestValidateRejectsArrayMembers(t *testing.T) {
+	// object members are now real nested schemas; array stays refused
+	b := typedBlueprint(t, func(b *Blueprint) {
+		p := b.Spec.XRD.Parameters["tuning"]
+		p.Properties["bad"] = Parameter{Type: "array"}
+		b.Spec.XRD.Parameters["tuning"] = p
+	})
+	err := b.Validate()
+	if err == nil || !strings.Contains(err.Error(), "scalar") {
+		t.Fatalf("err = %v, want a complaint that array members are refused", err)
+	}
+	if !strings.Contains(err.Error(), `.bad`) {
+		t.Errorf("err = %v, want it to name the member", err)
 	}
 }
 
@@ -248,7 +256,7 @@ func TestValidateRejectsUnknownMemberReference(t *testing.T) {
 		b.Spec.Resources[0].Fields["maxMessageSize"] = Field{From: "params.tuning.nope"}
 	})
 	err := b.Validate()
-	if err == nil || !strings.Contains(err.Error(), `"nope"`) || !strings.Contains(err.Error(), `"tuning"`) {
+	if err == nil || !strings.Contains(err.Error(), `"nope"`) || !strings.Contains(err.Error(), "tuning") {
 		t.Fatalf("err = %v, want an error naming the unknown member and its parameter", err)
 	}
 	// The declared members are listed so the fix is one round-trip.
@@ -278,13 +286,15 @@ func TestValidateRejectsMemberReferenceOnScalarParameter(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsTwoLevelMemberReference(t *testing.T) {
+func TestValidateRejectsChainThroughScalarMember(t *testing.T) {
+	// deep chains are legal now, but only through object members — a chain
+	// that descends through a scalar names the scalar's type
 	b := typedBlueprint(t, func(b *Blueprint) {
 		b.Spec.Resources[0].Fields["maxMessageSize"] = Field{From: "params.tuning.maxSize.deeper"}
 	})
 	err := b.Validate()
-	if err == nil || !strings.Contains(err.Error(), "one level") {
-		t.Fatalf("err = %v, want the one-level-in-v1 refusal", err)
+	if err == nil || !strings.Contains(err.Error(), "not \"object\"") {
+		t.Fatalf("err = %v, want the chain-through-scalar refusal", err)
 	}
 }
 

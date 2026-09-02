@@ -212,12 +212,20 @@ function modeButtons(path, pressed, isEnv) {
 
 function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap, isEnv) {
   var names = [];
+  function collectMemberRefs(prefix, props) {
+    Object.keys(props || {}).sort().forEach(function (mn) {
+      var mp = props[mn];
+      if (mp.type === "object" && mp.properties) {
+        collectMemberRefs(prefix + "." + mn, mp.properties); // arbitrary depth
+        return;
+      }
+      if (compatible(mp.type, fieldType)) names.push(prefix + "." + mn);
+    });
+  }
   Object.keys(params).forEach(function (n) {
     var p = params[n];
     if (p.type === "object" && p.properties) {
-      Object.keys(p.properties).sort().forEach(function (mn) {
-        if (compatible(p.properties[mn].type, fieldType)) names.push(n + "." + mn);
-      });
+      collectMemberRefs(n, p.properties);
       return; // a typed object itself is not a scalar wire target
     }
     if (compatible(p.type, fieldType)) names.push(n);
@@ -618,9 +626,44 @@ function renderXRD() {
     '<div class="g">' + esc((xrd.plural || "") + "." + (xrd.group || "")) + " &#183; " + esc(xrd.version) + "</div></div>" +
     '<div style="padding:7px 12px 3px"><span class="lbl">Parameters (' + names.length + ")</span></div>";
 
+  var MEMBER_TYPES = ["string", "integer", "number", "boolean", "object"];
+
+  // memberTreeHtml renders an object parameter's members recursively \u2014 the
+  // openapi-editor shape. Every row is addressed "<param>|<dot.path>", so
+  // one delegated handler edits any depth.
+  function memberTreeHtml(paramName, parentPath, props, depth) {
+    var out = "";
+    Object.keys(props || {}).sort().forEach(function (mn) {
+      var mp = props[mn];
+      var path = parentPath ? parentPath + "." + mn : mn;
+      var key = paramName + "|" + path;
+      out += '<div class="frow" style="margin:2px 0 0 ' + (depth * 12) + 'px">' +
+        '<input class="tin" data-mname="' + esc(key) + '" value="' + esc(mn) + '" aria-label="Member name" style="flex:1;min-width:0">' +
+        '<select class="tsel" data-mtype="' + esc(key) + '" aria-label="Member type">' +
+        MEMBER_TYPES.map(function (t) {
+          return "<option" + (t === mp.type ? " selected" : "") + ">" + t + "</option>";
+        }).join("") + "</select>" +
+        '<label class="g" style="display:inline-flex;align-items:center;gap:3px;font-size:11px">' +
+        '<input type="checkbox" data-mreq="' + esc(key) + '"' + (mp.required ? " checked" : "") + ">req</label>" +
+        (mp.type === "object" ? "" :
+          '<input class="tin" data-mdef="' + esc(key) + '" value="' + esc(mp.default || "") + '" placeholder="default" style="flex:0 0 64px">') +
+        '<button class="del" data-mdel="' + esc(key) + '" title="Remove member">\u00d7</button></div>';
+      if (mp.type === "object") {
+        out += memberTreeHtml(paramName, path, mp.properties, depth + 1);
+        out += '<div style="margin-left:' + ((depth + 1) * 12) + 'px;padding:2px 0">' +
+          '<button class="btn sm" data-madd="' + esc(paramName + "|" + path) + '">+ member</button></div>';
+      }
+    });
+    return out;
+  }
+
   function paramDetailRow(n, p) {
     if (p.type === "object") {
-      return '<div class="g" style="padding:2px 0 4px">free-form map (string values) \u2014 bind map fields like tags</div>';
+      var mh = (p.properties && Object.keys(p.properties).length ? "" :
+        '<div class="g" style="padding:2px 0 2px">no members \u2192 free-form map (string values); add members for a typed schema</div>');
+      mh += memberTreeHtml(n, "", p.properties, 0);
+      mh += '<div style="padding:3px 0 4px"><button class="btn sm" data-madd="' + esc(n + "|") + '">+ member</button></div>';
+      return mh;
     }
     var h = '<div class="frow" style="margin-bottom:0">';
     if (p.type === "boolean") {
@@ -826,9 +869,49 @@ function paramFrom(existing, patch) {
     enum: existing.enum || null,
     default: existing.default || "",
     description: existing.description || "",
+    // carried, not rebuilt: dropping this here is how an object param
+    // used to lose its whole member tree on any unrelated update
+    properties: existing.properties || null,
   };
   Object.keys(patch).forEach(function (k) { p[k] = patch[k]; });
   return p;
+}
+
+/* ---- object-parameter member tree helpers (any nesting depth) ---- */
+
+function cloneProps(p) { return p ? JSON.parse(JSON.stringify(p)) : {}; }
+
+// memberParent walks a dot-path to the object holding its final segment.
+function memberParent(props, path) {
+  var segs = path.split(".");
+  var cur = props;
+  for (var i = 0; i < segs.length - 1; i++) {
+    cur = (cur[segs[i]] || {}).properties;
+    if (!cur) return null;
+  }
+  return cur[segs[segs.length - 1]] === undefined ? null : { parent: cur, key: segs[segs.length - 1] };
+}
+
+// memberContainer returns the properties map AT parentPath ("" = the root).
+function memberContainer(props, parentPath) {
+  if (!parentPath) return props;
+  var segs = parentPath.split(".");
+  var cur = props;
+  for (var i = 0; i < segs.length; i++) {
+    var m = cur[segs[i]];
+    if (!m) return null;
+    if (!m.properties) m.properties = {};
+    cur = m.properties;
+  }
+  return cur;
+}
+
+// commitMembers writes a parameter's whole member tree back (empty = the
+// free-form map again). Callers wrap it in op() for the shared error path.
+function commitMembers(paramName, props) {
+  var params = paramsOf(store.state.doc);
+  return store.updateParameter(paramName,
+    paramFrom(params[paramName], { properties: Object.keys(props).length ? props : null }));
 }
 
 /* ---------------- events ---------------- */
@@ -1004,6 +1087,33 @@ function onBoxClick(e) {
   var cancel = e.target.closest("[data-npcancel]");
   if (cancel) { pendingNewParam = null; render(); return; }
 
+  var madd = e.target.closest("[data-madd]");
+  if (madd) {
+    var maddKey = madd.getAttribute("data-madd").split("|");
+    var maddParam = maddKey[0], maddPath = maddKey[1];
+    var maddProps = cloneProps((paramsOf(doc)[maddParam] || {}).properties);
+    var cont = memberContainer(maddProps, maddPath);
+    if (!cont) return;
+    var mBase = "member", mNm = mBase + "1", mI = 2;
+    while (cont[mNm]) { mNm = mBase + mI; mI++; }
+    cont[mNm] = { type: "string" };
+    op(function () { return commitMembers(maddParam, maddProps); })
+      .then(function (r) { if (r === null) render(); });
+    return;
+  }
+
+  var mdel = e.target.closest("[data-mdel]");
+  if (mdel) {
+    var mdelKey = mdel.getAttribute("data-mdel").split("|");
+    var mdelProps = cloneProps((paramsOf(doc)[mdelKey[0]] || {}).properties);
+    var mdelLoc = memberParent(mdelProps, mdelKey[1]);
+    if (!mdelLoc) return;
+    delete mdelLoc.parent[mdelLoc.key];
+    op(function () { return commitMembers(mdelKey[0], mdelProps); })
+      .then(function (r) { if (r === null) render(); });
+    return;
+  }
+
   var pd = e.target.closest("[data-pd]");
   if (pd) {
     var pn = pd.getAttribute("data-pd");
@@ -1142,6 +1252,38 @@ function onBoxChange(e) {
     var oldName = t.getAttribute("data-pn"), newName = t.value.trim();
     if (!newName || newName === oldName) { render(); return; }
     op(function () { return store.renameParameter(oldName, newName); })
+      .then(function (r) { if (r === null) render(); });
+    return;
+  }
+
+  var mAttr = null;
+  ["data-mname", "data-mtype", "data-mreq", "data-mdef"].some(function (a) {
+    if (t.hasAttribute(a)) { mAttr = a; return true; }
+    return false;
+  });
+  if (mAttr) {
+    var mKey = t.getAttribute(mAttr).split("|");
+    var mParam = mKey[0], mPath = mKey[1];
+    var mProps = cloneProps((paramsOf(doc)[mParam] || {}).properties);
+    var mLoc = memberParent(mProps, mPath);
+    if (!mLoc) return;
+    if (mAttr === "data-mname") {
+      var mNew = t.value.trim();
+      if (!mNew || mNew === mLoc.key) { render(); return; }
+      if (mLoc.parent[mNew]) { render(); return; } // duplicate name: keep the old
+      mLoc.parent[mNew] = mLoc.parent[mLoc.key];
+      delete mLoc.parent[mLoc.key];
+    } else if (mAttr === "data-mtype") {
+      mLoc.parent[mLoc.key].type = t.value;
+      if (t.value !== "object") delete mLoc.parent[mLoc.key].properties;
+      if (t.value === "object") { delete mLoc.parent[mLoc.key].default; delete mLoc.parent[mLoc.key].enum; }
+    } else if (mAttr === "data-mreq") {
+      mLoc.parent[mLoc.key].required = t.checked;
+    } else {
+      if (t.value) mLoc.parent[mLoc.key].default = t.value;
+      else delete mLoc.parent[mLoc.key].default;
+    }
+    op(function () { return commitMembers(mParam, mProps); })
       .then(function (r) { if (r === null) render(); });
     return;
   }
