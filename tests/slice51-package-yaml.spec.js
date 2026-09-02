@@ -1,16 +1,6 @@
-import { test, expect } from '@playwright/test';
-import * as fs from 'node:fs';
-
-const ENGINE = 'http://127.0.0.1:8081';
-const pristine = fs.readFileSync('tests/fixtures/pristine-doc.yaml', 'utf8');
-
-async function resetDoc(request) {
-  const res = await request.put(ENGINE + '/api/blueprint', {
-    headers: { 'Content-Type': 'application/yaml' },
-    data: pristine,
-  });
-  expect(res.ok()).toBeTruthy();
-}
+const { test, expect } = require('@playwright/test')
+const fs = require('fs')
+const { resetDoc, ENGINE } = require('./helpers')
 
 test.describe('package.yaml in and out', () => {
   test.beforeEach(async ({ request }) => {

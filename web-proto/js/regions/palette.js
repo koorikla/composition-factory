@@ -16,6 +16,7 @@
 import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { fanOut } from "../wires.js";
+import { esc } from "../dom.js";
 
 /* Node color families, exactly as the prototype's COLORS map. */
 const COLORS = { aws: "var(--wire-ref)", k8s: "var(--wire-status)", cluster: "#06b6d4" };
@@ -28,12 +29,6 @@ const HINT_SRC =
   'Pinned by digest in <span class="mono">.cf.lock</span> or discovered live from your cluster.';
 
 let booted = false;
-
-/** Prototype's esc(). */
-function esc(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
 
 /** Color family for a live kind row (heuristic: provider/group naming). */
 function famOf(k) {

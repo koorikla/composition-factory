@@ -47,7 +47,9 @@ test('switching engine to kcl emits function-kcl composition and updates functio
 })
 
 test('a reload keeps engine select in sync with the persisted document', async ({ page }) => {
-  await page.locator('#engineSel').selectOption('kcl')
+  await page.click('#tabs button[data-t="comp"]')
+  const engineSel = page.locator('#engineSel')
+  await engineSel.selectOption('kcl')
   await expect(page.locator('#code')).toContainText('function-kcl')
 
   await page.reload()

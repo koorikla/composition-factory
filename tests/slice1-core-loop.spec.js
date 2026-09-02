@@ -3,8 +3,7 @@
 // change, see a real 400 verbatim. Selectors match web-proto/index.html
 // (region roots #region-palette / #cw / #region-inspector / #region-output).
 //
-// cf serve on 127.0.0.1:8080 is a precondition (skipped otherwise);
-// serve.py (5180) is started by playwright.config.js. Every test restores
+// The suite runs against its own isolated engine on 127.0.0.1:8081. Every test restores
 // the live blueprint to the exact doc it found, so the suite is idempotent.
 const { test, expect } = require('@playwright/test')
 const { resetDoc } = require('./helpers')

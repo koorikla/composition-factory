@@ -16,6 +16,7 @@
 import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { listWires, fanOut, parseFrom } from "../wires.js";
+import { esc } from "../dom.js";
 
 const XR_ID = "xrd"; // store.selectedResource / positions key for the composite node
 
@@ -32,12 +33,6 @@ let inited = false;
 let rafWires = 0;
 
 /* ---------- small helpers ---------- */
-
-function esc(s) {
-  return String(s == null ? "" : s)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 function shortPath(p) {
   const seg = String(p).split(".");

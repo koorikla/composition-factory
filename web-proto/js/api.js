@@ -31,15 +31,21 @@
  * @returns {Promise<*>}  Parsed JSON body (null for empty responses)
  * @throws {ApiError}
  */
-async function request(method, path, body) {
-  const opts = { method, headers: {} };
+async function request(method, path, body, opts) {
+  const options = opts || {};
+  const fetchOpts = { method, headers: {} };
+  const contentType = options.contentType || (body !== undefined ? "application/json" : null);
+  if (contentType) {
+    fetchOpts.headers["Content-Type"] = contentType;
+  }
   if (body !== undefined) {
-    opts.headers["Content-Type"] = "application/json";
-    opts.body = JSON.stringify(body);
+    fetchOpts.body = (contentType === "application/json" && typeof body !== "string")
+      ? JSON.stringify(body)
+      : body;
   }
   let res;
   try {
-    res = await fetch(path, opts);
+    res = await fetch(path, fetchOpts);
   } catch (e) {
     throw { status: 0, message: "network error: " + (e && e.message || e) };
   }
@@ -53,6 +59,9 @@ async function request(method, path, body) {
       || text || (res.status + " " + res.statusText);
     console.warn("[API ERROR]", res.status, path, message);
     throw { status: res.status, message };
+  }
+  if (options.responseType === "text") {
+    return text;
   }
   return data;
 }
@@ -270,47 +279,17 @@ export function syncCluster() {
  * returns the persisted doc. 400s carry the parse/validation error verbatim.
  */
 export function importBlueprint(yamlText) {
-  return fetch("/api/blueprint/import", {
-    method: "POST",
-    headers: { "Content-Type": "application/yaml" },
-    body: yamlText,
-  }).then(async function (res) {
-    const body = await res.json().catch(function () { return {}; });
-    if (!res.ok) {
-      const e = new Error(body.error || res.statusText);
-      e.status = res.status;
-      throw e;
-    }
-    return body;
-  });
+  return request("POST", "/api/blueprint/import", yamlText, { contentType: "application/yaml" });
 }
 
 /** GET /api/package?format=yaml — the package.yaml document stream as text. */
 export function getPackageYAML() {
-  return fetch("/api/package?format=yaml").then(async function (res) {
-    if (!res.ok) {
-      const body = await res.json().catch(function () { return {}; });
-      throw new Error(body.error || res.statusText);
-    }
-    return res.text();
-  });
+  return request("GET", "/api/package?format=yaml", undefined, { responseType: "text" });
 }
 
 /** POST /api/sources/crds — add a scanned CRD manifest as a schema source. */
 export function addCRDSource(name, yamlText) {
-  return fetch("/api/sources/crds", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: name, yaml: yamlText }),
-  }).then(async function (res) {
-    const body = await res.json().catch(function () { return {}; });
-    if (!res.ok) {
-      const e = new Error(body.error || res.statusText);
-      e.status = res.status;
-      throw e;
-    }
-    return body;
-  });
+  return request("POST", "/api/sources/crds", { name: name, yaml: yamlText });
 }
 
 /** GET /api/examples — list curated starter blueprints. */

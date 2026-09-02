@@ -19,6 +19,7 @@
 import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { fanOut } from "../wires.js";
+import { esc } from "../dom.js";
 
 var PARAM_TYPES = ["string", "integer", "number", "boolean", "object"];
 
@@ -40,12 +41,6 @@ var fieldsCache = {};            // "apiVersion|kind" -> {fields,total}
 var kindDetailCache = {};        // "apiVersion|kind" -> {kind, envelope, status}
 
 /* ---------------- helpers ---------------- */
-
-function esc(s) {
-  return String(s === undefined || s === null ? "" : s)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
 
 function selectedResource() {
   var doc = store.state.doc, sel = store.state.selectedResource;

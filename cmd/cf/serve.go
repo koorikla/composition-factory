@@ -33,8 +33,7 @@ const shutdownTimeout = 10 * time.Second
 // provider schema cache — schema browsing, blueprint editing and `cf gen`'s
 // generate step — and serves the embedded canvas GUI at /, so `cf serve`
 // alone gives the full app at the printed address. --no-ui drops the GUI and
-// serves the API only (for MCP tooling, or a dev iterating on web-proto/
-// through serve.py's live proxy instead of the embedded snapshot).
+// serves the API only.
 //
 // SECURITY: this server has no authentication, by design -- see
 // internal/api's package comment for the full reasoning. It also both reads
@@ -248,8 +247,7 @@ func withUI(api http.Handler, noUI bool) http.Handler {
 	return mux
 }
 
-// noStore disables client caching on every UI response. Same discipline as
-// web-proto/serve.py's dev server, same reason: the assets change with every
+// noStore disables client caching on every UI response. The assets change with every
 // rebuild of this binary, and a browser that cached a module from the
 // previous build ghosts stale code behind the module cache — the class of
 // silent staleness this project exists to avoid. The payloads are a few

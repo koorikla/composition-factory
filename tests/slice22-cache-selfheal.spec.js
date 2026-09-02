@@ -10,9 +10,3 @@ test('the UI server sends Clear-Site-Data on the document only', async ({ reques
   expect(mod.headers()['clear-site-data']).toBeUndefined()
   expect(mod.headers()['cache-control']).toBe('no-store')
 })
-
-test('the dev proxy sends it too when running', async ({ request }) => {
-  const doc = await request.get('http://127.0.0.1:5180/').catch(() => null)
-  test.skip(!doc, 'serve.py not running (dev-only proxy)')
-  expect(doc.headers()['clear-site-data']).toBe('"cache"')
-})
