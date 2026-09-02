@@ -408,7 +408,7 @@ Two coupled failure modes. First, users will hand-edit the generated Composition
 
 ---
 
-### Scratch artifacts (all under `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/`)
+### Scratch artifacts (all under ``)
 
 - `bundletest/` — Vite harness used for every bundle measurement; `rtest/render.mjs`, `rtest/edge.mjs`, `rtest/jf2.mjs` are the rjsf/JSONForms comparison scripts; `measure2.mjs` computes the schema payload tiers; `parseperf.mjs` the parse/heap benchmark
 - `xpkg/ec2.yaml` — 8.56 MB, 204 CRDs, extracted via `crossplane xpkg extract xpkg.upbound.io/upbound/provider-aws-ec2:v2`

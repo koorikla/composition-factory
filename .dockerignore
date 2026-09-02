@@ -1,6 +1,7 @@
 .git
 .github
 .claude
+.superpowers
 bin
 out
 node_modules

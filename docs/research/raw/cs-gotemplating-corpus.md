@@ -10,7 +10,7 @@ templates** totalling **53,069 template lines / 21,036 template actions**. Plus 
 (`crossplane-contrib/function-go-templating`, HEAD `5d48403`, tags through v0.12.4) read in full: README, all 24
 `example/` compositions, `function_maps.go`, `fn.go`, `extraresources.go`, `input/v1beta1/input.go`.
 
-Scratch data: `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/`
+Scratch data: ``
 (`corpus/`, `repos/`, `docs2.json`, `freq.txt`, `actions.txt`, `struct.txt`).
 
 ---

@@ -888,7 +888,7 @@ Measured limits:
 
 ## Scratch artefacts
 
-- `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/disc/all_providers.json` — the full 153-provider marketplace crawl, the basis for every sizing and collision number above.
+- `disc/all_providers.json` — the full 153-provider marketplace crawl, the basis for every sizing and collision number above.
 - `.../disc/contrib_pkgs.txt` — 439 `ghcr.io/crossplane-contrib` package names (409 `provider-*`).
 - `.../disc/cosign.pem` — the decoded Upbound signing certificate.
 - `.../disc/scrape.py`, `.../disc/mkq.py` — the marketplace crawlers.

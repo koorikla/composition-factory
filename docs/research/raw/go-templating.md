@@ -664,6 +664,6 @@ spec:
 This renders cleanly on the user's exact stack (Crossplane 2.4.0 server, v2 Namespaced XRD, no claims, `sqs.aws.m.upbound.io/v1beta1`), which is the shape I used throughout the verification runs above.
 
 **Scratch artifacts left on disk** (all read-only work; the cluster was not modified):
-- `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/fgt012/` — verified v0.12.0 source checkout
-- `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/rt/` — 23 render test cases (`c1.yaml`–`c23.yaml`, `xr.yaml`, `xr2.yaml`, `observed.yaml`, `obs2.yaml`, `obs3.yaml`, `extra.yaml`, `creds.yaml`, `functions.yaml`)
-- `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/sprigls/` — Sprig v3.3.0 enumeration program
+- `fgt012/` — verified v0.12.0 source checkout
+- `rt/` — 23 render test cases (`c1.yaml`–`c23.yaml`, `xr.yaml`, `xr2.yaml`, `observed.yaml`, `obs2.yaml`, `obs3.yaml`, `extra.yaml`, `creds.yaml`, `functions.yaml`)
+- `sprigls/` — Sprig v3.3.0 enumeration program

@@ -129,12 +129,17 @@ jobs:
           docker pull ghcr.io/${{ github.repository }}:latest
           ```
 
-          Run the visual canvas UI:
+          Run the visual canvas UI (create a blueprint first — see README):
           ```sh
-          docker run --rm -p 8080:8080 -v $(pwd):/workspace -v cf-cache:/home/cf/.cache/compositionfactory ghcr.io/${{ github.repository }}:${{ github.ref_name }} serve --blueprint testdata/xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
+          docker run --rm -p 8080:8080 \
+            -v $(pwd):/workspace \
+            -v cf-cache:/home/cf/.cache/compositionfactory \
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
+            serve --blueprint xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
           ```
 
           ### Pre-compiled Binaries
           Multi-platform binaries and `checksums.txt` are attached below.
           EOF
           )"
+

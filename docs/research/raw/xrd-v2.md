@@ -491,7 +491,7 @@ spec:
 
 ## 11. Scratch artifacts (absolute paths)
 
-All under `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/`:
+All under ``:
 `xrd-crd.json` / `xrd-crd.yaml` (live XRD CRD), `v1schema.json`, `v2schema.json` (extracted XRD OpenAPI schemas), `xr-crd.json`, `xr-openapi.json` (live derived XQueue CRD), `crd.go`, `schemas.go` (crossplane-runtime `pkg/xcrd` sources), `t1.yaml`–`t24.yaml` (test cases), `conv.sh` (helper: convert → strip ownerRefs → server dry-run).
 
 ## 12. Sources

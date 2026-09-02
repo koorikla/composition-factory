@@ -282,7 +282,7 @@ Every one of these is **one-directional**. That is not an accident.
 
 ### Round-tripping: don't, and here is the evidence
 
-I parsed the user's actual production template (extracted live from `composition/xqueues.aws.platform.sparky.ee`) with Go's `text/template/parse`. Source at `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/tmplexp/main.go`.
+I parsed the user's actual production template (extracted live from `composition/xqueues.aws.platform.sparky.ee`) with Go's `text/template/parse`. Source at `tmplexp/main.go`.
 
 **First result — parsing fails outright by default:**
 ```
@@ -468,7 +468,7 @@ crossplane-xrds               4      crossplane/xrds               true     cros
 crossplane-xrs                5      crossplane/xrs                true     crossplane-system  true   true      Directory
 ```
 
-Repo `git@github.com:koorikla/platform-engineering-backstack.git`:
+Example platform-engineering GitOps repo layout:
 ```
 crossplane/
   compositions/
@@ -543,4 +543,4 @@ Also add `--check` as a pre-commit hook, and gate hand-edits with a `CODEOWNERS`
 
 **Could not confirm — flagging honestly:** whether adding a `kustomization.yaml` under a `directory.recurse: true` path flips `sourceType` to Kustomize *in this specific ArgoCD 3.5.1 config* (inferred from observed Helm/Directory auto-detection; test in a scratch repo before shipping `--layout kustomize`). Whether `crossplane` core rejects an XRD whose `metadata.name != <plural>.<group>` (consistent with all observed data and the CRD invariant, but I did not apply a bad manifest — the cluster is read-only per instructions). Trailing-whitespace effects on YAML block-scalar round-tripping are reasoned from the YAML spec, not measured.
 
-**Scratch artifacts** (all under `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/`): `tmplexp/main.go` + `tmplexp/tmpl.txt` (AST experiment), `cliergo/` (render determinism goldens), `offl/schemas/` (offline schema pull + lockfile), `proj/` and `iso/` (crossplane project generate outputs), `bin/kubectl-crossplane_factory` (plugin-naming test).
+**Scratch artifacts** (all under ``): `tmplexp/main.go` + `tmplexp/tmpl.txt` (AST experiment), `cliergo/` (render determinism goldens), `offl/schemas/` (offline schema pull + lockfile), `proj/` and `iso/` (crossplane project generate outputs), `bin/kubectl-crossplane_factory` (plugin-naming test).

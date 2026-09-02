@@ -672,7 +672,7 @@ crane blob "${REF%%:*}@$BASE" | gunzip | tar -xO package.yaml
 gh api repos/crossplane-contrib/provider-upjet-aws -q '.license.spdx_id'
 ```
 
-Working files: `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/ossresearch/`
+Working files: `ossresearch/`
 (`probe.sh` — base-layer meta probe; `extract.py` — package.yaml extraction; `crds.py` — group/kind/scope listing; `diffcrd.py` — per-CRD SHA-256 comparison)
 
 Environment gotcha for anyone re-running these: the shared scratchpad contains a `struct.py` that shadows the stdlib module and prints on import, breaking `import tarfile`. Run from an isolated directory.

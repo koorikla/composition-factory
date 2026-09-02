@@ -2,7 +2,7 @@
 
 Research brief — area: cloud IAM derivation. Date: 2026-08-28.
 Every claim is tagged **VERIFIED** (I ran it / read the bytes) or **DOCS** (read it, did not execute).
-Working files: `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/`
+Working files: ``
 
 ---
 

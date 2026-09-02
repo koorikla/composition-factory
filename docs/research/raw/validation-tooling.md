@@ -155,7 +155,7 @@ Fully cold (engine 106 MB + go-templating 80.1 MB + auto-ready 78.9 MB ≈ 265 M
 
 ### Verified end-to-end run on the user's own XQueue ✅
 
-Reconstructed from the live cluster into `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/xqueue/` (`xr.yaml`, `composition.yaml`, `functions.yaml`, `xrd.yaml`).
+Reconstructed from the live cluster into `xqueue/` (`xr.yaml`, `composition.yaml`, `functions.yaml`, `xrd.yaml`).
 
 ```
 crossplane composition render xr.yaml composition.yaml functions.yaml
@@ -468,7 +468,7 @@ Pointed at the **Function** manifests it also vendors function input CRDs ✅ (`
 
 ## 7. Recommended `make test` for generated projects
 
-Built and executed end-to-end ✅ at `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/genproj/Makefile`. **Full `make test` = 1.38 s warm; idempotent across runs.**
+Built and executed end-to-end ✅ at `genproj/Makefile`. **Full `make test` = 1.38 s warm; idempotent across runs.**
 
 ```makefile
 CROSSPLANE ?= crossplane
@@ -581,7 +581,7 @@ Cache `~/.crossplane/cache` (1.2 MB) and the Docker images (~265 MB) between run
 
 ## Reference paths
 
-- Reconstructed XQueue bundle: `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/xqueue/`
-- Working generated-project skeleton + Makefile: `/private/tmp/claude-501/-Users-kaurkallas-compositionfactory/96c83f73-f673-491a-aa88-c90f84f1eafb/scratchpad/genproj/`
+- Reconstructed XQueue bundle: `xqueue/`
+- Working generated-project skeleton + Makefile: `genproj/`
 - Captured help text: `.../scratchpad/help-render.txt`, `.../scratchpad/help-validate-trace.txt`, `.../scratchpad/help-generate.txt`
 - Docs: https://docs.crossplane.io/latest/cli/command-reference/
