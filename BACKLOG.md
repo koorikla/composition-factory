@@ -76,8 +76,8 @@
 - [x] Annotations authoring (engine shipped; IRSA opening demo live): Resource.annotations map with
       value/from/raw/template forms — IRSA (Role arn → ServiceAccount
       annotation) as the acceptance fixture; becomes the opening demo.
-- [ ] First-class map-entry wires in fields (annotations[key]-style bracket
-      grammar) — the general form of the same need. Later.
+- [x] First-class map-entry wires in fields (annotations[key]-style bracket
+      grammar & GUI authoring) — completed 2026-09-02
 - [x] Test isolation v2: the behavior suite gets its OWN cf serve (own port +
       scratch blueprint copy) so runs stop trampling the doc the user is
       looking at (isolated runner on 8081). — completed 2026-09-02

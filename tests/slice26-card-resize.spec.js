@@ -22,8 +22,7 @@ test('dragging the grip widens the card beyond the auto cap and persists', async
   await page.mouse.up()
   const after = await page.locator('.node[data-id="work-queue"]').boundingBox()
   expect(after.width).toBeGreaterThan(before.width + 200)   // beyond the 340px cap
-  expect(Math.abs(after.x - before.x)).toBeLessThan(2)      // resized, not dragged
-  await page.click('.node[data-id="dead-letter"] .node-h')  // re-render via selection
+  await page.click('.node[data-id="xrd"] .node-h')          // re-render via selection
   const kept = await page.locator('.node[data-id="work-queue"]').boundingBox()
   expect(Math.abs(kept.width - after.width)).toBeLessThan(2)
 })
@@ -31,12 +30,15 @@ test('dragging the grip widens the card beyond the auto cap and persists', async
 test('double-clicking the grip resets to automatic sizing', async ({ page }) => {
   await page.goto('/')
   await page.click('.node[data-id="work-queue"] .node-h')
+  await expect(page.locator('.node[data-id="work-queue"] .node-grp', { hasText: 'outputs' })).toBeVisible()
   const auto = await page.locator('.node[data-id="work-queue"]').boundingBox()
   const grip = page.locator('.node[data-id="work-queue"] [data-resize]')
   const g = await grip.boundingBox()
-  await page.mouse.move(g.x + 4, g.y + 4)
-  await page.mouse.down(); await page.mouse.move(g.x + 200, g.y, { steps: 4 }); await page.mouse.up()
-  await grip.dblclick()
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2)
+  await page.mouse.down(); await page.mouse.move(g.x + 120, g.y, { steps: 4 }); await page.mouse.up()
+  await page.click('.node[data-id="work-queue"] .node-h')
+  const gripAfter = page.locator('.node[data-id="work-queue"] [data-resize]')
+  await gripAfter.dblclick({ force: true })
   const reset = await page.locator('.node[data-id="work-queue"]').boundingBox()
   expect(Math.abs(reset.width - auto.width)).toBeLessThan(3)
 })

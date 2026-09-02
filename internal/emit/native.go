@@ -51,47 +51,57 @@ func buildNativeTree(resourceName string, plan []forProviderField) (*nativeNode,
 	root := &nativeNode{byName: map[string]*nativeNode{}}
 	for i := range plan {
 		f := &plan[i]
-		cur := root
-		segments := strings.Split(f.path, ".")
-		for si, s := range segments {
-			seg, indexed := strings.CutSuffix(s, "[0]")
-			// checkFieldPaths has already matched every path against the
-			// kind's own schema tree, whose segments are plain identifiers
-			// with at most a trailing [0]; anything else here is an emitter
-			// bug, not a user error, but it still must not be written out.
-			if seg == "" || strings.ContainsAny(seg, "[]") {
-				return nil, fmt.Errorf("resource %q: field %q: segment %q is not a plain name with an optional [0] index",
-					resourceName, f.path, s)
-			}
-			child := cur.byName[seg]
-			if child == nil {
-				child = &nativeNode{seg: seg, indexed: indexed, byName: map[string]*nativeNode{}}
-				cur.byName[seg] = child
-				cur.children = append(cur.children, child)
-			} else if child.indexed != indexed {
-				return nil, fmt.Errorf("resource %q: %q is set both as a whole array and by element [0]; "+
-					"set the whole array with one raw: field, or set element fields, not both",
-					resourceName, seg)
-			}
-			if child.leaf != nil {
-				// This path descends through (or lands on) a node another
-				// field already set outright.
-				return nil, fmt.Errorf("resource %q: field %q conflicts with field %q, which already sets that "+
-					"whole value; set the subtree with one raw: field or set individual fields inside it, not both",
-					resourceName, f.path, child.leaf.path)
-			}
-			if si == len(segments)-1 {
-				if len(child.children) > 0 {
-					return nil, fmt.Errorf("resource %q: field %q sets a whole value, but other fields already set "+
-						"paths inside it; set the subtree with one raw: field or set individual fields inside it, not both",
-						resourceName, f.path)
+		if f.isMap {
+			for ei := range f.entries {
+				entry := &f.entries[ei]
+				segments := append(strings.Split(f.path, "."), entry.path)
+				if err := insertNativePath(resourceName, root, f.path+"["+entry.path+"]", segments, entry); err != nil {
+					return nil, err
 				}
-				child.leaf = f
 			}
-			cur = child
+		} else {
+			segments := strings.Split(f.path, ".")
+			if err := insertNativePath(resourceName, root, f.path, segments, f); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return root, nil
+}
+
+func insertNativePath(resourceName string, root *nativeNode, fullPath string, segments []string, leaf *forProviderField) error {
+	cur := root
+	for si, s := range segments {
+		seg, indexed := strings.CutSuffix(s, "[0]")
+		if seg == "" {
+			return fmt.Errorf("resource %q: field %q: empty segment", resourceName, fullPath)
+		}
+		child := cur.byName[seg]
+		if child == nil {
+			child = &nativeNode{seg: seg, indexed: indexed, byName: map[string]*nativeNode{}}
+			cur.byName[seg] = child
+			cur.children = append(cur.children, child)
+		} else if child.indexed != indexed {
+			return fmt.Errorf("resource %q: %q is set both as a whole array and by element [0]; "+
+				"set the whole array with one raw: field, or set element fields, not both",
+				resourceName, seg)
+		}
+		if child.leaf != nil {
+			return fmt.Errorf("resource %q: field %q conflicts with field %q, which already sets that "+
+				"whole value; set the subtree with one raw: field or set individual fields inside it, not both",
+				resourceName, fullPath, child.leaf.path)
+		}
+		if si == len(segments)-1 {
+			if len(child.children) > 0 {
+				return fmt.Errorf("resource %q: field %q sets a whole value, but other fields already set "+
+					"paths inside it; set the subtree with one raw: field or set individual fields inside it, not both",
+					resourceName, fullPath)
+			}
+			child.leaf = leaf
+		}
+		cur = child
+	}
+	return nil
 }
 
 // analyze reports whether any descendant leaf of n renders unconditionally
@@ -158,7 +168,7 @@ func writeNativeNode(d *Doc, indent int, n *nativeNode) {
 		d.Line(indent, "{{- if or %s }}", strings.Join(conds, " "))
 	}
 
-	d.Line(indent, "%s:", n.seg)
+	d.Line(indent, "%s:", formatKey(n.seg))
 	if n.indexed {
 		// One sequence element. When the first child is an unconditional
 		// leaf its line carries the dash ("- name: web"); otherwise the dash
@@ -168,7 +178,7 @@ func writeNativeNode(d *Doc, indent int, n *nativeNode) {
 		first := n.children[0]
 		rest := n.children
 		if first.leaf != nil && first.leaf.guard == "" && !first.indexed {
-			d.Line(indent+1, "- %s: %s", first.seg, first.leaf.rhs)
+			d.Line(indent+1, "- %s: %s", formatKey(first.seg), first.leaf.rhs)
 			rest = n.children[1:]
 		} else {
 			d.Line(indent+1, "-")
@@ -196,10 +206,10 @@ func writeNativeLeaf(d *Doc, indent int, n *nativeNode) {
 		d.Line(indent, "{{- if %s }}", n.leaf.guard)
 	}
 	if n.indexed {
-		d.Line(indent, "%s:", n.seg)
+		d.Line(indent, "%s:", formatKey(n.seg))
 		d.Line(indent+1, "- %s", n.leaf.rhs)
 	} else {
-		d.Line(indent, "%s: %s", n.seg, n.leaf.rhs)
+		d.Line(indent, "%s: %s", formatKey(n.seg), n.leaf.rhs)
 	}
 	if n.leaf.guard != "" {
 		d.Line(indent, "{{- end }}")

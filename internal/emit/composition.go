@@ -381,10 +381,15 @@ func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
 	}
 	sort.Strings(paths) // deterministic: the same blueprint names the same field first
 	for _, p := range paths {
-		if known[p] {
+		basePath, _, isMap := blueprint.ParseFieldPath(p)
+		if known[p] || (isMap && known[basePath]) {
 			continue
 		}
-		if s := closestPath(p, suggestions); s != "" {
+		target := p
+		if isMap {
+			target = basePath
+		}
+		if s := closestPath(target, suggestions); s != "" {
 			return fmt.Errorf("resource %q: field %q is not in %s; did you mean %q? "+
 				"(an unknown field is silently pruned by the API server on apply, so it must be "+
 				"caught here)", r.Name, p, where, s)
@@ -454,7 +459,15 @@ func conventionFields(r blueprint.Resource, b *blueprint.Blueprint, crd schema.C
 		if len(n.Children) > 0 {
 			continue // a branch is a subtree, not a settable field
 		}
-		if _, explicit := merged[n.Name]; explicit {
+		hasExplicit := false
+		for k := range merged {
+			base, _, isMap := blueprint.ParseFieldPath(k)
+			if k == n.Name || (isMap && base == n.Name) {
+				hasExplicit = true
+				break
+			}
+		}
+		if hasExplicit {
 			continue // explicit wins: that IS the override
 		}
 		for _, c := range b.Spec.Conventions {
@@ -657,9 +670,11 @@ func editDistance(a, b string) int {
 // cross-resource status reference. An empty guard means the line always
 // renders — see writeMapField.
 type forProviderField struct {
-	path  string
-	rhs   string
-	guard string
+	path    string
+	rhs     string
+	guard   string
+	isMap   bool
+	entries []forProviderField
 }
 
 // planFields resolves r.Fields into a deterministic, path-sorted plan,
@@ -690,93 +705,111 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 	}
 	sort.Strings(paths)
 
-	plan := make([]forProviderField, 0, len(paths))
+	type leafItem struct {
+		basePath string
+		key      string
+		isMap    bool
+		rhs      string
+		guard    string
+	}
+	leaves := make([]leafItem, 0, len(paths))
+
 	for _, p := range paths {
 		f := r.Fields[p]
+		basePath, mapKey, isMap := blueprint.ParseFieldPath(p)
+		var rhs, guard string
 		switch {
 		case f.Value != "":
-			plan = append(plan, forProviderField{path: p, rhs: quoteYAML(f.Value)})
+			rhs = quoteYAML(f.Value)
 		case f.Raw != "":
-			plan = append(plan, forProviderField{path: p, rhs: f.Raw})
+			rhs = f.Raw
 		case f.Template != "":
 			if _, ok := b.Spec.Templates[f.Template]; !ok {
 				return nil, fmt.Errorf("resource %q field %q: unknown template %q", r.Name, p, f.Template)
 			}
-			plan = append(plan, forProviderField{path: p, rhs: templateCallRHS(f.Template, r.Name, p)})
+			rhs = templateCallRHS(f.Template, r.Name, p)
 		case f.From != "":
 			ref, err := blueprint.ParseFrom(f.From)
 			if err != nil {
 				return nil, fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
 			}
 			if ref.Resource != "" {
-				guard, expr, err := statusWire(ref, r, fmt.Sprintf("field %q", p), b, crds, wantNamespaced)
+				g, expr, err := statusWire(ref, r, fmt.Sprintf("field %q", p), b, crds, wantNamespaced)
 				if err != nil {
 					return nil, err
 				}
-				rhs := "{{ " + expr + " }}"
-				// A status wire is ALWAYS conditional: the value does not
-				// exist until the referenced resource has been observed
-				// (first reconcile, a fresh XR, `crossplane composition
-				// render` with no --observed-resources), so the field is
-				// omitted while unobserved and Crossplane fills it on a
-				// later reconcile.
-				plan = append(plan, forProviderField{path: p, rhs: rhs, guard: guard})
-				continue
-			}
-			// ref.Param carries everything after params., member half
-			// included; ParamRef splits the two for the member wire below.
-			param, member, _ := blueprint.ParamRef(f.From)
-			decl, ok := b.Spec.XRD.Parameters[param]
-			if !ok {
-				return nil, fmt.Errorf("resource %q field %q: unknown parameter %q", r.Name, p, param)
-			}
-			// A member wire (params.<name>.<member>) dereferences one level
-			// into a typed object parameter. Its guard shape follows the two
-			// requiredness gates (see memberGuard); the dereference itself is
-			// $spec.<param>.<member>, evaluated only where the guard chain has
-			// proven every key on the path. Enforced here as well as in
-			// blueprint.Validate because Composition is exported — an unknown
-			// member reaching the template would hard-fail every render.
-			if member != "" {
-				mdecl, ok := decl.Properties[member]
+				rhs = "{{ " + expr + " }}"
+				guard = g
+			} else {
+				param, member, _ := blueprint.ParamRef(f.From)
+				decl, ok := b.Spec.XRD.Parameters[param]
 				if !ok {
-					return nil, fmt.Errorf("resource %q field %q: references unknown member %q of "+
-						"parameter %q", r.Name, p, member, param)
+					return nil, fmt.Errorf("resource %q field %q: unknown parameter %q", r.Name, p, param)
 				}
-				plan = append(plan, forProviderField{
-					path:  p,
-					rhs:   fmt.Sprintf("{{ $spec.%s.%s }}", param, member),
-					guard: memberGuard(param, member, decl.Required, mdecl.Required),
-				})
-				continue
+				if member != "" {
+					mdecl, ok := decl.Properties[member]
+					if !ok {
+						return nil, fmt.Errorf("resource %q field %q: references unknown member %q of "+
+							"parameter %q", r.Name, p, member, param)
+					}
+					rhs = fmt.Sprintf("{{ $spec.%s.%s }}", param, member)
+					guard = memberGuard(param, member, decl.Required, mdecl.Required)
+				} else {
+					rhs = fmt.Sprintf("{{ $spec.%s }}", param)
+					if !decl.Required {
+						guard = fmt.Sprintf("hasKey $spec %q", param)
+					}
+				}
 			}
-			// A bare dereference, correct only because the value is a
-			// scalar. Go's template engine formats whatever it finds with
-			// fmt, so an object would render as "map[env:prod]" and an
-			// array as "[a b c]" -- and "[a b c]" is valid YAML that an
-			// items:{type:string} schema accepts as a ONE-element list.
-			// blueprint.Validate refuses composite-typed parameters behind
-			// a from: for exactly that reason. The M2 fix that lifts the
-			// restriction is `{{ $spec.x | toYaml | nindent N }}`, which
-			// needs the emitter to know N -- the field's own indent inside
-			// the template body -- so it is a change here, not there.
-			rhs := fmt.Sprintf("{{ $spec.%s }}", param)
-			if decl.Required {
-				plan = append(plan, forProviderField{path: p, rhs: rhs})
-				continue
-			}
-			// Optional: gated on hasKey, not `with`. Under
-			// options: ["missingkey=error"], `{{- with $spec.foo }}`
-			// evaluates the pipeline (indexing the map) before deciding
-			// truthiness, so a genuinely absent key — the normal case for
-			// an optional field the caller never set — hard-fails the
-			// entire render instead of gracefully omitting it. hasKey
-			// performs the presence check inside the function argument,
-			// sidestepping the template engine's own strict indexing.
-			// Direct $spec.field access inside the guarded branch is safe:
-			// Go templates never evaluate an untaken branch, and inside the
-			// taken one the key provably exists.
-			plan = append(plan, forProviderField{path: p, rhs: rhs, guard: fmt.Sprintf("hasKey $spec %q", param)})
+		}
+		leaves = append(leaves, leafItem{
+			basePath: basePath,
+			key:      mapKey,
+			isMap:    isMap,
+			rhs:      rhs,
+			guard:    guard,
+		})
+	}
+
+	grouped := map[string][]forProviderField{}
+	isMapField := map[string]bool{}
+	var distinctBase []string
+
+	for _, l := range leaves {
+		if _, exists := grouped[l.basePath]; !exists {
+			distinctBase = append(distinctBase, l.basePath)
+		}
+		if l.isMap {
+			isMapField[l.basePath] = true
+			grouped[l.basePath] = append(grouped[l.basePath], forProviderField{
+				path:  l.key,
+				rhs:   l.rhs,
+				guard: l.guard,
+			})
+		} else {
+			grouped[l.basePath] = append(grouped[l.basePath], forProviderField{
+				path:  l.basePath,
+				rhs:   l.rhs,
+				guard: l.guard,
+			})
+		}
+	}
+	sort.Strings(distinctBase)
+
+	plan := make([]forProviderField, 0, len(distinctBase))
+	for _, base := range distinctBase {
+		if isMapField[base] {
+			entries := grouped[base]
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].path < entries[j].path
+			})
+			plan = append(plan, forProviderField{
+				path:    base,
+				isMap:   true,
+				entries: entries,
+			})
+		} else {
+			plan = append(plan, grouped[base]...)
 		}
 	}
 	return plan, nil
@@ -1077,8 +1110,18 @@ func writeMapField(d *Doc, keyIndent int, key string, childIndent int, plan []fo
 
 	anyGuaranteed := false
 	for _, fld := range plan {
-		if fld.guard == "" {
+		if fld.isMap {
+			for _, e := range fld.entries {
+				if e.guard == "" {
+					anyGuaranteed = true
+					break
+				}
+			}
+		} else if fld.guard == "" {
 			anyGuaranteed = true
+			break
+		}
+		if anyGuaranteed {
 			break
 		}
 	}
@@ -1095,28 +1138,84 @@ func writeMapField(d *Doc, keyIndent int, key string, childIndent int, plan []fo
 	// Every field is optional: without this wrapper an XR that sets none of
 	// them renders a bare key with nothing under it. See the function
 	// comment above.
-	conds := make([]string, len(plan))
-	for i, fld := range plan {
-		conds[i] = "(" + fld.guard + ")"
-	}
-	d.Line(childIndent, "{{- if or %s }}", strings.Join(conds, " "))
+	var conds []string
 	for _, fld := range plan {
-		writeField(d, childIndent, fld)
+		if fld.isMap {
+			for _, e := range fld.entries {
+				if e.guard != "" {
+					conds = append(conds, "("+e.guard+")")
+				}
+			}
+		} else if fld.guard != "" {
+			conds = append(conds, "("+fld.guard+")")
+		}
 	}
-	d.Line(childIndent, "{{- else }}")
-	d.Line(childIndent, "{}")
-	d.Line(childIndent, "{{- end }}")
+	if len(conds) > 0 {
+		d.Line(childIndent, "{{- if or %s }}", strings.Join(conds, " "))
+		for _, fld := range plan {
+			writeField(d, childIndent, fld)
+		}
+		d.Line(childIndent, "{{- else }}")
+		d.Line(childIndent, "{}")
+		d.Line(childIndent, "{{- end }}")
+	} else {
+		for _, fld := range plan {
+			writeField(d, childIndent, fld)
+		}
+	}
 }
 
 // writeField emits one resolved field, gated on its guard when non-empty.
 func writeField(d *Doc, indent int, fld forProviderField) {
+	if fld.isMap {
+		anyChildGuaranteed := false
+		for _, e := range fld.entries {
+			if e.guard == "" {
+				anyChildGuaranteed = true
+				break
+			}
+		}
+		if anyChildGuaranteed {
+			d.Line(indent, "%s:", formatKey(fld.path))
+			for _, e := range fld.entries {
+				writeField(d, indent+1, e)
+			}
+		} else {
+			var conds []string
+			for _, e := range fld.entries {
+				if e.guard != "" {
+					conds = append(conds, "("+e.guard+")")
+				}
+			}
+			if len(conds) > 0 {
+				d.Line(indent, "{{- if or %s }}", strings.Join(conds, " "))
+				d.Line(indent, "%s:", formatKey(fld.path))
+				for _, e := range fld.entries {
+					writeField(d, indent+1, e)
+				}
+				d.Line(indent, "{{- else }}")
+				d.Line(indent, "%s: {}", formatKey(fld.path))
+				d.Line(indent, "{{- end }}")
+			} else {
+				d.Line(indent, "%s: {}", formatKey(fld.path))
+			}
+		}
+		return
+	}
 	if fld.guard != "" {
 		d.Line(indent, "{{- if %s }}", fld.guard)
 	}
-	d.Line(indent, "%s: %s", fld.path, fld.rhs)
+	d.Line(indent, "%s: %s", formatKey(fld.path), fld.rhs)
 	if fld.guard != "" {
 		d.Line(indent, "{{- end }}")
 	}
+}
+
+func formatKey(k string) string {
+	if strings.ContainsAny(k, "/: \t\n\r\"'#@{}[]") || yamlKeywords[strings.ToLower(k)] {
+		return quoteYAML(k)
+	}
+	return k
 }
 
 // resolveKind finds the CRD for r's kind, matching on (kind, provider): a

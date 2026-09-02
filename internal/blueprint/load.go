@@ -724,6 +724,19 @@ func (b *Blueprint) Validate() error {
 		}
 		sort.Strings(paths)
 		for _, p := range paths {
+			basePath, mapKey, isMap := ParseFieldPath(p)
+			if isMap {
+				if mapKey == "" {
+					return fmt.Errorf("resource %q field %q: empty map key inside brackets", r.Name, p)
+				}
+				if err := checkScalar(fmt.Sprintf("resource %q field %q: map key", r.Name, p), mapKey); err != nil {
+					return err
+				}
+				if _, hasWhole := r.Fields[basePath]; hasWhole {
+					return fmt.Errorf("resource %q field %q conflicts with field %q, which sets the whole map; "+
+						"set the whole map or set individual keys, not both", r.Name, p, basePath)
+				}
+			}
 			f := r.Fields[p]
 			set := 0
 			for _, v := range []string{f.From, f.Value, f.Raw, f.Template} {
@@ -990,3 +1003,35 @@ func (b *Blueprint) validateForEachStatusRef(r Resource) error {
 	}
 	return nil
 }
+
+// ParseFieldPath parses a field path, separating the base path from an optional map key.
+// Examples:
+// "tags[Environment]" -> basePath: "tags", key: "Environment", isMap: true
+// "tags[\"Environment\"]" -> basePath: "tags", key: "Environment", isMap: true
+// "spec.selector.matchLabels[app]" -> basePath: "spec.selector.matchLabels", key: "app", isMap: true
+// "queueName" -> basePath: "queueName", key: "", isMap: false
+func ParseFieldPath(p string) (basePath, key string, isMap bool) {
+	if strings.HasSuffix(p, "]") {
+		if idx := strings.LastIndex(p, "["); idx > 0 {
+			inner := p[idx+1 : len(p)-1]
+			if inner != "0" && !isDigits(inner) {
+				inner = strings.Trim(inner, `"'`)
+				return p[:idx], inner, true
+			}
+		}
+	}
+	return p, "", false
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+

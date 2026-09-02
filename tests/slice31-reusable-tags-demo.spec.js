@@ -35,8 +35,8 @@ test('a freshly dropped resource inherits the reusable tags too', async ({ page 
   // the convention reaches the new resource with zero configuration: the
   // define holds the tag literal ONCE; each covered resource emits a CALL
   const code = page.locator('#code')
-  await expect(code).toContainText('name: queue', { timeout: 8000 })
+  await expect(code).toContainText('setResourceNameAnnotation "queue"', { timeout: 8000 })
   const body = await code.textContent()
-  const calls = (body.match(/template "cf\.tags"/g) || []).length
+  const calls = (body.match(/include "cf\.tags"/g) || []).length
   expect(calls).toBeGreaterThanOrEqual(2)  // work-queue + the dropped queue
 })

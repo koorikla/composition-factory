@@ -32,6 +32,7 @@ var filter = "req";              // "req" | "set" | "all"
 var warnMsg = null;              // verbatim server error to show, or null
 var uiMode = {};                 // path -> "v"|"w"|"r" local mode override (selected resource only)
 var pendingNewParam = null;      // field path currently showing the inline new-parameter form
+var pendingNewMapEntry = null;   // map field path currently showing the inline add-key form
 var renderToken = 0;
 
 var kindsPromise = null;         // cached GET /api/kinds
@@ -85,6 +86,8 @@ function compatible(paramType, fieldType) {
   if (!fieldType || !paramType) return true;
   if (fieldType === paramType) return true;
   if (fieldType === "number" && paramType === "integer") return true;
+  if (fieldType === "map" && paramType === "object") return true;
+  if (fieldType === "object" && paramType === "map") return true;
   return false;
 }
 
@@ -270,8 +273,21 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
   var dm = docMode(entry);
   var m = uiMode[f.path] || dm;
 
-  if (filter === "req" && !(f.requiredChain || f.branch || entry)) return "";
-  if (filter === "set" && !entry) return "";
+  var isMap = f.type === "map";
+  var mapEntries = [];
+  if (isMap && res.fields) {
+    var prefix = f.path + "[";
+    Object.keys(res.fields).forEach(function (k) {
+      if (k.indexOf(prefix) === 0 && k.endsWith("]")) {
+        var keyName = k.slice(prefix.length, k.length - 1);
+        mapEntries.push({ fullPath: k, key: keyName, entry: res.fields[k] });
+      }
+    });
+    mapEntries.sort(function (a, b) { return a.key.localeCompare(b.key); });
+  }
+
+  if (filter === "req" && !(f.requiredChain || f.branch || entry || mapEntries.length)) return "";
+  if (filter === "set" && !entry && !mapEntries.length) return "";
 
   var wired = m === "w" && dm === "w" && !uiMode[f.path] && entry;
   var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
@@ -281,22 +297,92 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
     modeButtons(f.path, m, false) +
     '</div><div class="fld-d">' + esc(f.description) + "</div>";
 
-  if (m === "w") {
-    if (dm === "w" && !uiMode[f.path] && entry) {
-      var wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
-      var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
-      h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-        '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
-        '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
+  if (isMap) {
+    if (m === "w") {
+      if (dm === "w" && !uiMode[f.path] && entry) {
+        var wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
+        var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
+        h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
+          '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
+          '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
+      } else {
+        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false);
+      }
+    } else if (m === "r") {
+      h += '<textarea class="val raw" data-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
+        esc((dm === "r" && entry) ? entry.raw : "") + "</textarea>";
     } else {
-      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false);
+      if (entry) {
+        h += '<input class="val" data-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
+          '" placeholder="whole map value">';
+      }
+      h += '<div class="map-entries" style="margin-top:6px;display:flex;flex-direction:column;gap:4px">';
+      h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">' +
+        '<span style="font-size:10px;font-weight:600;color:var(--faint);text-transform:uppercase">Map Entries (' + mapEntries.length + ')</span>' +
+        '<button class="btn sm" data-add-map-entry="' + esc(f.path) + '" style="font-size:10px;padding:1px 6px">+ Add key</button>' +
+        '</div>';
+
+      mapEntries.forEach(function (me) {
+        var meEntry = me.entry;
+        var meDm = docMode(meEntry);
+        var meM = uiMode[me.fullPath] || meDm;
+        var meWired = meM === "w" && meDm === "w" && !uiMode[me.fullPath] && meEntry;
+        var isMeStatus = meWired && meEntry.from && meEntry.from.indexOf("resources.") === 0;
+
+        h += '<div class="map-entry-card" style="padding:6px 8px;background:var(--surface-2);border-radius:4px;border:1px solid var(--rule)">' +
+          '<div class="frow" style="margin-bottom:3px;align-items:center">' +
+          '<span style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ink);flex:1">[' + esc(me.key) + ']</span>' +
+          modeButtons(me.fullPath, meM, false) +
+          '<button class="del" data-del-map-entry="' + esc(me.fullPath) + '" title="Delete key" style="margin-left:4px">&#215;</button>' +
+          '</div>';
+
+        if (meM === "w") {
+          if (meWired) {
+            var wireCol = isMeStatus ? "var(--wire-status)" : "var(--wire-xrd)";
+            var bgStyle = isMeStatus ? ' style="background:var(--wire-status-soft)"' : "";
+            h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
+              '<span class="src" style="color:' + wireCol + '">' + esc(meEntry.from || "") + "</span>" +
+              '<span class="x" role="button" tabindex="0" data-unwire="' + esc(me.fullPath) + '" title="Remove wire">&#215;</span></div>';
+          } else {
+            h += wireSelectHtml(me.fullPath, "string", params, otherResources, otherStatusMap, false);
+          }
+        } else if (meM === "r") {
+          h += '<textarea class="val raw" data-raw="' + esc(me.fullPath) + '" rows="1" placeholder="{{ }}">' +
+            esc((meDm === "r" && meEntry) ? meEntry.raw : "") + "</textarea>";
+        } else {
+          h += '<input class="val" data-v="' + esc(me.fullPath) + '" value="' + esc((meDm === "v" && meEntry) ? meEntry.value : "") +
+            '" placeholder="value">';
+        }
+        h += '</div>';
+      });
+
+      if (pendingNewMapEntry === f.path) {
+        h += '<div class="frow" style="margin-top:6px;margin-bottom:0;gap:4px">' +
+          '<input class="tin" data-new-map-key="' + esc(f.path) + '" placeholder="Key (e.g. Team)" autofocus aria-label="Key name" style="flex:1">' +
+          '<input class="tin" data-new-map-val="' + esc(f.path) + '" placeholder="Value" aria-label="Initial value" style="flex:1">' +
+          '<button class="btn sm pri" data-new-map-ok="' + esc(f.path) + '">Add</button>' +
+          '<button class="del" data-new-map-cancel="' + esc(f.path) + '" title="Cancel">&#215;</button></div>';
+      }
+      h += '</div>';
     }
-  } else if (m === "r") {
-    h += '<textarea class="val raw" data-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
-      esc((dm === "r" && entry) ? entry.raw : "") + "</textarea>";
   } else {
-    h += '<input class="val" data-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
-      '" placeholder="' + (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from output") + '">';
+    if (m === "w") {
+      if (dm === "w" && !uiMode[f.path] && entry) {
+        var wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
+        var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
+        h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
+          '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
+          '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
+      } else {
+        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false);
+      }
+    } else if (m === "r") {
+      h += '<textarea class="val raw" data-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
+        esc((dm === "r" && entry) ? entry.raw : "") + "</textarea>";
+    } else {
+      h += '<input class="val" data-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
+        '" placeholder="' + (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from output") + '">';
+    }
   }
   return h + "</div>";
 }
@@ -546,9 +632,11 @@ function renderXRD() {
       h += '<input class="tin" data-pdef="' + esc(n) + '" value="' + esc(p.default || "") +
         '" placeholder="default value" aria-label="Default value">';
     }
-    h += '<input class="tin" data-pe="' + esc(n) + '" value="' + esc((p.enum || []).join(",")) +
-      '" placeholder="enum,values" title="Comma-separated allowed values" aria-label="Enum values">' +
-      '<button class="del" data-pd="' + esc(n) + '" title="Delete parameter">&#215;</button></div>';
+    if (p.type !== "boolean") {
+      h += '<input class="tin" data-pe="' + esc(n) + '" value="' + esc((p.enum || []).join(",")) +
+        '" placeholder="enum,values" title="Comma-separated allowed values" aria-label="Enum values">';
+    }
+    h += '<button class="del" data-pd="' + esc(n) + '" title="Delete parameter">&#215;</button></div>';
     return h;
   }
 
@@ -796,6 +884,46 @@ function onBoxClick(e) {
   if (unEnv) {
     var pe = unEnv.getAttribute("data-env-unwire");
     setEnvelopeField(pe, null).then(function (r) { if (r !== null) delete uiMode["env:" + pe]; });
+    return;
+  }
+
+  var addMap = e.target.closest("[data-add-map-entry]");
+  if (addMap) {
+    pendingNewMapEntry = addMap.getAttribute("data-add-map-entry");
+    render();
+    return;
+  }
+
+  var mapOk = e.target.closest("[data-new-map-ok]");
+  if (mapOk) {
+    var mapPath = mapOk.getAttribute("data-new-map-ok");
+    var keyInp = box.querySelector('[data-new-map-key="' + CSS.escape(mapPath) + '"]');
+    var valInp = box.querySelector('[data-new-map-val="' + CSS.escape(mapPath) + '"]');
+    var keyVal = keyInp && keyInp.value.trim();
+    if (!keyVal) return;
+    var initVal = (valInp && valInp.value.trim()) || "default";
+    var fullPath = mapPath + "[" + keyVal + "]";
+    setField(fullPath, { value: initVal }).then(function (r) {
+      if (r !== null) {
+        pendingNewMapEntry = null;
+      }
+    });
+    return;
+  }
+
+  var mapCancel = e.target.closest("[data-new-map-cancel]");
+  if (mapCancel) {
+    pendingNewMapEntry = null;
+    render();
+    return;
+  }
+
+  var delMap = e.target.closest("[data-del-map-entry]");
+  if (delMap) {
+    var delPath = delMap.getAttribute("data-del-map-entry");
+    setField(delPath, null).then(function (r) {
+      if (r !== null) delete uiMode[delPath];
+    });
     return;
   }
 
@@ -1070,6 +1198,7 @@ export function init(rootEl, deps) {
   store.subscribe("selection", function () {
     uiMode = {};
     pendingNewParam = null;
+    pendingNewMapEntry = null;
     warnMsg = null;
     render();
   });

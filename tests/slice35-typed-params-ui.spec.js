@@ -37,8 +37,7 @@ test('a field can wire to a member and the doc records params.obj.member', async
   await page.goto('/')
   await page.click('.node[data-id="work-queue"] .node-h')
   await page.click('#fseg button[data-f="all"]')
-  const row = page.locator('#insp .fld', { hasText: 'delaySeconds' }).first()
-  await row.locator('button[data-m="w"]').click()
+  await page.click('#insp button[data-m="w"][data-path="delaySeconds"]')
   const sel = page.locator('#insp select[data-wire="delaySeconds"]')
   await sel.selectOption('params.tuning.retention')
   await expect.poll(async () => {

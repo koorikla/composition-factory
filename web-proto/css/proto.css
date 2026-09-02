@@ -117,7 +117,7 @@ svg.wires .dim{opacity:.18}
 
 .node{position:absolute;width:max-content;min-width:198px;max-width:340px;background:var(--surface);border:1px solid var(--rule-2);
   border-radius:7px;box-shadow:var(--shadow);user-select:none}
-.node.sel{border-color:var(--wire-xrd);box-shadow:var(--shadow-lg),0 0 0 2px var(--wire-xrd-soft)}
+.node.sel{border-color:var(--wire-xrd);box-shadow:var(--shadow-lg),0 0 0 2px var(--wire-xrd-soft);z-index:10}
 .node-h{display:flex;align-items:center;gap:6px;padding:7px 9px;cursor:grab;
   border-bottom:1px solid var(--rule);border-radius:6px 6px 0 0}
 .node-h:active{cursor:grabbing}
