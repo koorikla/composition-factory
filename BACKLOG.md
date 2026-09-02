@@ -30,9 +30,10 @@
       kind list, registry host), and remove — needs DELETE /api/providers with a
       409 naming referencers when the blueprint still uses it. More actions as
       they come. — user request 2026-09-01
-- [ ] Pipeline steps in the GUI (after the engine lands spec.pipeline): show the
-      step chain in the Output/topbar area, one-click "add auto-ready", raw
-      input editing per step. — follows the functions-support engine work
+- [x] Pipeline steps in the GUI: show the step chain in the XRD inspector,
+      presets (function-auto-ready, function-environment-configs, etc.),
+      positioning (before/after), input editing, functions.yaml output tab.
+      — completed 2026-09-02
 - [x] Envelope field control (engine + GUI complete): per-resource authoring of
       the Crossplane-native envelope — writeConnectionSecretToRef (name/namespace),
       managementPolicies, and whatever else the kind's .m. CRD envelope actually
@@ -77,9 +78,9 @@
       annotation) as the acceptance fixture; becomes the opening demo.
 - [ ] First-class map-entry wires in fields (annotations[key]-style bracket
       grammar) — the general form of the same need. Later.
-- [ ] Test isolation v2: the behavior suite gets its OWN cf serve (own port +
+- [x] Test isolation v2: the behavior suite gets its OWN cf serve (own port +
       scratch blueprint copy) so runs stop trampling the doc the user is
-      looking at (today a suite run leaves test wires/doc state behind).
+      looking at (isolated runner on 8081). — completed 2026-09-02
 - [x] Palette required-count badges adopt effective (chain+branch) counts:
       Deployment shows "2 req" instead of "250 req" using RequiredChain and
       RequiredBranches in index.Build. — completed 2026-09-02

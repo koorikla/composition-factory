@@ -566,8 +566,61 @@ function renderXRD() {
       '<span class="fan" title="Wired into ' + fo + ' field' + (fo === 1 ? "" : "s") + '">&#215;' + fo + "</span></div>" +
       paramDetailRow(n, p) + "</div>";
   });
-  h += '<div style="padding:8px 12px">' +
+  h += '<div style="padding:8px 12px 14px">' +
     '<button class="btn sm pri" id="addParamBtn">+ Add parameter</button></div>';
+
+  /* ---------- pipeline steps ---------- */
+  var pipeline = doc.spec && doc.spec.pipeline || [];
+  h += '<div style="padding:14px 12px 3px;border-top:1px solid var(--rule);display:flex;align-items:center">' +
+    '<span class="lbl">Pipeline (' + (pipeline.length ? pipeline.length + " custom" : "default") + ')</span>' +
+    '</div>' +
+    '<div class="g" style="padding:2px 12px 8px;font-size:11px">Functions executed during Composition render. <code>render-resources</code> (go-templating) runs at center.</div>';
+
+  if (!pipeline.length) {
+    h += '<div style="margin:0 12px 10px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--rule);border-radius:6px;font-size:11px">' +
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
+      '<span style="font-family:var(--mono);font-weight:600;color:var(--ink)">1. render-resources</span>' +
+      '<span class="dg">go-templating (core)</span></div>' +
+      '<div style="display:flex;align-items:center;gap:6px">' +
+      '<span style="font-family:var(--mono);color:var(--ink)">2. auto-ready</span>' +
+      '<span class="dg">inferred default</span>' +
+      '<button class="btn sm" id="addAutoReadyBtn" style="margin-left:auto;font-size:10px">+ Pin step</button>' +
+      '</div></div>';
+  } else {
+    pipeline.forEach(function (step, i) {
+      var pos = step.position || "after";
+      h += '<div class="fld" style="margin:0 12px 8px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--rule);border-radius:6px">' +
+        '<div class="frow" style="margin-bottom:4px">' +
+        '<input class="tin bold" data-pipe-name="' + i + '" value="' + esc(step.name || "") + '" placeholder="step-name" aria-label="Step name" style="flex:1">' +
+        '<select class="tsel" data-pipe-pos="' + i + '" aria-label="Position">' +
+        '<option value="before"' + (pos === "before" ? " selected" : "") + '>before render</option>' +
+        '<option value="after"' + (pos === "after" ? " selected" : "") + '>after render</option></select>' +
+        '<button class="del" data-pipe-del="' + i + '" title="Delete pipeline step">&#215;</button></div>' +
+        '<div class="frow" style="margin-bottom:4px">' +
+        '<input class="tin" data-pipe-fn="' + i + '" value="' + esc(step.functionRef || "") + '" placeholder="functionRef (e.g. function-auto-ready)" aria-label="Function ref">' +
+        '</div>' +
+        '<div class="frow" style="margin-bottom:4px">' +
+        '<input class="tin" data-pipe-pkg="' + i + '" value="' + esc(step.package || "") + '" placeholder="xpkg.crossplane.io/... (package)" aria-label="Function package">' +
+        '</div>' +
+        '<div style="margin-top:4px">' +
+        '<div class="dg" style="font-size:10px;margin-bottom:2px">Input YAML (optional):</div>' +
+        '<textarea class="tin" data-pipe-input="' + i + '" rows="3" style="font-family:var(--mono);font-size:10px;width:100%;resize:vertical" placeholder="apiVersion: ...\nkind: ...">' + esc(step.input || "") + '</textarea>' +
+        '</div>' +
+        '</div>';
+    });
+  }
+
+  h += '<div style="padding:4px 12px 14px;display:flex;gap:6px;flex-wrap:wrap">' +
+    '<select class="tsel" id="pipePresetSelect" style="flex:1">' +
+    '<option value="auto-ready">+ function-auto-ready</option>' +
+    '<option value="environment-configs">+ function-environment-configs</option>' +
+    '<option value="cel-filter">+ function-cel-filter</option>' +
+    '<option value="extra-resources">+ function-extra-resources</option>' +
+    '<option value="custom">+ Custom function step</option>' +
+    '</select>' +
+    '<button class="btn sm pri" id="addPipeStepBtn">+ Add step</button>' +
+    '</div>';
+
   box.innerHTML = h;
 }
 
@@ -789,6 +842,69 @@ function onBoxClick(e) {
     op(function () { return store.addParameter(nm, { type: "string", required: false }); });
     return;
   }
+
+  if (e.target.closest("#addAutoReadyBtn") || (e.target.closest("#addPipeStepBtn") && box.querySelector("#pipePresetSelect") && box.querySelector("#pipePresetSelect").value === "auto-ready")) {
+    op(function () {
+      return store.replaceDoc(function (d) {
+        d.spec.pipeline = d.spec.pipeline || [];
+        d.spec.pipeline.push({
+          name: "auto-ready",
+          functionRef: "function-auto-ready",
+          package: "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1",
+          position: "after"
+        });
+      });
+    });
+    return;
+  }
+
+  if (e.target.closest("#addPipeStepBtn")) {
+    var preset = (box.querySelector("#pipePresetSelect") && box.querySelector("#pipePresetSelect").value) || "custom";
+    var newStep = { name: "custom-step", functionRef: "function-custom", package: "xpkg.crossplane.io/crossplane-contrib/function-custom:v0.1.0", position: "after" };
+    if (preset === "environment-configs") {
+      newStep = {
+        name: "environment-configs",
+        functionRef: "function-environment-configs",
+        package: "xpkg.crossplane.io/crossplane-contrib/function-environment-configs:v0.4.0",
+        position: "before",
+        input: "apiVersion: environmentconfigs.fn.crossplane.io/v1beta1\nkind: Input\nspec:\n  environmentConfigs:\n  - type: Reference\n    ref:\n      name: default"
+      };
+    } else if (preset === "cel-filter") {
+      newStep = {
+        name: "cel-filter",
+        functionRef: "function-cel-filter",
+        package: "xpkg.crossplane.io/crossplane-contrib/function-cel-filter:v0.3.0",
+        position: "after"
+      };
+    } else if (preset === "extra-resources") {
+      newStep = {
+        name: "extra-resources",
+        functionRef: "function-extra-resources",
+        package: "xpkg.crossplane.io/crossplane-contrib/function-extra-resources:v0.3.0",
+        position: "before"
+      };
+    }
+    op(function () {
+      return store.replaceDoc(function (d) {
+        d.spec.pipeline = d.spec.pipeline || [];
+        d.spec.pipeline.push(newStep);
+      });
+    });
+    return;
+  }
+
+  var pipeDel = e.target.closest("[data-pipe-del]");
+  if (pipeDel) {
+    var pidx = parseInt(pipeDel.getAttribute("data-pipe-del"), 10);
+    op(function () {
+      return store.replaceDoc(function (d) {
+        if (!d.spec.pipeline) return;
+        d.spec.pipeline.splice(pidx, 1);
+        if (!d.spec.pipeline.length) delete d.spec.pipeline;
+      });
+    });
+    return;
+  }
 }
 
 function onBoxChange(e) {
@@ -891,6 +1007,26 @@ function onBoxChange(e) {
     var sv = t.value;
     op(function () {
       return store.replaceDoc(function (d) { d.spec.xrd.scope = sv; });
+    }).then(function (r) { if (r === null) render(); });
+    return;
+  }
+
+  if (t.hasAttribute("data-pipe-name") || t.hasAttribute("data-pipe-pos") || t.hasAttribute("data-pipe-fn") || t.hasAttribute("data-pipe-pkg") || t.hasAttribute("data-pipe-input")) {
+    var pidx2 = parseInt(t.getAttribute("data-pipe-name") || t.getAttribute("data-pipe-pos") || t.getAttribute("data-pipe-fn") || t.getAttribute("data-pipe-pkg") || t.getAttribute("data-pipe-input"), 10);
+    var attr = t.hasAttribute("data-pipe-name") ? "name"
+      : t.hasAttribute("data-pipe-pos") ? "position"
+      : t.hasAttribute("data-pipe-fn") ? "functionRef"
+      : t.hasAttribute("data-pipe-pkg") ? "package" : "input";
+    var pval = t.value;
+    op(function () {
+      return store.replaceDoc(function (d) {
+        if (!d.spec.pipeline || !d.spec.pipeline[pidx2]) return;
+        if (attr === "input" && !pval.trim()) {
+          delete d.spec.pipeline[pidx2].input;
+        } else {
+          d.spec.pipeline[pidx2][attr] = pval;
+        }
+      });
     }).then(function (r) { if (r === null) render(); });
     return;
   }

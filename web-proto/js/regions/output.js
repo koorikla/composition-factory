@@ -59,6 +59,7 @@ export function init(rootEl, deps) {
     var h =
       '<button data-t="comp" aria-pressed="' + (tab === "comp") + '">composition.yaml</button>' +
       '<button data-t="xrd" aria-pressed="' + (tab === "xrd") + '">definition.yaml</button>' +
+      '<button data-t="fns" aria-pressed="' + (tab === "fns") + '">functions.yaml</button>' +
       '<button data-t="bp" aria-pressed="' + (tab === "bp") + '">' + esc(bpLabel) + '</button>';
     // one tab per generated providerconfig family (outputs carry the bodies)
     var g = store.state.lastGenerate;
@@ -92,6 +93,12 @@ export function init(rootEl, deps) {
   function matchOutput(which) {
     var g = store.state.lastGenerate;
     var outputs = g && g.outputs || [];
+    if (which === "fns") {
+      for (var k = 0; k < outputs.length; k++) {
+        if (/functions\.yaml$/.test(outputs[k].path)) return outputs[k];
+      }
+      return null;
+    }
     var dirRe = which === "comp" ? /[\\/]compositions[\\/]/ : /[\\/]xrds[\\/]/;
     var kindRe = which === "comp"
       ? /^kind:\s*Composition\s*$/m
