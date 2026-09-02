@@ -16,7 +16,8 @@ import (
 // first-problem contract and name the resource. Paths are visited in sorted
 // order for the same reason the fields loop sorts: the same blueprint must
 // name the same problem first, every time.
-func validateResourceEnvelope(x XRD, r Resource) error {
+func validateResourceEnvelope(b *Blueprint, r Resource) error {
+	x := b.Spec.XRD
 	paths := make([]string, 0, len(r.Envelope))
 	for p := range r.Envelope {
 		paths = append(paths, p)
@@ -62,6 +63,11 @@ func validateResourceEnvelope(x XRD, r Resource) error {
 			if err := checkScalar(fmt.Sprintf("resource %q envelope %q: %s", r.Name, p, src.label), src.val); err != nil {
 				return err
 			}
+		}
+
+		if f.Raw != "" && b.Engine() != EngineGoTemplating && strings.Contains(f.Raw, "{{") {
+			return fmt.Errorf("resource %q envelope %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)",
+				r.Name, p, f.Raw, b.Engine())
 		}
 
 		if f.From != "" {

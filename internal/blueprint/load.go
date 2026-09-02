@@ -906,6 +906,11 @@ func (b *Blueprint) Validate() error {
 					return err
 				}
 			}
+
+			if f.Raw != "" && b.Engine() != EngineGoTemplating && strings.Contains(f.Raw, "{{") {
+				return fmt.Errorf("resource %q field %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)",
+					r.Name, p, f.Raw, b.Engine())
+			}
 			if f.Template != "" {
 				if _, ok := b.Spec.Templates[f.Template]; !ok {
 					return fmt.Errorf("resource %q field %q: references unknown template %q "+
@@ -983,7 +988,7 @@ func (b *Blueprint) Validate() error {
 		// Envelope entries get the same structural discipline as fields (see
 		// envelope.go); schema-aware checks live in internal/emit, which
 		// holds the resolved CRD.
-		if err := validateResourceEnvelope(x, r); err != nil {
+		if err := validateResourceEnvelope(b, r); err != nil {
 			return err
 		}
 		// Annotations too (see annotations.go): key grammar and value forms

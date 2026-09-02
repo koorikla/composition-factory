@@ -26,10 +26,21 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 			if f.Template != "" {
 				return "", fmt.Errorf("resource %q field %q: engine %q does not support template: fields", r.Name, k, b.Engine())
 			}
+			if f.Raw != "" && strings.Contains(f.Raw, "{{") {
+				return "", fmt.Errorf("resource %q field %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)", r.Name, k, f.Raw, b.Engine())
+			}
 		}
 		for k, a := range r.Annotations {
 			if a.Template != "" {
 				return "", fmt.Errorf("resource %q annotation %q: engine %q does not support template: fields", r.Name, k, b.Engine())
+			}
+			if a.Raw != "" && strings.Contains(a.Raw, "{{") {
+				return "", fmt.Errorf("resource %q annotation %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)", r.Name, k, a.Raw, b.Engine())
+			}
+		}
+		for k, ef := range r.Envelope {
+			if ef.Raw != "" && strings.Contains(ef.Raw, "{{") {
+				return "", fmt.Errorf("resource %q envelope %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)", r.Name, k, ef.Raw, b.Engine())
 			}
 		}
 	}
@@ -106,8 +117,7 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 		}
 
 		if r.ForEach != "" {
-			loopExpr := translateForEachToKCL(r.ForEach)
-			sb.WriteString(fmt.Sprintf("%sfor _i in %s:\n", indent, loopExpr))
+			sb.WriteString(fmt.Sprintf("%s*[\n", indent))
 			indent = indent + "    "
 		}
 
@@ -122,13 +132,18 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 		sb.WriteString(fmt.Sprintf("%sannotations = {\n", metaInner))
 		annInner := metaInner + "    "
 		if r.ForEach != "" {
-			sb.WriteString(fmt.Sprintf("%s\"krm.kcl.dev/composition-resource-name\" = \"${_i}-%s\"\n", annInner, r.Name))
+			sb.WriteString(fmt.Sprintf("%s\"krm.kcl.dev/composition-resource-name\" = \"%s-${_i}\"\n", annInner, r.Name))
 		} else {
 			sb.WriteString(fmt.Sprintf("%s\"krm.kcl.dev/composition-resource-name\" = %q\n", annInner, r.Name))
 		}
 		for _, ann := range annPlan {
 			rhs := kclStructuredRHS(ann.structured, ann.rhs)
-			sb.WriteString(fmt.Sprintf("%s%q = %s\n", annInner, ann.path, rhs))
+			if ann.structured.kind == rhsStatus {
+				sb.WriteString(fmt.Sprintf("%sif %s:\n", annInner, rhs))
+				sb.WriteString(fmt.Sprintf("%s    %q = %s\n", annInner, ann.path, rhs))
+			} else {
+				sb.WriteString(fmt.Sprintf("%s%q = %s\n", annInner, ann.path, rhs))
+			}
 		}
 		sb.WriteString(fmt.Sprintf("%s}\n", metaInner))
 		sb.WriteString(fmt.Sprintf("%s}\n", inner))
@@ -172,7 +187,14 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 			sb.WriteString(fmt.Sprintf("%s}\n", inner))
 		}
 
-		sb.WriteString(fmt.Sprintf("%s},\n", indent))
+		if r.ForEach != "" {
+			loopExpr := translateForEachToKCL(r.ForEach)
+			indent = indent[4:]
+			sb.WriteString(fmt.Sprintf("%s} for _i in %s\n", indent+"    ", loopExpr))
+			sb.WriteString(fmt.Sprintf("%s],\n", indent))
+		} else {
+			sb.WriteString(fmt.Sprintf("%s},\n", indent))
+		}
 	}
 
 	sb.WriteString("]\n\n")
@@ -191,7 +213,12 @@ func writeKCLMapEntries(sb *strings.Builder, indent string, fields []forProvider
 		}
 
 		rhs := kclStructuredRHS(f.structured, f.rhs)
-		sb.WriteString(fmt.Sprintf("%s%s = %s\n", indent, quoteKCLKey(f.path), rhs))
+		if f.structured.kind == rhsStatus {
+			sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, rhs))
+			sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(f.path), rhs))
+		} else {
+			sb.WriteString(fmt.Sprintf("%s%s = %s\n", indent, quoteKCLKey(f.path), rhs))
+		}
 	}
 }
 
@@ -366,7 +393,12 @@ func writeKCLEnvelopeNodes(sb *strings.Builder, indent string, nodes []*envTreeN
 			sb.WriteString(fmt.Sprintf("%s}\n", indent))
 		} else if n.field != nil {
 			rhs := kclStructuredRHS(n.field.structured, n.field.rhs)
-			sb.WriteString(fmt.Sprintf("%s%s = %s\n", indent, quoteKCLKey(n.name), rhs))
+			if n.field.structured.kind == rhsStatus {
+				sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, rhs))
+				sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.name), rhs))
+			} else {
+				sb.WriteString(fmt.Sprintf("%s%s = %s\n", indent, quoteKCLKey(n.name), rhs))
+			}
 		}
 	}
 }
