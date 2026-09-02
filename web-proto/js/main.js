@@ -132,4 +132,17 @@ store.loadDoc();
     if (!r || !window.matchMedia("(max-width:900px)").matches) return;
     if (sel) { r.classList.add("drawer-open"); if (l) l.classList.remove("drawer-open"); }
   });
+  // crossing the breakpoint must never strand a selected inspector: entering
+  // narrow auto-opens the drawer for the current selection, leaving narrow
+  // clears drawer state so the desktop columns render normally.
+  var mq = window.matchMedia("(max-width:900px)");
+  (mq.addEventListener ? mq.addEventListener.bind(mq, "change") : mq.addListener.bind(mq))(function (e) {
+    if (!r) return;
+    if (e.matches) {
+      if (store.state.selectedResource) r.classList.add("drawer-open");
+    } else {
+      r.classList.remove("drawer-open");
+      if (l) l.classList.remove("drawer-open");
+    }
+  });
 })();

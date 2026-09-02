@@ -329,7 +329,19 @@ function resourceCardHTML(d, r, sel) {
   return h;
 }
 
+let gestureActive = false;
+let pendingRender = false;
+
+function gestureBegin() { gestureActive = true; }
+function gestureEnd() {
+  gestureActive = false;
+  if (pendingRender) { pendingRender = false; render(); }
+}
+
 function render() {
+  // Never rebuild the DOM under an active pointer gesture: replacing the
+  // dragged element kills the drag mid-flight ("random mouse clutches").
+  if (gestureActive) { pendingRender = true; return; }
   if (!canvasEl) return;
   const d = doc();
   if (!d) { canvasEl.innerHTML = ""; wiresEl.innerHTML = ""; return; }
@@ -459,7 +471,9 @@ function onPanDown(e) {
   function up() {
     document.removeEventListener("pointermove", mv);
     document.removeEventListener("pointerup", up);
+    gestureEnd();
   }
+  gestureBegin();
   document.addEventListener("pointermove", mv);
   document.addEventListener("pointerup", up);
 }
@@ -694,7 +708,9 @@ function onResizeDown(e) {
   function up() {
     document.removeEventListener("pointermove", mv);
     document.removeEventListener("pointerup", up);
+    gestureEnd();
   }
+  gestureBegin();
   document.addEventListener("pointermove", mv);
   document.addEventListener("pointerup", up);
 }
@@ -735,7 +751,9 @@ function onPointerDown(e) {
     document.removeEventListener("pointercancel", up);
     S.setPosition(name, { x: lx, y: ly }); // client-side only, recorded on release
     drawWires();
+    gestureEnd();
   }
+  gestureBegin();
   document.addEventListener("pointermove", mv);
   document.addEventListener("pointerup", up);
   document.addEventListener("pointercancel", up);
