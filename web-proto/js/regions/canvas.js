@@ -331,10 +331,21 @@ function resourceCardHTML(d, r, sel) {
 
 let gestureActive = false;
 let pendingRender = false;
+let gestureCleanup = null; // the active drag's own up(), for forced ends
 
-function gestureBegin() { gestureActive = true; }
+// A gesture that never sees its release (app switch mid-press, pointer
+// eaten elsewhere) must not leave rendering deferred forever: window blur
+// and document pointercancel force the active drag's cleanup.
+function forceGestureEnd() {
+  if (gestureCleanup) { const fn = gestureCleanup; gestureCleanup = null; fn(); }
+}
+addEventListener("blur", forceGestureEnd);
+document.addEventListener("pointercancel", forceGestureEnd);
+
+function gestureBegin(cleanup) { gestureActive = true; gestureCleanup = cleanup || null; }
 function gestureEnd() {
   gestureActive = false;
+  gestureCleanup = null;
   if (pendingRender) { pendingRender = false; render(); }
 }
 
@@ -473,7 +484,7 @@ function onPanDown(e) {
     document.removeEventListener("pointerup", up);
     gestureEnd();
   }
-  gestureBegin();
+  gestureBegin(up);
   document.addEventListener("pointermove", mv);
   document.addEventListener("pointerup", up);
 }
@@ -710,7 +721,7 @@ function onResizeDown(e) {
     document.removeEventListener("pointerup", up);
     gestureEnd();
   }
-  gestureBegin();
+  gestureBegin(up);
   document.addEventListener("pointermove", mv);
   document.addEventListener("pointerup", up);
 }
@@ -753,7 +764,7 @@ function onPointerDown(e) {
     drawWires();
     gestureEnd();
   }
-  gestureBegin();
+  gestureBegin(up);
   document.addEventListener("pointermove", mv);
   document.addEventListener("pointerup", up);
   document.addEventListener("pointercancel", up);
