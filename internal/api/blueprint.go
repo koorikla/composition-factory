@@ -162,7 +162,9 @@ func (srv *server) handleImportBlueprint(w http.ResponseWriter, r *http.Request)
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	b, err := blueprint.Parse(body)
+	// ParseAny also unwraps a package.yaml stream (cf package's yaml form),
+	// recovering the blueprint from its embedded-source annotation
+	b, err := blueprint.ParseAny(body)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return

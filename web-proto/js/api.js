@@ -283,3 +283,14 @@ export function importBlueprint(yamlText) {
     return body;
   });
 }
+
+/** GET /api/package?format=yaml — the package.yaml document stream as text. */
+export function getPackageYAML() {
+  return fetch("/api/package?format=yaml").then(async function (res) {
+    if (!res.ok) {
+      const body = await res.json().catch(function () { return {}; });
+      throw new Error(body.error || res.statusText);
+    }
+    return res.text();
+  });
+}

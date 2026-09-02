@@ -21,12 +21,7 @@ import (
 // reads). Everything is timestamp-free so the same inputs always produce
 // the same digest.
 func Build(meta []byte, docs [][]byte) (v1.Image, error) {
-	stream := bytes.TrimRight(meta, "\n")
-	for _, d := range docs {
-		stream = append(stream, []byte("\n---\n")...)
-		stream = append(stream, bytes.TrimRight(d, "\n")...)
-	}
-	stream = append(stream, '\n')
+	stream := Stream(meta, docs)
 
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
@@ -78,6 +73,17 @@ func Build(meta []byte, docs [][]byte) (v1.Image, error) {
 		return nil, fmt.Errorf("label config: %w", err)
 	}
 	return img, nil
+}
+
+// Stream renders the package.yaml document stream — the exact bytes Build
+// puts in the layer, so the "output yaml" forms and the .xpkg never drift.
+func Stream(meta []byte, docs [][]byte) []byte {
+	stream := append([]byte(nil), bytes.TrimRight(meta, "\n")...)
+	for _, d := range docs {
+		stream = append(stream, []byte("\n---\n")...)
+		stream = append(stream, bytes.TrimRight(d, "\n")...)
+	}
+	return append(stream, '\n')
 }
 
 // PackageStream returns the package.yaml document stream from any xpkg

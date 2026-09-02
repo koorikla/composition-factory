@@ -61,6 +61,7 @@ export function init(rootEl, deps) {
       '<button data-t="xrd" aria-pressed="' + (tab === "xrd") + '">definition.yaml</button>' +
       '<button data-t="fns" aria-pressed="' + (tab === "fns") + '">functions.yaml</button>' +
       '<button data-t="bp" aria-pressed="' + (tab === "bp") + '">' + esc(bpLabel) + '</button>';
+    h += '<button data-t="pkg" aria-pressed="' + (tab === "pkg") + '">package.yaml</button>';
     // one tab per generated providerconfig family (outputs carry the bodies)
     var g = store.state.lastGenerate;
     (g && g.outputs || []).forEach(function (o) {
@@ -139,6 +140,7 @@ export function init(rootEl, deps) {
   }
 
   var rbacCache = null; // invalidated on every doc emit
+  var pkgCache = null;  // same lifecycle: the package renders the live doc
 
   function currentText() {
     if (tab === "bp") {
@@ -152,6 +154,14 @@ export function init(rootEl, deps) {
         return new RegExp("providerconfigs[/\\\\]" + fam + "\\.yaml$").test(o.path);
       });
       return pcs.length ? pcs[0].body : "";
+    }
+    if (tab === "pkg") {
+      if (pkgCache) return pkgCache;
+      api.getPackageYAML().then(function (text) {
+        pkgCache = text;
+        if (tab === "pkg") render();
+      }).catch(function (e) { pkgCache = "# package unavailable: " + (e && e.message || e); if (tab === "pkg") render(); });
+      return "# building package\u2026";
     }
     if (tab === "rbac") {
       if (rbacCache) return rbacCache;
@@ -359,7 +369,7 @@ export function init(rootEl, deps) {
     scheduleGenerate();
   });
 
-  store.subscribe("doc", function () { rbacCache = null; });
+  store.subscribe("doc", function () { rbacCache = null; pkgCache = null; });
   store.subscribe("generate", function (result) {
     chipOk(result && result.outputs ? result.outputs.length : 0);
     buildTabs(); // providerconfig families can appear/vanish with sources

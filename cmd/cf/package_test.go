@@ -68,6 +68,34 @@ func TestPackageDeterministic(t *testing.T) {
 	}
 }
 
+func TestPackageYAMLMatchesXpkgStream(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	xp := filepath.Join(dir, "x.xpkg")
+	yp := filepath.Join(dir, "x.package.yaml")
+	var buf bytes.Buffer
+	if err := (&PackageCmd{Blueprint: bp, Out: xp, CacheDir: cacheDir}).Run(&buf); err != nil {
+		t.Fatalf("package: %v", err)
+	}
+	if err := (&PackageCmd{Blueprint: bp, Out: yp, YAML: true, CacheDir: cacheDir}).Run(&buf); err != nil {
+		t.Fatalf("package --yaml: %v", err)
+	}
+	img, err := tarball.ImageFromPath(xp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := xpkg.PackageStream(img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	yb, err := os.ReadFile(yp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(stream, yb) {
+		t.Fatal("--yaml output differs from the xpkg's package.yaml")
+	}
+}
+
 func TestPushPushesToRegistry(t *testing.T) {
 	dir, bp, cacheDir := seed(t)
 	out := filepath.Join(dir, "xqueue.xpkg")

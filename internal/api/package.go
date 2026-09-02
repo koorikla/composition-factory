@@ -54,6 +54,16 @@ func (srv *server) handlePackage(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// ?format=yaml: the package.yaml stream itself — same bytes the .xpkg
+	// carries, importable back through POST /api/blueprint/import
+	if r.URL.Query().Get("format") == "yaml" {
+		w.Header().Set("Content-Type", "application/yaml")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", b.Metadata.Name+".package.yaml"))
+		w.WriteHeader(http.StatusOK)
+		w.Write(xpkg.Stream(meta, docs))
+		return
+	}
+
 	img, err := xpkg.Build(meta, docs)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())

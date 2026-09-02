@@ -343,6 +343,55 @@ func Parse(body []byte) (*Blueprint, error) {
 	return &b, nil
 }
 
+// BlueprintAnnotation is where cf package embeds the blueprint source in a
+// Configuration meta document, and where ParseAny recovers it from.
+const BlueprintAnnotation = "factory.crossplane.io/blueprint"
+
+// ParseAny accepts either raw blueprint YAML or a package.yaml stream (the
+// "output yaml" form of cf package): a stream whose Configuration meta
+// document carries the blueprint under the factory.crossplane.io/blueprint
+// annotation is unwrapped and the embedded blueprint goes through the same
+// Parse gate. Everything else fails with Parse's own error.
+func ParseAny(body []byte) (*Blueprint, error) {
+	b, perr := Parse(body)
+	if perr == nil {
+		return b, nil
+	}
+	for _, doc := range splitDocs(body) {
+		var meta struct {
+			Kind     string `json:"kind"`
+			Metadata struct {
+				Annotations map[string]string `json:"annotations"`
+			} `json:"metadata"`
+		}
+		if yaml.Unmarshal(doc, &meta) != nil || meta.Kind != "Configuration" {
+			continue
+		}
+		src, ok := meta.Metadata.Annotations[BlueprintAnnotation]
+		if !ok {
+			return nil, fmt.Errorf("Configuration package has no %s annotation to recover a blueprint from", BlueprintAnnotation)
+		}
+		b, err := Parse([]byte(src))
+		if err != nil {
+			return nil, fmt.Errorf("embedded blueprint: %w", err)
+		}
+		return b, nil
+	}
+	return nil, perr
+}
+
+// splitDocs splits a multi-document YAML stream on "---" at column zero.
+func splitDocs(in []byte) [][]byte {
+	var docs [][]byte
+	for _, d := range strings.Split(string(in), "\n---\n") {
+		if strings.TrimSpace(d) == "" {
+			continue
+		}
+		docs = append(docs, []byte(d))
+	}
+	return docs
+}
+
 // Validate reports the first structural problem, naming the offending field.
 func (b *Blueprint) Validate() error {
 	// metadata.name reaches every generated file's provenance header

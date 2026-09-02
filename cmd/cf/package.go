@@ -25,7 +25,8 @@ import (
 // blueprint depends on, with the blueprint source embedded for recovery.
 type PackageCmd struct {
 	Blueprint string `arg:"" help:"Path to the blueprint file."`
-	Out       string `short:"o" help:"Output .xpkg path. Defaults to <blueprint name>.xpkg."`
+	Out       string `short:"o" help:"Output path. Defaults to <blueprint name>.xpkg (or .package.yaml with --yaml)."`
+	YAML      bool   `help:"Write the package.yaml document stream instead of an .xpkg image. Importable back via the GUI or POST /api/blueprint/import."`
 	CacheDir  string `help:"Schema cache directory." default:"${cachedir}"`
 }
 
@@ -72,6 +73,18 @@ func (c *PackageCmd) Run(out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if c.YAML {
+		path := c.Out
+		if path == "" {
+			path = b.Metadata.Name + ".package.yaml"
+		}
+		if err := os.WriteFile(path, xpkg.Stream(meta, docs), 0o644); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "wrote %s\n", path)
+		return nil
+	}
+
 	img, err := xpkg.Build(meta, docs)
 	if err != nil {
 		return err
