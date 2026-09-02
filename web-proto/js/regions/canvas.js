@@ -119,8 +119,8 @@ function ensurePositions(d) {
 /* ---------- rendering ---------- */
 
 function portRow(owner, path, opts) {
-  // opts: {dir, dotColor, req, ty, label, title, fan}
-  return '<div class="port' + (opts.req ? " req" : "") + '"' +
+  // opts: {dir, dotColor, req, ty, label, title, fan, cls}
+  return '<div class="port' + (opts.req ? " req" : "") + (opts.cls ? " " + opts.cls : "") + '"' +
     ' data-owner="' + esc(owner) + '" data-path="' + esc(path) + '"' +
     ' title="' + esc(opts.title || path) + '">' +
     '<span class="d ' + opts.dir + '" style="background:' + opts.dotColor + '"></span>' +
@@ -247,23 +247,43 @@ function resourceCardHTML(d, r, sel) {
     });
   });
 
-  // Outgoing status wires from this resource
+  // Status outputs: wired paths always, plus the top atProvider leaves from
+  // the schema — displayed like inputs so "object depends on object" is
+  // visible before any wire exists.
   const outStatusWires = listWires(d).filter(function (w) {
     return w.kind === "status" && w.srcResource === r.name;
   });
   const seenStatus = {};
+  const statusRows = [];
   outStatusWires.forEach(function (w) {
     if (seenStatus[w.srcPath]) return;
     seenStatus[w.srcPath] = true;
-    h += portRow(r.name, "status." + w.srcPath, {
-      dir: "out",
-      dotColor: "var(--wire-status)",
-      req: false,
-      ty: "",
-      label: "status." + shortPath(w.srcPath),
-      title: r.name + ".status." + w.srcPath + " (status output)",
-    });
+    statusRows.push(w.srcPath);
   });
+  const schemaLeaves = statusLeavesFor(meta) || [];
+  for (let si = 0; si < schemaLeaves.length && statusRows.length < STATUS_ROWS_SHOWN + Object.keys(seenStatus).length; si++) {
+    const p = schemaLeaves[si];
+    if (seenStatus[p]) continue;
+    seenStatus[p] = true;
+    statusRows.push(p);
+    if (statusRows.length >= STATUS_ROWS_SHOWN && si >= STATUS_ROWS_SHOWN) break;
+  }
+  if (statusRows.length) {
+    h += '<div class="node-grp" style="color:var(--wire-status);text-align:right">outputs</div>';
+    statusRows.forEach(function (p) {
+      h += portRow(r.name, "status." + p, {
+        dir: "out",
+        dotColor: "var(--wire-status)",
+        req: false,
+        ty: "",
+        cls: "status",
+        // outputs read right-aligned and short: the atProvider prefix is
+        // noise at a glance, the full path lives in the title
+        label: shortPath(p.replace(/^atProvider\./, "")),
+        title: r.name + ".status." + p + " (status output \u2014 other objects can wire from this)",
+      });
+    });
+  }
   h += '</div>';
 
   if (r.when || r.forEach || envKeys.length > 0) {
@@ -407,6 +427,7 @@ function onPanDown(e) {
   const sx = e.clientX, sy = e.clientY, ox = view.x, oy = view.y;
   let moved = false;
   function mv(ev) {
+    if (!ev.buttons) { up(); return; } // release happened while unfocused
     moved = true;
     view.x = ox + ev.clientX - sx;
     view.y = oy + ev.clientY - sy;
@@ -435,6 +456,33 @@ function buildZoomControls() {
   bar.querySelector("#zoom-out").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1 / 1.2); });
   bar.querySelector("#zoom-reset").addEventListener("click", function () { view.x = 0; view.y = 0; view.k = 1; applyView(); });
 }
+
+/* ---------- status outputs shown on cards (slice 32) ---------- */
+
+// "apiVersion|kind" -> array of status leaf paths (atProvider first), or
+// undefined while loading. Loaded lazily; cards re-render when it lands.
+const statusLeafCache = {};
+
+function statusLeavesFor(meta) {
+  if (!meta) return null;
+  const key = meta.apiVersion + "|" + meta.kind;
+  if (key in statusLeafCache) return statusLeafCache[key];
+  statusLeafCache[key] = null; // in flight
+  A.getKind(meta.apiVersion, meta.kind).then(function (detail) {
+    const leaves = (detail && detail.status || []).map(function (f) { return f.path; });
+    // atProvider outputs first — they are what other objects depend on
+    leaves.sort(function (a, b) {
+      const pa = a.indexOf("atProvider") === 0 ? 0 : 1;
+      const pb = b.indexOf("atProvider") === 0 ? 0 : 1;
+      return pa - pb || (a < b ? -1 : 1);
+    });
+    statusLeafCache[key] = leaves;
+    render();
+  }).catch(function () { statusLeafCache[key] = []; });
+  return null;
+}
+
+const STATUS_ROWS_SHOWN = 4;
 
 /* ---------- manual card size (slice 26): client-side, like positions ---- */
 
@@ -613,6 +661,7 @@ function onResizeDown(e) {
   const startW = el.getBoundingClientRect().width / view.k;
   const sx = e.clientX;
   function mv(ev) {
+    if (!ev.buttons) { up(); return; } // release happened while unfocused
     const w = Math.max(198, startW + (ev.clientX - sx) / view.k);
     cardSizes[name] = Math.round(w);
     el.style.width = cardSizes[name] + "px";
@@ -650,6 +699,7 @@ function onPointerDown(e) {
   let lx = start.x, ly = start.y;
 
   function mv(ev) {
+    if (!ev.buttons) { up(); return; } // release happened while unfocused
     lx = Math.max(4, start.x + (ev.clientX - sx) / view.k);
     ly = Math.max(4, start.y + (ev.clientY - sy) / view.k);
     el.style.left = lx + "px";

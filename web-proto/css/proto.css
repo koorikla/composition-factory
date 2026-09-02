@@ -265,3 +265,8 @@ svg.wires .dim{opacity:.18}
 
 /* scaffold addition (not in prototype-source): [hidden] must beat .warnbar{display:flex} */
 [hidden]{display:none!important}
+
+/* status outputs: right-aligned so cards read inputs-left / outputs-right */
+.port.status{justify-content:flex-end}
+.port.status .nm{text-align:right;color:var(--wire-status)}
+.port.status .ty{margin-left:0}
