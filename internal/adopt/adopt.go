@@ -39,7 +39,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, error) {
 		switch kind {
 		case "Composition":
 			compDoc = d
-		case "CompositeResourceDefinition", "CustomResourceDefinition":
+		case "CompositeResourceDefinition":
 			xrdDoc = d
 		}
 	}
@@ -49,8 +49,8 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, error) {
 	}
 
 	bp := &blueprint.Blueprint{
-		APIVersion: "compositionfactory.koorikla.io/v1alpha1",
-		Kind:       "Blueprint",
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
 		Spec: blueprint.Spec{
 			XRD: blueprint.XRD{
 				Parameters: make(map[string]blueprint.Parameter),

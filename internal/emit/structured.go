@@ -12,7 +12,8 @@ import (
 type RHSKind int
 
 const (
-	RHSLiteral RHSKind = iota
+	RHSUnset RHSKind = iota
+	RHSLiteral
 	RHSRaw
 	RHSTemplate
 	RHSParam

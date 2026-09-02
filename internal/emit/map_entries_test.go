@@ -44,7 +44,9 @@ spec:
 	}
 
 	b := &blueprint.Blueprint{
-		Metadata: blueprint.Metadata{Name: "test-map"},
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "test-map"},
 		Spec: blueprint.Spec{
 			XRD: blueprint.XRD{
 				Group:   "example.org",
@@ -132,7 +134,9 @@ spec:
 	}
 
 	b := &blueprint.Blueprint{
-		Metadata: blueprint.Metadata{Name: "test-map-cond"},
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "test-map-cond"},
 		Spec: blueprint.Spec{
 			XRD: blueprint.XRD{
 				Group:   "example.org",

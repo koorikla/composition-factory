@@ -233,12 +233,22 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 		plan = append(plan, envField{
 			path: []string{"providerConfigRef", "kind"},
 			rhs:  "ClusterProviderConfig",
+			structured: StructuredRHS{
+				Kind:  RHSLiteral,
+				Value: "ClusterProviderConfig",
+			},
 		})
 	}
 	if hasPCRKind && !hasPCRName {
 		plan = append(plan, envField{
 			path: []string{"providerConfigRef", "name"},
 			rhs:  "{{ $spec.providerName }}",
+			structured: StructuredRHS{
+				Kind:      RHSParam,
+				Param:     "providerName",
+				ParamSegs: []string{"providerName"},
+				RawExpr:   "$spec.providerName",
+			},
 		})
 	}
 	sort.Slice(plan, func(i, j int) bool {

@@ -406,6 +406,13 @@ func splitDocs(in []byte) [][]byte {
 
 // Validate reports the first structural problem, naming the offending field.
 func (b *Blueprint) Validate() error {
+	if b.APIVersion != APIVersion {
+		return fmt.Errorf("apiVersion: %q is not valid (must be %q)", b.APIVersion, APIVersion)
+	}
+	if b.Kind != Kind {
+		return fmt.Errorf("kind: %q is not valid (must be %q)", b.Kind, Kind)
+	}
+
 	// metadata.name reaches every generated file's provenance header
 	// (emit.header writes "# Source: blueprints/<name>.cf.yaml"). A newline
 	// there ends the comment and puts whatever follows at column 0 of a

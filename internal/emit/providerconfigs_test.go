@@ -64,6 +64,8 @@ func TestProviderFamilyRejectsUnparseableRef(t *testing.T) {
 // in both groups, no ProviderConfig CRD), so it doubles as the input here.
 func awsFamilyBlueprint() *blueprint.Blueprint {
 	return &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
 		Spec: blueprint.Spec{
 			Sources: []blueprint.Source{
 				{Provider: "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"},
@@ -96,6 +98,8 @@ func TestProviderConfigsAWSFamilyGolden(t *testing.T) {
 // one file.
 func TestProviderConfigsDedupeSameFamily(t *testing.T) {
 	b := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
 		Spec: blueprint.Spec{
 			Sources: []blueprint.Source{
 				{Provider: "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"},
@@ -125,6 +129,8 @@ func TestProviderConfigsDedupeSameFamily(t *testing.T) {
 // complement: two DIFFERENT families must never collapse into one file.
 func TestProviderConfigsDistinctFamiliesProduceDistinctFiles(t *testing.T) {
 	b := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
 		Spec: blueprint.Spec{
 			Sources: []blueprint.Source{
 				{Provider: "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"},
@@ -193,6 +199,8 @@ spec:
 // command would fail against a package that does not exist.
 func TestProviderConfigsSinglePackageFamilyDoesNotSuggestAFamilyPackage(t *testing.T) {
 	b := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
 		Spec: blueprint.Spec{
 			Sources: []blueprint.Source{
 				{Provider: "ghcr.io/crossplane-contrib/provider-kubernetes:v1.0.0"},

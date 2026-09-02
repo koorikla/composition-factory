@@ -20,7 +20,9 @@ import (
 // exactly one rule.
 func statusForEachBlueprint(mutate func(*Blueprint)) *Blueprint {
 	b := &Blueprint{
-		Metadata: Metadata{Name: "xcluster"},
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "xcluster"},
 		Spec: Spec{
 			XRD: XRD{
 				Group: "platform.sparky.ee", Kind: "XCluster", Plural: "xclusters",
