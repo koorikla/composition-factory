@@ -169,13 +169,7 @@ func New(o Options) (http.Handler, error) {
 	// ServeMux's own default 404/405 handling (normalized to JSON below)
 	// is what actually gives 405-vs-404 "for free", per this task's brief.
 	mux.HandleFunc("GET /healthz", handleHealthz)
-	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
-		v := o.Version
-		if v == "" {
-			v = "dev"
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"version": v})
-	})
+	mux.HandleFunc("GET /api/version", srv.handleVersion)
 	mux.HandleFunc("GET /api/kinds", srv.handleKinds)
 	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}", srv.handleKind)
 	mux.HandleFunc("GET /api/kinds/{apiVersion}/{kind}/fields", srv.handleKindFields)
@@ -305,7 +299,7 @@ const gzipMinBytes = 256
 // the body.
 func wrap(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rec := newRecorder()
+		rec := NewRecorder()
 		h.ServeHTTP(rec, r)
 
 		status := rec.status
@@ -457,10 +451,6 @@ func etagMatches(ifNoneMatch, etag string) bool {
 		}
 	}
 	return false
-}
-
-func newRecorder() *ResponseRecorder {
-	return NewRecorder()
 }
 
 // BuildIndex builds an index.Index over the given cache store, provider refs,

@@ -205,3 +205,60 @@ func TestAPIVersionOfCoreGroupIsBareVersion(t *testing.T) {
 		t.Errorf("APIVersion() = %q, want %q", got, "v1")
 	}
 }
+
+func TestParseCRDManifestHandlesMultipleDocsAndBlockScalars(t *testing.T) {
+	manifest := []byte(`
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: items.test.example.org
+spec:
+  group: test.example.org
+  scope: Namespaced
+  names:
+    kind: Item
+    plural: items
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        description: |
+          A multi-line block scalar description
+          ---
+          containing document separator marker within
+        properties:
+          spec:
+            properties:
+              data: {type: string}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.test.example.org
+spec:
+  group: test.example.org
+  scope: Namespaced
+  names:
+    kind: Widget
+    plural: widgets
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+---
+`)
+
+	crds, err := ParseCRDManifest(manifest)
+	if err != nil {
+		t.Fatalf("ParseCRDManifest failed: %v", err)
+	}
+	if len(crds) != 2 {
+		t.Fatalf("got %d CRDs, want 2", len(crds))
+	}
+	if !crds[0].Native || !crds[1].Native {
+		t.Errorf("expected all parsed CRDs from manifest to have Native=true")
+	}
+}

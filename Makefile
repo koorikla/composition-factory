@@ -6,7 +6,7 @@ BLUEPRINT ?= testdata/xqueue.cf.yaml
 OUT       ?= out
 
 build:
-	go build -ldflags "-X main.version=$(VERSION)" -o $(BIN) ./cmd/cf
+	go build -buildvcs=false -ldflags "-X main.version=$(VERSION)" -o $(BIN) ./cmd/cf
 
 # Lane A: no Docker, no cluster. Must pass anywhere.
 test:

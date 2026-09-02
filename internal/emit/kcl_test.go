@@ -167,7 +167,7 @@ func TestTranslateWhenToKCL_BooleanSubstrings(t *testing.T) {
 }
 
 func TestKCLStatusWireReadsStatusPathOnce(t *testing.T) {
-	got := kclStructuredRHS(StructuredRHS{Kind: RHSStatus, Resource: "role", StatusPath: "atProvider.arn"}, "")
+	got := kclStructuredRHS(structuredRHS{kind: rhsStatus, resource: "role", statusPath: "atProvider.arn"}, "")
 	want := `ocds?["role"]?.Resource?.status?.atProvider?.arn`
 	if got != want {
 		t.Errorf("kclStructuredRHS = %q, want %q", got, want)

@@ -190,23 +190,23 @@ func writePythonMapEntries(sb *strings.Builder, indent string, fields []forProvi
 	}
 }
 
-func pythonStructuredRHS(s StructuredRHS, fallbackRHS string) string {
-	switch s.Kind {
-	case RHSLiteral:
-		return pythonFormatLiteral(s.Value)
-	case RHSRaw:
-		return s.Value
-	case RHSTemplate:
-		return fmt.Sprintf("f\"{xr_name}-%s\"", s.Value)
-	case RHSParam:
-		if len(s.ParamSegs) > 0 {
-			if len(s.ParamSegs) == 1 {
-				return fmt.Sprintf("spec.get(%q)", s.ParamSegs[0])
+func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
+	switch s.kind {
+	case rhsLiteral:
+		return pythonFormatLiteral(s.value)
+	case rhsRaw:
+		return s.value
+	case rhsTemplate:
+		return fmt.Sprintf("f\"{xr_name}-%s\"", s.value)
+	case rhsParam:
+		if len(s.paramSegs) > 0 {
+			if len(s.paramSegs) == 1 {
+				return fmt.Sprintf("spec.get(%q)", s.paramSegs[0])
 			}
 			var sb strings.Builder
 			sb.WriteString("spec")
-			for i, p := range s.ParamSegs {
-				if i == len(s.ParamSegs)-1 {
+			for i, p := range s.paramSegs {
+				if i == len(s.paramSegs)-1 {
 					sb.WriteString(fmt.Sprintf(".get(%q)", p))
 				} else {
 					sb.WriteString(fmt.Sprintf(".get(%q, {})", p))
@@ -214,11 +214,11 @@ func pythonStructuredRHS(s StructuredRHS, fallbackRHS string) string {
 			}
 			return sb.String()
 		}
-		return translateParamAccessToPython(s.Param)
-	case RHSStatus:
-		parts := strings.Split(s.StatusPath, ".")
+		return translateParamAccessToPython(s.param)
+	case rhsStatus:
+		parts := strings.Split(s.statusPath, ".")
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("ocds.get(%q, {}).get(\"resource\", {}).get(\"status\", {})", s.Resource))
+		sb.WriteString(fmt.Sprintf("ocds.get(%q, {}).get(\"resource\", {}).get(\"status\", {})", s.resource))
 		for i, p := range parts {
 			if p == "" {
 				continue

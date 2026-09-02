@@ -4,9 +4,9 @@ package schema
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"sigs.k8s.io/yaml"
 )
 
@@ -188,13 +188,7 @@ func (c CRD) APIVersion() (string, error) {
 // object-rooted path; ParseCRDs, the provider-package decoder, still never
 // opens it.
 func ParseCRDManifest(data []byte) ([]CRD, error) {
-	var docs [][]byte
-	for _, d := range strings.Split(string(data), "\n---") {
-		if strings.TrimSpace(d) == "" {
-			continue
-		}
-		docs = append(docs, []byte(d))
-	}
+	docs := blueprint.SplitDocs(data)
 	crds, err := ParseCRDs(docs)
 	if err != nil {
 		return nil, err

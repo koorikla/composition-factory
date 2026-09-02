@@ -202,21 +202,21 @@ func quoteKCLKey(k string) string {
 	return k
 }
 
-func kclStructuredRHS(s StructuredRHS, fallbackRHS string) string {
-	switch s.Kind {
-	case RHSLiteral:
-		return kclFormatLiteral(s.Value)
-	case RHSRaw:
-		return s.Value
-	case RHSTemplate:
-		return fmt.Sprintf("\"${_xr}-%s\"", s.Value)
-	case RHSParam:
-		if len(s.ParamSegs) > 0 {
-			return "_spec?." + strings.Join(s.ParamSegs, "?.")
+func kclStructuredRHS(s structuredRHS, fallbackRHS string) string {
+	switch s.kind {
+	case rhsLiteral:
+		return kclFormatLiteral(s.value)
+	case rhsRaw:
+		return s.value
+	case rhsTemplate:
+		return fmt.Sprintf("\"${_xr}-%s\"", s.value)
+	case rhsParam:
+		if len(s.paramSegs) > 0 {
+			return "_spec?." + strings.Join(s.paramSegs, "?.")
 		}
-		return translateParamAccessToKCL(s.Param)
-	case RHSStatus:
-		return fmt.Sprintf("ocds?[%q]?.Resource?.status?.%s", s.Resource, strings.ReplaceAll(s.StatusPath, ".", "?."))
+		return translateParamAccessToKCL(s.param)
+	case rhsStatus:
+		return fmt.Sprintf("ocds?[%q]?.Resource?.status?.%s", s.resource, strings.ReplaceAll(s.statusPath, ".", "?."))
 	default:
 		return kclRHS(fallbackRHS)
 	}
