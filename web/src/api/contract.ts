@@ -70,11 +70,13 @@ export interface Parameter {
 }
 
 /** Mirrors internal/blueprint.Field (a resource's field assignment). Exactly
- * one of from, value or raw is set. */
+ * one of from, value, raw or template is set. */
 export interface FieldAssignment {
   from?: string
   value?: string
   raw?: string
+  /** Names a spec.templates entry whose output becomes the value. */
+  template?: string
 }
 
 /** Mirrors internal/blueprint.Resource. */
@@ -85,6 +87,13 @@ export interface Resource {
   /** "params.<name>" — repeats the resource N times over an integer parameter. */
   forEach?: string
   fields: Record<string, FieldAssignment>
+  /** metadata.annotations authoring: free-form annotation keys (dots and
+   * slashes legal, e.g. "eks.amazonaws.com/role-arn") to the same
+   * exactly-one-of assignment forms as fields. Values are always strings on
+   * the composed object; a wired entry whose source is absent omits the key
+   * cleanly. Omitted entirely (never null/{}) when a resource has none —
+   * the Go side marshals it omitempty. */
+  annotations?: Record<string, FieldAssignment>
 }
 
 /** Mirrors internal/blueprint.Source. */

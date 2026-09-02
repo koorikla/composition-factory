@@ -65,6 +65,14 @@
             "raw": "",
             "template": ""
           }
+        },
+        "annotations": {
+          "example.com/max-message-size": {
+            "from": "params.maxMessageSize",
+            "value": "",
+            "raw": "",
+            "template": ""
+          }
         }
       }
     ]

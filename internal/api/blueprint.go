@@ -527,37 +527,46 @@ func resourceDeclared(b *blueprint.Blueprint, name string) bool {
 }
 
 // statusReferencingResources returns the names of every resource that
-// references resources.<name>.status.<...> through a field's From, in
-// resource order. It mirrors blueprint.Blueprint's unexported
-// statusReferencingResources (see internal/blueprint/edit.go) exactly, over
-// the same exported Resource/Field data — the same one-check duplicate
-// referencingResources below is, for the same 409-classification reason.
+// references resources.<name>.status.<...> through a field's or an
+// annotation's From, in resource order. It mirrors blueprint.Blueprint's
+// unexported statusReferencingResources (see internal/blueprint/edit.go)
+// exactly, over the same exported Resource/Field data — the same one-check
+// duplicate referencingResources below is, for the same 409-classification
+// reason.
 func statusReferencingResources(b *blueprint.Blueprint, name string) []string {
 	var refs []string
 	for _, res := range b.Spec.Resources {
-		for _, f := range res.Fields {
-			if target, _, ok := blueprint.StatusRef(f.From); ok && target == name {
-				refs = append(refs, res.Name)
-				break
-			}
+		if anyStatusFrom(res.Fields, name) || anyStatusFrom(res.Annotations, name) {
+			refs = append(refs, res.Name)
 		}
 	}
 	return refs
 }
 
+// anyStatusFrom reports whether any entry in fields wires from resource
+// name's status.
+func anyStatusFrom(fields map[string]blueprint.Field, name string) bool {
+	for _, f := range fields {
+		if target, _, ok := blueprint.StatusRef(f.From); ok && target == name {
+			return true
+		}
+	}
+	return false
+}
+
 // referencingResources returns the names of every resource that references
-// params.<name> — through a field's From, an envelope entry's From, its own
-// ForEach loop bound, or its When condition — in resource order. It mirrors
-// blueprint.Blueprint's unexported referencingResources (see
-// internal/blueprint/edit.go) exactly, over the same exported Resource/Field
-// data — see handleDeleteParameter's doc comment for why this HTTP layer
-// needs its own copy of this one check.
+// params.<name> — through a field's From, an envelope entry's From, an
+// annotation entry's From, its own ForEach loop bound, or its When condition
+// — in resource order. It mirrors blueprint.Blueprint's unexported
+// referencingResources (see internal/blueprint/edit.go) exactly, over the
+// same exported Resource/Field data — see handleDeleteParameter's doc
+// comment for why this HTTP layer needs its own copy of this one check.
 func referencingResources(b *blueprint.Blueprint, name string) []string {
 	want := "params." + name
 	var refs []string
 	for _, res := range b.Spec.Resources {
 		if res.ForEach == want || whenReferences(res.When, name) ||
-			anyFrom(res.Fields, want) || anyFrom(res.Envelope, want) {
+			anyFrom(res.Fields, want) || anyFrom(res.Envelope, want) || anyFrom(res.Annotations, want) {
 			refs = append(refs, res.Name)
 		}
 	}

@@ -52,6 +52,13 @@ func (b *Blueprint) deepCopy() *Blueprint {
 				r.Envelope[path] = f
 			}
 		}
+		// Annotations: same map, same omitempty, same nil-stays-nil rule.
+		if b.Spec.Resources[i].Annotations != nil {
+			r.Annotations = make(map[string]Field, len(b.Spec.Resources[i].Annotations))
+			for key, f := range b.Spec.Resources[i].Annotations {
+				r.Annotations[key] = f
+			}
+		}
 		cp.Spec.Resources[i] = r
 	}
 
@@ -90,15 +97,15 @@ func whenParam(when string) string {
 }
 
 // referencingResources returns the names of every resource that references
-// params.<name> — through a field's From, an envelope entry's From, its own
-// ForEach loop bound, or its When condition — in resource order, each
-// resource named at most once.
+// params.<name> — through a field's From, an envelope entry's From, an
+// annotation entry's From, its own ForEach loop bound, or its When condition
+// — in resource order, each resource named at most once.
 func (b *Blueprint) referencingResources(name string) []string {
 	want := "params." + name
 	var refs []string
 	for _, r := range b.Spec.Resources {
 		if r.ForEach == want || whenParam(r.When) == name ||
-			anyFrom(r.Fields, want) || anyFrom(r.Envelope, want) {
+			anyFrom(r.Fields, want) || anyFrom(r.Envelope, want) || anyFrom(r.Annotations, want) {
 			refs = append(refs, r.Name)
 		}
 	}
@@ -119,25 +126,34 @@ func anyFrom(fields map[string]Field, want string) bool {
 }
 
 // statusReferencingResources returns the names of every resource with a
-// field whose From wires from resources.<name>'s status, in resource order.
-// It is the resources.<name>.status.* counterpart of referencingResources,
-// and matches by parsing each From with the same grammar the validator uses
-// rather than by substring, so a params reference (a different namespace)
-// or a name that merely shares a prefix can never match.
+// field or annotation whose From wires from resources.<name>'s status, in
+// resource order. It is the resources.<name>.status.* counterpart of
+// referencingResources, and matches by parsing each From with the same
+// grammar the validator uses rather than by substring, so a params reference
+// (a different namespace) or a name that merely shares a prefix can never
+// match.
 func (b *Blueprint) statusReferencingResources(name string) []string {
 	var refs []string
 	for _, r := range b.Spec.Resources {
-		for _, f := range r.Fields {
-			if f.From == "" {
-				continue
-			}
-			if ref, err := ParseFrom(f.From); err == nil && ref.Resource == name {
-				refs = append(refs, r.Name)
-				break
-			}
+		if anyStatusFrom(r.Fields, name) || anyStatusFrom(r.Annotations, name) {
+			refs = append(refs, r.Name)
 		}
 	}
 	return refs
+}
+
+// anyStatusFrom reports whether any entry in fields wires from resource
+// name's status.
+func anyStatusFrom(fields map[string]Field, name string) bool {
+	for _, f := range fields {
+		if f.From == "" {
+			continue
+		}
+		if ref, err := ParseFrom(f.From); err == nil && ref.Resource == name {
+			return true
+		}
+	}
+	return false
 }
 
 // resourceIndex returns the position of the resource named name, or -1.
@@ -165,13 +181,13 @@ func renameParamRef(from, oldRef, newRef string) (string, bool) {
 }
 
 // RenameResource renames a composed resource and rewrites every status wire
-// (resources.<from>.status.<path>) to point at the new name — the same
-// contract RenameParameter has for params.<name> references. Params
-// references are a different namespace and are never touched. It fails if
-// from is not declared, if to is already declared (unless to == from — the
-// same blur-submit no-op RenameParameter absorbs), or if the resulting
-// blueprint does not validate (e.g. to is not a DNS label); in every failure
-// case the receiver is left unchanged.
+// (resources.<from>.status.<path>) — in fields AND annotations — to point at
+// the new name, the same contract RenameParameter has for params.<name>
+// references. Params references are a different namespace and are never
+// touched. It fails if from is not declared, if to is already declared
+// (unless to == from — the same blur-submit no-op RenameParameter absorbs),
+// or if the resulting blueprint does not validate (e.g. to is not a DNS
+// label); in every failure case the receiver is left unchanged.
 func (b *Blueprint) RenameResource(from, to string) error {
 	idx := b.resourceIndex(from)
 	if idx < 0 {
@@ -193,6 +209,16 @@ func (b *Blueprint) RenameResource(from, to string) error {
 			if rest, ok := strings.CutPrefix(f.From, oldPrefix); ok {
 				f.From = newPrefix + rest
 				cp.Spec.Resources[i].Fields[path] = f
+			}
+		}
+		// An annotation wire is the same reference shape and gets the same
+		// rewrite: a dangling one would leave a guard chain that indexes an
+		// observed key that can never exist — an annotation that silently
+		// never materialises.
+		for key, f := range r.Annotations {
+			if rest, ok := strings.CutPrefix(f.From, oldPrefix); ok {
+				f.From = newPrefix + rest
+				cp.Spec.Resources[i].Annotations[key] = f
 			}
 		}
 	}
@@ -254,7 +280,8 @@ func (b *Blueprint) AddParameter(name string, p Parameter) error {
 
 // RenameParameter renames an XRD parameter and rewrites every resource
 // reference (params.<from>) to point at the new name — field From references,
-// envelope From references, and forEach loop bounds. Field keys are untouched
+// envelope From references, annotation From references, when conditions and
+// forEach loop bounds. Field keys are untouched
 // -- only the reference value changes. It fails if from
 // is not declared, if to is already declared (unless to == from -- see
 // below), or if the resulting blueprint does not validate; in every failure
@@ -322,6 +349,13 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 			if rewritten, changed := renameParamRef(f.From, oldRef, newRef); changed {
 				f.From = rewritten
 				cp.Spec.Resources[i].Envelope[path] = f
+			}
+		}
+		// Annotation froms too, for exactly the same reason.
+		for key, f := range r.Annotations {
+			if f.From == oldRef {
+				f.From = newRef
+				cp.Spec.Resources[i].Annotations[key] = f
 			}
 		}
 	}
