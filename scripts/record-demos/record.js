@@ -99,6 +99,48 @@ async function main() {
     await page.waitForTimeout(1400)
   })
 
+  // ---- wire: drag a parameter onto a card, watch the YAML follow --------
+  // Reset to the pristine IRSA doc first — compose left an extra card behind.
+  await page.request.put(BASE + '/api/blueprint', {
+    headers: { 'Content-Type': 'application/yaml' },
+    data: fs.readFileSync('testdata/irsa.cf.yaml', 'utf8'),
+  })
+  await page.goto(BASE)
+  await page.waitForSelector('.node[data-id="sa"]')
+  await page.click('#tabs button[data-t="comp"]').catch(() => {})
+  await record(page, 'wire', async () => {
+    await page.waitForTimeout(600)
+    const dot = await page.locator('.port[data-owner="xrd"][data-path="team"] .d').boundingBox()
+    const hdr = await page.locator('.node[data-id="role"] .node-h').boundingBox()
+    const from = { x: dot.x + dot.width / 2, y: dot.y + dot.height / 2 }
+    const to = { x: hdr.x + hdr.width / 2, y: hdr.y + hdr.height / 2 }
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    for (let i = 1; i <= 12; i++) { // slow drag so the preview wire lives across frames
+      await page.mouse.move(from.x + (to.x - from.x) * i / 12, from.y + (to.y - from.y) * i / 12)
+      await page.waitForTimeout(90)
+    }
+    await page.mouse.up()
+    await page.waitForSelector('#wire-picker')
+    await page.waitForTimeout(500)
+    await page.type('#wire-picker-search', 'path', { delay: 160 })
+    await page.waitForTimeout(600)
+    await page.click('#wire-picker .wire-picker-item')
+    // the doc PUT triggers a regenerate; wait for the binding to reach the YAML
+    await page.waitForFunction(() =>
+      (document.getElementById('code').textContent || '').includes('path:'), null, { timeout: 30000 })
+    await page.waitForTimeout(700)
+    await page.evaluate(() => { // scroll the output to the freshly wired line
+      const code = document.getElementById('code')
+      const lines = code.textContent.split('\n')
+      const idx = lines.findIndex(l => l.includes('path:'))
+      if (idx < 0) return
+      const lh = parseFloat(getComputedStyle(code).lineHeight) || 16
+      code.scrollTo({ top: Math.max(0, idx * lh - 70), behavior: 'smooth' })
+    })
+    await page.waitForTimeout(1400)
+  })
+
   await browser.close()
 }
 main().catch(e => { console.error(e); process.exit(1) })

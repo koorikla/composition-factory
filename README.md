@@ -28,6 +28,10 @@
 </td>
 </tr></table>
 
+![Wiring: drag a parameter dot onto a card, pick the target field, and the generated go-template binding appears in the Composition below](docs/screenshots/wire.gif)
+
+*Click-and-drag variable mapping — drag `$team` from the XR onto the Role card, the type-aware picker offers the CRD's real fields (or a custom annotation), and the generated Composition gains the guarded `path: {{ $spec.team }}` binding the moment you click.*
+
 One engine, `internal/emit`, powers all interfaces: the **`cf gen` CLI**, the **`cf serve` visual canvas**, and the **`cf mcp` AI agent server** produce 100% byte-identical, deterministic YAML ready for GitOps.
 
 ---
