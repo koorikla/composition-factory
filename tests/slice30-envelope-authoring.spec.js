@@ -1,6 +1,9 @@
 // Slice 30 — envelope authoring: the inspector exposes the kind's real
 // Crossplane envelope (writeConnectionSecretToRef, managementPolicies) with
-// the same V/W forms as forProvider fields; providerConfigRef stays derived.
+// the same V/W forms as forProvider fields. providerConfigRef used to be
+// derived-only; since per-resource overrides landed, its rows are offered
+// like any other envelope field (the derived default still applies when
+// unset).
 const { test, expect } = require('@playwright/test')
 const { resetDoc, ENGINE } = require('./helpers')
 
@@ -10,14 +13,16 @@ test.beforeEach(async ({ request }) => {
   test.skip(!api.ok(), 'cf serve is not running on 8080')
 })
 
-test('the envelope section lists real fields and hides derived providerConfigRef', async ({ page }) => {
+test('the envelope section lists real fields, providerConfigRef now overridable', async ({ page }) => {
   await page.goto('/')
   await page.click('.node[data-id="work-queue"] .node-h')
   const sec = page.locator('#insp .insp-sec', { hasText: 'Crossplane Envelope' })
   await expect(sec).toBeVisible()
   await expect(sec).toContainText('writeConnectionSecretToRef.name')
   await expect(sec).toContainText('managementPolicies')
-  await expect(sec).not.toContainText('providerConfigRef')  // derived-only, engine refuses it
+  // per-resource providerConfigRef overrides: the rows are offered; unset
+  // they keep the derived {kind, name: providerName} default
+  await expect(sec).toContainText('providerConfigRef.name')
 })
 
 test('wiring the secret name from a parameter persists and renders', async ({ page, request }) => {

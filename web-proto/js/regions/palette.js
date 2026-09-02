@@ -361,6 +361,10 @@ export function init(rootEl, deps) {
     h += '<div style="padding:8px 10px;display:flex;gap:6px">' +
       '<input id="src-add-ref" class="search" style="flex:1;min-width:0" placeholder="ghcr.io/\u2026/provider-x:vN" aria-label="Provider ref">' +
       '<button class="btn sm" id="src-add-btn">Add</button></div>';
+    // add/remove failures surface here, verbatim (the refactor that added
+    // the functions rail dropped this render and the add handler with it \u2014
+    // both are load-bearing: without them the Add button is silently dead)
+    if (providersErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(providersErr) + "</div>";
     h += '<div class="grp"><span class="lbl">Providers Catalogue</span></div>' +
       '<div style="padding:0 10px 6px"><input id="cat-search" class="search" placeholder="Search OSS providers\u2026" aria-label="Search catalogue"></div>';
     if (catRows === null) {
@@ -590,6 +594,21 @@ export function init(rootEl, deps) {
         if (hintEl) hintEl.innerHTML = '<span style="color:var(--err)">Failed to load example: ' + esc(err.message) + '</span>';
       }).finally(function () {
         guideExBtn.disabled = false;
+      });
+      return;
+    }
+    if (e.target.closest("#src-add-btn")) {
+      const addInput = railEl.querySelector("#src-add-ref");
+      const addRef = addInput && addInput.value.trim();
+      if (!addRef) return;
+      e.target.disabled = true;
+      providersErr = null;
+      api.addProvider(addRef).then(function () {
+        loadProviders();
+        loadKinds();             // new kinds must appear in the KINDS tab
+      }).catch(function (err) {
+        providersErr = err && err.message || String(err);
+        drawRail();
       });
       return;
     }

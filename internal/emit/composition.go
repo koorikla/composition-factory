@@ -2,6 +2,7 @@ package emit
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -414,6 +415,11 @@ func writeTemplateBody(d *Doc, ti int, b *blueprint.Blueprint, crds []schema.CRD
 // hatch is legitimate -- so every dotted ancestor of every leaf is admitted
 // too. What is rejected is a path that matches nothing in the schema at any
 // depth, which is the typo case.
+// arrayIdxRE matches a numeric array index in a field path. Every element
+// of an array shares the [0] element's schema, so indices normalize to [0]
+// for schema lookups; map-entry brackets (tags[team]) never match.
+var arrayIdxRE = regexp.MustCompile(`\[\d+\]`)
+
 func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
 	// FieldTree branches on what "the settable fields" means: the
 	// spec.forProvider subtree for a managed resource, the object's own
@@ -464,14 +470,23 @@ func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
 	sort.Strings(paths) // deterministic: the same blueprint names the same field first
 	for _, p := range paths {
 		basePath, _, isMap := blueprint.ParseFieldPath(p)
-		if known[p] || (isMap && known[basePath]) {
+		// The schema tree addresses array elements as [0] (every element
+		// shares the element schema), so any numeric index normalizes to
+		// [0] for the lookup: env[1].name checks against env[0].name.
+		lookup := arrayIdxRE.ReplaceAllString(p, "[0]")
+		if lookup != p && !crd.Native {
+			return fmt.Errorf("resource %q: field %q: multi-element arrays (an index above [0]) are "+
+				"supported on native/object-rooted kinds only in v1 — a managed resource's array is set "+
+				"whole with raw:, or through its [0] element", r.Name, p)
+		}
+		if known[lookup] || (isMap && known[basePath]) {
 			continue
 		}
 		target := p
 		if isMap {
 			target = basePath
 		}
-		if s := closestPath(target, suggestions); s != "" {
+		if s := closestPath(arrayIdxRE.ReplaceAllString(target, "[0]"), suggestions); s != "" {
 			return fmt.Errorf("resource %q: field %q is not in %s; did you mean %q? "+
 				"(an unknown field is silently pruned by the API server on apply, so it must be "+
 				"caught here)", r.Name, p, where, s)

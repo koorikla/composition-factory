@@ -2,6 +2,7 @@ package emit
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -36,8 +37,9 @@ import (
 
 // nativeNode is one segment in the planned field tree.
 type nativeNode struct {
-	seg      string            // segment name, "[0]" stripped
-	indexed  bool              // segment carried the [0] index
+	seg      string            // segment name, index stripped
+	idx      int               // element index for an indexed segment (0-based)
+	indexed  bool              // segment carried an [N] element index
 	leaf     *forProviderField // set when a planned field ends at this node
 	children []*nativeNode     // path-sorted insertion order (plan is sorted)
 	byName   map[string]*nativeNode
@@ -66,25 +68,46 @@ func buildNativeTree(resourceName string, plan []forProviderField) (*nativeNode,
 			}
 		}
 	}
+	if err := normalizeNativeArrays(resourceName, root); err != nil {
+		return nil, err
+	}
 	return root, nil
 }
 
 func insertNativePath(resourceName string, root *nativeNode, fullPath string, segments []string, leaf *forProviderField) error {
 	cur := root
 	for si, s := range segments {
-		seg, indexed := strings.CutSuffix(s, "[0]")
+		seg, idx, indexed := cutArrayIndex(s)
 		if seg == "" {
 			return fmt.Errorf("resource %q: field %q: empty segment", resourceName, fullPath)
 		}
-		child := cur.byName[seg]
+		// element nodes key by the FULL segment (env[0], env[1] are distinct
+		// nodes — sibling elements of one sequence); plain segments by name.
+		key := seg
+		if indexed {
+			key = s
+		}
+		child := cur.byName[key]
 		if child == nil {
-			child = &nativeNode{seg: seg, indexed: indexed, byName: map[string]*nativeNode{}}
-			cur.byName[seg] = child
+			// a segment set both as a whole array and by element is a
+			// conflict whichever order the two arrive in
+			if indexed && cur.byName[seg] != nil && !cur.byName[seg].indexed {
+				return fmt.Errorf("resource %q: %q is set both as a whole array and by element; "+
+					"set the whole array with one raw: field, or set element fields, not both",
+					resourceName, seg)
+			}
+			if !indexed {
+				for _, sib := range cur.children {
+					if sib.indexed && sib.seg == seg {
+						return fmt.Errorf("resource %q: %q is set both as a whole array and by element; "+
+							"set the whole array with one raw: field, or set element fields, not both",
+							resourceName, seg)
+					}
+				}
+			}
+			child = &nativeNode{seg: seg, idx: idx, indexed: indexed, byName: map[string]*nativeNode{}}
+			cur.byName[key] = child
 			cur.children = append(cur.children, child)
-		} else if child.indexed != indexed {
-			return fmt.Errorf("resource %q: %q is set both as a whole array and by element [0]; "+
-				"set the whole array with one raw: field, or set element fields, not both",
-				resourceName, seg)
 		}
 		if child.leaf != nil {
 			return fmt.Errorf("resource %q: field %q conflicts with field %q, which already sets that "+
@@ -141,10 +164,162 @@ func writeNativeFields(d *Doc, indent int, resourceName string, plan []forProvid
 	if err != nil {
 		return err
 	}
-	for _, child := range root.children {
-		writeNativeNode(d, indent, child)
+	writeNativeChildren(d, indent, root.children)
+	return nil
+}
+
+// cutArrayIndex splits a path segment's trailing [N] element index. A
+// non-numeric bracket suffix (map keys never reach here; ParseFieldPath
+// strips those first) or no suffix returns the segment untouched.
+func cutArrayIndex(s string) (seg string, idx int, indexed bool) {
+	open := strings.LastIndex(s, "[")
+	if open <= 0 || !strings.HasSuffix(s, "]") {
+		return s, 0, false
+	}
+	n := 0
+	digits := s[open+1 : len(s)-1]
+	if digits == "" {
+		return s, 0, false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return s, 0, false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return s[:open], n, true
+}
+
+// normalizeNativeArrays orders every element run numerically and refuses
+// index gaps: env[0] and env[2] with no env[1] would render a sequence
+// whose positions silently disagree with the written indices.
+func normalizeNativeArrays(resourceName string, n *nativeNode) error {
+	bySeg := map[string][]*nativeNode{}
+	for _, c := range n.children {
+		if c.indexed {
+			bySeg[c.seg] = append(bySeg[c.seg], c)
+		}
+	}
+	for seg, run := range bySeg {
+		sort.Slice(run, func(i, j int) bool { return run[i].idx < run[j].idx })
+		for i, e := range run {
+			if e.idx != i {
+				return fmt.Errorf("resource %q: %s elements must be indexed contiguously from [0]; "+
+					"missing [%d] before [%d]", resourceName, seg, i, e.idx)
+			}
+		}
+	}
+	// re-order children so each element run sits together in numeric order,
+	// at the position of its first appearance
+	if len(bySeg) > 0 {
+		seen := map[string]bool{}
+		ordered := make([]*nativeNode, 0, len(n.children))
+		for _, c := range n.children {
+			if !c.indexed {
+				ordered = append(ordered, c)
+				continue
+			}
+			if seen[c.seg] {
+				continue
+			}
+			seen[c.seg] = true
+			ordered = append(ordered, bySeg[c.seg]...)
+		}
+		n.children = ordered
+	}
+	for _, c := range n.children {
+		if err := normalizeNativeArrays(resourceName, c); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// writeNativeChildren renders a sibling list, grouping runs of indexed
+// nodes that share a segment into one sequence: the key once, then one
+// element per index. A single-element run renders byte-identically to the
+// old one-element form; a multi-element run adds a per-element guard when
+// that element is fully optional.
+func writeNativeChildren(d *Doc, indent int, children []*nativeNode) {
+	for i := 0; i < len(children); {
+		c := children[i]
+		if !c.indexed {
+			writeNativeNode(d, indent, c)
+			i++
+			continue
+		}
+		j := i
+		for j < len(children) && children[j].indexed && children[j].seg == c.seg {
+			j++
+		}
+		run := children[i:j]
+		i = j
+
+		unconditional := false
+		var guards []string
+		seen := map[string]bool{}
+		for _, e := range run {
+			u, gs := e.analyze()
+			unconditional = unconditional || u
+			for _, g := range gs {
+				if !seen[g] {
+					seen[g] = true
+					guards = append(guards, g)
+				}
+			}
+		}
+		guarded := !unconditional
+		if guarded {
+			conds := make([]string, len(guards))
+			for gi, g := range guards {
+				conds[gi] = "(" + g + ")"
+			}
+			d.Line(indent, "{{- if or %s }}", strings.Join(conds, " "))
+		}
+		d.Line(indent, "%s:", formatKey(c.seg))
+		for _, e := range run {
+			eGuard := ""
+			if len(run) > 1 {
+				if u, gs := e.analyze(); !u {
+					conds := make([]string, len(gs))
+					for gi, g := range gs {
+						conds[gi] = "(" + g + ")"
+					}
+					eGuard = strings.Join(conds, " ")
+				}
+			}
+			if eGuard != "" {
+				d.Line(indent, "{{- if or %s }}", eGuard)
+			}
+			writeNativeElement(d, indent, e)
+			if eGuard != "" {
+				d.Line(indent, "{{- end }}")
+			}
+		}
+		if guarded {
+			d.Line(indent, "{{- end }}")
+		}
+	}
+}
+
+// writeNativeElement renders one sequence element — the dash line and the
+// element's fields. The caller has already written the sequence key and
+// any guards.
+func writeNativeElement(d *Doc, indent int, n *nativeNode) {
+	if n.leaf != nil {
+		// the whole element set outright (a raw: flow mapping, say)
+		d.Line(indent+1, "- %s", n.leaf.rhs)
+		return
+	}
+	first := n.children[0]
+	rest := n.children
+	if first.leaf != nil && first.leaf.guard == "" && !first.indexed {
+		d.Line(indent+1, "- %s: %s", formatKey(first.seg), first.leaf.rhs)
+		rest = n.children[1:]
+	} else {
+		d.Line(indent+1, "-")
+	}
+	writeNativeChildren(d, indent+2, rest)
 }
 
 // writeNativeNode renders one node. Guard layering mirrors writeMapField:
@@ -169,28 +344,9 @@ func writeNativeNode(d *Doc, indent int, n *nativeNode) {
 	}
 
 	d.Line(indent, "%s:", formatKey(n.seg))
-	if n.indexed {
-		// One sequence element. When the first child is an unconditional
-		// leaf its line carries the dash ("- name: web"); otherwise the dash
-		// stands alone on its own line — a template guard or a nested branch
-		// cannot share a line with it — and YAML reads the deeper-indented
-		// mapping that follows as the element's value.
-		first := n.children[0]
-		rest := n.children
-		if first.leaf != nil && first.leaf.guard == "" && !first.indexed {
-			d.Line(indent+1, "- %s: %s", formatKey(first.seg), first.leaf.rhs)
-			rest = n.children[1:]
-		} else {
-			d.Line(indent+1, "-")
-		}
-		for _, c := range rest {
-			writeNativeNode(d, indent+2, c)
-		}
-	} else {
-		for _, c := range n.children {
-			writeNativeNode(d, indent+1, c)
-		}
-	}
+	// indexed nodes are grouped and rendered by writeNativeChildren — this
+	// node is a plain mapping key; its children may hold element runs
+	writeNativeChildren(d, indent+1, n.children)
 
 	if guarded {
 		d.Line(indent, "{{- end }}")
