@@ -1453,6 +1453,60 @@ export function init(rootEl, deps) {
     if (e.key === "Escape") { closeCtxMenu(); closeWirePicker(); }
   });
   cwEl.addEventListener("pointerdown", onPanDown);
+
+  // Touch gestures for mobile: 1-finger pan & 2-finger pinch zoom
+  let touchStartDist = 0;
+  let touchStartCenter = { x: 0, y: 0 };
+  let touchStartView = { x: 0, y: 0, k: 1 };
+  let isTouching = false;
+
+  cwEl.addEventListener("touchstart", function (e) {
+    if (e.target.closest(".node") || e.target.closest("button") || e.target.closest("#zoom-bar") || e.target.closest("#wire-picker")) return;
+    if (e.touches.length === 1) {
+      isTouching = true;
+      touchStartCenter = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      touchStartView = { x: view.x, y: view.y, k: view.k };
+    } else if (e.touches.length === 2) {
+      isTouching = true;
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      touchStartDist = Math.hypot(dx, dy) || 1;
+      const rect = cwEl.getBoundingClientRect();
+      touchStartCenter = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top,
+      };
+      touchStartView = { x: view.x, y: view.y, k: view.k };
+    }
+  }, { passive: false });
+
+  cwEl.addEventListener("touchmove", function (e) {
+    if (!isTouching) return;
+    if (e.touches.length === 1) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - touchStartCenter.x;
+      const dy = e.touches[0].clientY - touchStartCenter.y;
+      view.x = touchStartView.x + dx;
+      view.y = touchStartView.y + dy;
+      applyView();
+    } else if (e.touches.length === 2) {
+      e.preventDefault();
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      const dist = Math.hypot(dx, dy) || 1;
+      const scale = dist / touchStartDist;
+      const k = Math.min(K_MAX, Math.max(K_MIN, touchStartView.k * scale));
+      view.x = touchStartCenter.x - (k / touchStartView.k) * (touchStartCenter.x - touchStartView.x);
+      view.y = touchStartCenter.y - (k / touchStartView.k) * (touchStartCenter.y - touchStartView.y);
+      view.k = k;
+      applyView();
+    }
+  }, { passive: false });
+
+  cwEl.addEventListener("touchend", function (e) {
+    if (e.touches.length === 0) isTouching = false;
+  });
+
   buildZoomControls();
   applyView();
 

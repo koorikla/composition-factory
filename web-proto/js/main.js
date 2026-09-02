@@ -114,41 +114,263 @@ store.loadDoc();
 })();
 
 
+/* ---- floating & movable panels (Inspector & Code Drawer) ---- */
+(function () {
+  var insp = document.getElementById("region-inspector");
+  var drawer = document.getElementById("region-output");
+  var floatInspBtn = document.getElementById("pane-float-r");
+  var floatDrawerBtn = document.getElementById("drawer-float-btn");
+  var minDrawerBtn = document.getElementById("drawer-min-btn");
+  var cols = document.getElementById("cols");
+  var hr = document.getElementById("col-resize-r");
+
+  var state = {
+    inspector: { floated: false, x: 0, y: 0, w: 340, h: 560 },
+    drawer: { floated: false, x: 0, y: 0, w: 720, h: 360, min: false }
+  };
+
+  try {
+    var saved = JSON.parse(localStorage.getItem("cf-panel-float") || "null");
+    if (saved) {
+      if (saved.inspector) state.inspector = Object.assign(state.inspector, saved.inspector);
+      if (saved.drawer) state.drawer = Object.assign(state.drawer, saved.drawer);
+    }
+  } catch (_) {}
+
+  function save() {
+    try { localStorage.setItem("cf-panel-float", JSON.stringify(state)); } catch (_) {}
+  }
+
+  function makeDraggable(el, handleSelector, onMove) {
+    var handle = el.querySelector(handleSelector) || el;
+    handle.addEventListener("pointerdown", function (e) {
+      if (e.target.closest("button") || e.target.closest("input") || e.target.closest("select") || e.target.closest(".seg") || e.target.closest(".tabs")) return;
+      if (!el.classList.contains("floated-panel")) return;
+      e.preventDefault();
+      el.classList.add("dragging");
+      var rect = el.getBoundingClientRect();
+      var offX = e.clientX - rect.left;
+      var offY = e.clientY - rect.top;
+
+      function mv(ev) {
+        var x = Math.max(10, Math.min(window.innerWidth - el.offsetWidth - 10, ev.clientX - offX));
+        var y = Math.max(48, Math.min(window.innerHeight - 50, ev.clientY - offY));
+        el.style.left = x + "px";
+        el.style.top = y + "px";
+        el.style.right = "auto";
+        el.style.bottom = "auto";
+        if (onMove) onMove(x, y);
+      }
+
+      function up() {
+        el.classList.remove("dragging");
+        document.removeEventListener("pointermove", mv);
+        document.removeEventListener("pointerup", up);
+        save();
+      }
+
+      document.addEventListener("pointermove", mv);
+      document.addEventListener("pointerup", up);
+    });
+  }
+
+  function applyInspector() {
+    if (!insp || !floatInspBtn) return;
+    if (state.inspector.floated) {
+      insp.classList.add("floated-panel");
+      floatInspBtn.textContent = "🔒";
+      floatInspBtn.title = "Dock inspector (Lock in place)";
+      var x = state.inspector.x || (window.innerWidth - 370);
+      var y = state.inspector.y || 60;
+      x = Math.max(10, Math.min(window.innerWidth - 200, x));
+      y = Math.max(48, Math.min(window.innerHeight - 100, y));
+      insp.style.left = x + "px";
+      insp.style.top = y + "px";
+      insp.style.right = "auto";
+      insp.style.bottom = "auto";
+      if (state.inspector.w) insp.style.width = state.inspector.w + "px";
+      if (state.inspector.h) insp.style.height = state.inspector.h + "px";
+      if (hr) hr.style.display = "none";
+      if (cols) cols.style.gridTemplateColumns = (cols.style.gridTemplateColumns.split(" ")[0] || "216px") + " 1fr 0px";
+    } else {
+      insp.classList.remove("floated-panel");
+      floatInspBtn.textContent = "⛶";
+      floatInspBtn.title = "Float inspector window (Move freely)";
+      insp.style.left = "";
+      insp.style.top = "";
+      insp.style.right = "";
+      insp.style.bottom = "";
+      insp.style.width = "";
+      insp.style.height = "";
+      if (hr) hr.style.display = "";
+      // re-trigger column width apply
+      window.dispatchEvent(new Event("resize"));
+    }
+  }
+
+  function applyDrawer() {
+    if (!drawer || !floatDrawerBtn) return;
+    if (state.drawer.floated) {
+      drawer.classList.add("floated-panel");
+      drawer.classList.toggle("minimized", !!state.drawer.min);
+      floatDrawerBtn.textContent = "🔒";
+      floatDrawerBtn.title = "Dock editor (Lock at bottom)";
+      if (minDrawerBtn) minDrawerBtn.textContent = state.drawer.min ? "▴" : "▾";
+      var x = state.drawer.x || 230;
+      var y = state.drawer.y || (window.innerHeight - (state.drawer.min ? 60 : 380));
+      x = Math.max(10, Math.min(window.innerWidth - 200, x));
+      y = Math.max(48, Math.min(window.innerHeight - 40, y));
+      drawer.style.left = x + "px";
+      drawer.style.top = y + "px";
+      drawer.style.right = "auto";
+      drawer.style.bottom = "auto";
+      if (state.drawer.w) drawer.style.width = state.drawer.w + "px";
+      if (state.drawer.h && !state.drawer.min) drawer.style.height = state.drawer.h + "px";
+    } else {
+      drawer.classList.remove("floated-panel");
+      drawer.classList.remove("minimized");
+      floatDrawerBtn.textContent = "⛶";
+      floatDrawerBtn.title = "Float editor window (Move freely)";
+      if (minDrawerBtn) minDrawerBtn.textContent = "▾";
+      drawer.style.left = "";
+      drawer.style.top = "";
+      drawer.style.right = "";
+      drawer.style.bottom = "";
+      drawer.style.width = "";
+      drawer.style.height = "212px";
+    }
+  }
+
+  if (insp) {
+    makeDraggable(insp, ".pane-h", function (x, y) {
+      state.inspector.x = x; state.inspector.y = y;
+    });
+    if (floatInspBtn) floatInspBtn.addEventListener("click", function () {
+      state.inspector.floated = !state.inspector.floated;
+      save();
+      applyInspector();
+    });
+    insp.addEventListener("mouseup", function () {
+      if (insp.classList.contains("floated-panel")) {
+        state.inspector.w = insp.offsetWidth;
+        state.inspector.h = insp.offsetHeight;
+        save();
+      }
+    });
+  }
+
+  if (drawer) {
+    makeDraggable(drawer, ".drawer-h", function (x, y) {
+      state.drawer.x = x; state.drawer.y = y;
+    });
+    if (floatDrawerBtn) floatDrawerBtn.addEventListener("click", function () {
+      state.drawer.floated = !state.drawer.floated;
+      save();
+      applyDrawer();
+    });
+    if (minDrawerBtn) minDrawerBtn.addEventListener("click", function () {
+      if (state.drawer.floated) {
+        state.drawer.min = !state.drawer.min;
+        save();
+        applyDrawer();
+      } else {
+        // when docked, minimize collapses/expands height
+        var h = drawer.style.height;
+        if (h === "38px") drawer.style.height = "212px";
+        else drawer.style.height = "38px";
+      }
+    });
+    drawer.addEventListener("mouseup", function () {
+      if (drawer.classList.contains("floated-panel") && !state.drawer.min) {
+        state.drawer.w = drawer.offsetWidth;
+        state.drawer.h = drawer.offsetHeight;
+        save();
+      }
+    });
+  }
+
+  // Only float on desktop viewports by default; on narrow screens keep overlay mode
+  if (window.innerWidth > 900) {
+    applyInspector();
+    applyDrawer();
+  }
+})();
+
+
 /* ---- narrow-screen drawers: panes slide over instead of vanishing ---- */
 (function () {
   var l = document.querySelector(".pane.l");
   var r = document.querySelector(".pane.r");
+  var d = document.getElementById("region-output");
+  var backdrop = document.getElementById("drawerBackdrop");
   var toggleL = document.getElementById("pane-toggle-l");
+  var toggleR = document.getElementById("pane-toggle-r");
+  var toggleD = document.getElementById("pane-toggle-drawer");
   var closeR = document.getElementById("pane-close-r");
+
+  function syncBackdrop() {
+    if (!backdrop) return;
+    var isOpen = (l && l.classList.contains("drawer-open")) ||
+                 (r && r.classList.contains("drawer-open")) ||
+                 (d && d.classList.contains("drawer-open"));
+    backdrop.hidden = !isOpen || !window.matchMedia("(max-width:900px)").matches;
+  }
+
+  function closeAll() {
+    if (l) l.classList.remove("drawer-open");
+    if (r) r.classList.remove("drawer-open");
+    if (d) d.classList.remove("drawer-open");
+    syncBackdrop();
+  }
+
+  if (backdrop) backdrop.addEventListener("click", closeAll);
+
   if (toggleL && l) toggleL.addEventListener("click", function () {
     l.classList.toggle("drawer-open");
     if (r) r.classList.remove("drawer-open");
+    if (d) d.classList.remove("drawer-open");
+    syncBackdrop();
   });
-  var toggleR = document.getElementById("pane-toggle-r");
+
   if (toggleR && r) toggleR.addEventListener("click", function () {
     r.classList.toggle("drawer-open");
     if (l) l.classList.remove("drawer-open");
+    if (d) d.classList.remove("drawer-open");
+    syncBackdrop();
   });
+
+  if (toggleD && d) toggleD.addEventListener("click", function () {
+    d.classList.toggle("drawer-open");
+    if (l) l.classList.remove("drawer-open");
+    if (r) r.classList.remove("drawer-open");
+    syncBackdrop();
+  });
+
   if (closeR && r) closeR.addEventListener("click", function () {
     r.classList.remove("drawer-open");
+    syncBackdrop();
   });
+
   // selecting something opens the inspector drawer on narrow screens
   store.subscribe("selection", function (sel) {
     if (!r || !window.matchMedia("(max-width:900px)").matches) return;
-    if (sel) { r.classList.add("drawer-open"); if (l) l.classList.remove("drawer-open"); }
+    if (sel) {
+      r.classList.add("drawer-open");
+      if (l) l.classList.remove("drawer-open");
+      if (d) d.classList.remove("drawer-open");
+      syncBackdrop();
+    }
   });
-  // crossing the breakpoint must never strand a selected inspector: entering
-  // narrow auto-opens the drawer for the current selection, leaving narrow
-  // clears drawer state so the desktop columns render normally.
+
   var mq = window.matchMedia("(max-width:900px)");
   (mq.addEventListener ? mq.addEventListener.bind(mq, "change") : mq.addListener.bind(mq))(function (e) {
     if (!r) return;
     if (e.matches) {
       if (store.state.selectedResource) r.classList.add("drawer-open");
     } else {
-      r.classList.remove("drawer-open");
-      if (l) l.classList.remove("drawer-open");
+      closeAll();
     }
+    syncBackdrop();
   });
 })();
 

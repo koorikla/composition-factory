@@ -126,6 +126,13 @@
 - [x] Startup example chooser (user request 2026-09-02): pick between a few
       starting blueprints on first load — IRSA, an RDS composition, and a
       k8s app composition that uses both. — completed 2026-09-02
+- [x] Floating / movable panels & mobile support (user request 2026-09-02):
+      Inspector and Code Editor / Drawer can be floated with a single click,
+      dragged freely across the canvas, resized, collapsed/minimized, and
+      locked/docked back in place (with positions persisted). Enhanced mobile
+      experience with topbar horizontal scrolling, 1-finger canvas touch pan &
+      2-finger pinch zoom, responsive drawer overlays and backdrop dismissal.
+      — completed 2026-09-02
 - [ ] Ansible provider support (user backlog 2026-09-02): explore converting
       a runbook/role into a composition.
 - [ ] (back-backlog) Generate compositions in other languages — KCL, Python

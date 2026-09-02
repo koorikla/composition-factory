@@ -48,12 +48,123 @@ export function init(rootEl, deps) {
     validateBtn: document.getElementById("validateBtn"),
     generateBtn: document.getElementById("generateBtn"),
     tplSource: document.getElementById("tplSource"),
+    treeToggleBtn: document.getElementById("treeToggleBtn"),
+    treeRoot: document.getElementById("tree-root"),
+    treeCount: document.getElementById("tree-files-count"),
+    ebIcon: document.getElementById("eb-icon"),
+    ebPath: document.getElementById("eb-path"),
+    copyBtn: document.getElementById("code-copy-btn"),
   };
 
   var tab = "comp";          // "comp" | "xrd" | "bp"
   var genTimer = null;
+  var collapsedGroups = {};
 
-  /* ---------- tabs (prototype markup, built live) ---------- */
+  /* ---------- tree explorer + tabs (built live) ---------- */
+
+  function buildTree() {
+    if (!el.treeRoot) return;
+    var doc = store.state.doc;
+    var g = store.state.lastGenerate;
+    var outputs = (g && g.outputs || []);
+    var bpLabel = bpTabLabel(doc);
+
+    var categories = [];
+
+    // 1. Blueprints & Package
+    categories.push({
+      id: "meta",
+      title: "Blueprint & Package",
+      items: [
+        { key: "bp", name: bpLabel, icon: "⚡", path: "blueprints/" + bpLabel },
+        { key: "pkg", name: "package.yaml", icon: "📦", path: "package.yaml" },
+        { key: "rbac", name: "rbac", icon: "🛡️", path: "rbac" },
+      ]
+    });
+
+    // 2. Crossplane Compositions & Definitions
+    categories.push({
+      id: "engine",
+      title: "Compositions & XRDs",
+      items: [
+        { key: "comp", name: "composition.yaml", icon: "🧩", path: "compositions/" + (doc && doc.metadata && doc.metadata.name ? doc.metadata.name + ".yaml" : "composition.yaml") },
+        { key: "xrd", name: "definition.yaml", icon: "📋", path: "xrds/" + (doc && doc.metadata && doc.metadata.name ? doc.metadata.name + ".yaml" : "definition.yaml") },
+        { key: "fns", name: "functions.yaml", icon: "λ", path: "functions.yaml" },
+      ]
+    });
+
+    // 3. Templates (if FileSystem mode)
+    var tplOutputs = [];
+    outputs.forEach(function (o) {
+      var tm = /[\\/]templates[\\/][^\\/]+[\\/]([^\\/]+)$/.exec(o.path);
+      if (tm) tplOutputs.push({ file: tm[1], path: o.path });
+    });
+    if (tplOutputs.length > 0) {
+      tplOutputs.sort(function (a, b) { return a.file < b.file ? -1 : 1; });
+      categories.push({
+        id: "templates",
+        title: "Templates",
+        items: tplOutputs.map(function (to) {
+          return { key: "tpl:" + to.file, name: to.file, icon: "📄", path: to.path };
+        })
+      });
+    }
+
+    // 4. Runtime & ProviderConfigs
+    var runtimeAndPcs = [];
+    var hasRuntime = false;
+    outputs.forEach(function (o) {
+      if (/[\\/]runtime[\\/]/.test(o.path)) hasRuntime = true;
+      var m = /providerconfigs[\/\\]([^\/\\]+)\.yaml$/.exec(o.path);
+      if (m) {
+        runtimeAndPcs.push({ key: "pc:" + m[1], name: "providerconfigs/" + m[1] + ".yaml", icon: "☁️", path: o.path });
+      }
+    });
+    if (hasRuntime) {
+      runtimeAndPcs.unshift({ key: "runtime", name: "runtime.yaml", icon: "⚙️", path: "runtime/runtime.yaml" });
+    }
+    if (runtimeAndPcs.length > 0) {
+      categories.push({
+        id: "runtime",
+        title: "Runtime & Providers",
+        items: runtimeAndPcs
+      });
+    }
+
+    var totalFiles = 0;
+    categories.forEach(function (c) { totalFiles += c.items.length; });
+    if (el.treeCount) el.treeCount.textContent = totalFiles + " file" + (totalFiles === 1 ? "" : "s");
+
+    var h = "";
+    categories.forEach(function (cat) {
+      var isCollapsed = !!collapsedGroups[cat.id];
+      h += '<div class="tree-group" data-gid="' + esc(cat.id) + '"' + (isCollapsed ? ' data-collapsed=""' : '') + '>';
+      h += '  <div class="tree-group-title"><span class="tg-arrow">▼</span><span>' + esc(cat.title) + '</span></div>';
+      h += '  <div class="tree-group-items">';
+      cat.items.forEach(function (it) {
+        var isActive = (tab === it.key);
+        h += '    <div class="tree-item' + (isActive ? ' active' : '') + '" data-t="' + esc(it.key) + '" data-path="' + esc(it.path) + '" data-icon="' + esc(it.icon) + '">';
+        h += '      <span class="tree-item-icon">' + esc(it.icon) + '</span>';
+        h += '      <span class="tree-item-name">' + esc(it.name) + '</span>';
+        h += '    </div>';
+      });
+      h += '  </div>';
+      h += '</div>';
+    });
+    el.treeRoot.innerHTML = h;
+  }
+
+  function updateBreadcrumb() {
+    if (!el.ebPath) return;
+    var activeItem = el.treeRoot && el.treeRoot.querySelector('.tree-item[data-t="' + tab + '"]');
+    if (activeItem) {
+      if (el.ebIcon) el.ebIcon.textContent = activeItem.getAttribute("data-icon") || "📄";
+      el.ebPath.textContent = activeItem.getAttribute("data-path") || activeItem.textContent.trim();
+    } else {
+      if (el.ebIcon) el.ebIcon.textContent = "📄";
+      el.ebPath.textContent = tab;
+    }
+  }
 
   function buildTabs() {
     var bpLabel = bpTabLabel(store.state.doc);
@@ -91,7 +202,80 @@ export function init(rootEl, deps) {
     });
     h += '<button data-t="rbac" aria-pressed="' + (tab === "rbac") + '">rbac</button>';
     el.tabs.innerHTML = h;
+
+    buildTree();
   }
+
+  function selectTab(newTab) {
+    tab = newTab;
+    [].forEach.call(el.tabs.children, function (c) {
+      c.setAttribute("aria-pressed", String(c.getAttribute("data-t") === tab));
+    });
+    if (el.treeRoot) {
+      [].forEach.call(el.treeRoot.querySelectorAll(".tree-item"), function (ti) {
+        ti.classList.toggle("active", ti.getAttribute("data-t") === tab);
+      });
+    }
+    render();
+  }
+
+  if (el.treeRoot) {
+    el.treeRoot.addEventListener("click", function (e) {
+      var gt = e.target.closest(".tree-group-title");
+      if (gt) {
+        var gEl = gt.closest(".tree-group");
+        var gid = gEl.getAttribute("data-gid");
+        if (gEl.hasAttribute("data-collapsed")) {
+          gEl.removeAttribute("data-collapsed");
+          delete collapsedGroups[gid];
+        } else {
+          gEl.setAttribute("data-collapsed", "");
+          collapsedGroups[gid] = true;
+        }
+        return;
+      }
+      var it = e.target.closest(".tree-item");
+      if (!it) return;
+      selectTab(it.getAttribute("data-t"));
+    });
+  }
+
+  if (el.treeToggleBtn) {
+    el.treeToggleBtn.addEventListener("click", function () {
+      if (rootEl.hasAttribute("data-tree-collapsed")) {
+        rootEl.removeAttribute("data-tree-collapsed");
+        try { localStorage.setItem("cf-tree-collapsed", "0"); } catch (_) {}
+      } else {
+        rootEl.setAttribute("data-tree-collapsed", "");
+        try { localStorage.setItem("cf-tree-collapsed", "1"); } catch (_) {}
+      }
+    });
+  }
+  try {
+    if (localStorage.getItem("cf-tree-collapsed") === "1") {
+      rootEl.setAttribute("data-tree-collapsed", "");
+    }
+  } catch (_) {}
+
+  if (el.copyBtn) {
+    el.copyBtn.addEventListener("click", function () {
+      var text = currentText();
+      navigator.clipboard.writeText(text).then(function () {
+        var old = el.copyBtn.textContent;
+        el.copyBtn.textContent = "Copied!";
+        setTimeout(function () { el.copyBtn.textContent = old; }, 1500);
+      }).catch(function () {});
+    });
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+      if (!e.target.matches("input, textarea, select")) {
+        e.preventDefault();
+        if (el.treeToggleBtn) el.treeToggleBtn.click();
+      }
+    }
+  });
 
   function bpTabLabel(doc) {
     var name = doc && doc.metadata && doc.metadata.name || "blueprint";
@@ -101,11 +285,7 @@ export function init(rootEl, deps) {
   el.tabs.addEventListener("click", function (e) {
     var b = e.target.closest("button");
     if (!b || !el.tabs.contains(b)) return;
-    tab = b.getAttribute("data-t");
-    [].forEach.call(el.tabs.children, function (c) {
-      c.setAttribute("aria-pressed", String(c === b));
-    });
-    render();
+    selectTab(b.getAttribute("data-t"));
   });
 
   /* ---------- output matching ---------- */
@@ -254,6 +434,12 @@ export function init(rootEl, deps) {
       return !(i === a.length - 1 && l === "");
     }).length : 0;
     el.meta.textContent = lines + " lines · deterministic";
+    updateBreadcrumb();
+    if (el.treeRoot) {
+      [].forEach.call(el.treeRoot.querySelectorAll(".tree-item"), function (ti) {
+        ti.classList.toggle("active", ti.getAttribute("data-t") === tab);
+      });
+    }
   }
 
   /* ---------- render-failure bar (separate from the raw-count warnbar,

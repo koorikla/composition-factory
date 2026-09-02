@@ -21,6 +21,7 @@
     <span class="chip-ok" id="valid"></span>
     <button class="btn" id="pane-toggle-l" title="Kinds &amp; sources">☰</button>
     <button class="btn" id="pane-toggle-r" title="Inspector">⚙</button>
+    <button class="btn" id="pane-toggle-drawer" title="Generated code &amp; editor">YAML</button>
     <button class="btn" id="undoBtn" disabled title="Undo (⌘Z / Ctrl+Z)">↩</button>
     <button class="btn" id="redoBtn" disabled title="Redo (⇧⌘Z / Shift+Ctrl+Z)">↪</button>
     <button class="btn" id="packageBtn" title="Download this blueprint as a Crossplane Configuration package (.xpkg)">Package</button>
@@ -32,6 +33,8 @@
     <button class="btn pri" id="generateBtn" disabled title="Regenerate composition.yaml and definition.yaml from the blueprint now">Generate</button>
   </div>
   <!-- =============== END REGION: TOPBAR =============== -->
+
+  <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
 
   <div class="cols" id="cols">
 
@@ -67,7 +70,8 @@
     <!-- ================= REGION: INSPECTOR (root: #region-inspector) ================= -->
     <div class="pane r" id="region-inspector">
       <div class="pane-h">
-        <span class="lbl">Inspector</span><span class="sp"></span>
+        <span class="lbl" id="insp-drag-handle" style="cursor:default">Inspector</span><span class="sp"></span>
+        <button class="btn sm" id="pane-float-r" title="Float window / Lock in place" style="padding:0 5px;margin-right:4px">⛶</button>
         <button class="del" id="pane-close-r" title="Close inspector">×</button>
         <div class="seg" id="fseg">
           <button data-f="req" aria-pressed="true">Required</button>
@@ -82,9 +86,10 @@
   </div>
 
   <!-- ================= REGION: OUTPUT (root: #region-output) ================= -->
-  <div class="drawer" id="region-output" style="height:212px">
-    <div class="drawer-h">
-      <span class="lbl">Generated</span>
+  <div class="drawer" id="region-output" style="height:250px">
+    <div class="drawer-h" id="drawer-h">
+      <button class="btn sm" id="treeToggleBtn" title="Toggle File Tree Explorer (Ctrl+B)" style="padding:1px 6px;margin-right:2px">📁 Tree</button>
+      <span class="lbl" id="drawer-drag-handle" style="cursor:default">Editor</span>
       <div class="tabs" id="tabs"></div>
       <span class="sp"></span>
       <div class="tpl-source-wrap" style="display:inline-flex;align-items:center;gap:4px;margin-right:8px">
@@ -95,9 +100,32 @@
         </select>
       </div>
       <span class="mono" style="font-size:10px;color:var(--faint)" id="meta"></span>
+      <button class="btn sm" id="drawer-float-btn" title="Float window / Lock in place" style="padding:0 5px;margin-left:6px">⛶</button>
+      <button class="btn sm" id="drawer-min-btn" title="Collapse / Expand" style="padding:0 5px;margin-left:2px">▾</button>
     </div>
-    <div class="warnbar" id="warn" hidden></div>
-    <pre class="code" id="code"></pre>
+    <div class="drawer-body" id="drawer-body">
+      <aside class="drawer-tree" id="drawer-tree">
+        <div class="tree-header">
+          <span class="tree-title">ARTIFACTS</span>
+          <span class="tree-badge" id="tree-files-count">0 files</span>
+        </div>
+        <div class="tree-scroll" id="tree-root"></div>
+      </aside>
+      <div class="drawer-content" id="drawer-content">
+        <div class="editor-subbar" id="editor-subbar">
+          <div class="editor-breadcrumb" id="editor-breadcrumb">
+            <span class="eb-icon" id="eb-icon">📄</span>
+            <span class="eb-path" id="eb-path">composition.yaml</span>
+          </div>
+          <span class="sp"></span>
+          <button class="btn sm" id="code-copy-btn" title="Copy code to clipboard" style="padding:1px 6px">Copy</button>
+        </div>
+        <div class="warnbar" id="warn" hidden></div>
+        <div class="code-viewport" id="code-viewport">
+          <pre class="code" id="code"></pre>
+        </div>
+      </div>
+    </div>
   </div>
   <!-- ================= MODAL: EXAMPLES CHOOSER ================= -->
   <div class="modal-overlay" id="examplesOverlay" hidden>

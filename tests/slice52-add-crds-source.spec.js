@@ -50,6 +50,7 @@ test('uploading a CRD manifest makes its kinds droppable objects', async ({ page
 
   // the scanned kind lands in the KINDS rail
   await page.click('#rtabs button[data-r="kinds"]');
+  await expect(page.locator('.kind[data-kind="XDatabase"]')).toBeVisible({ timeout: 10000 });
   await expect(page.locator('.kind[data-kind="XDatabase"]')).toBeVisible();
 
   // and drops onto the canvas as an object-rooted card
