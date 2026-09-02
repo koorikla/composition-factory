@@ -9,6 +9,8 @@
   "license": "AGPL-3.0-only",
   "type": "commonjs",
   "devDependencies": {
-    "@playwright/test": "^1.62.1"
+    "@playwright/test": "^1.62.1",
+    "gifenc": "^1.0.3",
+    "pngjs": "^7.0.0"
   }
 }
