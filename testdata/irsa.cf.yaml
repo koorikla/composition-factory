@@ -59,6 +59,11 @@ spec:
   templates:
     trust-policy: >-
       '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ regexReplaceAll "^.*:oidc-provider/" .spec.oidcProviderArn "" }}:sub":"system:serviceaccount:{{ .spec.namespace }}:{{ .xr }}"}}}]}'
+    cf.tags: |
+      managed-by: crossplane
+      xr: {{ .xr | quote }}
+  conventions:
+    - {match: tags, template: cf.tags}
   resources:
     # The IAM Role: a managed resource, full Crossplane envelope
     # (providerConfigRef derived from providerName), trust policy from the
@@ -69,6 +74,12 @@ spec:
       fields:
         description: {value: IAM role assumed by a Kubernetes ServiceAccount via IRSA}
         assumeRolePolicy: {template: trust-policy}
+    - name: role-policy
+      kind: RolePolicy
+      provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+      fields:
+        role: {from: resources.role.status.atProvider.id}
+        policy: {raw: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:ListBucket"],"Resource":["arn:aws:s3:::*"]}]}'}
     # The ServiceAccount: a native Kubernetes object — no forProvider, no
     # providerConfigRef, the composed document IS the ServiceAccount. Its
     # role-arn annotation is the wire this whole blueprint exists for.
