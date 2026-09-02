@@ -390,3 +390,148 @@ func lineContaining(t *testing.T, s, needle string) string {
 	}
 	return hits[0]
 }
+
+func TestKCLForEachSyntaxAndLoopNaming(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-loop
+spec:
+  emit:
+    engine: kcl
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XQueue
+    plural: xqueues
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+      count: {type: integer, default: "3"}
+  resources:
+    - name: replica-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      forEach: params.count
+      fields:
+        region:
+          value: us-east-1
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	_ = os.WriteFile(p, []byte(bpYAML), 0600)
+	b, err := blueprint.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+	crds, _ := schema.ParseCRDs([][]byte{crdDoc})
+	out, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "*[\n") {
+		t.Errorf("expected list comprehension unpacking *[ in KCL, got:\n%s", s)
+	}
+	if !strings.Contains(s, `} for _i in range(0, int(_spec?.count or 0))`) {
+		t.Errorf("expected comprehension footer in KCL, got:\n%s", s)
+	}
+	if !strings.Contains(s, `"krm.kcl.dev/composition-resource-name" = "replica-queue-${_i}"`) {
+		t.Errorf("expected loop instance naming replica-queue-${_i}, got:\n%s", s)
+	}
+	if strings.Contains(s, `"${_i}-replica-queue"`) {
+		t.Errorf("found old loop instance naming ${_i}-replica-queue in output:\n%s", s)
+	}
+	if strings.Contains(s, "for _i in range") && !strings.Contains(s, "} for _i in range") {
+		t.Errorf("found invalid statement-style for loop in list:\n%s", s)
+	}
+}
+
+func TestKCLRefusesGoTemplateInRaw(t *testing.T) {
+	b := &blueprint.Blueprint{}
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+	b.Spec.XRD = blueprint.XRD{
+		Group: "aws.example.org", Version: "v1alpha1", Kind: "XQueue", Scope: "Namespaced",
+		Parameters: map[string]blueprint.Parameter{"providerName": {Type: "string", Required: true}},
+	}
+	b.Spec.Resources = []blueprint.Resource{{
+		Name: "work-queue", Kind: "Queue", Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
+		Fields: map[string]blueprint.Field{"region": {Raw: "{{ $spec.region }}"}},
+	}}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+	crds, _ := schema.ParseCRDs([][]byte{crdDoc})
+	_, err := Composition(b, crds)
+	if err == nil {
+		t.Fatal("expected error on KCL with Go-template in raw field, got nil")
+	}
+	if !strings.Contains(err.Error(), "Go-template syntax") || !strings.Contains(err.Error(), "go-templating engine") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestKCLStatusWireEmitsConditionalGuard(t *testing.T) {
+	b := wireBlueprint()
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+	out, err := Composition(b, wireCRDs(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `if ocds?["main-queue"]?.Resource?.status?.atProvider?.url:`) {
+		t.Errorf("expected conditional status guard in KCL output:\n%s", s)
+	}
+}

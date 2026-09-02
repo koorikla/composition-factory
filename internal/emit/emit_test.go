@@ -16,7 +16,6 @@ func TestFunctionsYAMLListsBothFunctions(t *testing.T) {
 		"kind: Function",
 		"name: function-go-templating",
 		"name: function-auto-ready",
-		"render.crossplane.io/runtime-docker-name",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("functions.yaml missing %q\n---\n%s", want, s)

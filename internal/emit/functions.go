@@ -41,9 +41,7 @@ func functionsDoc(b *blueprint.Blueprint, runtimeConfigName string) ([]byte, err
 	d := NewDoc()
 	header(d, blueprintSource(b))
 	d.Comment("Required by: crossplane composition render <xr> <composition> functions.yaml")
-	d.Comment("No render.crossplane.io/runtime annotation is needed to render; the")
-	d.Comment("docker-name annotation below only makes renders reuse one container")
-	d.Comment("per function instead of leaking a new one on every run.")
+	d.Comment("No render.crossplane.io/runtime annotation is needed to render.")
 	for i, f := range fns {
 		if i > 0 {
 			d.Line(0, "---")
@@ -52,8 +50,6 @@ func functionsDoc(b *blueprint.Blueprint, runtimeConfigName string) ([]byte, err
 		d.Line(0, "kind: Function")
 		d.Line(0, "metadata:")
 		d.Line(1, "name: %s", f.name)
-		d.Line(1, "annotations:")
-		d.Line(2, "render.crossplane.io/runtime-docker-name: cf-%s", f.name)
 		d.Line(0, "spec:")
 		d.Line(1, "package: %s", f.pkg)
 		if runtimeConfigName != "" && f.name == blueprint.TemplatingFunctionName {

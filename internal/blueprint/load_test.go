@@ -1648,3 +1648,43 @@ func TestValidateAllowsOmittingProviderNameForNativeOnlyCompositions(t *testing.
 		})
 	}
 }
+
+func TestLoadRefusesGoTemplateInRawUnderNonGoEngine(t *testing.T) {
+	for _, engine := range []string{"python", "kcl"} {
+		t.Run(engine+"_field", func(t *testing.T) {
+			bp := strings.Replace(valid, "spec:", "spec:\n  emit:\n    engine: "+engine, 1)
+			bp = strings.Replace(bp, "maxMessageSize: {from: params.maxMessageSize}", "region: {raw: \"{{ $spec.region }}\"}", 1)
+			_, err := Load(write(t, bp))
+			if err == nil {
+				t.Fatalf("expected error for %s engine with Go-template in raw field", engine)
+			}
+			if !strings.Contains(err.Error(), "Go-template syntax") || !strings.Contains(err.Error(), "go-templating engine") {
+				t.Errorf("unexpected error message: %v", err)
+			}
+		})
+
+		t.Run(engine+"_envelope", func(t *testing.T) {
+			bp := strings.Replace(valid, "spec:", "spec:\n  emit:\n    engine: "+engine, 1)
+			bp += "\n      envelope:\n        providerConfigRef.name: {raw: \"{{ $spec.providerName }}\"}"
+			_, err := Load(write(t, bp))
+			if err == nil {
+				t.Fatalf("expected error for %s engine with Go-template in raw envelope", engine)
+			}
+			if !strings.Contains(err.Error(), "Go-template syntax") || !strings.Contains(err.Error(), "go-templating engine") {
+				t.Errorf("unexpected error message: %v", err)
+			}
+		})
+
+		t.Run(engine+"_annotation", func(t *testing.T) {
+			bp := strings.Replace(valid, "spec:", "spec:\n  emit:\n    engine: "+engine, 1)
+			bp += "\n      annotations:\n        sample-ann: {raw: \"{{ $spec.location }}\"}"
+			_, err := Load(write(t, bp))
+			if err == nil {
+				t.Fatalf("expected error for %s engine with Go-template in raw annotation", engine)
+			}
+			if !strings.Contains(err.Error(), "Go-template syntax") || !strings.Contains(err.Error(), "go-templating engine") {
+				t.Errorf("unexpected error message: %v", err)
+			}
+		})
+	}
+}

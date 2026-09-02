@@ -112,6 +112,15 @@ spec:
 	}
 
 	// Verify Python script content
+	if !strings.Contains(compStr, "from google.protobuf.json_format import MessageToDict") {
+		t.Errorf("expected MessageToDict import in Python, got:\n%s", compStr)
+	}
+	if !strings.Contains(compStr, "oxr = MessageToDict(req.observed.composite.resource)") {
+		t.Errorf("expected oxr MessageToDict in Python, got:\n%s", compStr)
+	}
+	if !strings.Contains(compStr, `ocds = {k: {"resource": MessageToDict(v.resource)} for k, v in req.observed.resources.items()}`) {
+		t.Errorf("expected ocds MessageToDict in Python, got:\n%s", compStr)
+	}
 	if !strings.Contains(compStr, "def compose(req: fnv1.RunFunctionRequest, rsp: fnv1.RunFunctionResponse):") {
 		t.Errorf("expected compose signature in Python, got:\n%s", compStr)
 	}
@@ -124,8 +133,8 @@ spec:
 	if !strings.Contains(compStr, `"messageRetentionSeconds": spec.get("retention")`) {
 		t.Errorf("expected messageRetentionSeconds field wire in Python, got:\n%s", compStr)
 	}
-	if !strings.Contains(compStr, `rsp.desired.resources["work-queue"].ready = fnv1.READY_TRUE`) {
-		t.Errorf("expected ready assignment in Python, got:\n%s", compStr)
+	if strings.Contains(compStr, "ready = fnv1.READY_TRUE") {
+		t.Errorf("ready should not be emitted unconditionally when function-auto-ready is in the pipeline:\n%s", compStr)
 	}
 
 	// Verify functions.yaml
@@ -393,5 +402,128 @@ spec:
 	}
 	if !strings.Contains(err.Error(), "conventions") {
 		t.Errorf("expected error to mention conventions, got: %v", err)
+	}
+}
+
+func TestPythonForEachLoopNaming(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-loop
+spec:
+  emit:
+    engine: python
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XQueue
+    plural: xqueues
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+      count: {type: integer, default: "3"}
+  resources:
+    - name: replica-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      forEach: params.count
+      fields:
+        region:
+          value: us-east-1
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	_ = os.WriteFile(p, []byte(bpYAML), 0600)
+	b, err := blueprint.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+	crds, _ := schema.ParseCRDs([][]byte{crdDoc})
+	out, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `rsp.desired.resources[f"replica-queue-{_i}"].resource.update({`) {
+		t.Errorf("expected loop instance naming replica-queue-{_i}, got:\n%s", s)
+	}
+	if strings.Contains(s, `f"{_i}-replica-queue"`) {
+		t.Errorf("found old loop instance naming {_i}-replica-queue in output:\n%s", s)
+	}
+}
+
+func TestPythonRefusesGoTemplateInRaw(t *testing.T) {
+	b := &blueprint.Blueprint{}
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	b.Spec.XRD = blueprint.XRD{
+		Group: "aws.example.org", Version: "v1alpha1", Kind: "XQueue", Scope: "Namespaced",
+		Parameters: map[string]blueprint.Parameter{"providerName": {Type: "string", Required: true}},
+	}
+	b.Spec.Resources = []blueprint.Resource{{
+		Name: "work-queue", Kind: "Queue", Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
+		Fields: map[string]blueprint.Field{"region": {Raw: "{{ $spec.region }}"}},
+	}}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+	crds, _ := schema.ParseCRDs([][]byte{crdDoc})
+	_, err := Composition(b, crds)
+	if err == nil {
+		t.Fatal("expected error on Python with Go-template in raw field, got nil")
+	}
+	if !strings.Contains(err.Error(), "Go-template syntax") || !strings.Contains(err.Error(), "go-templating engine") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

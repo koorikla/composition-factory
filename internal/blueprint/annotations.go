@@ -148,6 +148,11 @@ func (b *Blueprint) validateResourceAnnotations(r Resource) error {
 			}
 		}
 
+		if f.Raw != "" && b.Engine() != EngineGoTemplating && strings.Contains(f.Raw, "{{") {
+			return fmt.Errorf("resource %q %s: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)",
+				r.Name, label, f.Raw, b.Engine())
+		}
+
 		if f.Template != "" {
 			// Deliberately NO native refusal here, unlike fields: the fields
 			// rule exists because a template call's output re-indents to the
