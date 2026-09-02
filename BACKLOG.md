@@ -645,3 +645,46 @@ templates open as an opaque card or not at all, as today.
       or are dropped (go-templating only for now, per Kaur).
 - [ ] Spec addendum: retire §7 (the DSL), restate §2's round-trip non-goal as "understanding is
       partial, preservation is total", update §11/§12.
+
+## Test infrastructure — kind cluster, namespace per workspace (decided 2026-09-02)
+
+Decision (Kaur): use kind for the cluster, a namespace per workspace inside it. Skaffold stays
+the build/deploy/verify loop; it does not run the Go unit tests or Playwright. No kind cluster
+exists on the dev box today (the `kind-cf-test` context is stale), so this starts from scratch.
+
+- [ ] Per-workspace local e2e: playwright.config.js and tests/helpers.js derive the engine
+      port and scratch dir from the worktree (hash of `git rev-parse --show-toplevel`, override
+      with CF_E2E_PORT); no more shared 8081, no more stale-engine kills. The demo recorder
+      (8086) gets the same treatment. Small; do first.
+- [ ] `make cluster` / `make cluster-down`: idempotent `kind create cluster --name cf-test`,
+      Crossplane installed by helm at a pinned chart version, Function objects for
+      function-go-templating and function-auto-ready at the versions functions.yaml pins, wait
+      until both are Healthy. Script under scripts/cluster/; versions in one place.
+- [ ] Workspace namespace: `cf-<slug>` where slug = worktree basename + short hash. `make deploy`
+      wraps `skaffold run --namespace cf-<slug>` with a profile whose localPort is derived from
+      the same hash; `make undeploy` deletes the namespace. deploy/k8s manifests must not carry a
+      hardcoded namespace.
+- [ ] Cluster-scoped collision: XRDs, Compositions and the CRDs they create are cluster-scoped,
+      so two workspaces installing the same `xapps.platform.example.org` collide even in
+      separate namespaces. Lane C rewrites the XRD group per workspace
+      (`platform.<slug>.cf-test`) at generate time — `cf gen --group-suffix` or a sed in the
+      script — and tears down only its own XRD/Composition/CRDs. Document this in AGENTS.md
+      next to the port contract.
+- [ ] Lane C `make test-cluster` (skaffold verify job in the workspace namespace): `cf gen` the
+      K8s App example (native kinds only, no cloud credentials), apply XRD + Composition +
+      functions.yaml, create an XR in the namespace, wait for the composed Deployment to report
+      Available, assert the Service exists; then the negative case that render cannot see:
+      compose a StatefulSet or Job, prove it hangs without the aggregated ClusterRole and
+      composes once the emitted RBAC (GET /api/rbac) is applied. Teardown deletes the XR first,
+      then the workspace's definitions.
+- [ ] Deploy smoke in the same verify run: curl /healthz on the cf Service, GET /api/kinds
+      returns the pre-populated provider kinds (proves the init-container cache and the
+      blueprints volume the three fix(deploy) commits touched), GET /api/version matches the
+      image tag.
+- [ ] CI: a `cluster` job using kind-action that runs `make cluster` + `make test-cluster`,
+      separate from the e2e job so a cluster flake never blocks the canvas suite. Pin the kind
+      node image.
+- [ ] Reuse the cluster as the oracle for two things already on the backlog: the live-cluster
+      schema source specs (slice45) run against the real API server instead of a stub, and the
+      manifests-as-source spike's `kubectl get composition -o yaml` fixture is taken from a
+      cf-emitted Composition applied here.
