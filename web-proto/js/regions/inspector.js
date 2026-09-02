@@ -95,6 +95,30 @@ function suggestedParamType(fieldType) {
   return "string";
 }
 
+/** Parse the engine's when grammar: params.x | params.x == "lit" | != */
+function parseWhen(str) {
+  if (!str) return {};
+  var m = /^params\.([A-Za-z][A-Za-z0-9]*)(?:\s(==|!=)\s"([^"]*)")?$/.exec(str);
+  if (!m) return {};
+  return { param: m[1], op: m[2] || "==", val: m[3] };
+}
+
+function whenFromControls(root, rn) {
+  var pSel = root.querySelector('[data-when-param="' + CSS.escape(rn) + '"]');
+  var p = pSel && pSel.value;
+  if (!p) return null;
+  var params = paramsOf(store.state.doc);
+  var decl = params[p] || {};
+  if (decl.type === "boolean") return "params." + p; // bare: engine's boolean form
+  // string param: compose the full comparison — when the op/value controls
+  // haven't rendered yet (param just chosen), default to == first enum value
+  var opEl = root.querySelector('[data-when-op="' + CSS.escape(rn) + '"]');
+  var valEl = root.querySelector('[data-when-val="' + CSS.escape(rn) + '"]');
+  var op = opEl ? opEl.value : "==";
+  var val = valEl ? valEl.value : ((decl.enum && decl.enum[0]) || "");
+  return "params." + p + " " + op + ' "' + val + '"';
+}
+
 function paramsOf(doc) {
   return doc && doc.spec && doc.spec.xrd && doc.spec.xrd.parameters || {};
 }
@@ -360,6 +384,36 @@ async function renderResource(res) {
     }).join("") + "</select></div>" +
     (intParams.length ? "" : '<div class="g" style="padding:2px 0 0">declare an integer parameter to enable looping</div>') +
     "</div>";
+
+  // when: conditional resource — builder for the engine's exact grammar:
+  // bare boolean param, or  params.x == "literal" / != "literal"
+  var w = parseWhen(res.when);
+  var condParams = Object.keys(allParams).filter(function (n) {
+    var t = allParams[n].type;
+    return t === "boolean" || t === "string";
+  });
+  h += '<div class="fld"><div class="frow" style="margin-bottom:0">' +
+    '<span class="lbl" style="flex:0 0 auto">when</span>' +
+    '<select class="tsel" data-when-param="' + esc(res.name) + '" style="flex:1" ' +
+    'title="Compose this resource only when the condition holds">' +
+    '<option value=""' + (!w.param ? " selected" : "") + ">\u2014 always \u2014</option>" +
+    condParams.map(function (n) {
+      return '<option value="' + esc(n) + '"' + (w.param === n ? " selected" : "") + ">params." + esc(n) + "</option>";
+    }).join("") + "</select>";
+  if (w.param && allParams[w.param] && allParams[w.param].type === "string") {
+    var vals = allParams[w.param].enum || [];
+    h += '<select class="tsel" data-when-op="' + esc(res.name) + '" style="flex:0 0 auto">' +
+      ["==", "!="].map(function (o) {
+        return '<option value="' + o + '"' + (w.op === o ? " selected" : "") + ">" + o + "</option>";
+      }).join("") + "</select>";
+    h += vals.length
+      ? '<select class="tsel" data-when-val="' + esc(res.name) + '" style="flex:1">' +
+        vals.map(function (v) {
+          return '<option value="' + esc(v) + '"' + (w.val === v ? " selected" : "") + ">" + esc(v) + "</option>";
+        }).join("") + "</select>"
+      : '<input class="tin" data-when-val="' + esc(res.name) + '" style="flex:1" value="' + esc(w.val || "") + '" placeholder="value">';
+  }
+  h += "</div></div>";
 
   if (loadErr) {
     h += '<div class="warnbar">' + esc(loadErr) + "</div>";
@@ -657,6 +711,17 @@ function onBoxClick(e) {
 }
 
 function onBoxChange(e) {
+  if (e.target.matches("[data-when-param],[data-when-op],[data-when-val]")) {
+    var wrn = e.target.getAttribute("data-when-param") ||
+      e.target.getAttribute("data-when-op") || e.target.getAttribute("data-when-val");
+    var expr = whenFromControls(box, wrn);
+    store.replaceDoc(function (d) {
+      var r = d.spec.resources.find(function (x) { return x.name === wrn; });
+      if (!r) return;
+      if (expr) r.when = expr; else delete r.when;
+    });
+    return;
+  }
   if (e.target.matches("select[data-foreach]")) {
     var rn = e.target.getAttribute("data-foreach");
     var val = e.target.value;
