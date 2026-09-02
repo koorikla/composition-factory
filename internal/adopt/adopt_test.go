@@ -3,8 +3,6 @@ package adopt
 import (
 	"strings"
 	"testing"
-
-	"github.com/koorikla/compositionfactory/internal/blueprint"
 )
 
 func TestAdoptGoTemplatingComposition(t *testing.T) {
@@ -274,15 +272,9 @@ spec:
 		t.Fatalf("got %d resources, want 2", len(bp.Spec.Resources))
 	}
 
-	var sa *blueprint.Resource
-	for i := range bp.Spec.Resources {
-		if bp.Spec.Resources[i].Name == "app-sa" {
-			sa = &bp.Spec.Resources[i]
-			break
-		}
-	}
+	sa := bp.ResourceNamed("app-sa")
 	if sa == nil {
-		t.Fatalf("app-sa resource not found")
+		t.Fatal("resource app-sa not found")
 	}
 
 	ann := sa.Annotations["eks.amazonaws.com/role-arn"]

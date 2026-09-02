@@ -41,11 +41,9 @@ type Node struct {
 // object schemas declare NO required array at the top level (spec is
 // "optional" on every kind), yet the apiserver validates top-level struct
 // members unconditionally: posting a Deployment with an empty spec fails
-// with `spec.selector: Required value`. Without the exemption a native
-// kind's chain would be vacuously empty. Managed resources (and envelope /
-// status trees) pass false: an optional forProvider block's inner requireds
-// bind only if the block is set, exactly as the CRD's structural validation
-// applies them.
+// with `spec.selector: Required value` — and the vendored top level
+// declares no required array at all, so a strict chain would vacuously
+// mark nothing on every native kind. See ComputeRequiredChain.
 func ComputeRequiredChain(nodes []*Node, topLevelHeld bool) {
 	for _, n := range nodes {
 		n.RequiredChain = n.Required
@@ -103,7 +101,6 @@ func RequiredBranches(nodes []*Node, prefix string) []Branch {
 	return out
 }
 
-// hasChainLeaf reports whether any leaf in n's subtree is chain-required.
 func hasChainLeaf(n *Node) bool {
 	for _, c := range n.Children {
 		if len(c.Children) == 0 {
@@ -124,6 +121,30 @@ func hasChainLeaf(n *Node) bool {
 type Leaf struct {
 	Path string
 	Node *Node
+}
+
+// Leaves flattens nodes to settable fields with their paths. Arrays of
+// scalars (no Children, e.g. managementPolicies) are assigned whole and keep
+// their plain path with no [0] index; only arrays of objects (Children
+// present, Type == "array", e.g. containers) get an indexed path for their
+// element fields.
+func Leaves(nodes []*Node, prefix string) []Leaf {
+	var out []Leaf
+	for _, n := range nodes {
+		path := n.Name
+		if prefix != "" {
+			path = prefix + "." + n.Name
+		}
+		switch {
+		case len(n.Children) == 0:
+			out = append(out, Leaf{Path: path, Node: n})
+		case n.Type == "array":
+			out = append(out, Leaves(n.Children, path+"[0]")...)
+		default:
+			out = append(out, Leaves(n.Children, path)...)
+		}
+	}
+	return out
 }
 
 // BuildTree converts an OpenAPI properties map into sorted Nodes. Sorting keeps
@@ -192,31 +213,6 @@ func stringSlice(v any) []string {
 	return out
 }
 
-// Leaves flattens nodes to settable fields with their paths. Arrays of
-// scalars (no Children, e.g. managementPolicies) are assigned whole and keep
-// their plain path with no [0] index; only arrays of objects (Children
-// present, Type == "array", e.g. containers) get an indexed path for their
-// element fields.
-func Leaves(nodes []*Node, prefix string) []Leaf {
-	var out []Leaf
-	for _, n := range nodes {
-		path := n.Name
-		if prefix != "" {
-			path = prefix + "." + n.Name
-		}
-		switch {
-		case len(n.Children) == 0:
-			out = append(out, Leaf{Path: path, Node: n})
-		case n.Type == "array":
-			out = append(out, Leaves(n.Children, path+"[0]")...)
-		default:
-			out = append(out, Leaves(n.Children, path)...)
-		}
-	}
-	return out
-}
-
-// specProperties returns spec.properties and spec.required for the preferred version.
 func (c CRD) specProperties() (map[string]any, []string, error) {
 	v, err := c.Preferred()
 	if err != nil {
@@ -233,24 +229,46 @@ func (c CRD) specProperties() (map[string]any, []string, error) {
 	return props, stringSlice(spec["required"]), nil
 }
 
-// ForProvider returns the spec.forProvider subtree.
-func (c CRD) ForProvider() ([]*Node, error) {
-	props, _, err := c.specProperties()
+func (c CRD) getCachedTree(treeType string, compute func() ([]*Node, error)) ([]*Node, error) {
+	if c.cache == nil {
+		return compute()
+	}
+	c.cache.mu.Lock()
+	defer c.cache.mu.Unlock()
+	if c.cache.trees == nil {
+		c.cache.trees = make(map[string][]*Node)
+	}
+	if nodes, ok := c.cache.trees[treeType]; ok {
+		return nodes, nil
+	}
+	nodes, err := compute()
 	if err != nil {
 		return nil, err
 	}
-	fp, ok := props["forProvider"].(map[string]any)
-	if !ok {
-		// Legitimate: provider-kubernetes ObservedObjectCollection has none.
-		return nil, nil
-	}
-	inner, _ := fp["properties"].(map[string]any)
-	nodes := BuildTree(inner, stringSlice(fp["required"]))
-	// Strict chain: forProvider's own required list is the root context, and
-	// an optional block's inner requireds bind only when the block is set —
-	// the CRD's structural validation applies them exactly that way.
-	ComputeRequiredChain(nodes, false)
+	c.cache.trees[treeType] = nodes
 	return nodes, nil
+}
+
+// ForProvider returns the spec.forProvider subtree.
+func (c CRD) ForProvider() ([]*Node, error) {
+	return c.getCachedTree("forProvider", func() ([]*Node, error) {
+		props, _, err := c.specProperties()
+		if err != nil {
+			return nil, err
+		}
+		fp, ok := props["forProvider"].(map[string]any)
+		if !ok {
+			// Legitimate: provider-kubernetes ObservedObjectCollection has none.
+			return nil, nil
+		}
+		inner, _ := fp["properties"].(map[string]any)
+		nodes := BuildTree(inner, stringSlice(fp["required"]))
+		// Strict chain: forProvider's own required list is the root context, and
+		// an optional block's inner requireds bind only when the block is set —
+		// the CRD's structural validation applies them exactly that way.
+		ComputeRequiredChain(nodes, false)
+		return nodes, nil
+	})
 }
 
 // FieldTree returns the settable field tree for composing this kind — the
@@ -269,29 +287,31 @@ func (c CRD) FieldTree() ([]*Node, error) {
 	if !c.Native {
 		return c.ForProvider()
 	}
-	v, err := c.Preferred()
-	if err != nil {
-		return nil, err
-	}
-	rest := make(map[string]any, len(v.Properties))
-	for k, val := range v.Properties {
-		switch k {
-		case "apiVersion", "kind", "metadata", "status":
-			continue
+	return c.getCachedTree("fieldTree", func() ([]*Node, error) {
+		v, err := c.Preferred()
+		if err != nil {
+			return nil, err
 		}
-		rest[k] = val
-	}
-	// No required list: Kubernetes object schemas mark nothing required at
-	// the top level (required lives inside spec's own subtrees, which
-	// BuildTree reads from each node's schema as usual).
-	nodes := BuildTree(rest, nil)
-	// topLevelHeld=true is the native chain policy: the apiserver validates
-	// top-level struct members (spec) unconditionally — an empty Deployment
-	// fails with `spec.selector: Required value` — and the vendored top level
-	// declares no required array at all, so a strict chain would vacuously
-	// mark nothing on every native kind. See ComputeRequiredChain.
-	ComputeRequiredChain(nodes, true)
-	return nodes, nil
+		rest := make(map[string]any, len(v.Properties))
+		for k, val := range v.Properties {
+			switch k {
+			case "apiVersion", "kind", "metadata", "status":
+				continue
+			}
+			rest[k] = val
+		}
+		// No required list: Kubernetes object schemas mark nothing required at
+		// the top level (required lives inside spec's own subtrees, which
+		// BuildTree reads from each node's schema as usual).
+		nodes := BuildTree(rest, nil)
+		// topLevelHeld=true is the native chain policy: the apiserver validates
+		// top-level struct members (spec) unconditionally — an empty Deployment
+		// fails with `spec.selector: Required value` — and the vendored top level
+		// declares no required array at all, so a strict chain would vacuously
+		// mark nothing on every native kind. See ComputeRequiredChain.
+		ComputeRequiredChain(nodes, true)
+		return nodes, nil
+	})
 }
 
 // Status returns the top-level .status subtree of the preferred version's
@@ -306,21 +326,23 @@ func (c CRD) FieldTree() ([]*Node, error) {
 // ForProvider's contract for a missing forProvider — because only the
 // caller knows whether anything is actually being wired from it.
 func (c CRD) Status() ([]*Node, error) {
-	v, err := c.Preferred()
-	if err != nil {
-		return nil, err
-	}
-	st, ok := v.Properties["status"].(map[string]any)
-	if !ok {
-		return nil, nil
-	}
-	inner, _ := st["properties"].(map[string]any)
-	if inner == nil {
-		return nil, nil
-	}
-	nodes := BuildTree(inner, stringSlice(st["required"]))
-	ComputeRequiredChain(nodes, false)
-	return nodes, nil
+	return c.getCachedTree("status", func() ([]*Node, error) {
+		v, err := c.Preferred()
+		if err != nil {
+			return nil, err
+		}
+		st, ok := v.Properties["status"].(map[string]any)
+		if !ok {
+			return nil, nil
+		}
+		inner, _ := st["properties"].(map[string]any)
+		if inner == nil {
+			return nil, nil
+		}
+		nodes := BuildTree(inner, stringSlice(st["required"]))
+		ComputeRequiredChain(nodes, false)
+		return nodes, nil
+	})
 }
 
 // Envelope returns spec.properties minus forProvider and initProvider. It is
@@ -333,18 +355,20 @@ func (c CRD) Envelope() ([]*Node, error) {
 	if c.Native {
 		return nil, nil
 	}
-	props, required, err := c.specProperties()
-	if err != nil {
-		return nil, err
-	}
-	rest := make(map[string]any, len(props))
-	for k, v := range props {
-		if k == "forProvider" || k == "initProvider" {
-			continue
+	return c.getCachedTree("envelope", func() ([]*Node, error) {
+		props, required, err := c.specProperties()
+		if err != nil {
+			return nil, err
 		}
-		rest[k] = v
-	}
-	nodes := BuildTree(rest, required)
-	ComputeRequiredChain(nodes, false)
-	return nodes, nil
+		rest := make(map[string]any, len(props))
+		for k, val := range props {
+			if k == "forProvider" || k == "initProvider" {
+				continue
+			}
+			rest[k] = val
+		}
+		nodes := BuildTree(rest, required)
+		ComputeRequiredChain(nodes, false)
+		return nodes, nil
+	})
 }

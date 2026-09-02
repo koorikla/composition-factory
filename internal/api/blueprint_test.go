@@ -196,15 +196,10 @@ func TestRenameResourceRewritesStatusReferencesOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	var policy *blueprint.Resource
-	for i := range reloaded.Spec.Resources {
-		if reloaded.Spec.Resources[i].Name == "queue-policy" {
-			policy = &reloaded.Spec.Resources[i]
-		}
-		if reloaded.Spec.Resources[i].Name == "main-queue" {
-			t.Error("main-queue still present on disk after rename")
-		}
+	if reloaded.ResourceNamed("main-queue") != nil {
+		t.Error("main-queue still present on disk after rename")
 	}
+	policy := reloaded.ResourceNamed("queue-policy")
 	if policy == nil {
 		t.Fatal("queue-policy missing from the reloaded document")
 	}
@@ -325,12 +320,7 @@ func TestRenameResourceRewritesForEachStatusRefOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	var pool *blueprint.Resource
-	for i := range reloaded.Spec.Resources {
-		if reloaded.Spec.Resources[i].Name == "replica-pool" {
-			pool = &reloaded.Spec.Resources[i]
-		}
-	}
+	pool := reloaded.ResourceNamed("replica-pool")
 	if pool == nil {
 		t.Fatal("replica-pool missing from the reloaded document")
 	}

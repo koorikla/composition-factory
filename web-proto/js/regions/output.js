@@ -28,6 +28,8 @@ import { esc } from "../dom.js";
  *    untouched.
  */
 
+import { esc } from "../dom.js";
+
 var DEBOUNCE_MS = 300;
 var MIN_DRAWER = 64;   // px — keep the header + a few code lines reachable
 var MIN_CANVAS = 140;  // px — never let the drawer swallow the canvas

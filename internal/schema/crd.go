@@ -5,6 +5,7 @@ package schema
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"sigs.k8s.io/yaml"
 )
@@ -15,6 +16,11 @@ import (
 // Service, ...) travels through the generator: internal/schema/k8s builds one
 // per vendored kind, with Native set, so the index, the API and the emitter
 // share one schema shape instead of growing a parallel native-kind type.
+type crdCache struct {
+	mu    sync.Mutex
+	trees map[string][]*Node
+}
+
 type CRD struct {
 	Group      string
 	Kind       string
@@ -31,6 +37,8 @@ type CRD struct {
 	// providerConfigRef). Only internal/schema/k8s sets it; ParseCRDs never
 	// does, so no fetched package can smuggle a kind into the native path.
 	Native bool `json:"native,omitempty"`
+
+	cache *crdCache
 }
 
 // Version is one served version of a CRD.
@@ -88,6 +96,7 @@ func ParseCRDs(docs [][]byte) ([]CRD, error) {
 			Plural:     doc.Spec.Names.Plural,
 			Scope:      doc.Spec.Scope,
 			Categories: doc.Spec.Names.Categories,
+			cache:      &crdCache{trees: make(map[string][]*Node)},
 		}
 		for _, v := range doc.Spec.Versions {
 			c.Versions = append(c.Versions, Version{

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/koorikla/compositionfactory/internal/api"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -42,9 +43,9 @@ func (s *server) call(method, path string, body []byte) (status int, respBody []
 	// gzipped body or a 304, and not sending the headers is how HTTP asks
 	// for neither.
 
-	rec := &recorder{header: make(http.Header), status: http.StatusOK}
+	rec := api.NewRecorder()
 	s.handler.ServeHTTP(rec, r)
-	return rec.status, rec.body.Bytes(), nil
+	return rec.Status(), rec.Body(), nil
 }
 
 // result converts a bridged response into the tool result: an error status
@@ -84,18 +85,3 @@ func (s *server) bridge(method, path string, body []byte) (*sdk.CallToolResult, 
 	}
 	return result(status, resp)
 }
-
-// recorder is a minimal http.ResponseWriter buffering the handler's whole
-// response — a small deliberate duplicate of internal/api's unexported
-// recorder (the same precedent as that package's own splitYAMLStream copy:
-// the original is private to its package, and twelve lines are not worth an
-// export or an httptest dependency in non-test code).
-type recorder struct {
-	header http.Header
-	status int
-	body   bytes.Buffer
-}
-
-func (r *recorder) Header() http.Header         { return r.header }
-func (r *recorder) WriteHeader(status int)      { r.status = status }
-func (r *recorder) Write(b []byte) (int, error) { return r.body.Write(b) }

@@ -30,6 +30,7 @@ import (
 	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/testfixture"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
 
@@ -42,41 +43,7 @@ const testProviderRef = "ghcr.io/x/provider-aws-sqs:v2.7.0"
 // enforces in production (unlike internal/api's own tests, which deliberately
 // diverge the two; nothing here needs that divergence).
 func testCRDs(t *testing.T) []schema.CRD {
-	t.Helper()
-	crds, err := schema.ParseCRDs([][]byte{[]byte(`
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata: {name: queues.sqs.aws.m.upbound.io}
-spec:
-  group: sqs.aws.m.upbound.io
-  scope: Namespaced
-  names: {kind: Queue, plural: queues, categories: [managed]}
-  versions:
-  - name: v1beta1
-    served: true
-    storage: true
-    schema:
-      openAPIV3Schema:
-        properties:
-          spec:
-            properties:
-              forProvider:
-                required: [region]
-                properties:
-                  region: {type: string}
-                  tags: {type: object, additionalProperties: {type: string}}
-                  maxMessageSize: {type: integer}
-              providerConfigRef:
-                type: object
-                required: [name]
-                properties:
-                  kind: {type: string}
-                  name: {type: string}
-`)})
-	if err != nil {
-		t.Fatalf("ParseCRDs: %v", err)
-	}
-	return crds
+	return testfixture.QueueCRDs(t)
 }
 
 // testBlueprintYAML is a valid Namespaced blueprint against testCRDs:

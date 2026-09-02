@@ -18,6 +18,7 @@
 
 import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
+import { esc } from "../dom.js";
 import { fanOut } from "../wires.js";
 import { esc } from "../dom.js";
 

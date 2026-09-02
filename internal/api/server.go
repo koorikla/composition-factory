@@ -455,24 +455,9 @@ func etagMatches(ifNoneMatch, etag string) bool {
 	return false
 }
 
-// recorder is a minimal http.ResponseWriter that buffers a handler's entire
-// response instead of sending it, so wrap can inspect and transform the
-// complete status/headers/body before anything reaches the real client.
-type recorder struct {
-	header http.Header
-	status int
-	body   bytes.Buffer
+func newRecorder() *ResponseRecorder {
+	return NewRecorder()
 }
-
-func newRecorder() *recorder {
-	return &recorder{header: make(http.Header), status: http.StatusOK}
-}
-
-func (r *recorder) Header() http.Header { return r.header }
-
-func (r *recorder) WriteHeader(status int) { r.status = status }
-
-func (r *recorder) Write(b []byte) (int, error) { return r.body.Write(b) }
 
 // rebuildIndexLocked rebuilds srv.Index from srv.Store, srv.Providers,
 // vendored Kubernetes native kinds, and any CRD sources declared in the blueprint.

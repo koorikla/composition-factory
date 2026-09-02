@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
@@ -60,7 +61,7 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if diff := cmp.Diff(crds, got); diff != "" {
+	if diff := cmp.Diff(crds, got, cmpopts.IgnoreUnexported(schema.CRD{})); diff != "" {
 		t.Errorf("round trip (-want +got):\n%s", diff)
 	}
 }
@@ -113,7 +114,7 @@ func TestSaveWithColludingRefsDoesNotClobberCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load A: %v", err)
 	}
-	if diff := cmp.Diff(crdsA, gotA); diff != "" {
+	if diff := cmp.Diff(crdsA, gotA, cmpopts.IgnoreUnexported(schema.CRD{})); diff != "" {
 		t.Errorf("provider A clobbered (-want +got):\n%s", diff)
 	}
 
@@ -121,7 +122,7 @@ func TestSaveWithColludingRefsDoesNotClobberCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load B: %v", err)
 	}
-	if diff := cmp.Diff(crdsB, gotB); diff != "" {
+	if diff := cmp.Diff(crdsB, gotB, cmpopts.IgnoreUnexported(schema.CRD{})); diff != "" {
 		t.Errorf("provider B clobbered (-want +got):\n%s", diff)
 	}
 }

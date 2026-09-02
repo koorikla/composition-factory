@@ -305,10 +305,10 @@ clean, Playwright 115 passed / 1 skipped.
       `validateForEachStatusRef` (load.go:1001, 1095) are the same five
       checks; six+ linear "find resource by name" scans across packages —
       add `(*Blueprint).ResourceNamed`.
-- [ ] Same Queue CRD fixture retyped with drift in mcp/server_test.go:44,
+- [x] Same Queue CRD fixture retyped with drift in mcp/server_test.go:44,
       emit/composition_test.go:19, api/server_test.go:150-240 — an
       internal/testfixture package. `recorder` type duplicated in
-      api/server.go:461 and mcp/bridge.go:93.
+      api/server.go:461 and mcp/bridge.go:93. — completed 2026-09-02
 
 ### Performance — Go
 
@@ -316,10 +316,10 @@ clean, Playwright 115 passed / 1 skipped.
       whole provider cache from disk (api/generate.go:136 → cache.LoadSources)
       although the same CRDs sit in srv.Index. Serve from the index or
       memoise Store.Load by ref + mtime.
-- [ ] Schema trees are rebuilt from raw maps on every call (schema/tree.go
+- [x] Schema trees are rebuilt from raw maps on every call (schema/tree.go
       ForProvider/FieldTree/Status/Envelope); in emit, crd.Status() +
       Leaves() run inside per-field loops (composition.go:576, 944, 1036).
-      Cache per (apiVersion, kind).
+      Cache per (apiVersion, kind). — completed 2026-09-02
 - [ ] acceptance_test.go builds the binary and pulls the provider 11 times.
       TestMain: build once, one pre-warmed cache dir.
 - [ ] Unfiltered GET /api/catalogue re-marshals + re-hashes + re-gzips the
@@ -336,9 +336,9 @@ clean, Playwright 115 passed / 1 skipped.
 - [ ] Wire computation is quadratic: wires.js fanOut() walks the whole doc
       and is called per port; listWires runs again per card, per layout,
       per draw. Compute once per render, pass a fan map down.
-- [ ] Five esc() copies with four semantics (main.js:452 drops 0/false,
+- [x] Five esc() copies with four semantics (main.js:452 drops 0/false,
       output.js/palette.js throw on null, only inspector.js escapes `'`).
-      One shared js/dom.js used by every region.
+      One shared js/dom.js used by every region. — completed 2026-09-02
 - [ ] Six copies of pointerdown → move/up closure drag scaffolding
       (main.js:62-76, 145-176; canvas.js:631, 968, 1380, 1462), none using
       setPointerCapture (pointercancel on mobile leaks listeners); touch
@@ -349,9 +349,9 @@ clean, Playwright 115 passed / 1 skipped.
       markup is pasted four times; field-path parsing is inline string
       prefix checks instead of wires.js parseFrom; the target namespace is
       "env:" in inspector.js but "envelope." in canvas.js. Pick one.
-- [ ] api.js: importBlueprint, getPackageYAML, addCRDSource bypass request()
+- [x] api.js: importBlueprint, getPackageYAML, addCRDSource bypass request()
       and throw a different error shape than the "frozen contract" comment
-      promises (getPackageYAML has no status at all).
+      promises (getPackageYAML has no status at all). — completed 2026-09-02
 - [ ] main.js column resize writes localStorage on every pointermove and
       the resize listener is unthrottled; inspector rebuilds its whole panel
       with innerHTML on every doc emit (the pattern canvas.js abandoned for

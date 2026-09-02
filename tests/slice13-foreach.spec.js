@@ -30,7 +30,9 @@ test('setting for-each on a resource persists, badges the card and loops the tem
 test('Validate proves the loop: render ok with one extra instance', async ({ page }) => {
   await page.goto('/')
   await page.click('.node[data-id="dead-letter"] .node-h')
-  await page.locator('#insp select[data-foreach]').selectOption('params.instanceCount')
+  const sel = page.locator('#insp select[data-foreach]')
+  await expect(sel).toBeVisible()
+  await sel.selectOption('params.instanceCount')
   await expect(page.locator('#code')).toContainText('range', { timeout: 8000 })
   await page.click('#validateBtn')
   // work-queue + 2x dead-letter (instanceCount defaults to 2)
