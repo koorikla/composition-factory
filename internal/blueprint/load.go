@@ -930,8 +930,14 @@ func (b *Blueprint) Validate() error {
 					return fmt.Errorf("resource %q field %q: %w", r.Name, p, err)
 				}
 				if ref.Resource != "" {
-					if err := b.validateStatusRef(r, fmt.Sprintf("field %q", p), f.From); err != nil {
-						return err
+					if ref.IsMetadataName() {
+						if err := b.validateMetadataRef(r, fmt.Sprintf("field %q", p), f.From); err != nil {
+							return err
+						}
+					} else {
+						if err := b.validateStatusRef(r, fmt.Sprintf("field %q", p), f.From); err != nil {
+							return err
+						}
 					}
 					continue
 				}
@@ -1006,6 +1012,25 @@ func (b *Blueprint) Validate() error {
 // what names where the reference sits on r, preformatted (`field "podSpec"`,
 // `annotation "eks.amazonaws.com/role-arn"`), so one checker serves both wire
 // surfaces without the field messages changing a byte.
+func (b *Blueprint) validateMetadataRef(r Resource, what, from string) error {
+	target, path, ok := MetadataRef(from)
+	if !ok || path != "name" {
+		return fmt.Errorf("resource %q %s: a metadata reference must be resources.<name>.metadata.name (got %q)", r.Name, what, from)
+	}
+	if target == r.Name {
+		return fmt.Errorf("resource %q %s: references its own metadata.name -- a resource cannot be wired to itself", r.Name, what)
+	}
+	decl := b.ResourceNamed(target)
+	if decl == nil {
+		return fmt.Errorf("resource %q %s: references unknown resource %q", r.Name, what, target)
+	}
+	if decl.ForEach != "" {
+		return fmt.Errorf("resource %q %s: resource %q is looped (forEach: %s), so its name is indexed (%s-0, %s-1, ...) -- reference an unlooped resource",
+			r.Name, what, target, decl.ForEach, target, target)
+	}
+	return nil
+}
+
 func (b *Blueprint) validateStatusRef(r Resource, what, from string) error {
 	target, path, ok := StatusRef(from)
 	if !ok {

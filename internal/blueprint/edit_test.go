@@ -493,3 +493,40 @@ func TestDeleteProviderNameSucceedsForNativeOnlyCompositions(t *testing.T) {
 		t.Fatal("providerName parameter should have been deleted")
 	}
 }
+
+func TestRenameResourceRewritesMetadataNameReferences(t *testing.T) {
+	b := editable()
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name:   "sa",
+		Kind:   "ServiceAccount",
+		Fields: map[string]Field{"automountServiceAccountToken": {Value: "true"}},
+	}, Resource{
+		Name:   "app",
+		Kind:   "Deployment",
+		Fields: map[string]Field{"spec.template.spec.serviceAccountName": {From: "resources.sa.metadata.name"}},
+	})
+	if err := b.RenameResource("sa", "workload-sa"); err != nil {
+		t.Fatalf("RenameResource: %v", err)
+	}
+	got := b.Spec.Resources[2].Fields["spec.template.spec.serviceAccountName"].From
+	if got != "resources.workload-sa.metadata.name" {
+		t.Errorf("rewritten from = %q, want resources.workload-sa.metadata.name", got)
+	}
+}
+
+func TestDeleteResourceRefusesWhenMetadataNameReferenced(t *testing.T) {
+	b := editable()
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name:   "sa",
+		Kind:   "ServiceAccount",
+		Fields: map[string]Field{"automountServiceAccountToken": {Value: "true"}},
+	}, Resource{
+		Name:   "app",
+		Kind:   "Deployment",
+		Fields: map[string]Field{"spec.template.spec.serviceAccountName": {From: "resources.sa.metadata.name"}},
+	})
+	err := b.DeleteResource("sa")
+	if err == nil {
+		t.Fatal("DeleteResource(sa) = nil, want refusal when metadata.name is referenced")
+	}
+}

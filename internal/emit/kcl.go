@@ -217,6 +217,8 @@ func kclStructuredRHS(s structuredRHS, fallbackRHS string) string {
 		return translateParamAccessToKCL(s.param)
 	case rhsStatus:
 		return fmt.Sprintf("ocds?[%q]?.Resource?.status?.%s", s.resource, strings.ReplaceAll(s.statusPath, ".", "?."))
+	case rhsMetadata:
+		return fmt.Sprintf("\"${_xr}-%s\"", s.resource)
 	default:
 		return kclRHS(fallbackRHS, s.targetType)
 	}

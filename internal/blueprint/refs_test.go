@@ -174,3 +174,73 @@ func TestValidateRefsRejectsDuplicateResourceNames(t *testing.T) {
 		t.Errorf("err = %v, want it to name the duplicated resource name", err)
 	}
 }
+
+func TestParseFromResourcesMetadataNameForm(t *testing.T) {
+	ref, err := ParseFrom("resources.sa.metadata.name")
+	if err != nil {
+		t.Fatalf("ParseFrom: %v", err)
+	}
+	want := FromRef{Resource: "sa", MetadataPath: "name"}
+	if diff := cmp.Diff(want, ref); diff != "" {
+		t.Errorf("ref mismatch (-want +got):\n%s", diff)
+	}
+	if !ref.IsMetadataName() {
+		t.Errorf("IsMetadataName() = false, want true")
+	}
+}
+
+func TestValidateAcceptsMetadataNameWire(t *testing.T) {
+	b := scalarBlueprint(func(*Blueprint) {})
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name: "sa",
+		Kind: "ServiceAccount",
+		Fields: map[string]Field{
+			"automountServiceAccountToken": {Value: "true"},
+		},
+	}, Resource{
+		Name: "app",
+		Kind: "Deployment",
+		Fields: map[string]Field{
+			"spec.template.spec.serviceAccountName": {From: "resources.sa.metadata.name"},
+		},
+	})
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want metadata.name wire to be accepted", err)
+	}
+}
+
+func TestValidateRejectsMetadataNameWireToSelf(t *testing.T) {
+	b := scalarBlueprint(func(*Blueprint) {})
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name: "sa",
+		Kind: "ServiceAccount",
+		Fields: map[string]Field{
+			"spec.template.spec.serviceAccountName": {From: "resources.sa.metadata.name"},
+		},
+	})
+	err := b.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want self-referencing metadata.name to be refused")
+	}
+	if !strings.Contains(err.Error(), "own metadata.name") {
+		t.Errorf("err = %v, want it to explain self-reference", err)
+	}
+}
+
+func TestValidateRejectsMetadataNameWireToUnknownResource(t *testing.T) {
+	b := scalarBlueprint(func(*Blueprint) {})
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name: "app",
+		Kind: "Deployment",
+		Fields: map[string]Field{
+			"spec.template.spec.serviceAccountName": {From: "resources.unknown-sa.metadata.name"},
+		},
+	})
+	err := b.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want unknown resource metadata.name wire to be refused")
+	}
+	if !strings.Contains(err.Error(), "unknown-sa") {
+		t.Errorf("err = %v, want it to name missing resource", err)
+	}
+}

@@ -51,6 +51,10 @@ func Generate(b *blueprint.Blueprint, crds []schema.CRD, outDir string) ([]Outpu
 	if err != nil {
 		return nil, err
 	}
+	rbacBytes, err := RBAC(b, crds)
+	if err != nil {
+		return nil, err
+	}
 
 	// Sorted by path so callers can diff two runs positionally. providerconfigs
 	// entries are variable in count (zero-to-many families), so they are
@@ -91,6 +95,9 @@ func Generate(b *blueprint.Blueprint, crds []schema.CRD, outDir string) ([]Outpu
 	}
 
 	out = append(out, Output{Path: filepath.Join(outDir, "xrds", name), Body: xrd})
+	if len(rbacBytes) > 0 {
+		out = append(out, Output{Path: filepath.Join(outDir, "rbac.yaml"), Body: rbacBytes})
+	}
 
 	sort.Slice(out, func(i, j int) bool {
 		return filepath.ToSlash(out[i].Path) < filepath.ToSlash(out[j].Path)

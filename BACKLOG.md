@@ -93,19 +93,6 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
 
 ### P0 — native Kubernetes kinds do not work on a real cluster (agent B, verified in kind)
 
-- [ ] Every composed native object gets `generateName: <xr>-`, so sibling references by name
-      dangle: `serviceAccountName: web`, HPA `scaleTargetRef.name: web`, Ingress backend
-      `web` — on the cluster: `error looking up service account default/web: serviceaccount
-      "web" not found`. The shipped k8s-workload starter has the same defect. Emit
-      deterministic `metadata.name` for native kinds (or `<xr>-<resource>`), make
-      `metadata.name`, `metadata.labels`, `metadata.annotations` settable, and support
-      `from: resources.<n>.metadata.name` so references resolve. Found by B.
-- [ ] `cf gen` writes no RBAC and never warns; `/api/rbac` is bare rule JSON (no ClusterRole
-      object, no aggregation label, includes the XR's own resource and the four pre-granted
-      kinds). Verified on Crossplane 2.4: the rules are correct and complete, and the
-      failure is loud (`ComposeResources … "ingress" … is forbidden`, pipeline aborted), so
-      emit a ready aggregated ClusterRole for the non-pre-granted kinds only and warn at gen
-      time. Found by B.
 - [ ] `spec.emit.templateSource: FileSystem` cannot be packaged (`cannot package a blueprint
       with … FileSystem`) and cannot be rendered locally (`cannot read tmpl from the folder
       /templates`) with no hint that only in-cluster works; the `when:` guard is split across

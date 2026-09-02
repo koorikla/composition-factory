@@ -129,11 +129,13 @@ func TestDeploymentFieldTreeReachesThePodTemplate(t *testing.T) {
 
 	for _, absent := range []string{
 		"apiVersion", "kind", "status.replicas",
-		"metadata.name", // top-level metadata is generator-owned…
 	} {
 		if _, ok := paths[absent]; ok {
 			t.Errorf("Deployment field tree must not offer %q", absent)
 		}
+	}
+	if _, ok := paths["metadata.name"]; !ok {
+		t.Error("Deployment field tree must offer metadata.name")
 	}
 	// …but the pod template's own metadata is a real, settable subtree.
 	if _, ok := paths["spec.template.metadata.annotations"]; !ok {

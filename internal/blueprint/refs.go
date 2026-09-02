@@ -33,9 +33,15 @@ import (
 //     conditions[0].type, and [0] is not an identifier — a status wire
 //     cannot cross an array in M-scope.
 type FromRef struct {
-	Param      string
-	Resource   string
-	StatusPath []string
+	Param        string
+	Resource     string
+	StatusPath   []string
+	MetadataPath string
+}
+
+// IsMetadataName reports whether this ref points to another resource's metadata.name.
+func (r FromRef) IsMetadataName() bool {
+	return r.Resource != "" && r.MetadataPath == "name"
 }
 
 // statusSegmentRE is the Go text/template field-access grammar: after a dot,
@@ -52,13 +58,20 @@ func ParseFrom(s string) (FromRef, error) {
 		return FromRef{Param: param}, nil
 	}
 	if rest, ok := strings.CutPrefix(s, "resources."); ok {
+		if name, ok := strings.CutSuffix(rest, ".metadata.name"); ok {
+			if !resourceNameRE.MatchString(name) {
+				return FromRef{}, fmt.Errorf("from: %q is not a valid resource name in a "+
+					"resources.<name>.metadata.name reference (must be a DNS label, e.g. main-queue)", name)
+			}
+			return FromRef{Resource: name, MetadataPath: "name"}, nil
+		}
 		// A resource name is a DNS label and never contains a dot, so the
 		// FIRST ".status." unambiguously splits name from path — even when
 		// the status path itself begins with a key literally named "status".
 		name, path, found := strings.Cut(rest, ".status.")
 		if !found || path == "" {
 			return FromRef{}, fmt.Errorf("from: %q must be resources.<name>.status.<path> "+
-				"(e.g. resources.main-queue.status.atProvider.url)", s)
+				"(e.g. resources.main-queue.status.atProvider.url) or resources.<name>.metadata.name", s)
 		}
 		if !resourceNameRE.MatchString(name) {
 			return FromRef{}, fmt.Errorf("from: %q is not a valid resource name in a "+
@@ -76,5 +89,5 @@ func ParseFrom(s string) (FromRef, error) {
 		return FromRef{Resource: name, StatusPath: segs}, nil
 	}
 	return FromRef{}, fmt.Errorf("from must start with params.<name>, "+
-		"params.<name>.<member> or resources.<name>.status.<path> (got %q)", s)
+		"params.<name>.<member>, resources.<name>.status.<path> or resources.<name>.metadata.name (got %q)", s)
 }

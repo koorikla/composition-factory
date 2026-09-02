@@ -20,6 +20,7 @@ const (
 	rhsTemplate
 	rhsParam
 	rhsStatus
+	rhsMetadata
 )
 
 // structuredRHS represents a typed, backend-independent representation of a field,
@@ -146,6 +147,25 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 			}
 			if targetType == "map" && !isMap {
 				return s, "", "", fmt.Errorf("resource %q field %q is a map, and a from: wire cannot render one in v1. Set it with raw:", r.Name, p)
+			}
+
+			if ref.IsMetadataName() {
+				targetDecl := b.ResourceNamed(ref.Resource)
+				if targetDecl == nil {
+					return s, "", "", fmt.Errorf("resource %q field %q: references unknown resource %q", r.Name, p, ref.Resource)
+				}
+				s.kind = rhsMetadata
+				s.resource = ref.Resource
+				s.statusPath = "metadata.name"
+				s.optional = false
+				s.guard = ""
+				s.targetType = targetType
+				if isMap {
+					s.targetType = "string"
+				}
+				s.rawExpr = fmt.Sprintf("$xr-%s", ref.Resource)
+				rhs = fmt.Sprintf("{{ $xr }}-%s", ref.Resource)
+				return s, rhs, "", nil
 			}
 
 			g, expr, err := statusWire(ref, r, fmt.Sprintf("field %q", p), b, crds, wantNamespaced)
