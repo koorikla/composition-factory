@@ -246,6 +246,13 @@ make test-e2e       # Run Playwright browser tests
 make lint           # Check formatting and vet
 ```
 
+### Demo recordings
+
+The README's GIFs are recorded from the real app (no mocks) by
+`scripts/record-demos/run.sh` — it boots a scratch engine seeded with the
+IRSA example and drives the canvas with Playwright, encoding the frames to
+GIF natively (no ffmpeg). Re-run it after visual changes.
+
 ### Local Kubernetes with Skaffold
 
 You can run Composition Factory inside a local Kubernetes cluster (Minikube, kind, k3d, Docker Desktop) with [Skaffold](https://skaffold.dev/):
