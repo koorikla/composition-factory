@@ -166,3 +166,208 @@
       clicking the delete badge, or right-clicking for the context menu deletes the wire
       binding from fields, envelope, or annotations with full undo/redo support (`Cmd/Ctrl+Z`).
       — user request 2026-09-02
+
+## Consolidation backlog (audit re-verified 2026-09-02 at 062bd82)
+
+Re-checked after the Antigravity run. Already resolved and NOT listed below:
+index rebuild unified for provider add/delete + crds source (c2ee07e), gofmt
+drift (47bc0c1, 51b74d1, 7aec258), docs restructure into /docs, stray root
+`cf` binary removed. Suite state at re-check: go test -short green, vet/tidy
+clean, Playwright 115 passed / 1 skipped.
+
+### Correctness (do first)
+
+- [ ] KCL and Python emitters drop every field/envelope/annotation guard and
+      re-parse the Go-template RHS as a string: `.guard` is never read in
+      internal/emit/kcl.go or python.go, so an optional param or a status
+      wire renders unconditionally; unrecognised RHS shapes fall through to
+      a quoted literal of the raw `{{ ... }}` text with no error.
+      `translateWhenToKCL` does `ReplaceAll(when, "true", "True")` on the
+      whole expression (corrupts any param name containing true/false).
+      Fix shape: planFields/planAnnotations/planEnvelope return a structured
+      RHS (kind + param/resource + path + guard); each backend formats it.
+- [ ] `POST /api/cluster/sync` still carries its own inline index rebuild
+      (internal/api/cluster.go:104-124) that omits `crds:` sources — every
+      scanned CRD kind disappears from /api/kinds after a sync. Replace with
+      `srv.rebuildIndexLocked()`.
+- [ ] `rebuildIndexLocked` (internal/api/server.go:480) swallows six error
+      paths (`ReadFile`, `yaml.Unmarshal`, `Store.Load`, crds ReadFile /
+      ParseCRDManifest, `k8s.Kinds`) with `if err == nil`; provider add /
+      delete / crds-add / example-load lost their 500s. An evicted cache
+      entry now stays listed in /api/providers with its kinds silently gone.
+      Return the errors (keep the deliberate `continue` on missing sibling
+      crds files); in delete, assign `srv.Providers` after a successful build.
+- [ ] `adopt.Adopt` never calls `bp.Validate()` (nor do cmd/cf/adopt.go or
+      the MCP tool) — `cf adopt` can write a blueprint `cf gen` refuses. Its
+      `splitYAML` also swallows unmarshal errors with `continue`, so a
+      malformed Composition reports "no Composition document found".
+- [ ] `cf package` / `GET /api/package` select output docs by a `"xrds/"` /
+      `"compositions/"` string prefix against `filepath.Join` paths — zero
+      docs on Windows (cmd/cf/package.go:65, internal/api/package.go:44).
+- [ ] Kubeconfig sniff in internal/api/cluster.go:48 tests the first byte for
+      `'a'` twice, `{`/`k` arbitrarily, and overwrites the FromKubeconfig
+      error with the NewClient fallback's. Replace with a YAML/JSON sniff and
+      keep both errors.
+- [ ] `syncBlueprintSourcesLocked` (internal/api/blueprint.go:667-685) makes
+      the lockfile step best-effort and adds an already-cached ref to
+      srv.Providers without pinning it — the exact "cached but unpinned"
+      state cmd/cf/provider.go's comment forbids. Make it hard-fail like
+      handleAddProvider.
+
+### Docs drift (superpowers + guides)
+
+- [ ] docs/superpowers spec: line 3 still "Status: draft for review"; §3
+      stack still React 19 + xyflow + rjsf + CodeMirror; §11 lists CLI
+      commands that never shipped (provider search/list/versions/info/pin,
+      index, k8s use, validate) and omits package/push/adopt; §12 milestone
+      table has nothing marked done. Write a dated addendum
+      (docs/superpowers/specs/2026-09-02-addendum.md) recording the real
+      stack, shipped CLI/HTTP/MCP surface, engines (gotpl/kcl/python),
+      FileSystem source, adopt, examples, and milestone status.
+- [ ] docs/superpowers/plans/2026-08-28-m3-canvas.md describes the deleted
+      React canvas as the frozen contract — add a "superseded 2026-09-01 by
+      the web-proto pivot" header.
+- [ ] docs/mcp.md: 13 tools vs 30 HTTP routes; `adopt_composition` is not in
+      the tool table and "the one HTTP route without a tool" is false
+      (resource rename/delete, provider delete, import, package, crds
+      sources, cluster, rbac, catalogue, examples have no tool). Either add
+      the tools (bridge makes each a few lines) or state the scope honestly.
+- [ ] Dev-loop docs point at serve.py: Makefile:22-23 and
+      playwright.config.js:2 say the suite starts serve.py and needs cf serve
+      on :8080 (it boots its own cf serve on 8081); web-proto/README.md
+      tells you to run serve.py on 5180; tests/slice1-core-loop.spec.js:7
+      same. `cf serve` already serves live source with no-store headers, so
+      retire serve.py + `make dev`, fix the three comments, and delete or
+      rewrite slice22-cache-selfheal (permanently skipped, probes 5180).
+- [ ] docs/catalogue.md:304 points at web/src/api/fixtures (see removal
+      below); release.yml pins checkout@v4/setup-go@v5 while ci.yml and
+      catalogue.yml use v5/v6.
+- [ ] No GEMINI.md / AGENTS.md: agents other than Claude get only the README.
+      Add a short AGENTS.md (engine truths, BDD loop, never `git add -A`,
+      gofmt before commit) so the next non-Claude session inherits the rules.
+
+### Dead weight
+
+- [ ] Delete web/ (41 tracked files, 159 MB with node_modules; nothing
+      builds, serves or tests it). First move the nine JSON fixtures from
+      web/src/api/fixtures into internal/api/testdata/contract/ and repoint
+      internal/api/contract_fixtures_test.go (its "not present on this
+      branch" skip comment is also stale). Local .claude/launch.json still
+      launches `npm run dev --prefix web` on 5173.
+- [ ] web-proto/prototype-source.html is byte-identical to
+      docs/design/canvas-prototype.html and loaded by nothing (embed.go
+      excludes it). Keep the docs/design copy.
+- [ ] scripts/record-demo.js requires gif-encoder-2 and playwright, neither
+      installed; scripts/record-demos/ is the maintained twin.
+- [ ] Dead code: `emit.memberGuard` (no callers; chainGuard supersedes),
+      `api.connectCluster()` in web-proto/js/api.js (no callers),
+      `ensurePositions()` in canvas.js (empty body, still called with an
+      argument), store.js:185-186 duplicate guard, output.js removes an
+      "err" class nothing adds, six unused CSS classes in proto.css
+      (.xf .promote .btw .bn .bk .more).
+- [ ] Branches/worktrees all 0 ahead of main: engine-mvp, canvas-parity,
+      worktree-agent-a8f64090cfffd3a90, worktree-agent-aed01c6e7b850f5a9,
+      worktree-kcl-emitter, worktree-selectors-functions,
+      worktree-startup-examples; blank-start-guide's feature commit is on
+      main as 4b81974. worktree-fs-export is still locked by a live Claude
+      session — leave it. Add `/cf` to .gitignore; make `make clean` remove
+      .testrun and .demorun.
+
+### Unify — Go
+
+- [ ] cmd/cf/options.go:35-106 still builds the same providers + crds +
+      cluster + native union by hand — have it call the api package's
+      rebuild (export a `BuildIndex(store, providers, blueprint, dir)`).
+- [ ] Six handlers in internal/api/blueprint.go (198, 285, 360, 417, 466,
+      514) repeat decode → lock → load → edit → classify → persist → 200;
+      the two rename handlers are line-identical. Add
+      `srv.mutate(w, r, func(*Blueprint) (int, error))`.
+- [ ] internal/api/blueprint.go:570-617 re-implements four unexported scans
+      from internal/blueprint/edit.go (statusReferencingResources,
+      anyStatusFrom, referencingResources, anyFrom). Export them, or return
+      a typed StillReferencedError so the API classifies 409 without
+      re-scanning.
+- [ ] YAML document splitting exists four times with two delimiters:
+      xpkg/fetch.go:141, api/render.go:299, blueprint/load.go:403
+      ("\n---\n" — mis-splits a trailing ---), adopt/adopt.go:150. One
+      `SplitDocs`.
+- [ ] "Unknown path — did you mean" block written five times
+      (composition.go:379, 576, 944, 1036; envelope.go:32). One
+      `unknownPath(kind, what, target, leaves, filter) error`.
+- [ ] Field-form switch value/raw/template/from + guard construction in
+      three planners (composition.go planFields, annotations.go
+      planAnnotations, envelope.go planEnvelope) — the same extraction the
+      KCL/Python fix above needs (`resolveRHS`).
+- [ ] `provider add` sequence (fetch → ParseCRDs → lock → Save) duplicated
+      between cmd/cf/provider.go:29-62 and internal/api/providers.go:141-185
+      with the same comment pasted; `validateStatusRef` /
+      `validateForEachStatusRef` (load.go:1001, 1095) are the same five
+      checks; six+ linear "find resource by name" scans across packages —
+      add `(*Blueprint).ResourceNamed`.
+- [ ] Same Queue CRD fixture retyped with drift in mcp/server_test.go:44,
+      emit/composition_test.go:19, api/server_test.go:150-240 — an
+      internal/testfixture package. `recorder` type duplicated in
+      api/server.go:461 and mcp/bridge.go:93.
+
+### Performance — Go
+
+- [ ] Every generate / render / package request re-reads and re-parses the
+      whole provider cache from disk (api/generate.go:136 → cache.LoadSources)
+      although the same CRDs sit in srv.Index. Serve from the index or
+      memoise Store.Load by ref + mtime.
+- [ ] Schema trees are rebuilt from raw maps on every call (schema/tree.go
+      ForProvider/FieldTree/Status/Envelope); in emit, crd.Status() +
+      Leaves() run inside per-field loops (composition.go:576, 944, 1036).
+      Cache per (apiVersion, kind).
+- [ ] acceptance_test.go builds the binary and pulls the provider 11 times.
+      TestMain: build once, one pre-warmed cache dir.
+- [ ] Unfiltered GET /api/catalogue re-marshals + re-hashes + re-gzips the
+      139 KB embedded catalogue per request; index.All() copies the whole
+      kinds slice per provider list. Cache both.
+
+### Unify — canvas (web-proto)
+
+- [ ] Inspector and palette refetch /api/kinds on every doc emit
+      (inspector.js:1761 `kindsPromise = null`, palette.js:831 loadKinds()).
+      canvas.js:1682-1693 already guards with a sources signature and
+      documents why (async render cascade ate the next clicks). Apply the
+      same guard in both. Biggest UX win for the least code.
+- [ ] Wire computation is quadratic: wires.js fanOut() walks the whole doc
+      and is called per port; listWires runs again per card, per layout,
+      per draw. Compute once per render, pass a fan map down.
+- [ ] Five esc() copies with four semantics (main.js:452 drops 0/false,
+      output.js/palette.js throw on null, only inspector.js escapes `'`).
+      One shared js/dom.js used by every region.
+- [ ] Six copies of pointerdown → move/up closure drag scaffolding
+      (main.js:62-76, 145-176; canvas.js:631, 968, 1380, 1462), none using
+      setPointerCapture (pointercancel on mobile leaks listeners); touch
+      gestures at canvas.js:1621-1668 re-implement the wheel-zoom math. One
+      `startDrag(e, onMove, onEnd)`.
+- [ ] inspector.js: entryOf/setField/commitValue and their envelope twins
+      are pairwise identical bar `fields` vs `envelope`; the bound-row
+      markup is pasted four times; field-path parsing is inline string
+      prefix checks instead of wires.js parseFrom; the target namespace is
+      "env:" in inspector.js but "envelope." in canvas.js. Pick one.
+- [ ] api.js: importBlueprint, getPackageYAML, addCRDSource bypass request()
+      and throw a different error shape than the "frozen contract" comment
+      promises (getPackageYAML has no status at all).
+- [ ] main.js column resize writes localStorage on every pointermove and
+      the resize listener is unthrottled; inspector rebuilds its whole panel
+      with innerHTML on every doc emit (the pattern canvas.js abandoned for
+      selection stability). main.js:441 iconOf() hardcodes the example IDs
+      from internal/examples — serve the icon with the example.
+- [ ] tour.js injects its styles from a JS string — move to proto.css.
+
+### Unify — Playwright suite
+
+- [ ] 12 specs re-implement resetDoc + ENGINE instead of importing
+      tests/helpers.js (slice42-drag-to-card-picker, 43, 44, 48, 49, 50,
+      51, 52, 53, 57-interactive-tour, 59; slice22 is the skipped one) and
+      PUT tests/fixtures/pristine-doc.yaml — JSON content under a .yaml name,
+      identical to pristine-doc.json. Delete the .yaml fixture, import
+      helpers, drop the ESM `import` in a commonjs package.
+- [ ] 44 specs repeat a beforeEach whose skip message says "not running on
+      8080" while probing 8081, which playwright.config.js already
+      guarantees via /healthz. One shared fixture or globalSetup (~180 lines).
+- [ ] Two specs share the slice42 prefix; the suite is not in CI and no
+      timing baseline is kept (last local run: 115 passed in 2.9 min).
