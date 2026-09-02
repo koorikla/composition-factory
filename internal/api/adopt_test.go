@@ -70,6 +70,100 @@ spec:
 	}
 }
 
+func TestAdoptEndpointWithPatchAndTransformAndLossReport(t *testing.T) {
+	h, _ := testHandlerWithPath(t)
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  group: aws.example.org
+  claimNames:
+    kind: Queue
+    plural: queues
+  names:
+    kind: XQueue
+    plural: xqueues
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                queueName:
+                  type: string
+                tags:
+                  type: array
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: pt-adopted
+spec:
+  compositeTypeRef:
+    apiVersion: aws.example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: queue
+            base:
+              apiVersion: sqs.aws.upbound.io/v1beta1
+              kind: Queue
+              spec:
+                forProvider:
+                  region: us-east-1
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.queueName
+                toFieldPath: spec.forProvider.name
+`
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"manifest": manifest,
+		"persist":  false,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/blueprint/adopt", bytes.NewReader(reqBody))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var res adoptResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	if res.Blueprint.Metadata.Name != "pt-adopted" {
+		t.Errorf("blueprint name = %q, want pt-adopted", res.Blueprint.Metadata.Name)
+	}
+	if len(res.Blueprint.Spec.Resources) != 1 {
+		t.Fatalf("resources count = %d, want 1", len(res.Blueprint.Spec.Resources))
+	}
+	if res.Blueprint.Spec.Resources[0].Fields["name"].From != "params.queueName" {
+		t.Errorf("queue name field = %+v, want From: params.queueName", res.Blueprint.Spec.Resources[0].Fields["name"])
+	}
+	if res.LossReport == nil || !res.LossReport.IsLossy() {
+		t.Errorf("expected loss report in response due to claimNames and array tags")
+	}
+}
+
 func TestConcurrentAdoptAndList(t *testing.T) {
 	h, _ := testHandlerWithPath(t)
 

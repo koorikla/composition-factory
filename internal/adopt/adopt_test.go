@@ -1,6 +1,7 @@
 package adopt
 
 import (
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"strings"
 	"testing"
 )
@@ -45,11 +46,14 @@ spec:
         name: function-auto-ready
 `
 
-	bp, err := Adopt([]byte(manifest), Options{
+	bp, report, err := Adopt([]byte(manifest), Options{
 		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
 	})
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.IsLossy() {
+		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
 	}
 
 	if bp.Metadata.Name != "xqueues.aws.example.org" {
@@ -64,15 +68,15 @@ spec:
 
 	// Parameters discovered from template
 	if _, ok := bp.Spec.XRD.Parameters["region"]; !ok {
-		t.Errorf("expected parameter 'region' in XRD parameters")
+		t.Errorf("expected parameter region in XRD parameters")
 	}
 	if _, ok := bp.Spec.XRD.Parameters["roleArn"]; !ok {
-		t.Errorf("expected parameter 'roleArn' in XRD parameters")
+		t.Errorf("expected parameter roleArn in XRD parameters")
 	}
 
 	// Templates (defines)
 	if _, ok := bp.Spec.Templates["cf.tags"]; !ok {
-		t.Errorf("expected template 'cf.tags' in Spec.Templates")
+		t.Errorf("expected template cf.tags in Spec.Templates")
 	}
 
 	// Pipeline
@@ -123,9 +127,12 @@ spec:
           toFieldPath: spec.forProvider.region
 `
 
-	bp, err := Adopt([]byte(manifest), Options{})
+	bp, report, err := Adopt([]byte(manifest), Options{})
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.IsLossy() {
+		t.Errorf("expected non-lossy adopt, got: %+v", report.Drops)
 	}
 
 	if bp.Spec.XRD.Kind != "XRQueue" {
@@ -146,17 +153,185 @@ spec:
 	}
 }
 
-func TestAdoptMultiDocumentXRDAndComposition(t *testing.T) {
+func TestAdoptFunctionPatchAndTransform(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: pt-buckets
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XBucket
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: s3-bucket
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                forProvider:
+                  region: us-east-1
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.bucketName
+                toFieldPath: spec.forProvider.name
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.IsLossy() {
+		t.Errorf("expected non-lossy adopt, got: %+v", report.Drops)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+	if res.Name != "s3-bucket" || res.Kind != "Bucket" {
+		t.Errorf("resource = %s (%s), want s3-bucket (Bucket)", res.Name, res.Kind)
+	}
+	if res.Fields["name"].From != "params.bucketName" {
+		t.Errorf("bucket name field = %+v, want From: params.bucketName", res.Fields["name"])
+	}
+
+	// Verify function-patch-and-transform is not kept in pipeline, but auto-ready is
+	if len(bp.Spec.Pipeline) != 1 || bp.Spec.Pipeline[0].Name != "auto-ready" {
+		t.Errorf("pipeline = %+v, want only auto-ready step", bp.Spec.Pipeline)
+	}
+}
+
+func TestAdoptXRDFlatParametersAndNestedObjects(t *testing.T) {
 	manifest := `
 apiVersion: apiextensions.crossplane.io/v1
 kind: CompositeResourceDefinition
 metadata:
-  name: xdatabases.example.org
+  name: xclusters.example.org
 spec:
   group: example.org
   names:
-    kind: XDatabase
-    plural: xdatabases
+    kind: XCluster
+    plural: xclusters
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - clusterName
+              properties:
+                clusterName:
+                  type: string
+                  description: Name of the cluster
+                nodeCount:
+                  type: integer
+                  default: 3
+                  description: Number of worker nodes
+                tuning:
+                  type: object
+                  required:
+                    - maxPods
+                  properties:
+                    maxPods:
+                      type: integer
+                      default: 110
+                    enableMonitoring:
+                      type: boolean
+                      default: true
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xcluster-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XCluster
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: eks.aws.upbound.io/v1beta1
+            kind: Cluster
+            metadata:
+              name: main-cluster
+            spec:
+              forProvider:
+                name: {{ $spec.clusterName }}
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.IsLossy() {
+		t.Errorf("expected non-lossy adopt, got: %+v", report.Drops)
+	}
+
+	// Flat parameters parsed under spec
+	pClusterName := bp.Spec.XRD.Parameters["clusterName"]
+	if !pClusterName.Required || pClusterName.Description != "Name of the cluster" {
+		t.Errorf("clusterName parameter = %+v", pClusterName)
+	}
+	pNodeCount := bp.Spec.XRD.Parameters["nodeCount"]
+	if pNodeCount.Type != "integer" || pNodeCount.Default != "3" {
+		t.Errorf("nodeCount parameter = %+v", pNodeCount)
+	}
+
+	// Nested object tuning
+	pTuning := bp.Spec.XRD.Parameters["tuning"]
+	if pTuning.Type != "object" || len(pTuning.Properties) != 2 {
+		t.Fatalf("tuning parameter = %+v, want object with 2 properties", pTuning)
+	}
+	pMaxPods := pTuning.Properties["maxPods"]
+	if !pMaxPods.Required || pMaxPods.Type != "integer" || pMaxPods.Default != "110" {
+		t.Errorf("tuning.maxPods = %+v", pMaxPods)
+	}
+	pMon := pTuning.Properties["enableMonitoring"]
+	if pMon.Type != "boolean" || pMon.Default != "true" {
+		t.Errorf("tuning.enableMonitoring = %+v", pMon)
+	}
+}
+
+func TestAdoptXRDUnsupportedDropped(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xnetworks.example.org
+spec:
+  group: example.org
+  claimNames:
+    kind: Network
+    plural: networks
+  connectionSecretKeys:
+    - kubeconfig
+  names:
+    kind: XNetwork
+    plural: xnetworks
   versions:
     - name: v1alpha1
       served: true
@@ -168,26 +343,20 @@ spec:
             spec:
               type: object
               properties:
-                parameters:
-                  type: object
-                  required:
-                    - dbName
-                  properties:
-                    dbName:
-                      type: string
-                      description: Database name
-                    storageGB:
-                      type: integer
-                      default: 20
+                subnets:
+                  type: array
+                  description: List of subnets
+                cidr:
+                  type: string
 ---
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: xdatabase-composition
+  name: xnetwork-comp
 spec:
   compositeTypeRef:
     apiVersion: example.org/v1alpha1
-    kind: XDatabase
+    kind: XNetwork
   mode: Pipeline
   pipeline:
     - step: render
@@ -198,31 +367,227 @@ spec:
         kind: GoTemplate
         inline:
           template: |
-            apiVersion: rds.aws.upbound.io/v1beta1
-            kind: Instance
+            apiVersion: ec2.aws.upbound.io/v1beta1
+            kind: VPC
             metadata:
-              name: db-instance
+              name: main-vpc
             spec:
               forProvider:
-                allocatedStorage: {{ $spec.storageGB }}
-                dbName: {{ $spec.dbName }}
+                cidrBlock: {{ $spec.cidr }}
 `
 
-	bp, err := Adopt([]byte(manifest), Options{})
+	bp, report, err := Adopt([]byte(manifest), Options{})
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
+	if !report.IsLossy() {
+		t.Fatalf("expected lossy report due to array, claimNames, connectionSecretKeys")
+	}
 
-	if bp.Spec.XRD.Kind != "XDatabase" || bp.Spec.XRD.Group != "example.org" {
-		t.Errorf("XRD = %s.%s, want XDatabase.example.org", bp.Spec.XRD.Kind, bp.Spec.XRD.Group)
+	// Verify subnets array parameter is NOT in bp parameters
+	if _, ok := bp.Spec.XRD.Parameters["subnets"]; ok {
+		t.Errorf("expected array parameter subnets to be dropped")
 	}
-	dbNameP := bp.Spec.XRD.Parameters["dbName"]
-	if !dbNameP.Required || dbNameP.Description != "Database name" {
-		t.Errorf("dbName parameter = %+v, want required=true, description='Database name'", dbNameP)
+	if _, ok := bp.Spec.XRD.Parameters["cidr"]; !ok {
+		t.Errorf("expected string parameter cidr to be preserved")
 	}
-	storageP := bp.Spec.XRD.Parameters["storageGB"]
-	if storageP.Type != "integer" || storageP.Default != "20" {
-		t.Errorf("storageGB parameter = %+v, want type=integer, default='20'", storageP)
+
+	// Verify drops recorded in report
+	dropStr := report.String()
+	if !strings.Contains(dropStr, "xrd.parameters.subnets") {
+		t.Errorf("report missing subnets drop: %s", dropStr)
+	}
+	if !strings.Contains(dropStr, "xrd.claimNames") {
+		t.Errorf("report missing claimNames drop: %s", dropStr)
+	}
+}
+
+func TestAdoptResourceNameNormalization(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-norm
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XNorm
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: Bad_Name_With_Underscores
+            spec:
+              forProvider:
+                region: us-east-1
+            ---
+            apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: App_SA
+              annotations:
+                queue-url: {{ (index $observed "Bad_Name_With_Underscores").resource.status.atProvider.url }}
+            spec: {}
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	_ = report
+
+	q := bp.ResourceNamed("bad-name-with-underscores")
+	if q == nil {
+		t.Fatalf("expected normalized resource bad-name-with-underscores, got resources: %+v", bp.Spec.Resources)
+	}
+
+	sa := bp.ResourceNamed("app-sa")
+	if sa == nil {
+		t.Fatalf("expected normalized resource app-sa")
+	}
+	ann := sa.Annotations["queue-url"]
+	if ann.From != "resources.bad-name-with-underscores.status.url" {
+		t.Errorf("status wire = %q, want From: resources.bad-name-with-underscores.status.url", ann.From)
+	}
+}
+
+func TestAdoptNonParamPatchDropped(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-non-params
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1
+    kind: XNonParam
+  resources:
+    - name: role
+      base:
+        apiVersion: iam.aws.upbound.io/v1beta1
+        kind: Role
+        spec:
+          forProvider:
+            assumeRolePolicy: "{}"
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.uid
+          toFieldPath: spec.forProvider.description
+        - type: FromCompositeFieldPath
+          fromFieldPath: status.eks.oidc
+          toFieldPath: spec.forProvider.path
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.arn
+          toFieldPath: status.arn
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if !report.IsLossy() {
+		t.Fatalf("expected lossy report due to non-param patches")
+	}
+
+	// metadata.uid and status.eks.oidc should NOT be in parameters
+	if _, ok := bp.Spec.XRD.Parameters["metadata"]; ok {
+		t.Errorf("metadata should not be created as parameter")
+	}
+	if _, ok := bp.Spec.XRD.Parameters["status"]; ok {
+		t.Errorf("status should not be created as parameter")
+	}
+}
+
+func TestAdoptMultiLineScalarDropped(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-multiline
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XMulti
+  resources:
+    - name: policy
+      base:
+        apiVersion: iam.aws.upbound.io/v1beta1
+        kind: Policy
+        spec:
+          forProvider:
+            name: my-policy
+            policy: |
+              {
+                "Version": "2012-10-17",
+                "Statement": []
+              }
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if !report.IsLossy() {
+		t.Fatalf("expected lossy report for multiline policy")
+	}
+
+	// Blueprint should validate cleanly because multiline field was dropped
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("blueprint validate failed: %v", err)
+	}
+}
+
+func TestAdoptLossReportComments(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "test-loss"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Kind:    "XTest",
+				Version: "v1alpha1",
+				Plural:  "xtests",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+		},
+	}
+	report := &LossReport{}
+	report.Record("xrd.parameters.tags", "array parameter not supported")
+	report.Record("resource.db.patches[0]", "ToCompositeFieldPath not supported")
+
+	yamlBytes, err := FormatAdoptedYAML(bp, report)
+	if err != nil {
+		t.Fatalf("FormatAdoptedYAML: %v", err)
+	}
+
+	yamlStr := string(yamlBytes)
+	if !strings.Contains(yamlStr, "# adopt: dropped xrd.parameters.tags (array parameter not supported)") {
+		t.Errorf("missing tags drop comment in:\n%s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "# adopt: dropped resource.db.patches[0] (ToCompositeFieldPath not supported)") {
+		t.Errorf("missing patches drop comment in:\n%s", yamlStr)
+	}
+
+	// Ensure the YAML parses as a valid blueprint
+	parsed, err := blueprint.Parse(yamlBytes)
+	if err != nil {
+		t.Fatalf("Parse of commented YAML failed: %v", err)
+	}
+	if parsed.Metadata.Name != "test-loss" {
+		t.Errorf("parsed name = %q, want test-loss", parsed.Metadata.Name)
 	}
 }
 
@@ -263,10 +628,11 @@ spec:
             spec: {}
 `
 
-	bp, err := Adopt([]byte(manifest), Options{})
+	bp, report, err := Adopt([]byte(manifest), Options{})
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
+	_ = report
 
 	if len(bp.Spec.Resources) != 2 {
 		t.Fatalf("got %d resources, want 2", len(bp.Spec.Resources))
@@ -292,46 +658,12 @@ metadata:
 spec:
   [unclosed yaml
 `
-	_, err := Adopt([]byte(manifest), Options{})
+	_, _, err := Adopt([]byte(manifest), Options{})
 	if err == nil {
 		t.Fatalf("expected error for malformed YAML, got nil")
 	}
 	if !strings.Contains(err.Error(), "unmarshal document") && !strings.Contains(err.Error(), "yaml") {
 		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
-func TestAdoptInvalidBlueprintFailsValidation(t *testing.T) {
-	manifest := `
-apiVersion: apiextensions.crossplane.io/v1
-kind: Composition
-metadata:
-  name: test-comp
-spec:
-  compositeTypeRef:
-    apiVersion: example.org/v1alpha1
-    kind: XQueue
-  mode: Pipeline
-  pipeline:
-    - step: render
-      functionRef:
-        name: function-go-templating
-      input:
-        apiVersion: gotemplating.fn.crossplane.io/v1beta1
-        kind: GoTemplate
-        inline:
-          template: |
-            apiVersion: sqs.aws.upbound.io/v1beta1
-            kind: Queue
-            metadata:
-              name: bad_name_with_underscores
-`
-	_, err := Adopt([]byte(manifest), Options{})
-	if err == nil {
-		t.Fatalf("expected validation error for invalid resource name, got nil")
-	}
-	if !strings.Contains(err.Error(), "validate adopted blueprint") {
-		t.Errorf("expected validate error prefix, got: %v", err)
 	}
 }
 
@@ -372,7 +704,7 @@ spec:
               forProvider:
                 region: us-east-1
 `
-	bp, err := Adopt([]byte(manifest), Options{
+	bp, _, err := Adopt([]byte(manifest), Options{
 		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
 	})
 	if err != nil {

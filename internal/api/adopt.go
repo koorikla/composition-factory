@@ -17,8 +17,9 @@ type adoptRequest struct {
 }
 
 type adoptResponse struct {
-	Blueprint *blueprint.Blueprint `json:"blueprint"`
-	Persisted bool                 `json:"persisted"`
+	Blueprint  *blueprint.Blueprint `json:"blueprint"`
+	LossReport *adopt.LossReport    `json:"lossReport,omitempty"`
+	Persisted  bool                 `json:"persisted"`
 }
 
 func (srv *server) handleAdoptBlueprint(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +46,7 @@ func (srv *server) handleAdoptBlueprint(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	bp, err := adopt.Adopt([]byte(req.Manifest), adopt.Options{
+	bp, report, err := adopt.Adopt([]byte(req.Manifest), adopt.Options{
 		DefaultProviderRef: req.Provider,
 	})
 	if err != nil {
@@ -65,7 +66,8 @@ func (srv *server) handleAdoptBlueprint(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, adoptResponse{
-		Blueprint: bp,
-		Persisted: persisted,
+		Blueprint:  bp,
+		LossReport: report,
+		Persisted:  persisted,
 	})
 }
