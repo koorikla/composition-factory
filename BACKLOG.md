@@ -577,27 +577,27 @@ Phase 1 from this list.
 Scope per Kaur: the reader parses the go-templating format cf emits — nothing else. Foreign
 templates open as an opaque card or not at all, as today.
 
-- [ ] Write the dialect down: one table of cf's emitted forms (prelude, define block, document
+- [x] Write the dialect down: one table of cf's emitted forms (prelude, define block, document
       header + setResourceNameAnnotation, literal field, wire field, guarded optional field,
       status-wire guard chain, forEach range, when if, envelope, annotations, FileSystem file
       split) with the exact emitted text and the exact matcher for each. This table is the
       "specified structure"; emitter and reader are both generated/checked from it so they
-      cannot drift (golden per form).
-- [ ] Build `internal/manifest` prototype: recognise the forms as blocks with byte ranges
+      cannot drift (golden per form). — completed 2026-09-02
+- [x] Build `internal/manifest` prototype: recognise the forms as blocks with byte ranges
       (`text/template/parse` with SkipFuncCheck for positions, scalar-action masking + `yaml.v3`
-      line/column for keys); anything unrecognised inside the body is an opaque span.
-- [ ] Round-trip golden over every cf-emitted composition in testdata and
+      line/column for keys); anything unrecognised inside the body is an opaque span. — completed 2026-09-02
+- [x] Round-trip golden over every cf-emitted composition in testdata and
       internal/emit/testdata: `patch(parse(x), nothing) == x` byte-exact; then one wire edit,
-      one literal edit and one added resource change only the intended bytes (diff assert).
-- [ ] Preservation fixtures: a hand-added label, an extra pipeline step, a hand-added
+      one literal edit and one added resource change only the intended bytes (diff assert). — completed 2026-09-02
+- [x] Preservation fixtures: a hand-added label, an extra pipeline step, a hand-added
       `{{ range }}` block and a comment inside the template survive three open-edit-save cycles
-      byte-for-byte.
-- [ ] `kubectl get composition -o yaml` fixture of a cf-emitted composition (from the kind
+      byte-for-byte. — completed 2026-09-02
+- [x] `kubectl get composition -o yaml` fixture of a cf-emitted composition (from the kind
       cluster): open, scrub server-side fields, edit one field, prove `crossplane composition
-      render` equals the original's render except for that field.
-- [ ] Decide layout storage (`.cf/layout.yaml` sidecar vs annotation) and XRD first-save
-      canonicalisation policy; record in the memo.
-- [ ] Decision: go/no-go against memo §6 with the goldens' results.
+      render` equals the original's render except for that field. — completed 2026-09-02
+- [x] Decide layout storage (`.cf/layout.yaml` sidecar vs annotation) and XRD first-save
+      canonicalisation policy; record in the memo. — completed 2026-09-02
+- [x] Decision: go/no-go against memo §6 with the goldens' results. — completed 2026-09-02 (GO on Phase 0)
 
 ### Phase 1 — cf-dialect round-trip (blocked on Phase 0 go)
 
@@ -652,42 +652,43 @@ Decision (Kaur): use kind for the cluster, a namespace per workspace inside it. 
 the build/deploy/verify loop; it does not run the Go unit tests or Playwright. No kind cluster
 exists on the dev box today (the `kind-cf-test` context is stale), so this starts from scratch.
 
-- [ ] Per-workspace local e2e: playwright.config.js and tests/helpers.js derive the engine
+- [x] Per-workspace local e2e: playwright.config.js and tests/helpers.js derive the engine
       port and scratch dir from the worktree (hash of `git rev-parse --show-toplevel`, override
       with CF_E2E_PORT); no more shared 8081, no more stale-engine kills. The demo recorder
-      (8086) gets the same treatment. Small; do first.
-- [ ] `make cluster` / `make cluster-down`: idempotent `kind create cluster --name cf-test`,
+      (8086) gets the same treatment. Small; do first. — completed 2026-09-02
+- [x] `make cluster` / `make cluster-down`: idempotent `kind create cluster --name cf-test`,
       Crossplane installed by helm at a pinned chart version, Function objects for
       function-go-templating and function-auto-ready at the versions functions.yaml pins, wait
-      until both are Healthy. Script under scripts/cluster/; versions in one place.
-- [ ] Workspace namespace: `cf-<slug>` where slug = worktree basename + short hash. `make deploy`
+      until both are Healthy. Script under scripts/cluster/; versions in one place. — completed 2026-09-02
+- [x] Workspace namespace: `cf-<slug>` where slug = worktree basename + short hash. `make deploy`
       wraps `skaffold run --namespace cf-<slug>` with a profile whose localPort is derived from
       the same hash; `make undeploy` deletes the namespace. deploy/k8s manifests must not carry a
-      hardcoded namespace.
-- [ ] Cluster-scoped collision: XRDs, Compositions and the CRDs they create are cluster-scoped,
+      hardcoded namespace. — completed 2026-09-02
+- [x] Cluster-scoped collision: XRDs, Compositions and the CRDs they create are cluster-scoped,
       so two workspaces installing the same `xapps.platform.example.org` collide even in
       separate namespaces. Lane C rewrites the XRD group per workspace
       (`platform.<slug>.cf-test`) at generate time — `cf gen --group-suffix` or a sed in the
       script — and tears down only its own XRD/Composition/CRDs. Document this in AGENTS.md
-      next to the port contract.
-- [ ] Lane C `make test-cluster` (skaffold verify job in the workspace namespace): `cf gen` the
+      next to the port contract. — completed 2026-09-02
+- [x] Lane C `make test-cluster` (skaffold verify job in the workspace namespace): `cf gen` the
       K8s App example (native kinds only, no cloud credentials), apply XRD + Composition +
       functions.yaml, create an XR in the namespace, wait for the composed Deployment to report
       Available, assert the Service exists; then the negative case that render cannot see:
       compose a StatefulSet or Job, prove it hangs without the aggregated ClusterRole and
       composes once the emitted RBAC (GET /api/rbac) is applied. Teardown deletes the XR first,
-      then the workspace's definitions.
-- [ ] Deploy smoke in the same verify run: curl /healthz on the cf Service, GET /api/kinds
+      then the workspace's definitions. — completed 2026-09-02
+- [x] Deploy smoke in the same verify run: curl /healthz on the cf Service, GET /api/kinds
       returns the pre-populated provider kinds (proves the init-container cache and the
       blueprints volume the three fix(deploy) commits touched), GET /api/version matches the
-      image tag.
-- [ ] CI: a `cluster` job using kind-action that runs `make cluster` + `make test-cluster`,
+      image tag. — completed 2026-09-02
+- [x] CI: a `cluster` job using kind-action that runs `make cluster` + `make test-cluster`,
       separate from the e2e job so a cluster flake never blocks the canvas suite. Pin the kind
-      node image.
-- [ ] Reuse the cluster as the oracle for two things already on the backlog: the live-cluster
+      node image. — completed 2026-09-02
+- [x] Reuse the cluster as the oracle for two things already on the backlog: the live-cluster
       schema source specs (slice45) run against the real API server instead of a stub, and the
       manifests-as-source spike's `kubectl get composition -o yaml` fixture is taken from a
-      cf-emitted Composition applied here.
+      cf-emitted Composition applied here. — completed 2026-09-02
+
 
 ## Backlog v4 — dogfooding five real compositions on v0.7.0 (2026-09-02)
 
@@ -728,6 +729,41 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
 - [ ] Header `# Source: blueprints/<name>.cf.yaml` is fabricated — it prints a hardcoded
       prefix, not the path given. Found by A, C and E.
 
+### P0 — native Kubernetes kinds do not work on a real cluster (agent B, verified in kind)
+
+- [ ] Every composed native object gets `generateName: <xr>-`, so sibling references by name
+      dangle: `serviceAccountName: web`, HPA `scaleTargetRef.name: web`, Ingress backend
+      `web` — on the cluster: `error looking up service account default/web: serviceaccount
+      "web" not found`. The shipped k8s-workload starter has the same defect. Emit
+      deterministic `metadata.name` for native kinds (or `<xr>-<resource>`), make
+      `metadata.name`, `metadata.labels`, `metadata.annotations` settable, and support
+      `from: resources.<n>.metadata.name` so references resolve. Found by B.
+- [ ] String parameters are emitted unquoted, so YAML retypes them: `"0x1F"` → `31`, `"1e3"`
+      → `1000` (an Ingress host!), `"null"` → null, `"on"` → true; the API server then
+      rejects the Deployment (`cannot unmarshal bool into … EnvVar.value`). Only annotations
+      get `| quote`. Same root cause as the typed-literal item above; `data[PORT]: {from:
+      params.port}` on a ConfigMap likewise needs stringification into string-typed
+      targets. Found by B.
+- [ ] Only nine kinds are vendored (Deployment, Service, ConfigMap, Secret, ServiceAccount,
+      StatefulSet, Job, CronJob, DaemonSet); Ingress, HPA, PVC, NetworkPolicy, PDB, Role and
+      RoleBinding are refused and the refusal does not list the set. Workaround was
+      hand-written CRD stubs via `sources: - crds:`. Vendor the rest of core and name the set
+      in the error. Found by B.
+- [ ] `cf gen` writes no RBAC and never warns; `/api/rbac` is bare rule JSON (no ClusterRole
+      object, no aggregation label, includes the XR's own resource and the four pre-granted
+      kinds). Verified on Crossplane 2.4: the rules are correct and complete, and the
+      failure is loud (`ComposeResources … "ingress" … is forbidden`, pipeline aborted), so
+      emit a ready aggregated ClusterRole for the non-pre-granted kinds only and warn at gen
+      time. Found by B.
+- [ ] `spec.emit.templateSource: FileSystem` cannot be packaged (`cannot package a blueprint
+      with … FileSystem`) and cannot be rendered locally (`cannot read tmpl from the folder
+      /templates`) with no hint that only in-cluster works; the `when:` guard is split across
+      two files (`{{- if }}` ends 005-ingress.yaml, `{{- end }}` ends 006-hpa.yaml). Found by B.
+- [ ] `providerName` is mandatory even with zero managed resources and is never consumed by
+      a native-only composition. `cf gen` emits a Deployment with no selector/template
+      without warning (only `requiredBranches` in the API knows). `cf --version` errors.
+      `crossplane xpkg extract` needs `--from-xpkg` (docs omit it). Found by B.
+
 ### P1 — alternative engines are broken for real blueprints
 
 - [ ] Python: every blueprint fails at real render with `AttributeError: get` — the emitted
@@ -742,7 +778,7 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
       matching and contradicts the forEach error text. Found by A and C.
 - [ ] `raw:` is pasted verbatim into KCL/Python programs (`settings = {tier: {{ … }}}` →
       syntax error at render). Refuse `{{` in raw under non-go engines with a clear message, or
-      document raw as go-templating-only. Found by A, B(?), C.
+      document raw as go-templating-only. Found by A, B and C.
 - [ ] Lane B renders only go-templating. Extend the acceptance test to render each engine
       through its real function image (function-kcl, function-python) on the same fixtures;
       the Python `.get` bug would have been caught on day one.
