@@ -43,10 +43,10 @@ spec:
             - --addr
             - 0.0.0.0:8080
             # Safe ONLY because the Service is ClusterIP (cluster-internal): this
-        # server has no authentication and reads/writes files on request. If
-        # the Service ever becomes NodePort/LoadBalancer or gains an Ingress,
-        # an auth layer must land first.
-        - --i-know-this-is-unauthenticated
+            # server has no authentication and reads/writes files on request. If
+            # the Service ever becomes NodePort/LoadBalancer or gains an Ingress,
+            # an auth layer must land first.
+            - --i-know-this-is-unauthenticated
             - --out
             - /workspace/out
           ports:
