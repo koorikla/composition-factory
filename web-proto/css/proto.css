@@ -224,7 +224,7 @@ svg.wires .dim{opacity:.18}
 .note ul{margin:0 0 10px;padding-left:17px} .note li{margin-bottom:5px}
 .note .cap{color:var(--muted);font-size:12px}
 @media (max-width:1150px){.cols{grid-template-columns:186px 1fr 280px}.node{width:184px}}
-#pane-toggle-l,#pane-close-r{display:none}
+#pane-toggle-l,#pane-toggle-r,#pane-close-r{display:none}
 /* Narrow screens: the side panes become slide-over drawers, never vanish.
    .drawer-open is toggled by main.js; the canvas keeps the full width. */
 @media (max-width:900px){
@@ -238,6 +238,7 @@ svg.wires .dim{opacity:.18}
   .pane.r{right:0;border-left:1px solid var(--rule-2)}
   .pane.l.drawer-open,.pane.r.drawer-open{display:flex;flex-direction:column}
   #pane-toggle-l{display:inline-flex}
+  #pane-toggle-r{display:inline-flex}
   #pane-close-r{display:inline-flex}
 }
 

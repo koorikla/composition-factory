@@ -124,6 +124,11 @@ store.loadDoc();
     l.classList.toggle("drawer-open");
     if (r) r.classList.remove("drawer-open");
   });
+  var toggleR = document.getElementById("pane-toggle-r");
+  if (toggleR && r) toggleR.addEventListener("click", function () {
+    r.classList.toggle("drawer-open");
+    if (l) l.classList.remove("drawer-open");
+  });
   if (closeR && r) closeR.addEventListener("click", function () {
     r.classList.remove("drawer-open");
   });
