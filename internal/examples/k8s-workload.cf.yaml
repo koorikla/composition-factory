@@ -59,11 +59,11 @@ spec:
         spec.replicas: {from: params.replicas}
         spec.selector.matchLabels: {raw: "{app: workload}"}
         spec.template.metadata.labels: {raw: "{app: workload}"}
-        spec.template.spec.serviceAccountName: {value: sa}
+        spec.template.spec.serviceAccountName: {from: resources.sa.metadata.name}
         spec.template.spec.containers[0].name: {value: app}
         spec.template.spec.containers[0].image: {from: params.image}
         spec.template.spec.containers[0].ports[0].containerPort: {from: params.port}
-        spec.template.spec.containers[0].envFrom[0].configMapRef.name: {value: config}
+        spec.template.spec.containers[0].envFrom[0].configMapRef.name: {from: resources.config.metadata.name}
     - name: svc
       kind: Service
       provider: k8s

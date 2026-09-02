@@ -58,8 +58,8 @@ spec:
         spec.concurrencyPolicy: {from: params.concurrencyPolicy}
         spec.successfulJobsHistoryLimit: {from: params.successfulJobsHistoryLimit}
         spec.failedJobsHistoryLimit: {from: params.failedJobsHistoryLimit}
-        spec.jobTemplate.spec.template.spec.serviceAccountName: {value: sa}
+        spec.jobTemplate.spec.template.spec.serviceAccountName: {from: resources.sa.metadata.name}
         spec.jobTemplate.spec.template.spec.restartPolicy: {value: OnFailure}
         spec.jobTemplate.spec.template.spec.containers[0].name: {value: worker}
         spec.jobTemplate.spec.template.spec.containers[0].image: {from: params.image}
-        spec.jobTemplate.spec.template.spec.containers[0].envFrom[0].configMapRef.name: {value: config}
+        spec.jobTemplate.spec.template.spec.containers[0].envFrom[0].configMapRef.name: {from: resources.config.metadata.name}

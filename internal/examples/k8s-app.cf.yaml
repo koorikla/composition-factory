@@ -101,7 +101,7 @@ spec:
         spec.replicas: {from: params.replicas}
         spec.selector.matchLabels: {raw: "{app: worker}"}
         spec.template.metadata.labels: {raw: "{app: worker}"}
-        spec.template.spec.serviceAccountName: {value: sa}
+        spec.template.spec.serviceAccountName: {from: resources.sa.metadata.name}
         spec.template.spec.containers[0].name: {value: worker}
         spec.template.spec.containers[0].image: {from: params.image}
         spec.template.spec.containers[0].ports[0].containerPort: {from: params.containerPort}

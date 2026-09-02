@@ -275,3 +275,54 @@ func TestGenGroupSuffix(t *testing.T) {
 		t.Errorf("Composition compositeTypeRef mismatch in output: %s", string(compData))
 	}
 }
+
+func TestGenEmitsRBACForNonPreGrantedKinds(t *testing.T) {
+	dir := t.TempDir()
+	bpPath := filepath.Join(dir, "k8s-ingress.cf.yaml")
+	bpContent := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata: {name: xingress}
+spec:
+  xrd:
+    group: platform.example.org
+    kind: XIngress
+    plural: xingresses
+    version: v1alpha1
+    scope: Namespaced
+  resources:
+    - name: web-ing
+      kind: Ingress
+      provider: k8s
+      fields:
+        spec.rules[0].host: {value: "example.com"}
+`
+	if err := os.WriteFile(bpPath, []byte(bpContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out")
+	var buf bytes.Buffer
+	cmd := &GenCmd{
+		Blueprint: bpPath,
+		Out:       out,
+		CacheDir:  filepath.Join(dir, "cache"),
+	}
+	if err := cmd.Run(&buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	rbacPath := filepath.Join(out, "rbac.yaml")
+	rbacData, err := os.ReadFile(rbacPath)
+	if err != nil {
+		t.Fatalf("expected rbac.yaml at %s, got err: %v", rbacPath, err)
+	}
+	if !strings.Contains(string(rbacData), "kind: ClusterRole") {
+		t.Errorf("rbac.yaml missing ClusterRole: %s", string(rbacData))
+	}
+	if !strings.Contains(string(rbacData), "ingresses") {
+		t.Errorf("rbac.yaml missing ingresses rule: %s", string(rbacData))
+	}
+	if !strings.Contains(buf.String(), "warning: composed native Kubernetes kinds require cluster RBAC permissions") {
+		t.Errorf("output missing RBAC warning, got: %s", buf.String())
+	}
+}

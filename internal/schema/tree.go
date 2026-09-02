@@ -295,7 +295,7 @@ func (c CRD) FieldTree() ([]*Node, error) {
 		rest := make(map[string]any, len(v.Properties))
 		for k, val := range v.Properties {
 			switch k {
-			case "apiVersion", "kind", "metadata", "status":
+			case "apiVersion", "kind", "status":
 				continue
 			}
 			rest[k] = val

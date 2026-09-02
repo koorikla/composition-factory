@@ -267,24 +267,6 @@ func writeTemplateBody(d *Doc, ti int, b *blueprint.Blueprint, crds []schema.CRD
 		d.Line(ti, "---")
 		d.Line(ti, "apiVersion: %s", apiVersion)
 		d.Line(ti, "kind: %s", crd.Kind)
-		d.Line(ti, "metadata:")
-		d.Line(ti, "  annotations:")
-		if looped {
-			// Indexed, per the §8 rule: the composition-resource-name
-			// annotation is how Crossplane keys composed resources, so a
-			// constant name inside a range collapses every iteration into
-			// ONE resource — silently, since the collapsed document is
-			// legal. r.Name is a validated DNS label (resourceNameRE), so
-			// interpolating it bare inside the printf format is safe.
-			d.Line(ti, `    {{ setResourceNameAnnotation (printf "%s-%%d" $i) }}`, r.Name)
-		} else {
-			d.Line(ti, "    {{ setResourceNameAnnotation %q }}", r.Name)
-		}
-		// Blueprint-authored annotations follow the function-set line, sorted
-		// by key. The setResourceNameAnnotation line above is unconditional,
-		// so this block can never render empty however many entries are
-		// guarded — no writeMapField-style {} fallback is needed here.
-		writeAnnotations(d, ti, annPlan)
 		// Conventions fill in matching fields the blueprint does NOT set
 		// explicitly; an explicit field always wins — that IS the override
 		// mechanism. The merge happens on a copy, never on r.Fields itself.
@@ -304,6 +286,80 @@ func writeTemplateBody(d *Doc, ti int, b *blueprint.Blueprint, crds []schema.CRD
 		if err != nil {
 			return err
 		}
+
+		var metaPlan, bodyPlan []forProviderField
+		if crd.Native {
+			for _, fld := range plan {
+				if strings.HasPrefix(fld.path, "metadata.") {
+					metaPlan = append(metaPlan, fld)
+				} else {
+					bodyPlan = append(bodyPlan, fld)
+				}
+			}
+		} else {
+			bodyPlan = plan
+		}
+
+		d.Line(ti, "metadata:")
+		if crd.Native {
+			var metaName *forProviderField
+			for i := range metaPlan {
+				if metaPlan[i].path == "metadata.name" {
+					metaName = &metaPlan[i]
+					break
+				}
+			}
+			if metaName != nil {
+				if metaName.guard != "" {
+					d.Line(ti, "  {{- if %s }}", metaName.guard)
+				}
+				d.Line(ti, "  name: %s", metaName.rhs)
+				if metaName.guard != "" {
+					d.Line(ti, "  {{- end }}")
+				}
+			} else {
+				if looped {
+					d.Line(ti, `  name: {{ printf "%%s-%s-%%d" $xr $i }}`, r.Name)
+				} else {
+					d.Line(ti, "  name: {{ $xr }}-%s", r.Name)
+				}
+			}
+		}
+		d.Line(ti, "  annotations:")
+		if looped {
+			// Indexed, per the §8 rule: the composition-resource-name
+			// annotation is how Crossplane keys composed resources, so a
+			// constant name inside a range collapses every iteration into
+			// ONE resource — silently, since the collapsed document is
+			// legal. r.Name is a validated DNS label (resourceNameRE), so
+			// interpolating it bare inside the printf format is safe.
+			d.Line(ti, `    {{ setResourceNameAnnotation (printf "%s-%%d" $i) }}`, r.Name)
+		} else {
+			d.Line(ti, "    {{ setResourceNameAnnotation %q }}", r.Name)
+		}
+		// Blueprint-authored annotations follow the function-set line, sorted
+		// by key. The setResourceNameAnnotation line above is unconditional,
+		// so this block can never render empty however many entries are
+		// guarded — no writeMapField-style {} fallback is needed here.
+		writeAnnotations(d, ti, annPlan)
+
+		if crd.Native {
+			var otherMeta []forProviderField
+			for _, fld := range metaPlan {
+				if fld.path == "metadata.name" || fld.path == "metadata.annotations" || strings.HasPrefix(fld.path, "metadata.annotations.") {
+					continue
+				}
+				fldCopy := fld
+				fldCopy.path = strings.TrimPrefix(fld.path, "metadata.")
+				otherMeta = append(otherMeta, fldCopy)
+			}
+			if len(otherMeta) > 0 {
+				if err := writeNativeFields(d, ti+1, r.Name, otherMeta); err != nil {
+					return err
+				}
+			}
+		}
+
 		// A native Kubernetes kind takes the whole other branch of the
 		// envelope fork: apiVersion/kind/metadata/spec ARE the composed
 		// object, so its (object-rooted) field paths render as a real nested
@@ -323,7 +379,7 @@ func writeTemplateBody(d *Doc, ti int, b *blueprint.Blueprint, crds []schema.CRD
 			// fixed forProvider column (templateFieldNindent), which a native
 			// leaf at an arbitrary nesting depth breaks. Enforced here too
 			// because Composition is exported.
-			for _, fld := range plan {
+			for _, fld := range bodyPlan {
 				if f, ok := rc.Fields[fld.path]; ok && f.Template != "" {
 					return fmt.Errorf("resource %q field %q: template: fields are not supported on "+
 						"native Kubernetes kind %q in v1 -- the template call's output re-indents to the "+
@@ -331,7 +387,7 @@ func writeTemplateBody(d *Doc, ti int, b *blueprint.Blueprint, crds []schema.CRD
 						"breaks (see blueprint.Validate)", r.Name, fld.path, r.Kind)
 				}
 			}
-			if err := writeNativeFields(d, ti, r.Name, plan); err != nil {
+			if err := writeNativeFields(d, ti, r.Name, bodyPlan); err != nil {
 				return err
 			}
 		} else {

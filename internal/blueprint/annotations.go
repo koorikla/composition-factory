@@ -166,8 +166,14 @@ func (b *Blueprint) validateResourceAnnotations(r Resource) error {
 				return fmt.Errorf("resource %q %s: %w", r.Name, label, err)
 			}
 			if ref.Resource != "" {
-				if err := b.validateStatusRef(r, label, f.From); err != nil {
-					return err
+				if ref.IsMetadataName() {
+					if err := b.validateMetadataRef(r, label, f.From); err != nil {
+						return err
+					}
+				} else {
+					if err := b.validateStatusRef(r, label, f.From); err != nil {
+						return err
+					}
 				}
 				continue
 			}

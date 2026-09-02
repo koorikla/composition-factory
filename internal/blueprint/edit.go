@@ -214,10 +214,15 @@ func (b *Blueprint) RenameResource(from, to string) error {
 	cp.Spec.Resources[idx].Name = to
 	oldPrefix := "resources." + from + ".status."
 	newPrefix := "resources." + to + ".status."
+	oldMetaRef := "resources." + from + ".metadata.name"
+	newMetaRef := "resources." + to + ".metadata.name"
 	for i, r := range cp.Spec.Resources {
 		for path, f := range r.Fields {
 			if rest, ok := strings.CutPrefix(f.From, oldPrefix); ok {
 				f.From = newPrefix + rest
+				cp.Spec.Resources[i].Fields[path] = f
+			} else if f.From == oldMetaRef {
+				f.From = newMetaRef
 				cp.Spec.Resources[i].Fields[path] = f
 			}
 		}
@@ -228,6 +233,9 @@ func (b *Blueprint) RenameResource(from, to string) error {
 		for key, f := range r.Annotations {
 			if rest, ok := strings.CutPrefix(f.From, oldPrefix); ok {
 				f.From = newPrefix + rest
+				cp.Spec.Resources[i].Annotations[key] = f
+			} else if f.From == oldMetaRef {
+				f.From = newMetaRef
 				cp.Spec.Resources[i].Annotations[key] = f
 			}
 		}
@@ -265,7 +273,7 @@ func (b *Blueprint) DeleteResource(name string) error {
 		for i, r := range refs {
 			quoted[i] = fmt.Sprintf("%q", r)
 		}
-		return fmt.Errorf("delete resource %q: its status is still wired into resources %s",
+		return fmt.Errorf("delete resource %q: its status or metadata is still wired into resources %s",
 			name, strings.Join(quoted, ", "))
 	}
 

@@ -40,6 +40,7 @@ spec:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
+            name: {{ $xr }}-web
             annotations:
               {{ setResourceNameAnnotation "web" }}
           spec:
@@ -59,6 +60,7 @@ spec:
           apiVersion: v1
           kind: Service
           metadata:
+            name: {{ $xr }}-web-svc
             annotations:
               {{ setResourceNameAnnotation "web-svc" }}
           spec:

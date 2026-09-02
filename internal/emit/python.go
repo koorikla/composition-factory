@@ -230,6 +230,8 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 			}
 		}
 		return sb.String()
+	case rhsMetadata:
+		return fmt.Sprintf("f\"{xr_name}-%s\"", s.resource)
 	default:
 		return pythonRHS(fallbackRHS, s.targetType)
 	}

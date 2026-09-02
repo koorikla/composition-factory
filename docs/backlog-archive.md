@@ -10,6 +10,21 @@ git — `git log -p BACKLOG.md`.
 
 ## Canvas slice backlog (BDD loop: spec → GUI → backend → verify)
 
+- [x] Every composed native object gets `generateName: <xr>-`, so sibling references by name
+      dangle: `serviceAccountName: web`, HPA `scaleTargetRef.name: web`, Ingress backend
+      `web` — on the cluster: `error looking up service account default/web: serviceaccount
+      "web" not found`. The shipped k8s-workload starter has the same defect. Emit
+      deterministic `metadata.name` for native kinds (or `<xr>-<resource>`), make
+      `metadata.name`, `metadata.labels`, `metadata.annotations` settable, and support
+      `from: resources.<n>.metadata.name` so references resolve. Found by B.
+      — completed 2026-09-03
+- [x] `cf gen` writes no RBAC and never warns; `/api/rbac` is bare rule JSON (no ClusterRole
+      object, no aggregation label, includes the XR's own resource and the four pre-granted
+      kinds). Verified on Crossplane 2.4: the rules are correct and complete, and the
+      failure is loud (`ComposeResources … "ingress" … is forbidden`, pipeline aborted), so
+      emit a ready aggregated ClusterRole for the non-pre-granted kinds only and warn at gen
+      time. Found by B.
+      — completed 2026-09-03
 The original slice queue, worked from 2026-09-01. Every item shipped with a
 Playwright behavior.
 

@@ -286,8 +286,10 @@ func TestBuildIndexesNativeKindsUnderTheirOwnProviderLabel(t *testing.T) {
 		Versions: []schema.Version{{Name: "v1", Served: true, Storage: true, Properties: map[string]any{
 			"apiVersion": map[string]any{"type": "string"},
 			"kind":       map[string]any{"type": "string"},
-			"metadata":   map[string]any{"type": "object"},
-			"status":     map[string]any{"type": "object"},
+			"metadata": map[string]any{"type": "object", "properties": map[string]any{
+				"name": map[string]any{"type": "string"},
+			}},
+			"status": map[string]any{"type": "object"},
 			"spec": map[string]any{"type": "object", "properties": map[string]any{
 				"replicas": map[string]any{"type": "integer"},
 				"paused":   map[string]any{"type": "boolean"},
@@ -323,8 +325,8 @@ func TestBuildIndexesNativeKindsUnderTheirOwnProviderLabel(t *testing.T) {
 	if !k.Namespaced {
 		t.Error("native Deployment must index as namespaced")
 	}
-	if k.Fields != 2 {
-		t.Errorf("Fields = %d, want 2 (spec.replicas, spec.paused via FieldTree)", k.Fields)
+	if k.Fields != 3 {
+		t.Errorf("Fields = %d, want 3 (metadata.name, spec.replicas, spec.paused via FieldTree)", k.Fields)
 	}
 
 	if _, _, ok := idx.LookupKind("apps/v1", "Deployment"); !ok {

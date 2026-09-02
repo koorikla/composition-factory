@@ -309,9 +309,12 @@ func TestFieldTreeOfNativeKindExcludesGeneratorOwnedKeys(t *testing.T) {
 		Versions: []Version{{Name: "v1", Served: true, Storage: true, Properties: map[string]any{
 			"apiVersion": map[string]any{"type": "string"},
 			"kind":       map[string]any{"type": "string"},
-			"metadata":   map[string]any{"type": "object"},
-			"status":     map[string]any{"type": "object"},
-			"data":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+			"metadata": map[string]any{"type": "object", "properties": map[string]any{
+				"name":   map[string]any{"type": "string"},
+				"labels": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+			}},
+			"status": map[string]any{"type": "object"},
+			"data":   map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
 		}}},
 	}
 	nodes, err := c.FieldTree()
@@ -319,8 +322,20 @@ func TestFieldTreeOfNativeKindExcludesGeneratorOwnedKeys(t *testing.T) {
 		t.Fatalf("FieldTree: %v", err)
 	}
 	leaves := Leaves(nodes, "")
-	if len(leaves) != 1 || leaves[0].Path != "data" {
-		t.Errorf("native FieldTree leaves = %+v, want exactly [data]", leaves)
+	foundData, foundName, foundLabels := false, false, false
+	for _, l := range leaves {
+		if l.Path == "data" {
+			foundData = true
+		}
+		if l.Path == "metadata.name" {
+			foundName = true
+		}
+		if l.Path == "metadata.labels" {
+			foundLabels = true
+		}
+	}
+	if !foundData || !foundName || !foundLabels {
+		t.Errorf("native FieldTree leaves = %+v, want data, metadata.name, metadata.labels", leaves)
 	}
 }
 

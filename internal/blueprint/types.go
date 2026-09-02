@@ -539,3 +539,17 @@ func StatusRef(from string) (resource, path string, ok bool) {
 	}
 	return resource, path, true
 }
+
+// MetadataRef splits a well-formed cross-resource metadata reference
+// resources.<name>.metadata.<path> into its resource name and metadata path.
+func MetadataRef(from string) (resource, path string, ok bool) {
+	rest, found := strings.CutPrefix(from, statusRefPrefix)
+	if !found {
+		return "", "", false
+	}
+	resource, path, found = strings.Cut(rest, ".metadata.")
+	if !found || resource == "" || path == "" {
+		return "", "", false
+	}
+	return resource, path, true
+}
