@@ -87,3 +87,10 @@
       menu of type-compatible input fields to bind (params.X → chosen field),
       or drop directly onto a target port. — completed 2026-09-02
 
+- [x] `cf package` / `cf push`: Configuration (.xpkg) packaging per the
+      2026-09-02 decision memo — crossplane.yaml synthesized from sources +
+      effective pipeline (exact "=tag" pins, digests kept verbatim), blueprint
+      source embedded as an annotation, single-layer xpkg readable by our own
+      fetch path AND `crossplane xpkg extract` (verified against v2.5.0);
+      GET /api/package + canvas Package button download the same bytes.
+      — completed 2026-09-02

@@ -1,8 +1,6 @@
 package emit
 
 import (
-	"fmt"
-
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 )
 
@@ -24,21 +22,9 @@ var templatingFunction = fn{
 // may share a function), each carrying its package exactly as the blueprint
 // declared it -- tag, digest pin, or neither, verbatim.
 func Functions(b *blueprint.Blueprint) ([]byte, error) {
-	fns := []fn{templatingFunction}
-	declared := map[string]string{templatingFunction.name: templatingFunction.pkg}
-	for _, s := range effectivePipeline(b) {
-		if pkg, ok := declared[s.FunctionRef]; ok {
-			if pkg != s.Package {
-				// Validate rejects both ways this can happen (a functionRef
-				// declared twice with different packages, and a step naming
-				// the built-in templating function); kept for direct callers.
-				return nil, fmt.Errorf("pipeline step %q: functionRef %q already declared with package %q",
-					s.Name, s.FunctionRef, pkg)
-			}
-			continue
-		}
-		declared[s.FunctionRef] = s.Package
-		fns = append(fns, fn{s.FunctionRef, s.Package})
+	fns, err := functionList(b)
+	if err != nil {
+		return nil, err
 	}
 
 	d := NewDoc()

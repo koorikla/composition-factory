@@ -235,6 +235,8 @@ The full, commented version of this blueprint lives at `testdata/irsa.cf.yaml`.
 | `cf gen --check <blueprint>` | Checks if output matches blueprint without writing (exits 0 if in sync, 2 if drifted). |
 | `cf serve --blueprint <file>` | Starts HTTP API and embedded canvas visual editor on `:8080`. |
 | `cf mcp --blueprint <file>` | Runs MCP server over stdio for AI agent workflows. |
+| `cf package <blueprint> [-o file.xpkg]` | Builds a Crossplane Configuration package: the emitted XRD + Composition plus a synthesized `crossplane.yaml` pinning every provider and function dependency, with the blueprint source embedded for recovery. `crossplane xpkg extract`-compatible; the canvas has a matching **Package** download button. |
+| `cf push <ref> <file.xpkg>` | Pushes a built package to an OCI registry (same keychain auth as `cf provider add`). `crossplane xpkg push` works on the same file. |
 
 ---
 

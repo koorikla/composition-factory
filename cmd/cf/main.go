@@ -21,6 +21,8 @@ type CLI struct {
 	Gen      GenCmd      `cmd:"" help:"Generate XRD, Composition and functions.yaml from a blueprint."`
 	Serve    ServeCmd    `cmd:"" help:"Serve the compositionfactory HTTP API, loopback-only by default."`
 	MCP      MCPCmd      `cmd:"" name:"mcp" help:"Serve the compositionfactory MCP server over stdio, for agent tooling."`
+	Package  PackageCmd  `cmd:"" help:"Build a Crossplane Configuration package (.xpkg) from a blueprint."`
+	Push     PushCmd     `cmd:"" help:"Push a built .xpkg to an OCI registry."`
 }
 
 type VersionCmd struct{}

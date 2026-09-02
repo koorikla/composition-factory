@@ -188,3 +188,18 @@ store.loadDoc();
     reader.readAsText(f);
   });
 })();
+
+
+/* ---- package: one-click Configuration .xpkg download ---- */
+(function () {
+  var btn = document.getElementById("packageBtn");
+  if (!btn) return;
+  btn.addEventListener("click", function () {
+    var a = document.createElement("a");
+    a.href = "/api/package";
+    a.download = ""; // filename comes from Content-Disposition
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+})();
