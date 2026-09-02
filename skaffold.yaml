@@ -1,0 +1,22 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: compositionfactory
+build:
+  artifacts:
+    - image: compositionfactory
+      docker:
+        dockerfile: Dockerfile
+        buildArgs:
+          VERSION: dev
+      sync:
+        infer:
+          - 'web-proto/**/*'
+manifests:
+  rawYaml:
+    - deploy/k8s/*.yaml
+portForward:
+  - resourceType: Service
+    resourceName: compositionfactory
+    port: 8080
+    localPort: 8080

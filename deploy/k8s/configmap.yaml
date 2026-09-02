@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cf-blueprints
+  labels:
+    app.kubernetes.io/name: compositionfactory
+    app.kubernetes.io/component: canvas
+data:
+  xqueue.cf.yaml: |
+    apiVersion: factory.crossplane.io/v1alpha1
+    kind: Blueprint
+    metadata:
+      name: xqueue
+    spec:
+      sources:
+        - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      xrd:
+        group: platform.sparky.ee
+        kind: XQueue
+        plural: xqueues
+        version: v1alpha1
+        scope: Namespaced
+        parameters:
+          location:
+            type: string
+            required: true
+            enum: [EU, US]
+          providerName:
+            type: string
+            required: true
+          maxMessageSize:
+            type: integer
+            required: true
+            default: "2048"
+      resources:
+        - name: main-queue
+          kind: Queue
+          provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+          fields:
+            region: {value: eu-north-1}
+            maxMessageSize: {from: params.maxMessageSize}
+        - name: queue-policy
+          kind: QueuePolicy
+          provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+          fields:
+            region: {value: eu-north-1}
+            queueUrl: {from: resources.main-queue.status.atProvider.url}
+            policy: {value: '{"Version": "2012-10-17", "Statement": []}'}
+
+  irsa.cf.yaml: |
+    apiVersion: factory.crossplane.io/v1alpha1
+    kind: Blueprint
+    metadata:
+      name: irsa
+    spec:
+      sources:
+        - provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+      xrd:
+        group: platform.sparky.ee
+        kind: XIrsa
+        plural: xirsas
+        version: v1alpha1
+        scope: Namespaced
+        parameters:
+          providerName:
+            type: string
+            required: true
+            description: ProviderConfig to reconcile the composed resources against.
+          oidcProviderArn:
+            type: string
+            required: true
+            description: ARN of the cluster's IAM OIDC provider (arn:aws:iam::<account>:oidc-provider/<issuer>).
+          namespace:
+            type: string
+            default: default
+            description: Namespace of the ServiceAccount the trust policy binds to.
+      templates:
+        trust-policy: >-
+          '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"{{ regexReplaceAll "^.*:oidc-provider/" .spec.oidcProviderArn "" }}:sub":"system:serviceaccount:{{ .spec.namespace }}:{{ .xr }}"}}}]}'
+        cf.tags: |
+          managed-by: crossplane
+          xr: {{ .xr | quote }}
+      conventions:
+        - {match: tags, template: cf.tags}
+      resources:
+        - name: role
+          kind: Role
+          provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+          fields:
+            description: {value: IAM role assumed by a Kubernetes ServiceAccount via IRSA}
+            assumeRolePolicy: {template: trust-policy}
+        - name: role-policy
+          kind: RolePolicy
+          provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
+          fields:
+            role: {from: resources.role.status.atProvider.id}
+            policy: {raw: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:ListBucket"],"Resource":["arn:aws:s3:::*"]}]}'}
+        - name: sa
+          kind: ServiceAccount
+          provider: k8s
+          fields:
+            automountServiceAccountToken: {raw: "true"}
+          annotations:
+            eks.amazonaws.com/role-arn: {from: resources.role.status.atProvider.arn}

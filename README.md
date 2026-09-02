@@ -224,6 +224,18 @@ make test-e2e       # Run Playwright browser tests
 make lint           # Check formatting and vet
 ```
 
+### Local Kubernetes with Skaffold
+
+You can run Composition Factory inside a local Kubernetes cluster (Minikube, kind, k3d, Docker Desktop) with [Skaffold](https://skaffold.dev/):
+
+```sh
+# Continuous build, deploy, file-sync, and port-forward to http://localhost:8080
+skaffold dev
+
+# Or one-shot deploy
+skaffold run
+```
+
 ---
 
 ## Documentation
