@@ -4,6 +4,7 @@ package schema
 
 import (
 	"fmt"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 )
@@ -154,4 +155,33 @@ func (c CRD) APIVersion() (string, error) {
 		return v.Name, nil
 	}
 	return c.Group + "/" + v.Name, nil
+}
+
+// ParseCRDManifest decodes a scanned CRD manifest — a YAML file of
+// CustomResourceDefinitions the user supplies directly (a crds: source, the
+// live-cluster scan's file-shaped sibling) — into object-rooted kinds:
+// every CRD comes back with Native set, because a scanned kind is composed
+// as the object itself (an Argo Workflow, another composition's XR), never
+// through a forProvider envelope. This is a deliberate door into the
+// object-rooted path; ParseCRDs, the provider-package decoder, still never
+// opens it.
+func ParseCRDManifest(data []byte) ([]CRD, error) {
+	var docs [][]byte
+	for _, d := range strings.Split(string(data), "\n---") {
+		if strings.TrimSpace(d) == "" {
+			continue
+		}
+		docs = append(docs, []byte(d))
+	}
+	crds, err := ParseCRDs(docs)
+	if err != nil {
+		return nil, err
+	}
+	if len(crds) == 0 {
+		return nil, fmt.Errorf("no CustomResourceDefinition documents found")
+	}
+	for i := range crds {
+		crds[i].Native = true
+	}
+	return crds, nil
 }

@@ -94,3 +94,17 @@
       fetch path AND `crossplane xpkg extract` (verified against v2.5.0);
       GET /api/package + canvas Package button download the same bytes.
       — completed 2026-09-02
+- [x] Compose ANY CRD-backed object (user request 2026-09-02: "existing
+      composition claim, an argo workflow etc — according to the crd
+      scanning"): `crds:` source form (a CRD manifest file, loaded by every
+      front door via cache.LoadSources) + POST /api/sources/crds + GUI
+      "+ Add CRDs from file" in SOURCES; scanned kinds are object-rooted
+      (the composed document IS the object) and resolve for any provider
+      ending .yaml/.yml, "cluster" included — which also closes the
+      cluster-kind drop→resolve gap. — completed 2026-09-02
+- [ ] OpenAPI-grade object parameters (user request 2026-09-02): the
+      inspector/SHARED editors handle `object` params awkwardly — grow the
+      GUI (and engine where needed) until any object-typed variable can be
+      added/modified at arbitrary nesting: nested members, member types
+      incl. object/array-of-scalar, required flags, defaults — basically an
+      openapi spec editor for parameters.

@@ -416,8 +416,26 @@ func (b *Blueprint) Validate() error {
 	// the stored document), and shaped like a reference cache.Store.Load can
 	// actually use.
 	for i, s := range b.Spec.Sources {
+		// A crds: source is a CRD manifest file, not a package — its own
+		// checks and nothing from the provider branch below.
+		if s.CRDs != "" {
+			if s.Provider != "" {
+				return fmt.Errorf("spec.sources[%d]: provider and crds are mutually exclusive — "+
+					"a source is either a provider package or a CRD manifest file", i)
+			}
+			if err := checkScalar(fmt.Sprintf("spec.sources[%d].crds", i), s.CRDs); err != nil {
+				return err
+			}
+			// The .yaml suffix is the family marker: emit's resolveKind
+			// routes resources whose provider ends in .yaml/.yml down the
+			// object-rooted path, and no OCI package ref can carry it.
+			if !strings.HasSuffix(s.CRDs, ".yaml") && !strings.HasSuffix(s.CRDs, ".yml") {
+				return fmt.Errorf("spec.sources[%d].crds: %q must be a .yaml/.yml file path", i, s.CRDs)
+			}
+			continue
+		}
 		if s.Provider == "" {
-			return fmt.Errorf("spec.sources[%d].provider is required", i)
+			return fmt.Errorf("spec.sources[%d]: one of provider (a package ref) or crds (a CRD manifest file) is required", i)
 		}
 		// "k8s" is a label, not a package: every loader treats a source entry
 		// as something to pull from the schema cache (cache.Store.Load), so a
@@ -652,7 +670,16 @@ func (b *Blueprint) Validate() error {
 			if err := checkScalar(fmt.Sprintf("spec.resources[%d].provider", i), r.Provider); err != nil {
 				return err
 			}
-			if !providerRefRE.MatchString(r.Provider) {
+			// A resource may reference a crds: source by its path — those
+			// refs skip the OCI shape check (they are file paths).
+			crdsSource := false
+			for _, src := range b.Spec.Sources {
+				if src.CRDs != "" && src.CRDs == r.Provider {
+					crdsSource = true
+					break
+				}
+			}
+			if !crdsSource && !providerRefRE.MatchString(r.Provider) {
 				return fmt.Errorf("spec.resources[%d].provider: %q is not a valid provider reference "+
 					"(e.g. ghcr.io/org/provider-name:v1.2.3, or ...@sha256:<digest>)", i, r.Provider)
 			}
@@ -662,7 +689,7 @@ func (b *Blueprint) Validate() error {
 			// add extended the index) and then fails hours later, after a
 			// restart, as "kind not found in any cached provider". Native
 			// kinds are not provider packages and are exempt.
-			if r.Provider != NativeProvider {
+			if r.Provider != NativeProvider && !crdsSource {
 				declared := false
 				for _, src := range b.Spec.Sources {
 					if src.Provider == r.Provider {

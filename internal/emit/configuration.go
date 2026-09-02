@@ -80,6 +80,9 @@ func ConfigurationMeta(b *blueprint.Blueprint, source []byte) ([]byte, error) {
 	d.Line(2, "version: %s", quoteYAML(">=v2.0.0"))
 	d.Line(1, "dependsOn:")
 	for _, src := range b.Spec.Sources {
+		if src.Provider == "" {
+			continue // a crds: source is a scanned manifest, not an installable package
+		}
 		pkg, version := splitRef(src.Provider)
 		d.Line(1, "- apiVersion: pkg.crossplane.io/v1")
 		d.Line(2, "kind: Provider")

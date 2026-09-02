@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/schema/k8s"
@@ -133,13 +134,9 @@ func (srv *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 // no source (blueprint.Validate refuses a source called "k8s") and live in
 // no cache: they are compiled into the binary and always available.
 func (srv *server) loadSourceCRDs(b *blueprint.Blueprint) ([]schema.CRD, error) {
-	var crds []schema.CRD
-	for _, s := range b.Spec.Sources {
-		got, err := srv.Store.Load(s.Provider)
-		if err != nil {
-			return nil, err
-		}
-		crds = append(crds, got...)
+	crds, err := cache.LoadSources(srv.Store, b, filepath.Dir(srv.Blueprint))
+	if err != nil {
+		return nil, err
 	}
 	native, err := k8s.Kinds()
 	if err != nil {

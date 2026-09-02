@@ -1237,14 +1237,26 @@ func formatKey(k string) string {
 // selected without provider: k8s on the resource; a bare kind that matches
 // only a native kind fails with the hint instead of being auto-upgraded.
 func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (schema.CRD, error) {
-	if r.Provider == blueprint.NativeProvider {
+	// Three providers name the object-rooted family: "k8s" (vendored native
+	// kinds), "cluster" (live-scan pseudo-provider, cluster.ProviderLabel),
+	// and a crds: source's file path (Validate pins those to a .yaml/.yml
+	// suffix, which no OCI package ref can carry). All of their CRDs are
+	// marked Native — the composed document IS the object.
+	objectRooted := r.Provider == blueprint.NativeProvider ||
+		r.Provider == "cluster" ||
+		strings.HasSuffix(r.Provider, ".yaml") || strings.HasSuffix(r.Provider, ".yml")
+	if objectRooted {
 		for _, c := range crds {
 			if c.Native && c.Kind == r.Kind {
 				return c, nil
 			}
 		}
-		return schema.CRD{}, fmt.Errorf("resource %q: kind %q is not one of the vendored native Kubernetes kinds "+
-			"(provider %q serves the subset pinned to Kubernetes %s)", r.Name, r.Kind, blueprint.NativeProvider, k8s.Version)
+		if r.Provider == blueprint.NativeProvider {
+			return schema.CRD{}, fmt.Errorf("resource %q: kind %q is not one of the vendored native Kubernetes kinds "+
+				"(provider %q serves the subset pinned to Kubernetes %s)", r.Name, r.Kind, blueprint.NativeProvider, k8s.Version)
+		}
+		return schema.CRD{}, fmt.Errorf("resource %q: kind %q not found in scanned source %q; "+
+			"check the CRD manifest actually defines it", r.Name, r.Kind, r.Provider)
 	}
 
 	var fallback *schema.CRD

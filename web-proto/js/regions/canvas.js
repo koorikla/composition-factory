@@ -1396,8 +1396,13 @@ function onDrop(e) {
     // provider packages and never appear in sources.
     if (entry.provider && entry.provider !== "k8s") {
       next.spec.sources = next.spec.sources || [];
-      var declared = next.spec.sources.some(function (s) { return s.provider === entry.provider; });
-      if (!declared) next.spec.sources.push({ provider: entry.provider });
+      // a .yaml/.yml provider is a scanned crds: source (a CRD manifest
+      // file), declared under crds:, never as a provider package
+      var isCrds = /\.ya?ml$/.test(entry.provider);
+      var declared = next.spec.sources.some(function (s) {
+        return isCrds ? s.crds === entry.provider : s.provider === entry.provider;
+      });
+      if (!declared) next.spec.sources.push(isCrds ? { crds: entry.provider } : { provider: entry.provider });
     }
     next.spec.resources = next.spec.resources || [];
     next.spec.resources.push({

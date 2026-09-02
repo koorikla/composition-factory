@@ -86,9 +86,18 @@ type Convention struct {
 	Template string `json:"template"`
 }
 
-// Source is one schema source. M1 supports provider packages only.
+// Source is one schema source: a provider package (OCI ref) or a CRD
+// manifest file. Exactly one of the two is set (Validate enforces it).
+//
+// CRDs points at a YAML file of CustomResourceDefinitions, relative to the
+// blueprint's directory. Its kinds join the schema set object-rooted (the
+// composed document IS the object — no forProvider, no providerConfigRef),
+// which is what an Argo Workflow, another composition's XR, or any other
+// operator-owned kind actually needs. Resources reference the source by
+// this same path in their provider field.
 type Source struct {
-	Provider string `json:"provider"`
+	Provider string `json:"provider,omitempty"`
+	CRDs     string `json:"crds,omitempty"`
 }
 
 // XRD describes the composite API to generate.

@@ -294,3 +294,20 @@ export function getPackageYAML() {
     return res.text();
   });
 }
+
+/** POST /api/sources/crds — add a scanned CRD manifest as a schema source. */
+export function addCRDSource(name, yamlText) {
+  return fetch("/api/sources/crds", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name, yaml: yamlText }),
+  }).then(async function (res) {
+    const body = await res.json().catch(function () { return {}; });
+    if (!res.ok) {
+      const e = new Error(body.error || res.statusText);
+      e.status = res.status;
+      throw e;
+    }
+    return body;
+  });
+}

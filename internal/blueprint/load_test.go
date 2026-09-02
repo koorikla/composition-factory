@@ -816,7 +816,7 @@ func TestValidateRejectsInvalidSourceProvider(t *testing.T) {
 		provider   string
 		wantSubstr string
 	}{
-		{"empty is rejected", "", "spec.sources[0].provider is required"},
+		{"empty is rejected", "", "one of provider (a package ref) or crds"},
 		{"newline is a control character", "ghcr.io/x/y:v1\ninjected: true", "spec.sources[0].provider"},
 		{"NUL is a control character", "ghcr.io/x/y\x00:v1", "spec.sources[0].provider"},
 		{"space is not a valid reference character", "ghcr.io/x y:v1", "spec.sources[0].provider"},

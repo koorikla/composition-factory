@@ -177,6 +177,7 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("PUT /api/blueprint", srv.handlePutBlueprint)
 	mux.HandleFunc("POST /api/blueprint/import", srv.handleImportBlueprint)
 	mux.HandleFunc("GET /api/package", srv.handlePackage)
+	mux.HandleFunc("POST /api/sources/crds", srv.handleAddCRDSource)
 	mux.HandleFunc("POST /api/blueprint/parameters", srv.handleAddParameter)
 	mux.HandleFunc("PUT /api/blueprint/parameters/{name}", srv.handleSetParameter)
 	mux.HandleFunc("POST /api/blueprint/parameters/{name}/rename", srv.handleRenameParameter)

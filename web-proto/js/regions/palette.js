@@ -249,6 +249,9 @@ export function init(rootEl, deps) {
     const nativeCount = kinds.filter(function (k) { return k.provider === "k8s"; }).length;
     if (nativeCount) sources = sources.concat([{ provider: "k8s", digest: "", kinds: nativeCount, native: true }]);
     let h = '<div class="grp"><span class="lbl">Providers</span><span class="n">' + sources.length + "</span></div>";
+    h += '<div style="padding:2px 10px 8px"><button class="btn" id="addCrdsBtn" ' +
+      'title="Add any CRD-backed kind (an Argo Workflow, another composition\u2019s XR\u2026) from a CRD manifest file">+ Add CRDs from file</button>' +
+      '<input type="file" id="addCrdsFile" accept=".yaml,.yml" hidden></div>';
     if (!sources.length) h += '<div class="empty">No sources declared.</div>';
     sources.forEach(function (s) {
       const ref = s && s.provider || "";
@@ -413,6 +416,26 @@ export function init(rootEl, deps) {
   }
 
   railEl.addEventListener("change", function (e) {
+    if (e.target.id === "addCrdsFile") {
+      var f = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        var name = f.name.replace(/\.(yaml|yml)$/, "").toLowerCase().replace(/[^a-z0-9-]/g, "-");
+        api.addCRDSource(name, String(reader.result)).then(function () {
+          providers = null;                    // provider rows may change
+          return store.loadDoc();              // pull the doc the server just extended
+        }).then(function () {
+          loadKinds();
+          if (rail === "src") { loadProviders(); drawRail(); }
+        }).catch(function (err) {
+          alert("add CRDs failed: " + (err && err.message || err));
+        });
+      };
+      reader.readAsText(f);
+      return;
+    }
     if (e.target.id === "param-add-type") { syncMemberRows(); paramType = e.target.value; drawRail(); return; }
     if (e.target.closest("[data-member-name],[data-member-type],[data-member-default]")) { syncMemberRows(); return; }
     const pickAll = e.target.closest("input[data-pick-all]");
@@ -435,6 +458,11 @@ export function init(rootEl, deps) {
   });
 
   railEl.addEventListener("click", function (e) {
+    if (e.target.id === "addCrdsBtn") {
+      var fi = document.getElementById("addCrdsFile");
+      if (fi) fi.click();
+      return;
+    }
     if (e.target.closest("#cluster-sync-btn")) {
       clusterLoading = true;
       clusterErr = null;

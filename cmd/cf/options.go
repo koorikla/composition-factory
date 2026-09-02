@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/koorikla/compositionfactory/internal/api"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
@@ -32,6 +35,29 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string, cl *clust
 	byProvider := make(map[string][]schema.CRD, len(b.Spec.Sources))
 	refs := make([]string, 0, len(b.Spec.Sources))
 	for _, s := range b.Spec.Sources {
+		// crds: sources are scanned manifest files; they index under their
+		// own path label so the palette groups them per file. They skip
+		// refs: /api/providers lists xpkg packages with digests, and a
+		// manifest file has neither.
+		if s.CRDs != "" {
+			if _, ok := byProvider[s.CRDs]; ok {
+				continue
+			}
+			path := s.CRDs
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(filepath.Dir(blueprintPath), path)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return api.Options{}, fmt.Errorf("crds source %q: %w", s.CRDs, err)
+			}
+			scanned, err := schema.ParseCRDManifest(data)
+			if err != nil {
+				return api.Options{}, fmt.Errorf("crds source %q: %w", s.CRDs, err)
+			}
+			byProvider[s.CRDs] = scanned
+			continue
+		}
 		if _, ok := byProvider[s.Provider]; ok {
 			continue // a duplicate source entry names the same load
 		}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -14,7 +15,6 @@ import (
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/emit"
-	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
@@ -40,13 +40,9 @@ func (c *PackageCmd) Run(out io.Writer) error {
 		return err
 	}
 	store := cache.New(c.CacheDir)
-	var crds []schema.CRD
-	for _, s := range b.Spec.Sources {
-		got, err := store.Load(s.Provider)
-		if err != nil {
-			return err
-		}
-		crds = append(crds, got...)
+	crds, err := cache.LoadSources(store, b, filepath.Dir(c.Blueprint))
+	if err != nil {
+		return err
 	}
 	native, err := k8s.Kinds()
 	if err != nil {

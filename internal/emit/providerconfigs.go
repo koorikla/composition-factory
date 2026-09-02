@@ -38,6 +38,9 @@ func ProviderConfigs(b *blueprint.Blueprint, crds []schema.CRD) (map[string][]by
 	var order []string // first-seen family name order, for a stable refs slice within each family
 
 	for _, s := range b.Spec.Sources {
+		if s.Provider == "" {
+			continue // a crds: source has no provider package, so no ProviderConfig family
+		}
 		fam, split, err := providerFamily(s.Provider)
 		if err != nil {
 			return nil, fmt.Errorf("spec.sources: deriving a provider family: %w", err)
