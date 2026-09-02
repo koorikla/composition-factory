@@ -279,6 +279,66 @@ func TestDeleteUnknownResourceIs404(t *testing.T) {
 	}
 }
 
+// forEachWireTestBlueprint rewrites the on-disk fixture to add a replica-pool
+// resource whose loop bound is main-queue's OBSERVED status (forEach:
+// resources.main-queue.status.<path>), and confirms the mutated fixture still
+// validates — the fan-out counterpart of wireTestBlueprint's field wire.
+func forEachWireTestBlueprint(t *testing.T, path string) {
+	t.Helper()
+	wired := strings.Replace(testBlueprintYAML,
+		"    - name: main-queue",
+		"    - name: replica-pool\n      kind: Queue\n"+
+			"      forEach: resources.main-queue.status.atProvider.messageCount\n"+
+			"      fields:\n        region: {value: eu-north-1}\n"+
+			"    - name: main-queue", 1)
+	if err := os.WriteFile(path, []byte(wired), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blueprint.Load(path); err != nil {
+		t.Fatalf("mutated fixture does not itself validate: %v", err)
+	}
+}
+
+// A forEach status loop bound references the target resource as surely as a
+// field wire does, and the HTTP layer's duplicate referencer scan must track
+// it or the 409 classification silently diverges from the edit layer's.
+func TestDeleteForEachStatusReferencedResourceIs409(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	forEachWireTestBlueprint(t, path)
+	rec := do(t, h, "DELETE", "/api/blueprint/resources/main-queue", "")
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "replica-pool") {
+		t.Errorf("body = %s, want it to name the fan-out resource", rec.Body)
+	}
+}
+
+func TestRenameResourceRewritesForEachStatusRefOnDisk(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	forEachWireTestBlueprint(t, path)
+	if rec := do(t, h, "POST", "/api/blueprint/resources/main-queue/rename",
+		`{"to":"primary-queue"}`); rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	var pool *blueprint.Resource
+	for i := range reloaded.Spec.Resources {
+		if reloaded.Spec.Resources[i].Name == "replica-pool" {
+			pool = &reloaded.Spec.Resources[i]
+		}
+	}
+	if pool == nil {
+		t.Fatal("replica-pool missing from the reloaded document")
+	}
+	if got := pool.ForEach; got != "resources.primary-queue.status.atProvider.messageCount" {
+		t.Errorf("forEach on disk = %q, want it rewritten to the new resource name", got)
+	}
+}
+
 func TestMalformedJSONBodyIs400(t *testing.T) {
 	h, _ := testHandlerWithPath(t)
 	if rec := do(t, h, "POST", "/api/blueprint/parameters", `{"name":`); rec.Code != http.StatusBadRequest {

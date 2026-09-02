@@ -1,0 +1,16 @@
+# Mocked observed state for `crossplane composition render
+# --observed-resources`: the main-queue Queue as a reconciled cluster would
+# report it. The status.atProvider.maxMessageSize here (a number leaf in the
+# real .m. Queue CRD) is the OBSERVED loop bound that must fan
+# xqueue-foreach-status.cf.yaml's replica-queue out to exactly three
+# instances.
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metadata:
+  name: demo-fan-main-queue
+  namespace: default
+  annotations:
+    crossplane.io/composition-resource-name: main-queue
+status:
+  atProvider:
+    maxMessageSize: 3

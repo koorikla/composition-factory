@@ -1,0 +1,7 @@
+apiVersion: platform.sparky.ee/v1alpha1
+kind: XQueueFan
+metadata:
+  name: demo-fan
+  namespace: default
+spec:
+  providerName: localstack

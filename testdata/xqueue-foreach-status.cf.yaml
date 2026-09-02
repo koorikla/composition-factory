@@ -1,0 +1,31 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-foreach-status
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.sparky.ee
+    kind: XQueueFan
+    plural: xqueuefans
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {value: eu-north-1}
+    # The loop bound is main-queue's OBSERVED status value (a number leaf in
+    # the real .m. Queue CRD): nothing of replica-queue exists until the
+    # cluster reports how many, so an unobserved render fans out to zero
+    # instances and Crossplane creates them on a later reconcile.
+    - name: replica-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      forEach: resources.main-queue.status.atProvider.maxMessageSize
+      fields:
+        region: {value: eu-north-1}

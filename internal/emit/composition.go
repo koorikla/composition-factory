@@ -115,12 +115,14 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		// loop count, so every line below — separator, envelope,
 		// providerConfigRef — repeats per iteration; fields render exactly
 		// as they do outside a loop. The count is an integer XRD parameter
-		// (blueprint.Validate pins the grammar to params.<name>, the type to
-		// integer, and requires required-or-default, which is what makes the
-		// bare $spec dereference below safe under missingkey=error: a
-		// required key is present on any admitted XR, and a defaulted one is
-		// injected by the API server's schema defaulting before the function
-		// runs). The (int ...) cast is load-bearing, not defensive:
+		// (params.<name>: blueprint.Validate pins the type to integer and
+		// requires required-or-default, which is what makes the bare $spec
+		// dereference below safe under missingkey=error: a required key is
+		// present on any admitted XR, and a defaulted one is injected by the
+		// API server's schema defaulting before the function runs) or another
+		// resource's observed status integer (resources.<name>.status.<path>
+		// — see the guarded form below). The (int ...) cast is load-bearing,
+		// not defensive:
 		// function-go-templating receives the observed composite over
 		// protobuf, whose Struct type carries every number as a float64, and
 		// sprig's until takes an int — text/template converts between
@@ -144,9 +146,35 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 			}
 			d.Line(ti, "{{- if %s }}", cond)
 		}
+		// The loop bound comes in two forms. params.<name> dereferences the
+		// composite's spec bare (safe: Validate pins it required-or-default).
+		// resources.<name>.status.<path> is OBSERVED state — it does not
+		// exist until the source resource has been observed reporting that
+		// leaf (first reconcile, a fresh XR, `crossplane composition render`
+		// with no --observed-resources) — so the WHOLE range wraps in the
+		// same hasKey/kindIs guard chain a status wire uses, and an
+		// unobserved source fans out to ZERO instances. That semantic is
+		// load-bearing, not an edge case: NOTHING of the looped resource
+		// exists until the cluster says how many, and Crossplane creates the
+		// instances on a later reconcile once the count is observed —
+		// exactly how a status wire's field materialises late, lifted from
+		// one field to a whole document set. The alternative (hard-failing
+		// like the params form) would make every fresh XR unrenderable,
+		// because no XRD gate can make observed state unconditional.
 		looped := r.ForEach != ""
+		loopGuarded := false
 		if looped {
-			d.Line(ti, "{{- range $i := until (int $spec.%s) }}", strings.TrimPrefix(r.ForEach, "params."))
+			if ref, perr := blueprint.ParseFrom(r.ForEach); perr == nil && ref.Resource != "" {
+				guard, expr, err := forEachStatusBound(ref, r, b, crds, wantNamespaced)
+				if err != nil {
+					return nil, err
+				}
+				d.Line(ti, "{{- if %s }}", guard)
+				d.Line(ti, "{{- range $i := until (int %s) }}", expr)
+				loopGuarded = true
+			} else {
+				d.Line(ti, "{{- range $i := until (int $spec.%s) }}", strings.TrimPrefix(r.ForEach, "params."))
+			}
 		}
 		d.Line(ti, "---")
 		d.Line(ti, "apiVersion: %s", apiVersion)
@@ -261,6 +289,12 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 		}
 		if looped {
 			d.Line(ti, "{{- end }}")
+			if loopGuarded {
+				// The observed-bound guard closes AFTER the range and before
+				// any when: condition-outside-guard-outside-range, mirroring
+				// the opening order above.
+				d.Line(ti, "{{- end }}")
+			}
 		}
 		if conditional {
 			d.Line(ti, "{{- end }}")
@@ -872,8 +906,104 @@ func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blu
 	return guard, expr, nil
 }
 
-// statusGuard builds the render-time guard for a status wire, plus the
-// value expression it protects. The value lives at
+// forEachCountTypes are the status-leaf types an observed loop bound
+// (forEach: resources.<name>.status.<path>) may resolve to. A loop bound
+// COUNTS something, so only integer and number qualify — number included
+// because protojson delivers every numeric value as float64 anyway and upjet
+// providers declare many genuinely-integral fields as number; the (int ...)
+// cast in the range head handles both. A string is refused even though
+// cast.ToInt could parse one: the count would then ride on string parsing of
+// arbitrary provider output, silently looping zero times on anything
+// non-numeric. Maps, arrays, untyped leaves and object branches have no
+// defensible count at all.
+var forEachCountTypes = map[string]bool{
+	"integer": true, "number": true,
+}
+
+// forEachStatusBound resolves an observed loop bound for resource r: it
+// checks ref's status path against the SOURCE resource's CRD status schema
+// (the only layer that can — blueprint.Validate has no CRDs, same split as
+// statusWire) and returns the render-time guard chain plus the bare count
+// expression the range head dereferences. The guard is the same
+// hasKey/kindIs chain a status wire uses, because the failure mode is the
+// same: nothing on the $.observed.resources chain exists until the source is
+// observed, and under missingkey=error every unguarded dereference of a
+// missing key hard-fails the whole render. Behind the guard the semantic is
+// deliberate and documented at the emit site: an unobserved source fans out
+// to ZERO instances.
+func forEachStatusBound(ref blueprint.FromRef, r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) (guard, expr string, err error) {
+	var src *blueprint.Resource
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Name == ref.Resource {
+			src = &b.Spec.Resources[i]
+			break
+		}
+	}
+	if src == nil {
+		// Validate refuses this before any emitter runs; kept as a defensive
+		// error because Composition is exported and callable on its own.
+		return "", "", fmt.Errorf("resource %q: forEach references the status of unknown resource %q",
+			r.Name, ref.Resource)
+	}
+	crd, err := resolveKind(crds, *src, wantNamespaced)
+	if err != nil {
+		return "", "", fmt.Errorf("resource %q: forEach: %w", r.Name, err)
+	}
+	nodes, err := crd.Status()
+	if err != nil {
+		return "", "", fmt.Errorf("resource %q: forEach: %w", r.Name, err)
+	}
+	if len(nodes) == 0 {
+		return "", "", fmt.Errorf("resource %q: kind %q declares no status schema in its CRD, "+
+			"so forEach: %s can never carry a count and the resource would silently never fan out",
+			r.Name, src.Kind, r.ForEach)
+	}
+
+	path := strings.Join(ref.StatusPath, ".")
+	leaves := schema.Leaves(nodes, "")
+	suggestions := make([]string, 0, len(leaves))
+	var leaf *schema.Node
+	for _, l := range leaves {
+		// Only countable leaves enter the suggestion pool: suggesting a
+		// string (or an indexed conditions[0] path the grammar cannot even
+		// write) would suggest something unusable as a loop bound.
+		if forEachCountTypes[l.Node.Type] && !strings.Contains(l.Path, "[") {
+			suggestions = append(suggestions, l.Path)
+		}
+		if l.Path == path {
+			leaf = l.Node
+		}
+	}
+	switch {
+	case leaf == nil:
+		if s := closestPath(path, suggestions); s != "" {
+			return "", "", fmt.Errorf("resource %q: forEach status path %q is not an integer or number "+
+				"leaf in %s's status schema; did you mean %q? (a status path the provider never writes "+
+				"would leave the guard false forever — a fan-out that silently never happens — so it "+
+				"must be caught here)", r.Name, path, crd.Kind, s)
+		}
+		return "", "", fmt.Errorf("resource %q: forEach status path %q is not an integer or number "+
+			"leaf in %s's status schema (a status path the provider never writes would leave the "+
+			"guard false forever — a fan-out that silently never happens — so it must be caught here)",
+			r.Name, path, crd.Kind)
+	case !forEachCountTypes[leaf.Type]:
+		typ := leaf.Type
+		if typ == "" {
+			typ = "untyped"
+		}
+		return "", "", fmt.Errorf("resource %q: forEach status path %q on %s is %s, and a loop bound "+
+			"must be an integer or number status leaf — it renders as until (int <observed value>), "+
+			"a repetition count", r.Name, path, crd.Kind, typ)
+	}
+
+	guard, expr = statusGuard(ref.Resource, ref.StatusPath)
+	return guard, expr, nil
+}
+
+// statusGuard builds the render-time guard for a status dereference, plus
+// the BARE value expression it protects (callers wrap it: a status wire as
+// an interpolation, an observed forEach bound inside its range head). The
+// value lives at
 // $.observed.resources.<name>.resource.status.<path> — but nothing on that
 // chain is guaranteed to exist (the whole resources key is absent until
 // something is observed, and each level below appears as the resource
@@ -898,8 +1028,8 @@ func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blu
 //     render of the whole composition.
 //
 // The expression comes back BARE (no {{ }}): the field surface interpolates
-// it as-is, the annotation surface pipes it through quote first — see
-// statusWire's doc comment for why the two differ.
+// it as-is, the annotation surface pipes it through quote first, and the
+// forEach bound wraps it in until (int …) — see each caller for why.
 func statusGuard(resName string, segs []string) (guard, expr string) {
 	entry := fmt.Sprintf("(index $.observed.resources %q)", resName)
 	conds := []string{
