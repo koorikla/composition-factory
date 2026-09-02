@@ -403,6 +403,17 @@ browser; the P0s were fixed in the same push as this section.
       instance: envelope.go:232-243 auto-defaulted providerConfigRef.kind/name
       set only `rhs`, so KCL/Python emit "" instead of ClusterProviderConfig /
       the providerName wire. Add an RHSUnset sentinel and populate both. — completed 2026-09-02
+- [ ] KCL/Python cannot render `template:` fields or conventions: RHSTemplate
+      still formats the placeholder "${_xr}-<name>" (kcl.go:195,
+      python.go:183) and never reads b.Spec.Templates. 864f1bf made both
+      engines refuse with a clear error; 8ad2537 removed that refusal
+      without translating anything (tests went red on main); 5592879
+      restored it. The item is DONE only when the template body is
+      translated (or the DSL declares templates go-templating-only) and
+      kcl_test.go/python_test.go cover a conventions blueprint end to end.
+      Related: KCL `when` rewrites string literals ("true" → "True",
+      kcl.go:233); Python observed access mixes dict .get() and attribute
+      reads (python.go:202,263) — verify against function-python.
 - [x] KCL/Python flatten envelope paths: kcl.go:149, python.go:146 emit
       "writeConnectionSecretToRef.name" as ONE key instead of a nested object
       → invalid composed spec. The go-templating writer nests correctly. — completed 2026-09-02
