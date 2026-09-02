@@ -3,29 +3,88 @@ kind: Blueprint
 metadata:
   name: xqueue
 spec:
+  conventions: null
+  resources:
+  - fields:
+      maxMessageSize:
+        from: params.maxMessageSize
+        raw: ""
+        template: ""
+        value: ""
+      region:
+        from: ""
+        raw: ""
+        template: ""
+        value: eu-north-1
+    forEach: ""
+    kind: Queue
+    name: main-queue
+    provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+    when: ""
+  - fields:
+      policy:
+        from: ""
+        raw: ""
+        template: ""
+        value: '{"Version": "2012-10-17", "Statement": []}'
+      queueUrl:
+        from: resources.main-queue.status.atProvider.url
+        raw: ""
+        template: ""
+        value: ""
+      region:
+        from: ""
+        raw: ""
+        template: ""
+        value: eu-north-1
+    forEach: ""
+    kind: QueuePolicy
+    name: queue-policy
+    provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+    when: ""
+  - fields:
+      maxMessageSize:
+        from: params.maxMessageSize
+        raw: ""
+        template: ""
+        value: ""
+      region:
+        from: ""
+        raw: ""
+        template: ""
+        value: eu-north-1
+    forEach: ""
+    kind: Queue
+    name: main-queue-5
+    provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+    when: ""
   sources:
-    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  templates: null
   xrd:
     group: platform.sparky.ee
     kind: XQueue
-    plural: xqueues
-    version: v1alpha1
-    scope: Namespaced
     parameters:
-      location:       {type: string, required: true, enum: [EU, US]}
-      providerName:   {type: string, required: true}
-      maxMessageSize: {type: integer, default: "2048"}
-  resources:
-    - name: main-queue
-      kind: Queue
-      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
-      fields:
-        region:         {value: "eu-north-1"}
-        maxMessageSize: {from: params.maxMessageSize}
-    - name: queue-policy
-      kind: QueuePolicy
-      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
-      fields:
-        region:   {value: "eu-north-1"}
-        policy:   {value: '{"Version": "2012-10-17", "Statement": []}'}
-        queueUrl: {from: resources.main-queue.status.atProvider.url}
+      location:
+        default: ""
+        description: ""
+        enum:
+        - EU
+        - US
+        required: true
+        type: string
+      maxMessageSize:
+        default: "2048"
+        description: ""
+        enum: null
+        required: false
+        type: integer
+      providerName:
+        default: ""
+        description: ""
+        enum: null
+        required: true
+        type: string
+    plural: xqueues
+    scope: Namespaced
+    version: v1alpha1
