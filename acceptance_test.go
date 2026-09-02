@@ -3,6 +3,7 @@ package main_test
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -79,6 +80,50 @@ func requireTool(t *testing.T, name string, args ...string) {
 	}
 }
 
+var (
+	testBin      string
+	testCacheDir string
+	testLockFile string
+)
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	if testing.Short() {
+		os.Exit(m.Run())
+	}
+
+	dir, err := os.MkdirTemp("", "cf-acceptance-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(dir)
+
+	testBin = filepath.Join(dir, "cf")
+	out, err := exec.Command("go", "build", "-buildvcs=false", "-o", testBin, "./cmd/cf").CombinedOutput()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "build cf: %v\n%s\n", err, out)
+		os.Exit(1)
+	}
+
+	testCacheDir = filepath.Join(dir, "cache")
+	testLockFile = filepath.Join(dir, ".cf.lock")
+
+	providers := []string{
+		providerRef,
+		"ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0",
+	}
+	for _, p := range providers {
+		out, err := exec.Command(testBin, "provider", "add", p, "--cache-dir", testCacheDir, "--lock", testLockFile).CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cf provider add %s: %v\n%s\n", p, err, out)
+			os.Exit(1)
+		}
+	}
+
+	os.Exit(m.Run())
+}
+
 func TestAcceptanceXQueueRenders(t *testing.T) {
 	if testing.Short() {
 		unavailable(t, "acceptance test needs Docker; skipped under -short")
@@ -86,7 +131,7 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 	requireTool(t, "crossplane")
 	requireTool(t, "docker", "info")
 
-	dir := t.TempDir()
+	_ = t.TempDir()
 
 	// Build to the repo's bin/cf — the Makefile's own build target — rather
 	// than a bespoke name or t.TempDir(). The honest reason: the acceptance
@@ -102,26 +147,12 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 	// produces. That is not the reason for this shape; it's just what
 	// surfaced the value of testing the real build output instead of an
 	// ad-hoc one.)
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	bin := filepath.Join(repoRoot, "bin", "cf")
-	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
-		t.Fatalf("build cf: %v\n%s", err, out)
-	}
-
-	cacheDir := filepath.Join(dir, "cache")
-	lock := filepath.Join(dir, ".cf.lock")
-
-	// Step 1: fetch the provider. No cluster, no Docker.
-	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("cf provider add: %v\n%s", err, out)
-	}
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
 
 	// Step 2: generate.
-	outDir := filepath.Join(dir, "out")
+	outDir := filepath.Join(t.TempDir(), "out")
 	gen := exec.Command(bin, "gen", "testdata/xqueue.cf.yaml", "-o", outDir, "--cache-dir", cacheDir)
 	if out, err := gen.CombinedOutput(); err != nil {
 		t.Fatalf("cf gen: %v\n%s", err, out)
@@ -226,28 +257,14 @@ func TestAcceptanceForEachRenders(t *testing.T) {
 	requireTool(t, "docker", "info")
 
 	dir := t.TempDir()
-
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	bin := filepath.Join(repoRoot, "bin", "cf")
-	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
-		t.Fatalf("build cf: %v\n%s", err, out)
-	}
-
-	cacheDir := filepath.Join(dir, "cache")
-	lock := filepath.Join(dir, ".cf.lock")
-
-	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("cf provider add: %v\n%s", err, out)
-	}
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
 
 	// Generate twice into separate directories: determinism is a correctness
 	// requirement (a churning file on a prune:true GitOps repo is a
 	// live-cluster incident), so the two runs must agree byte for byte.
-	outDir := filepath.Join(dir, "out")
+	outDir := filepath.Join(t.TempDir(), "out")
 	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
 		gen := exec.Command(bin, "gen", "testdata/xqueue-foreach.cf.yaml", "-o", o, "--cache-dir", cacheDir)
 		if out, err := gen.CombinedOutput(); err != nil {
@@ -329,27 +346,13 @@ func TestAcceptanceForEachStatusRenders(t *testing.T) {
 	requireTool(t, "docker", "info")
 
 	dir := t.TempDir()
-
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	bin := filepath.Join(repoRoot, "bin", "cf")
-	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
-		t.Fatalf("build cf: %v\n%s", err, out)
-	}
-
-	cacheDir := filepath.Join(dir, "cache")
-	lock := filepath.Join(dir, ".cf.lock")
-
-	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("cf provider add: %v\n%s", err, out)
-	}
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
 
 	// Generate twice into separate directories: determinism is a correctness
 	// requirement, so the two runs must agree byte for byte.
-	outDir := filepath.Join(dir, "out")
+	outDir := filepath.Join(t.TempDir(), "out")
 	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
 		gen := exec.Command(bin, "gen", "testdata/xqueue-foreach-status.cf.yaml", "-o", o, "--cache-dir", cacheDir)
 		if out, err := gen.CombinedOutput(); err != nil {
@@ -438,27 +441,13 @@ func TestAcceptanceWhenRenders(t *testing.T) {
 	requireTool(t, "docker", "info")
 
 	dir := t.TempDir()
-
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	bin := filepath.Join(repoRoot, "bin", "cf")
-	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
-		t.Fatalf("build cf: %v\n%s", err, out)
-	}
-
-	cacheDir := filepath.Join(dir, "cache")
-	lock := filepath.Join(dir, ".cf.lock")
-
-	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("cf provider add: %v\n%s", err, out)
-	}
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
 
 	// Generate twice into separate directories: determinism is a correctness
 	// requirement, so the two runs must agree byte for byte.
-	outDir := filepath.Join(dir, "out")
+	outDir := filepath.Join(t.TempDir(), "out")
 	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
 		gen := exec.Command(bin, "gen", "testdata/xqueue-when.cf.yaml", "-o", o, "--cache-dir", cacheDir)
 		if out, err := gen.CombinedOutput(); err != nil {
@@ -542,27 +531,13 @@ func TestAcceptanceStatusRefRenders(t *testing.T) {
 	requireTool(t, "docker", "info")
 
 	dir := t.TempDir()
-
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	bin := filepath.Join(repoRoot, "bin", "cf")
-	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
-		t.Fatalf("build cf: %v\n%s", err, out)
-	}
-
-	cacheDir := filepath.Join(dir, "cache")
-	lock := filepath.Join(dir, ".cf.lock")
-
-	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("cf provider add: %v\n%s", err, out)
-	}
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
 
 	// Generate twice into separate directories: determinism is a correctness
 	// requirement, so the two runs must agree byte for byte.
-	outDir := filepath.Join(dir, "out")
+	outDir := filepath.Join(t.TempDir(), "out")
 	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
 		gen := exec.Command(bin, "gen", "testdata/xqueue-statusref.cf.yaml", "-o", o, "--cache-dir", cacheDir)
 		if out, err := gen.CombinedOutput(); err != nil {
@@ -653,27 +628,13 @@ func TestAcceptanceConventionsRender(t *testing.T) {
 	requireTool(t, "docker", "info")
 
 	dir := t.TempDir()
-
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	bin := filepath.Join(repoRoot, "bin", "cf")
-	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
-		t.Fatalf("build cf: %v\n%s", err, out)
-	}
-
-	cacheDir := filepath.Join(dir, "cache")
-	lock := filepath.Join(dir, ".cf.lock")
-
-	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("cf provider add: %v\n%s", err, out)
-	}
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
 
 	// Generate twice into separate directories: determinism is a correctness
 	// requirement, so the two runs must agree byte for byte.
-	outDir := filepath.Join(dir, "out")
+	outDir := filepath.Join(t.TempDir(), "out")
 	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
 		gen := exec.Command(bin, "gen", "testdata/xqueue-conventions.cf.yaml", "-o", o, "--cache-dir", cacheDir)
 		if out, err := gen.CombinedOutput(); err != nil {
@@ -791,27 +752,11 @@ func TestAcceptancePipelineAutoReadyRenders(t *testing.T) {
 	requireTool(t, "docker", "info")
 
 	dir := t.TempDir()
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
 
-	// Build to bin/cf for the same test-what-you-ship reason
-	// TestAcceptanceXQueueRenders documents.
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	bin := filepath.Join(repoRoot, "bin", "cf")
-	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
-		t.Fatalf("build cf: %v\n%s", err, out)
-	}
-
-	cacheDir := filepath.Join(dir, "cache")
-	lock := filepath.Join(dir, ".cf.lock")
-
-	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("cf provider add: %v\n%s", err, out)
-	}
-
-	outDir := filepath.Join(dir, "out")
+	outDir := filepath.Join(t.TempDir(), "out")
 	gen := exec.Command(bin, "gen", "testdata/xqueue-pipeline.cf.yaml", "-o", outDir, "--cache-dir", cacheDir)
 	if out, err := gen.CombinedOutput(); err != nil {
 		t.Fatalf("cf gen: %v\n%s", err, out)
@@ -927,30 +872,17 @@ func TestAcceptanceNativeCompositionRenders(t *testing.T) {
 	requireTool(t, "crossplane")
 	requireTool(t, "docker", "info")
 
-	dir := t.TempDir()
-
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	bin := filepath.Join(repoRoot, "bin", "cf")
-	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
-		t.Fatalf("build cf: %v\n%s", err, out)
-	}
-
-	cacheDir := filepath.Join(dir, "cache")
-	lock := filepath.Join(dir, ".cf.lock")
+	_ = t.TempDir()
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
 
 	// Step 1: fetch the managed provider. The native kinds need no fetch at
 	// all — they are vendored into the binary, pinned to one Kubernetes
 	// version, which is half of what this test exists to prove.
-	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("cf provider add: %v\n%s", err, out)
-	}
 
 	// Step 2: generate, then prove --check sees the fresh tree as in sync.
-	outDir := filepath.Join(dir, "out")
+	outDir := filepath.Join(t.TempDir(), "out")
 	gen := exec.Command(bin, "gen", "testdata/xwebapp.cf.yaml", "-o", outDir, "--cache-dir", cacheDir)
 	if out, err := gen.CombinedOutput(); err != nil {
 		t.Fatalf("cf gen: %v\n%s", err, out)
@@ -1040,28 +972,12 @@ func TestAcceptanceEnvelopeRenders(t *testing.T) {
 	requireTool(t, "crossplane")
 	requireTool(t, "docker", "info")
 
-	dir := t.TempDir()
+	_ = t.TempDir()
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
 
-	// Build to bin/cf for the same test-what-you-ship reason
-	// TestAcceptanceXQueueRenders documents.
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	bin := filepath.Join(repoRoot, "bin", "cf")
-	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
-		t.Fatalf("build cf: %v\n%s", err, out)
-	}
-
-	cacheDir := filepath.Join(dir, "cache")
-	lock := filepath.Join(dir, ".cf.lock")
-
-	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("cf provider add: %v\n%s", err, out)
-	}
-
-	outDir := filepath.Join(dir, "out")
+	outDir := filepath.Join(t.TempDir(), "out")
 	gen := exec.Command(bin, "gen", "testdata/xqueue-envelope.cf.yaml", "-o", outDir, "--cache-dir", cacheDir)
 	if out, err := gen.CombinedOutput(); err != nil {
 		t.Fatalf("cf gen: %v\n%s", err, out)
@@ -1137,29 +1053,13 @@ func TestAcceptanceTypedObjectParamRenders(t *testing.T) {
 	requireTool(t, "docker", "info")
 
 	dir := t.TempDir()
-
-	// Build to bin/cf for the same test-what-you-ship reason
-	// TestAcceptanceXQueueRenders documents.
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	bin := filepath.Join(repoRoot, "bin", "cf")
-	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
-		t.Fatalf("build cf: %v\n%s", err, out)
-	}
-
-	cacheDir := filepath.Join(dir, "cache")
-	lock := filepath.Join(dir, ".cf.lock")
-
-	add := exec.Command(bin, "provider", "add", providerRef, "--cache-dir", cacheDir, "--lock", lock)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("cf provider add: %v\n%s", err, out)
-	}
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
 
 	// Generate twice into separate directories: determinism is a correctness
 	// requirement, so the two runs must agree byte for byte.
-	outDir := filepath.Join(dir, "out")
+	outDir := filepath.Join(t.TempDir(), "out")
 	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
 		gen := exec.Command(bin, "gen", "testdata/xqueue-typedobj.cf.yaml", "-o", o, "--cache-dir", cacheDir)
 		if out, err := gen.CombinedOutput(); err != nil {
@@ -1346,30 +1246,13 @@ func TestAcceptanceIRSARenders(t *testing.T) {
 	requireTool(t, "docker", "info")
 
 	dir := t.TempDir()
-
-	// Build to bin/cf for the same test-what-you-ship reason
-	// TestAcceptanceXQueueRenders documents.
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	bin := filepath.Join(repoRoot, "bin", "cf")
-	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/cf").CombinedOutput(); err != nil {
-		t.Fatalf("build cf: %v\n%s", err, out)
-	}
-
-	cacheDir := filepath.Join(dir, "cache")
-	lock := filepath.Join(dir, ".cf.lock")
-
-	add := exec.Command(bin, "provider", "add",
-		"ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0", "--cache-dir", cacheDir, "--lock", lock)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("cf provider add: %v\n%s", err, out)
-	}
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
 
 	// Generate twice into separate directories: determinism is a correctness
 	// requirement, so the two runs must agree byte for byte.
-	outDir := filepath.Join(dir, "out")
+	outDir := filepath.Join(t.TempDir(), "out")
 	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
 		gen := exec.Command(bin, "gen", "testdata/irsa.cf.yaml", "-o", o, "--cache-dir", cacheDir)
 		if out, err := gen.CombinedOutput(); err != nil {

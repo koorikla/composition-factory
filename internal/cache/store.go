@@ -12,16 +12,26 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
 
 // Store is a directory of cached provider schemas.
-type Store struct{ Root string }
+type Store struct {
+	Root string
+	mu   sync.RWMutex
+	memo map[string]*Entry
+}
 
 // New returns a Store rooted at root. Use DefaultRoot for the usual location.
-func New(root string) *Store { return &Store{Root: root} }
+func New(root string) *Store {
+	return &Store{
+		Root: root,
+		memo: make(map[string]*Entry),
+	}
+}
 
 // DefaultRoot is ~/.cache/compositionfactory, or ./.cf-cache if HOME is unset.
 func DefaultRoot() string {
@@ -106,11 +116,28 @@ func (s *Store) SaveCRDs(ref, digest string, crds []schema.CRD) error {
 	if err != nil {
 		return fmt.Errorf("encode cache entry: %w", err)
 	}
-	return os.WriteFile(filepath.Join(dir, "crds.json"), body, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "crds.json"), body, 0o644); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	if s.memo == nil {
+		s.memo = make(map[string]*Entry)
+	}
+	s.memo[ref] = &entry
+	s.mu.Unlock()
+	return nil
 }
 
 // loadEntry reads and decodes the cache entry for ref.
 func (s *Store) loadEntry(ref string) (*Entry, error) {
+	s.mu.RLock()
+	if e, ok := s.memo[ref]; ok {
+		s.mu.RUnlock()
+		return e, nil
+	}
+	s.mu.RUnlock()
+
 	path := filepath.Join(s.Root, slug(ref), "crds.json")
 	body, err := os.ReadFile(path)
 	if err != nil {
@@ -120,6 +147,14 @@ func (s *Store) loadEntry(ref string) (*Entry, error) {
 	if err := json.Unmarshal(body, &entry); err != nil {
 		return nil, fmt.Errorf("decode cached entry for %q: %w", ref, err)
 	}
+
+	s.mu.Lock()
+	if s.memo == nil {
+		s.memo = make(map[string]*Entry)
+	}
+	s.memo[ref] = &entry
+	s.mu.Unlock()
+
 	return &entry, nil
 }
 
@@ -150,6 +185,12 @@ func (s *Store) Delete(ref string) error {
 	if err := os.RemoveAll(filepath.Join(s.Root, slug(ref))); err != nil {
 		return fmt.Errorf("delete cached entry for %q: %w", ref, err)
 	}
+
+	s.mu.Lock()
+	if s.memo != nil {
+		delete(s.memo, ref)
+	}
+	s.mu.Unlock()
 	return nil
 }
 
@@ -253,4 +294,11 @@ func (s *Store) FetchAndSave(ctx context.Context, lockPath, ref string, fetch fu
 	}
 
 	return pkg, crds, nil
+}
+
+// Clear drops the in-memory cache.
+func (s *Store) Clear() {
+	s.mu.Lock()
+	s.memo = nil
+	s.mu.Unlock()
 }

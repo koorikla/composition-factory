@@ -543,6 +543,7 @@ func TestListProvidersBrokenCacheMatchesHTTP(t *testing.T) {
 	if err := os.RemoveAll(s.storeRoot); err != nil {
 		t.Fatalf("break cache: %v", err)
 	}
+	s.options.Store.Clear()
 	s.assertToolErrorMatchesHTTP(t, "list_providers", nil, http.MethodGet, "/api/providers", "")
 }
 
@@ -629,6 +630,7 @@ func TestGenerateBrokenCacheMatchesHTTP(t *testing.T) {
 	if err := os.RemoveAll(s.storeRoot); err != nil {
 		t.Fatalf("break cache: %v", err)
 	}
+	s.options.Store.Clear()
 	s.assertToolErrorMatchesHTTP(t,
 		"generate", map[string]any{"write": false},
 		http.MethodPost, "/api/generate", `{"write":false}`)
@@ -685,6 +687,7 @@ func TestRenderCheckBrokenCacheMatchesHTTP(t *testing.T) {
 	if err := os.RemoveAll(s.storeRoot); err != nil {
 		t.Fatalf("break cache: %v", err)
 	}
+	s.options.Store.Clear()
 	s.assertToolErrorMatchesHTTP(t, "render_check", nil, http.MethodPost, "/api/render", "")
 }
 

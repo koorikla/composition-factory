@@ -312,7 +312,7 @@ clean, Playwright 115 passed / 1 skipped.
 
 ### Performance — Go
 
-- [ ] Every generate / render / package request re-reads and re-parses the
+- [x] Every generate / render / package request re-reads and re-parses the
       whole provider cache from disk (api/generate.go:136 → cache.LoadSources)
       although the same CRDs sit in srv.Index. Serve from the index or
       memoise Store.Load by ref + mtime.
@@ -320,7 +320,7 @@ clean, Playwright 115 passed / 1 skipped.
       ForProvider/FieldTree/Status/Envelope); in emit, crd.Status() +
       Leaves() run inside per-field loops (composition.go:576, 944, 1036).
       Cache per (apiVersion, kind). — completed 2026-09-02
-- [ ] acceptance_test.go builds the binary and pulls the provider 11 times.
+- [x] acceptance_test.go builds the binary and pulls the provider 11 times.
       TestMain: build once, one pre-warmed cache dir.
 - [x] Unfiltered GET /api/catalogue re-marshals + re-hashes + re-gzips the
       139 KB embedded catalogue per request; index.All() copies the whole
