@@ -175,7 +175,7 @@ echo "==> Importing live server-side Configuration tree with cf import..."
 
 ROUNDTRIP_REGEN_OUT="${OUT_DIR}/roundtrip-full-regen"
 echo "==> Regenerating Crossplane artifacts from adopted blueprint..."
-./bin/cf gen "${ROUNDTRIP_BP}" --out "${ROUNDTRIP_REGEN_OUT}" --group-suffix="${WORKSPACE_GROUP_SUFFIX}"
+./bin/cf gen "${ROUNDTRIP_BP}" --out "${ROUNDTRIP_REGEN_OUT}"
 
 echo "==> Verifying regenerated Composition against original emitted composition..."
 COMP_ORIG=("${RT_OUT_DIR}/compositions/"*.yaml)
