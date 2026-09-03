@@ -62,6 +62,20 @@ func (r *LossReport) String() string {
 	return sb.String()
 }
 
+// ScrubCount returns the number of server-side metadata, status, or annotation fields scrubbed.
+func (r *LossReport) ScrubCount() int {
+	if r == nil {
+		return 0
+	}
+	count := 0
+	for _, d := range r.Drops {
+		if strings.Contains(d.Reason, "scrubbed") {
+			count++
+		}
+	}
+	return count
+}
+
 // FormatAdoptedYAML marshals bp to clean YAML (omitting empty strings and null slices)
 // and prepends "# adopt: dropped ..." comments if lossy.
 func FormatAdoptedYAML(bp *blueprint.Blueprint, report *LossReport) ([]byte, error) {
@@ -147,7 +161,10 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		return nil, nil, fmt.Errorf("manifest contains no YAML documents")
 	}
 
+	docs = unwrapListDocs(docs)
 	report := &LossReport{}
+	ScrubDocuments(docs, report)
+
 	var compDoc map[string]any
 	var xrdDoc map[string]any
 
@@ -675,7 +692,9 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 	if err != nil {
 		return fmt.Errorf("split masked template yaml: %w", err)
 	}
+	docs = unwrapListDocs(docs)
 	for _, doc := range docs {
+		ScrubDocument(doc, "", report)
 		res := resourceFromMap(doc, defaultProvider, placeholderTable, report, nameMapping)
 		if res == nil {
 			continue
