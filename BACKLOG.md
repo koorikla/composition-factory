@@ -39,7 +39,6 @@ not an exception for the importer to special-case.
 
 ## Track 1 — Manifest Import & Adoption Compatibility
 
-- [ ] **Simplify Emitted Status Wires**: Replace the 11-term `hasKey/kindIs` guard chain with a clean, missingkey-safe `define "cf.observed"` helper in Go-templating outputs. Keep byte-determinism goldens and ensure `cf adopt` parses both formats seamlessly.
 - [ ] **Opaque Block & Custom Function Pipeline Preservation**: When importing complex foreign compositions containing unknown custom functions or non-standard pipeline steps, preserve them as declared custom steps in `spec.pipeline` / `spec.resources` so they round-trip cleanly without loss.
 - [ ] **`kubectl` Export Scrubbing**: Automatically scrub runtime status, managed fields, UIDs, and cluster-assigned metadata when pasting or importing raw cluster dumps (`kubectl get composition -o yaml`), reporting how many server-side fields were dropped rather than dropping them silently.
 - [ ] **Round-trip gate in Lane C** (the acceptance bar for this whole track):
@@ -55,7 +54,6 @@ not an exception for the importer to special-case.
 
 ## Track 2 — Canvas Live-Edit & Authoring Experience
 
-- [ ] **Canvas Action Dispatch Maps**: Replace large `if/else` ladders in `web-proto/js/regions/canvas.js` (`openFieldPicker`) and `inspector.js` (`onBoxClick`, `onBoxChange`) with modular `const actions = { ... }` dispatch tables to simplify adding new authoring actions.
 - [ ] **Canvas Region Modularization**: Extract inner helpers and sub-views from oversized `init` closures in `palette.js` and `output.js` into isolated, testable JavaScript modules.
 
 ---
