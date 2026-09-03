@@ -1142,329 +1142,437 @@ async function commitEnvelopeValue(path, kind, text) {
   if (ok !== null) delete uiMode["env:" + path];
 }
 
-function onBoxClick(e) {
-  var toggleDesc = e.target.closest("[data-toggle-desc]");
-  if (toggleDesc) {
-    var descWrap = toggleDesc.closest(".fld-d");
-    if (descWrap) {
-      var exp = descWrap.classList.toggle("expanded");
-      toggleDesc.textContent = exp ? "less" : "more";
-    }
-    return;
-  }
-  var annDel = e.target.closest("[data-ann-del]");
-  if (annDel) {
-    var adk = annDel.getAttribute("data-ann-del");
-    var selRes = selectedResource();
-    if (!selRes) return;
-    store.replaceDoc(function (d) {
-      var r = d.spec.resources.find(function (x) { return x.name === selRes.name; });
-      if (r && r.annotations) { delete r.annotations[adk]; if (!Object.keys(r.annotations).length) delete r.annotations; }
-    });
-    return;
-  }
-  if (e.target.closest("[data-ann-add]")) {
-    var keyEl = box.querySelector("[data-ann-key]");
-    var valEl = box.querySelector("[data-ann-value]");
-    var selRes2 = selectedResource();
-    if (!selRes2 || !keyEl || !keyEl.value.trim()) return;
-    var annKey = keyEl.value.trim(), annVal = (valEl && valEl.value) || "";
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = d.spec.resources.find(function (x) { return x.name === selRes2.name; });
-        if (!r) return;
-        r.annotations = r.annotations || {};
-        r.annotations[annKey] = { value: annVal };
-      });
-    });
-    return;
-  }
-  var doc = store.state.doc;
-  if (!doc) return;
-
-  var mb = e.target.closest("button[data-m]");
-  if (mb) {
-    var isEnv = mb.hasAttribute("data-env");
-    var path = mb.getAttribute("data-path");
-    var m = mb.getAttribute("data-m");
-    var res = selectedResource();
-    var entry = isEnv ? (res ? envelopeEntryOf(res, path) : null) : (res ? entryOf(res, path) : null);
-    if (entry && entry.from && (m === "v" || m === "r")) {
-      if (!confirm('This field is wired from "' + entry.from + '". Switch modes and overwrite the wire?')) return;
-    }
-    var mKey = isEnv ? ("env:" + path) : path;
-    uiMode[mKey] = m;
-    if (m !== "w" && pendingNewParam === mKey) pendingNewParam = null;
-    render();
-    return;
-  }
-
-  var un = e.target.closest("[data-unwire]");
-  if (un) {
-    var p1 = un.getAttribute("data-unwire");
-    setField(p1, null).then(function (r) { if (r !== null) delete uiMode[p1]; });
-    return;
-  }
-
-  var unEnv = e.target.closest("[data-env-unwire]");
-  if (unEnv) {
-    var pe = unEnv.getAttribute("data-env-unwire");
-    setEnvelopeField(pe, null).then(function (r) { if (r !== null) delete uiMode["env:" + pe]; });
-    return;
-  }
-
-  var addMap = e.target.closest("[data-add-map-entry]");
-  if (addMap) {
-    pendingNewMapEntry = addMap.getAttribute("data-add-map-entry");
-    render();
-    return;
-  }
-
-  var mapOk = e.target.closest("[data-new-map-ok]");
-  if (mapOk) {
-    var mapPath = mapOk.getAttribute("data-new-map-ok");
-    var keyInp = box.querySelector('[data-new-map-key="' + CSS.escape(mapPath) + '"]');
-    var valInp = box.querySelector('[data-new-map-val="' + CSS.escape(mapPath) + '"]');
-    var keyVal = keyInp && keyInp.value.trim();
-    if (!keyVal) return;
-    var initVal = (valInp && valInp.value.trim()) || "default";
-    var fullPath = mapPath + "[" + keyVal + "]";
-    setField(fullPath, { value: initVal }).then(function (r) {
-      if (r !== null) {
-        pendingNewMapEntry = null;
+var boxClickActions = [
+  {
+    selector: "[data-toggle-desc]",
+    run: function (el) {
+      var descWrap = el.closest(".fld-d");
+      if (descWrap) {
+        var exp = descWrap.classList.toggle("expanded");
+        el.textContent = exp ? "less" : "more";
       }
-    });
-    return;
-  }
-
-  var mapCancel = e.target.closest("[data-new-map-cancel]");
-  if (mapCancel) {
-    pendingNewMapEntry = null;
-    render();
-    return;
-  }
-
-  var delMap = e.target.closest("[data-del-map-entry]");
-  if (delMap) {
-    var delPath = delMap.getAttribute("data-del-map-entry");
-    setField(delPath, null).then(function (r) {
-      if (r !== null) delete uiMode[delPath];
-    });
-    return;
-  }
-
-  var ok = e.target.closest("[data-npok]");
-  if (ok) {
-    var p2 = ok.getAttribute("data-npok");
-    var isEnv = p2.indexOf("env:") === 0;
-    var realPath = isEnv ? p2.slice(4) : p2;
-    var nameEl = box.querySelector('[data-npname="' + CSS.escape(p2) + '"]');
-    var typeEl = box.querySelector('[data-nptype="' + CSS.escape(p2) + '"]');
-    var name = nameEl && nameEl.value.trim();
-    var type = typeEl && typeEl.value || "string";
-    if (!name) return;
-    op(function () { return store.addParameter(name, { type: type, required: false }); })
-      .then(function (docAfter) {
-        if (docAfter === null) return null;
-        if (isEnv) {
-          return setEnvelopeField(realPath, { from: "params." + name, value: "", raw: "" });
-        }
-        return setField(realPath, { from: "params." + name, value: "", raw: "" });
-      })
-      .then(function (r) {
-        if (r !== null) { pendingNewParam = null; delete uiMode[p2]; }
+    }
+  },
+  {
+    selector: "[data-ann-del]",
+    run: function (el) {
+      var adk = el.getAttribute("data-ann-del");
+      var selRes = selectedResource();
+      if (!selRes) return;
+      store.replaceDoc(function (d) {
+        var r = d.spec.resources.find(function (x) { return x.name === selRes.name; });
+        if (r && r.annotations) { delete r.annotations[adk]; if (!Object.keys(r.annotations).length) delete r.annotations; }
       });
-    return;
-  }
-
-  var cancel = e.target.closest("[data-npcancel]");
-  if (cancel) { pendingNewParam = null; render(); return; }
-
-  var madd = e.target.closest("[data-madd]");
-  if (madd) {
-    var maddKey = madd.getAttribute("data-madd").split("|");
-    var maddParam = maddKey[0], maddPath = maddKey[1];
-    var maddProps = cloneProps((paramsOf(doc)[maddParam] || {}).properties);
-    var cont = memberContainer(maddProps, maddPath);
-    if (!cont) return;
-    var mBase = "member", mNm = mBase + "1", mI = 2;
-    while (cont[mNm]) { mNm = mBase + mI; mI++; }
-    cont[mNm] = { type: "string" };
-    op(function () { return commitMembers(maddParam, maddProps); })
-      .then(function (r) { if (r === null) render(); });
-    return;
-  }
-
-  var mdel = e.target.closest("[data-mdel]");
-  if (mdel) {
-    var mdelKey = mdel.getAttribute("data-mdel").split("|");
-    var mdelProps = cloneProps((paramsOf(doc)[mdelKey[0]] || {}).properties);
-    var mdelLoc = memberParent(mdelProps, mdelKey[1]);
-    if (!mdelLoc) return;
-    delete mdelLoc.parent[mdelLoc.key];
-    op(function () { return commitMembers(mdelKey[0], mdelProps); })
-      .then(function (r) { if (r === null) render(); });
-    return;
-  }
-
-  var pd = e.target.closest("[data-pd]");
-  if (pd) {
-    var pn = pd.getAttribute("data-pd");
-    var fo = fanOut(doc, pn);
-    if (fo > 0 && !confirm('Parameter "' + pn + '" is wired into ' + fo + " field" + (fo === 1 ? "" : "s") + ". Delete it?")) return;
-    op(function () { return store.deleteParameter(pn); });
-    return;
-  }
-
-  if (e.target.closest("#addParamBtn")) {
-    var params = paramsOf(doc);
-    var base = "newParam", nm = base, i = 2;
-    while (params[nm]) { nm = base + i; i++; }
-    op(function () { return store.addParameter(nm, { type: "string", required: false }); });
-    return;
-  }
-
-  if (e.target.closest("#addAutoReadyBtn") || (e.target.closest("#addPipeStepBtn") && box.querySelector("#pipePresetSelect") && box.querySelector("#pipePresetSelect").value === "auto-ready")) {
-    op(function () {
-      return store.replaceDoc(function (d) {
-        d.spec.pipeline = d.spec.pipeline || [];
-        d.spec.pipeline.push({
+    }
+  },
+  {
+    selector: "[data-ann-add]",
+    run: function () {
+      var keyEl = box.querySelector("[data-ann-key]");
+      var valEl = box.querySelector("[data-ann-value]");
+      var selRes2 = selectedResource();
+      if (!selRes2 || !keyEl || !keyEl.value.trim()) return;
+      var annKey = keyEl.value.trim(), annVal = (valEl && valEl.value) || "";
+      op(function () {
+        return store.replaceDoc(function (d) {
+          var r = d.spec.resources.find(function (x) { return x.name === selRes2.name; });
+          if (!r) return;
+          r.annotations = r.annotations || {};
+          r.annotations[annKey] = { value: annVal };
+        });
+      });
+    }
+  },
+  {
+    selector: "button[data-m]",
+    needsDoc: true,
+    run: function (mb, doc) {
+      var isEnv = mb.hasAttribute("data-env");
+      var path = mb.getAttribute("data-path");
+      var m = mb.getAttribute("data-m");
+      var res = selectedResource();
+      var entry = isEnv ? (res ? envelopeEntryOf(res, path) : null) : (res ? entryOf(res, path) : null);
+      if (entry && entry.from && (m === "v" || m === "r")) {
+        if (!confirm('This field is wired from "' + entry.from + '". Switch modes and overwrite the wire?')) return;
+      }
+      var mKey = isEnv ? ("env:" + path) : path;
+      uiMode[mKey] = m;
+      if (m !== "w" && pendingNewParam === mKey) pendingNewParam = null;
+      render();
+    }
+  },
+  {
+    selector: "[data-unwire]",
+    needsDoc: true,
+    run: function (un) {
+      var p1 = un.getAttribute("data-unwire");
+      setField(p1, null).then(function (r) { if (r !== null) delete uiMode[p1]; });
+    }
+  },
+  {
+    selector: "[data-env-unwire]",
+    needsDoc: true,
+    run: function (unEnv) {
+      var pe = unEnv.getAttribute("data-env-unwire");
+      setEnvelopeField(pe, null).then(function (r) { if (r !== null) delete uiMode["env:" + pe]; });
+    }
+  },
+  {
+    selector: "[data-add-map-entry]",
+    needsDoc: true,
+    run: function (addMap) {
+      pendingNewMapEntry = addMap.getAttribute("data-add-map-entry");
+      render();
+    }
+  },
+  {
+    selector: "[data-new-map-ok]",
+    needsDoc: true,
+    run: function (mapOk) {
+      var mapPath = mapOk.getAttribute("data-new-map-ok");
+      var keyInp = box.querySelector('[data-new-map-key="' + CSS.escape(mapPath) + '"]');
+      var valInp = box.querySelector('[data-new-map-val="' + CSS.escape(mapPath) + '"]');
+      var keyVal = keyInp && keyInp.value.trim();
+      if (!keyVal) return;
+      var initVal = (valInp && valInp.value.trim()) || "default";
+      var fullPath = mapPath + "[" + keyVal + "]";
+      setField(fullPath, { value: initVal }).then(function (r) {
+        if (r !== null) {
+          pendingNewMapEntry = null;
+        }
+      });
+    }
+  },
+  {
+    selector: "[data-new-map-cancel]",
+    needsDoc: true,
+    run: function () {
+      pendingNewMapEntry = null;
+      render();
+    }
+  },
+  {
+    selector: "[data-del-map-entry]",
+    needsDoc: true,
+    run: function (delMap) {
+      var delPath = delMap.getAttribute("data-del-map-entry");
+      setField(delPath, null).then(function (r) {
+        if (r !== null) delete uiMode[delPath];
+      });
+    }
+  },
+  {
+    selector: "[data-npok]",
+    needsDoc: true,
+    run: function (ok) {
+      var p2 = ok.getAttribute("data-npok");
+      var isEnv = p2.indexOf("env:") === 0;
+      var realPath = isEnv ? p2.slice(4) : p2;
+      var nameEl = box.querySelector('[data-npname="' + CSS.escape(p2) + '"]');
+      var typeEl = box.querySelector('[data-nptype="' + CSS.escape(p2) + '"]');
+      var name = nameEl && nameEl.value.trim();
+      var type = typeEl && typeEl.value || "string";
+      if (!name) return;
+      op(function () { return store.addParameter(name, { type: type, required: false }); })
+        .then(function (docAfter) {
+          if (docAfter === null) return null;
+          if (isEnv) {
+            return setEnvelopeField(realPath, { from: "params." + name, value: "", raw: "" });
+          }
+          return setField(realPath, { from: "params." + name, value: "", raw: "" });
+        })
+        .then(function (r) {
+          if (r !== null) { pendingNewParam = null; delete uiMode[p2]; }
+        });
+    }
+  },
+  {
+    selector: "[data-npcancel]",
+    needsDoc: true,
+    run: function () {
+      pendingNewParam = null;
+      render();
+    }
+  },
+  {
+    selector: "[data-madd]",
+    needsDoc: true,
+    run: function (madd, doc) {
+      var maddKey = madd.getAttribute("data-madd").split("|");
+      var maddParam = maddKey[0], maddPath = maddKey[1];
+      var maddProps = cloneProps((paramsOf(doc)[maddParam] || {}).properties);
+      var cont = memberContainer(maddProps, maddPath);
+      if (!cont) return;
+      var mBase = "member", mNm = mBase + "1", mI = 2;
+      while (cont[mNm]) { mNm = mBase + mI; mI++; }
+      cont[mNm] = { type: "string" };
+      op(function () { return commitMembers(maddParam, maddProps); })
+        .then(function (r) { if (r === null) render(); });
+    }
+  },
+  {
+    selector: "[data-mdel]",
+    needsDoc: true,
+    run: function (mdel, doc) {
+      var mdelKey = mdel.getAttribute("data-mdel").split("|");
+      var mdelProps = cloneProps((paramsOf(doc)[mdelKey[0]] || {}).properties);
+      var mdelLoc = memberParent(mdelProps, mdelKey[1]);
+      if (!mdelLoc) return;
+      delete mdelLoc.parent[mdelLoc.key];
+      op(function () { return commitMembers(mdelKey[0], mdelProps); })
+        .then(function (r) { if (r === null) render(); });
+    }
+  },
+  {
+    selector: "[data-pd]",
+    needsDoc: true,
+    run: function (pd, doc) {
+      var pn = pd.getAttribute("data-pd");
+      var fo = fanOut(doc, pn);
+      if (fo > 0 && !confirm('Parameter "' + pn + '" is wired into ' + fo + " field" + (fo === 1 ? "" : "s") + ". Delete it?")) return;
+      op(function () { return store.deleteParameter(pn); });
+    }
+  },
+  {
+    selector: "#addParamBtn",
+    needsDoc: true,
+    run: function (_, doc) {
+      var params = paramsOf(doc);
+      var base = "newParam", nm = base, i = 2;
+      while (params[nm]) { nm = base + i; i++; }
+      op(function () { return store.addParameter(nm, { type: "string", required: false }); });
+    }
+  },
+  {
+    selector: "#addAutoReadyBtn",
+    needsDoc: true,
+    run: function () {
+      op(function () {
+        return store.replaceDoc(function (d) {
+          d.spec.pipeline = d.spec.pipeline || [];
+          d.spec.pipeline.push({
+            name: "auto-ready",
+            functionRef: "function-auto-ready",
+            package: "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1",
+            position: "after"
+          });
+        });
+      });
+    }
+  },
+  {
+    selector: "#addPipeStepBtn",
+    needsDoc: true,
+    run: function () {
+      var preset = (box.querySelector("#pipePresetSelect") && box.querySelector("#pipePresetSelect").value) || "custom";
+      var pipePresetMap = {
+        "auto-ready": {
           name: "auto-ready",
           functionRef: "function-auto-ready",
           package: "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1",
           position: "after"
+        },
+        "environment-configs": {
+          name: "environment-configs",
+          functionRef: "function-environment-configs",
+          package: "xpkg.crossplane.io/crossplane-contrib/function-environment-configs:v0.4.0",
+          position: "before",
+          input: "apiVersion: environmentconfigs.fn.crossplane.io/v1beta1\nkind: Input\nspec:\n  environmentConfigs:\n  - type: Reference\n    ref:\n      name: default"
+        },
+        "cel-filter": {
+          name: "cel-filter",
+          functionRef: "function-cel-filter",
+          package: "xpkg.crossplane.io/crossplane-contrib/function-cel-filter:v0.3.0",
+          position: "after"
+        },
+        "extra-resources": {
+          name: "extra-resources",
+          functionRef: "function-extra-resources",
+          package: "xpkg.crossplane.io/crossplane-contrib/function-extra-resources:v0.3.0",
+          position: "before"
+        },
+        "custom": {
+          name: "custom-step",
+          functionRef: "function-custom",
+          package: "xpkg.crossplane.io/crossplane-contrib/function-custom:v0.1.0",
+          position: "after"
+        }
+      };
+      var newStep = pipePresetMap[preset] || pipePresetMap.custom;
+      op(function () {
+        return store.replaceDoc(function (d) {
+          d.spec.pipeline = d.spec.pipeline || [];
+          d.spec.pipeline.push(newStep);
         });
       });
-    });
-    return;
-  }
-
-  if (e.target.closest("#addPipeStepBtn")) {
-    var preset = (box.querySelector("#pipePresetSelect") && box.querySelector("#pipePresetSelect").value) || "custom";
-    var newStep = { name: "custom-step", functionRef: "function-custom", package: "xpkg.crossplane.io/crossplane-contrib/function-custom:v0.1.0", position: "after" };
-    if (preset === "environment-configs") {
-      newStep = {
-        name: "environment-configs",
-        functionRef: "function-environment-configs",
-        package: "xpkg.crossplane.io/crossplane-contrib/function-environment-configs:v0.4.0",
-        position: "before",
-        input: "apiVersion: environmentconfigs.fn.crossplane.io/v1beta1\nkind: Input\nspec:\n  environmentConfigs:\n  - type: Reference\n    ref:\n      name: default"
-      };
-    } else if (preset === "cel-filter") {
-      newStep = {
-        name: "cel-filter",
-        functionRef: "function-cel-filter",
-        package: "xpkg.crossplane.io/crossplane-contrib/function-cel-filter:v0.3.0",
-        position: "after"
-      };
-    } else if (preset === "extra-resources") {
-      newStep = {
-        name: "extra-resources",
-        functionRef: "function-extra-resources",
-        package: "xpkg.crossplane.io/crossplane-contrib/function-extra-resources:v0.3.0",
-        position: "before"
-      };
     }
-    op(function () {
-      return store.replaceDoc(function (d) {
-        d.spec.pipeline = d.spec.pipeline || [];
-        d.spec.pipeline.push(newStep);
+  },
+  {
+    selector: "[data-pipe-del]",
+    needsDoc: true,
+    run: function (pipeDel) {
+      var pidx = parseInt(pipeDel.getAttribute("data-pipe-del"), 10);
+      op(function () {
+        return store.replaceDoc(function (d) {
+          if (!d.spec.pipeline) return;
+          d.spec.pipeline.splice(pidx, 1);
+          if (!d.spec.pipeline.length) delete d.spec.pipeline;
+        });
       });
-    });
-    return;
+    }
+  },
+  {
+    selector: "[data-wl-sync-app]",
+    needsDoc: true,
+    run: function (syncBtn) {
+      var rname = syncBtn.getAttribute("data-wl-sync-app");
+      var appInp = box.querySelector('[data-wl-app="' + rname + '"]');
+      var val = appInp ? appInp.value.trim() : "";
+      if (!val) val = rname;
+      op(function () {
+        return store.replaceDoc(function (d) {
+          var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname; });
+          if (!r) return;
+          r.fields = r.fields || {};
+          delete r.fields["spec.selector.matchLabels.app"];
+          delete r.fields["spec.template.metadata.labels.app"];
+          r.fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: val }) };
+          r.fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: val }) };
+          if (!r.fields["spec.template.spec.containers[0].name"]) {
+            r.fields["spec.template.spec.containers[0].name"] = { value: rname };
+          }
+        });
+      });
+    }
+  },
+  {
+    selector: "[data-svc-match-wl]",
+    needsDoc: true,
+    run: function (svcMatchBtn) {
+      var rname2 = svcMatchBtn.getAttribute("data-svc-match-wl");
+      var matchApp = svcMatchBtn.getAttribute("data-match-app") || "";
+      op(function () {
+        return store.replaceDoc(function (d) {
+          var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname2; });
+          if (!r) return;
+          r.fields = r.fields || {};
+          delete r.fields["spec.selector.app"];
+          r.fields["spec.selector"] = { raw: JSON.stringify({ app: matchApp }) };
+          r.fields["spec.ports[0].port"] = { raw: "8080" };
+        });
+      });
+    }
+  },
+  {
+    selector: "[data-apply-std-labels]",
+    needsDoc: true,
+    run: function (stdLblBtn) {
+      var rname3 = stdLblBtn.getAttribute("data-apply-std-labels");
+      op(function () {
+        return store.replaceDoc(function (d) {
+          var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname3; });
+          if (!r) return;
+          r.annotations = r.annotations || {};
+          r.annotations["app.kubernetes.io/managed-by"] = { value: "crossplane" };
+          r.annotations["app.kubernetes.io/name"] = { raw: "'{{ $xr }}'" };
+          r.annotations["app.kubernetes.io/instance"] = { raw: "'{{ $xr }}'" };
+        });
+      });
+    }
+  },
+  {
+    selector: "[data-apply-ext-name]",
+    needsDoc: true,
+    run: function (extNameBtn) {
+      var rname4 = extNameBtn.getAttribute("data-apply-ext-name");
+      op(function () {
+        return store.replaceDoc(function (d) {
+          var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname4; });
+          if (!r) return;
+          r.annotations = r.annotations || {};
+          r.annotations["crossplane.io/external-name"] = { raw: "'{{ $xr }}-" + rname4 + "'" };
+        });
+      });
+    }
   }
+];
 
-  var pipeDel = e.target.closest("[data-pipe-del]");
-  if (pipeDel) {
-    var pidx = parseInt(pipeDel.getAttribute("data-pipe-del"), 10);
-    op(function () {
-      return store.replaceDoc(function (d) {
-        if (!d.spec.pipeline) return;
-        d.spec.pipeline.splice(pidx, 1);
-        if (!d.spec.pipeline.length) delete d.spec.pipeline;
-      });
-    });
-    return;
-  }
-
-  var syncBtn = e.target.closest("[data-wl-sync-app]");
-  if (syncBtn) {
-    var rname = syncBtn.getAttribute("data-wl-sync-app");
-    var appInp = box.querySelector('[data-wl-app="' + rname + '"]');
-    var val = appInp ? appInp.value.trim() : "";
-    if (!val) val = rname;
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname; });
-        if (!r) return;
-        r.fields = r.fields || {};
-        delete r.fields["spec.selector.matchLabels.app"];
-        delete r.fields["spec.template.metadata.labels.app"];
-        r.fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: val }) };
-        r.fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: val }) };
-        if (!r.fields["spec.template.spec.containers[0].name"]) {
-          r.fields["spec.template.spec.containers[0].name"] = { value: rname };
-        }
-      });
-    });
-    return;
-  }
-
-  var svcMatchBtn = e.target.closest("[data-svc-match-wl]");
-  if (svcMatchBtn) {
-    var rname2 = svcMatchBtn.getAttribute("data-svc-match-wl");
-    var matchApp = svcMatchBtn.getAttribute("data-match-app") || "";
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname2; });
-        if (!r) return;
-        r.fields = r.fields || {};
-        delete r.fields["spec.selector.app"];
-        r.fields["spec.selector"] = { raw: JSON.stringify({ app: matchApp }) };
-        r.fields["spec.ports[0].port"] = { raw: "8080" };
-      });
-    });
-    return;
-  }
-
-  var stdLblBtn = e.target.closest("[data-apply-std-labels]");
-  if (stdLblBtn) {
-    var rname3 = stdLblBtn.getAttribute("data-apply-std-labels");
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname3; });
-        if (!r) return;
-        r.annotations = r.annotations || {};
-        r.annotations["app.kubernetes.io/managed-by"] = { value: "crossplane" };
-        r.annotations["app.kubernetes.io/name"] = { raw: "'{{ $xr }}'" };
-        r.annotations["app.kubernetes.io/instance"] = { raw: "'{{ $xr }}'" };
-      });
-    });
-    return;
-  }
-
-  var extNameBtn = e.target.closest("[data-apply-ext-name]");
-  if (extNameBtn) {
-    var rname4 = extNameBtn.getAttribute("data-apply-ext-name");
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname4; });
-        if (!r) return;
-        r.annotations = r.annotations || {};
-        r.annotations["crossplane.io/external-name"] = { raw: "'{{ $xr }}-" + rname4 + "'" };
-      });
-    });
-    return;
+function onBoxClick(e) {
+  for (var i = 0; i < boxClickActions.length; i++) {
+    var item = boxClickActions[i];
+    var el = e.target.closest(item.selector);
+    if (el) {
+      if (item.needsDoc) {
+        var d = store.state.doc;
+        if (!d) return;
+        item.run(el, d);
+      } else {
+        item.run(el);
+      }
+      return;
+    }
   }
 }
+
+var wlSimpleFieldMap = {
+  "data-wl-replicas": "spec.replicas",
+  "data-wl-image": "spec.template.spec.containers[0].image",
+  "data-wl-cname": "spec.template.spec.containers[0].name",
+  "data-wl-cport": "spec.template.spec.containers[0].ports[0].containerPort",
+  "data-svc-app": "spec.selector.app",
+  "data-svc-port": "spec.ports[0].port",
+  "data-svc-tgtport": "spec.ports[0].targetPort",
+  "data-svc-type": "spec.type"
+};
+
+var directCommitMap = {
+  "data-v": function (t) { commitValue(t.getAttribute("data-v"), "value", t.value); },
+  "data-raw": function (t) { commitValue(t.getAttribute("data-raw"), "raw", t.value); },
+  "data-env-v": function (t) { commitEnvelopeValue(t.getAttribute("data-env-v"), "value", t.value); },
+  "data-env-raw": function (t) { commitEnvelopeValue(t.getAttribute("data-env-raw"), "raw", t.value); }
+};
+
+var paramFieldUpdaters = {
+  "data-pt": function (t) { return { type: t.value }; },
+  "data-pr": function (t) { return { required: t.checked }; },
+  "data-pdef": function (t) { return { default: t.value }; },
+  "data-pe": function (t) {
+    var vals = t.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    return { enum: vals.length ? vals : null };
+  }
+};
+
+var xrdFieldUpdaters = {
+  xk: function (t) {
+    var kv = t.value.trim();
+    if (!kv) { render(); return; }
+    op(function () {
+      return store.replaceDoc(function (d) { d.spec.xrd.kind = kv; });
+    }).then(function (r) { if (r === null) render(); });
+  },
+  xs: function (t) {
+    var sv = t.value;
+    op(function () {
+      return store.replaceDoc(function (d) { d.spec.xrd.scope = sv; });
+    }).then(function (r) { if (r === null) render(); });
+  }
+};
+
+var pipeAttrs = {
+  "data-pipe-name": "name",
+  "data-pipe-pos": "position",
+  "data-pipe-fn": "functionRef",
+  "data-pipe-pkg": "package",
+  "data-pipe-input": "input"
+};
 
 function onBoxChange(e) {
   var t = e.target;
   if (!t) return;
   var doc = store.state.doc;
-  if (e.target.matches("[data-when-param],[data-when-op],[data-when-val]")) {
-    var wrn = e.target.getAttribute("data-when-param") ||
-      e.target.getAttribute("data-when-op") || e.target.getAttribute("data-when-val");
+  if (t.matches("[data-when-param],[data-when-op],[data-when-val]")) {
+    var wrn = t.getAttribute("data-when-param") ||
+      t.getAttribute("data-when-op") || t.getAttribute("data-when-val");
     var expr = whenFromControls(box, wrn);
     store.replaceDoc(function (d) {
       var r = d.spec.resources.find(function (x) { return x.name === wrn; });
@@ -1473,9 +1581,9 @@ function onBoxChange(e) {
     });
     return;
   }
-  if (e.target.matches("select[data-foreach]")) {
-    var rn = e.target.getAttribute("data-foreach");
-    var val = e.target.value;
+  if (t.matches("select[data-foreach]")) {
+    var rn = t.getAttribute("data-foreach");
+    var val = t.value;
     store.replaceDoc(function (d) {
       var r = d.spec.resources.find(function (x) { return x.name === rn; });
       if (!r) return;
@@ -1502,130 +1610,32 @@ function onBoxChange(e) {
     return;
   }
 
-  if (t.hasAttribute("data-wl-replicas")) {
-    var wlRepRname = t.getAttribute("data-wl-replicas");
-    var wlRepVal = t.value.trim();
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === wlRepRname; });
-        if (!r) return;
-        r.fields = r.fields || {};
-        if (wlRepVal) r.fields["spec.replicas"] = { value: wlRepVal };
-        else delete r.fields["spec.replicas"];
-      });
-    });
-    return;
+  for (var wlAttr in wlSimpleFieldMap) {
+    if (t.hasAttribute(wlAttr)) {
+      var wlRname = t.getAttribute(wlAttr);
+      var wlPath = wlSimpleFieldMap[wlAttr];
+      var wlVal = t.value.trim();
+      (function (rName, fPath, fVal) {
+        op(function () {
+          return store.replaceDoc(function (d) {
+            var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rName; });
+            if (!r) return;
+            r.fields = r.fields || {};
+            if (fVal) r.fields[fPath] = { value: fVal };
+            else delete r.fields[fPath];
+          });
+        });
+      })(wlRname, wlPath, wlVal);
+      return;
+    }
   }
 
-  if (t.hasAttribute("data-wl-image")) {
-    var wlImgRname = t.getAttribute("data-wl-image");
-    var wlImgVal = t.value.trim();
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === wlImgRname; });
-        if (!r) return;
-        r.fields = r.fields || {};
-        if (wlImgVal) r.fields["spec.template.spec.containers[0].image"] = { value: wlImgVal };
-        else delete r.fields["spec.template.spec.containers[0].image"];
-      });
-    });
-    return;
+  for (var directAttr in directCommitMap) {
+    if (t.hasAttribute(directAttr)) {
+      directCommitMap[directAttr](t);
+      return;
+    }
   }
-
-  if (t.hasAttribute("data-wl-cname")) {
-    var wlCnRname = t.getAttribute("data-wl-cname");
-    var wlCnVal = t.value.trim();
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === wlCnRname; });
-        if (!r) return;
-        r.fields = r.fields || {};
-        if (wlCnVal) r.fields["spec.template.spec.containers[0].name"] = { value: wlCnVal };
-        else delete r.fields["spec.template.spec.containers[0].name"];
-      });
-    });
-    return;
-  }
-
-  if (t.hasAttribute("data-wl-cport")) {
-    var wlCpRname = t.getAttribute("data-wl-cport");
-    var wlCpVal = t.value.trim();
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === wlCpRname; });
-        if (!r) return;
-        r.fields = r.fields || {};
-        if (wlCpVal) r.fields["spec.template.spec.containers[0].ports[0].containerPort"] = { value: wlCpVal };
-        else delete r.fields["spec.template.spec.containers[0].ports[0].containerPort"];
-      });
-    });
-    return;
-  }
-
-  if (t.hasAttribute("data-svc-app")) {
-    var svcAppRname = t.getAttribute("data-svc-app");
-    var svcAppVal = t.value.trim();
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === svcAppRname; });
-        if (!r) return;
-        r.fields = r.fields || {};
-        if (svcAppVal) r.fields["spec.selector.app"] = { value: svcAppVal };
-        else delete r.fields["spec.selector.app"];
-      });
-    });
-    return;
-  }
-
-  if (t.hasAttribute("data-svc-port")) {
-    var svcPortRname = t.getAttribute("data-svc-port");
-    var svcPortVal = t.value.trim();
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === svcPortRname; });
-        if (!r) return;
-        r.fields = r.fields || {};
-        if (svcPortVal) r.fields["spec.ports[0].port"] = { value: svcPortVal };
-        else delete r.fields["spec.ports[0].port"];
-      });
-    });
-    return;
-  }
-
-  if (t.hasAttribute("data-svc-tgtport")) {
-    var svcTgtRname = t.getAttribute("data-svc-tgtport");
-    var svcTgtVal = t.value.trim();
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === svcTgtRname; });
-        if (!r) return;
-        r.fields = r.fields || {};
-        if (svcTgtVal) r.fields["spec.ports[0].targetPort"] = { value: svcTgtVal };
-        else delete r.fields["spec.ports[0].targetPort"];
-      });
-    });
-    return;
-  }
-
-  if (t.hasAttribute("data-svc-type")) {
-    var svcTypeRname = t.getAttribute("data-svc-type");
-    var svcTypeVal = t.value;
-    op(function () {
-      return store.replaceDoc(function (d) {
-        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === svcTypeRname; });
-        if (!r) return;
-        r.fields = r.fields || {};
-        if (svcTypeVal) r.fields["spec.type"] = { value: svcTypeVal };
-        else delete r.fields["spec.type"];
-      });
-    });
-    return;
-  }
-
-  if (t.hasAttribute("data-v")) { commitValue(t.getAttribute("data-v"), "value", t.value); return; }
-  if (t.hasAttribute("data-raw")) { commitValue(t.getAttribute("data-raw"), "raw", t.value); return; }
-  if (t.hasAttribute("data-env-v")) { commitEnvelopeValue(t.getAttribute("data-env-v"), "value", t.value); return; }
-  if (t.hasAttribute("data-env-raw")) { commitEnvelopeValue(t.getAttribute("data-env-raw"), "raw", t.value); return; }
 
   if (t.hasAttribute("data-wire")) {
     var path = t.getAttribute("data-wire");
@@ -1668,88 +1678,75 @@ function onBoxChange(e) {
     var mProps = cloneProps((paramsOf(doc)[mParam] || {}).properties);
     var mLoc = memberParent(mProps, mPath);
     if (!mLoc) return;
-    if (mAttr === "data-mname") {
-      var mNew = t.value.trim();
-      if (!mNew || mNew === mLoc.key) { render(); return; }
-      if (mLoc.parent[mNew]) { render(); return; } // duplicate name: keep the old
-      mLoc.parent[mNew] = mLoc.parent[mLoc.key];
-      delete mLoc.parent[mLoc.key];
-    } else if (mAttr === "data-mtype") {
-      mLoc.parent[mLoc.key].type = t.value;
-      if (t.value !== "object") delete mLoc.parent[mLoc.key].properties;
-      if (t.value === "object") { delete mLoc.parent[mLoc.key].default; delete mLoc.parent[mLoc.key].enum; }
-    } else if (mAttr === "data-mreq") {
-      mLoc.parent[mLoc.key].required = t.checked;
-    } else {
-      if (t.value) mLoc.parent[mLoc.key].default = t.value;
-      else delete mLoc.parent[mLoc.key].default;
+    var memberHandler = {
+      "data-mname": function () {
+        var mNew = t.value.trim();
+        if (!mNew || mNew === mLoc.key) { render(); return false; }
+        if (mLoc.parent[mNew]) { render(); return false; }
+        mLoc.parent[mNew] = mLoc.parent[mLoc.key];
+        delete mLoc.parent[mLoc.key];
+        return true;
+      },
+      "data-mtype": function () {
+        mLoc.parent[mLoc.key].type = t.value;
+        if (t.value !== "object") delete mLoc.parent[mLoc.key].properties;
+        if (t.value === "object") { delete mLoc.parent[mLoc.key].default; delete mLoc.parent[mLoc.key].enum; }
+        return true;
+      },
+      "data-mreq": function () {
+        mLoc.parent[mLoc.key].required = t.checked;
+        return true;
+      },
+      "data-mdef": function () {
+        if (t.value) mLoc.parent[mLoc.key].default = t.value;
+        else delete mLoc.parent[mLoc.key].default;
+        return true;
+      }
+    };
+    if (memberHandler[mAttr] && memberHandler[mAttr]()) {
+      op(function () { return commitMembers(mParam, mProps); })
+        .then(function (r) { if (r === null) render(); });
     }
-    op(function () { return commitMembers(mParam, mProps); })
-      .then(function (r) { if (r === null) render(); });
     return;
   }
 
   var params = paramsOf(doc);
-  if (t.hasAttribute("data-pt")) {
-    var n1 = t.getAttribute("data-pt");
-    op(function () { return store.updateParameter(n1, paramFrom(params[n1], { type: t.value })); })
-      .then(function (r) { if (r === null) render(); });
-    return;
+  for (var pAttr in paramFieldUpdaters) {
+    if (t.hasAttribute(pAttr)) {
+      var paramName = t.getAttribute(pAttr);
+      var patch = paramFieldUpdaters[pAttr](t);
+      (function (pn, pPatch) {
+        op(function () { return store.updateParameter(pn, paramFrom(params[pn], pPatch)); })
+          .then(function (r) { if (r === null) render(); });
+      })(paramName, patch);
+      return;
+    }
   }
-  if (t.hasAttribute("data-pr")) {
-    var n2 = t.getAttribute("data-pr");
-    op(function () { return store.updateParameter(n2, paramFrom(params[n2], { required: t.checked })); })
-      .then(function (r) { if (r === null) render(); });
-    return;
-  }
-  if (t.hasAttribute("data-pdef")) {
-    var n3 = t.getAttribute("data-pdef");
-    op(function () { return store.updateParameter(n3, paramFrom(params[n3], { default: t.value })); })
-      .then(function (r) { if (r === null) render(); });
-    return;
-  }
-  if (t.hasAttribute("data-pe")) {
-    var n4 = t.getAttribute("data-pe");
-    var vals = t.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
-    op(function () { return store.updateParameter(n4, paramFrom(params[n4], { enum: vals.length ? vals : null })); })
-      .then(function (r) { if (r === null) render(); });
+
+  if (xrdFieldUpdaters[t.id]) {
+    xrdFieldUpdaters[t.id](t);
     return;
   }
 
-  if (t.id === "xk") {
-    var kv = t.value.trim();
-    if (!kv) { render(); return; }
-    op(function () {
-      return store.replaceDoc(function (d) { d.spec.xrd.kind = kv; });
-    }).then(function (r) { if (r === null) render(); });
-    return;
-  }
-  if (t.id === "xs") {
-    var sv = t.value;
-    op(function () {
-      return store.replaceDoc(function (d) { d.spec.xrd.scope = sv; });
-    }).then(function (r) { if (r === null) render(); });
-    return;
-  }
-
-  if (t.hasAttribute("data-pipe-name") || t.hasAttribute("data-pipe-pos") || t.hasAttribute("data-pipe-fn") || t.hasAttribute("data-pipe-pkg") || t.hasAttribute("data-pipe-input")) {
-    var pidx2 = parseInt(t.getAttribute("data-pipe-name") || t.getAttribute("data-pipe-pos") || t.getAttribute("data-pipe-fn") || t.getAttribute("data-pipe-pkg") || t.getAttribute("data-pipe-input"), 10);
-    var attr = t.hasAttribute("data-pipe-name") ? "name"
-      : t.hasAttribute("data-pipe-pos") ? "position"
-      : t.hasAttribute("data-pipe-fn") ? "functionRef"
-      : t.hasAttribute("data-pipe-pkg") ? "package" : "input";
-    var pval = t.value;
-    op(function () {
-      return store.replaceDoc(function (d) {
-        if (!d.spec.pipeline || !d.spec.pipeline[pidx2]) return;
-        if (attr === "input" && !pval.trim()) {
-          delete d.spec.pipeline[pidx2].input;
-        } else {
-          d.spec.pipeline[pidx2][attr] = pval;
-        }
-      });
-    }).then(function (r) { if (r === null) render(); });
-    return;
+  for (var pipeAttr in pipeAttrs) {
+    if (t.hasAttribute(pipeAttr)) {
+      var pidx2 = parseInt(t.getAttribute(pipeAttr), 10);
+      var attrKey = pipeAttrs[pipeAttr];
+      var pval = t.value;
+      (function (idx, key, val) {
+        op(function () {
+          return store.replaceDoc(function (d) {
+            if (!d.spec.pipeline || !d.spec.pipeline[idx]) return;
+            if (key === "input" && !val.trim()) {
+              delete d.spec.pipeline[idx].input;
+            } else {
+              d.spec.pipeline[idx][key] = val;
+            }
+          });
+        }).then(function (r) { if (r === null) render(); });
+      })(pidx2, attrKey, pval);
+      return;
+    }
   }
 }
 
