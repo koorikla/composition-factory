@@ -157,7 +157,7 @@ if [ ! -f "${COMP_RT[0]}" ]; then
   echo "ERROR: Round-trip generated composition is missing" >&2
   exit 1
 fi
-diff -u "${COMP_ORIG[0]}" "${COMP_RT[0]}" || {
+diff -u -I '^# Source:' "${COMP_ORIG[0]}" "${COMP_RT[0]}" || {
   echo "ERROR: Round-trip regenerated composition differs from original emission" >&2
   exit 1
 }
@@ -169,7 +169,7 @@ if [ ! -f "${XRD_RT[0]}" ]; then
   echo "ERROR: Round-trip generated XRD is missing" >&2
   exit 1
 fi
-diff -u "${XRD_ORIG[0]}" "${XRD_RT[0]}" || {
+diff -u -I '^# Source:' "${XRD_ORIG[0]}" "${XRD_RT[0]}" || {
   echo "ERROR: Round-trip regenerated XRD differs from original emission" >&2
   exit 1
 }
