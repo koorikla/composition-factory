@@ -19,6 +19,9 @@ This document records the foundational architecture rules, testing loops, and co
 - **Reproducibility**:
   Given the same blueprint and provider versions (or `.cf.lock`), generation must always produce the exact same byte-for-byte outputs.
 
+- **The Round-Trip Rule**:
+  Anything cf generates must survive Kubernetes and come back. Apply it to a real cluster, read it back with `kubectl get <kind> -o yaml`, and cf must be able to import *that* — the server round-tripped form, not the file cf wrote. The API server defaults fields, reorders maps, injects `managedFields`/`creationTimestamp`/`uid`/`resourceVersion`/`status`, and prunes what its schema does not know. An importer exercised only against cf's own output has never met the version of the document that matters operationally. The acceptance form is `cf gen` → `kubectl apply` → `kubectl get -o yaml` → `cf import` → `cf gen` reproducing the original bytes, with server-added fields scrubbed and named in a loss report. Lane C (§3, `make test-cluster`) is where this is proven. An artifact that cannot make the trip is an emitter bug, not an exception for the importer to special-case.
+
 ---
 
 ## 2. Port Contract & Environment Isolation

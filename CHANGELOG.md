@@ -58,10 +58,12 @@ consumer's git diff.
   (294/186/176 → 194/147/137 lines); `internal/cluster` coverage 55.0% → 78.5%;
   the working copy pruned 807 MB → 313 MB. Still open: the canvas dispatch
   ladders and `init` closures, untouched across every pass.
-- `BACKLOG.md` records the round-trip rule as the acceptance bar for the
-  manifest-import track: anything cf generates must survive `kubectl apply` and
-  come back through `kubectl get -o yaml` into `cf import`. The DSL stays the
-  canonical IR; import is a converter into it, not a replacement for it.
+- The round-trip rule is recorded as an Engine Truth in AGENTS.md §1 and as a
+  co-equal architectural principle in `BACKLOG.md`: anything cf generates must
+  survive `kubectl apply` and come back through `kubectl get -o yaml` into
+  `cf import`, with server-added fields scrubbed and named in a loss report.
+  Lane C is where it gets proven. The DSL stays the canonical IR; import is a
+  converter into it, not a replacement for it.
 - Two archive entries corrected where they claimed more than shipped: the
   emitter consolidation covers the planning half only (26 lines of engine-refusal
   preamble are still duplicated byte-for-byte between the KCL and Python

@@ -12,7 +12,9 @@ The `factory.crossplane.io/v1alpha1` `Blueprint` document (`.cf.yaml`) is and re
 
 All user interfaces (Canvas, CLI, API, MCP) operate on this model. Crossplane manifests (`composition.yaml`, `definition.yaml`, `functions.yaml`, `package.yaml`) are deterministic, generated artifacts. Manifest import and adoption act as high-fidelity converters *into* the canonical Blueprint format.
 
-### The round-trip rule
+---
+
+## Architectural Principle: The Round-Trip Rule
 
 **Anything cf generates must survive Kubernetes and come back.** Apply it to a
 real cluster, read it back with `kubectl get <kind> -o yaml`, and cf must be
@@ -21,6 +23,9 @@ wrote. The API server defaults fields, reorders maps, injects `managedFields`,
 `creationTimestamp`, `uid`, `resourceVersion` and `status`, and prunes anything
 the schema does not know; an importer that only reads cf's own output has not
 been tested against the only version of the document that matters operationally.
+
+Recorded in AGENTS.md §1 as an Engine Truth, so it binds every agent and not
+just this backlog.
 
 This is the acceptance bar for Track 1, and it is testable rather than
 aspirational: `cf gen` → `kubectl apply` → `kubectl get -o yaml` → `cf import`
