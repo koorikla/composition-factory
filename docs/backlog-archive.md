@@ -1,3 +1,6 @@
+- [x] Workspace Worktree Hygiene: pruned 10 merged worktrees and deleted 10 merged
+      local branches.
+      — completed 2026-09-03
 - [x] Drag-to-wire type warning action "change parameter type" converts XRD parameter
       type to matching target field type upon user confirmation (`canvas.js:1330`).
       — completed 2026-09-03

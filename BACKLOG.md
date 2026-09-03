@@ -30,12 +30,6 @@ All user interfaces (Canvas, CLI, API, MCP) operate on this model. Crossplane ma
 
 ---
 
-## Track 3 — Workspace & Maintenance
-
-- [ ] **Workspace Worktree Hygiene**: Prune merged local worktree branches that have already been integrated into `main`.
-
----
-
 ## Non-findings (Recorded so they are not re-raised)
 
 - [x] `deploy/k8s/deployment.yaml` passes `--i-know-this-is-unauthenticated` with `--addr 0.0.0.0:8080`. Safe because the Service is ClusterIP.
