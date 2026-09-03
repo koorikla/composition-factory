@@ -93,7 +93,7 @@ function buildTree() {
   // 3. Templates (if FileSystem mode)
   var tplOutputs = [];
   outputs.forEach(function (o) {
-    var tm = /[\\/]templates[\\/][^\\/]+[\\/]([^\\/]+)$/.exec(o.path);
+    var tm = /(?:^|[\\/])templates[\\/][^\\/]+[\\/]([^\\/]+)$/.exec(o.path);
     if (tm) tplOutputs.push({ file: tm[1], path: o.path });
   });
   if (tplOutputs.length > 0) {
@@ -111,8 +111,8 @@ function buildTree() {
   var runtimeAndPcs = [];
   var hasRuntime = false;
   outputs.forEach(function (o) {
-    if (/[\\/]runtime[\\/]/.test(o.path)) hasRuntime = true;
-    var m = /providerconfigs[\/\\]([^\/\\]+)\.yaml$/.exec(o.path);
+    if (/(?:^|[\\/])runtime[\\/]/.test(o.path)) hasRuntime = true;
+    var m = /(?:^|[\\/])providerconfigs[\\/]([^\\/]+)\.yaml$/.exec(o.path);
     if (m) {
       runtimeAndPcs.push({ key: "pc:" + m[1], name: "providerconfigs/" + m[1] + ".yaml", icon: "☁️", path: o.path });
     }
@@ -177,8 +177,8 @@ function buildTabs() {
   var hasRuntime = false;
   var tplOutputs = [];
   outputs.forEach(function (o) {
-    if (/[\\/]runtime[\\/]/.test(o.path)) hasRuntime = true;
-    var tm = /[\\/]templates[\\/][^\\/]+[\\/]([^\\/]+)$/.exec(o.path);
+    if (/(?:^|[\\/])runtime[\\/]/.test(o.path)) hasRuntime = true;
+    var tm = /(?:^|[\\/])templates[\\/][^\\/]+[\\/]([^\\/]+)$/.exec(o.path);
     if (tm) tplOutputs.push({ file: tm[1], path: o.path });
   });
   tplOutputs.sort(function (a, b) { return a.file < b.file ? -1 : 1; });
@@ -192,7 +192,7 @@ function buildTabs() {
 
   // one tab per generated providerconfig family (outputs carry the bodies)
   outputs.forEach(function (o) {
-    var m = /providerconfigs[\/\\]([^\/\\]+)\.yaml$/.exec(o.path);
+    var m = /(?:^|[\\/])providerconfigs[\\/]([^\\/]+)\.yaml$/.exec(o.path);
     if (!m) return;
     var key = "pc:" + m[1];
     h += '<button data-t="' + key + '" aria-pressed="' + (tab === key) + '">providerconfigs/' + m[1] + ".yaml</button>";
@@ -228,7 +228,7 @@ function matchOutput(which) {
     }
     return null;
   }
-  var dirRe = which === "comp" ? /[\\/]compositions[\\/]/ : /[\\/]xrds[\\/]/;
+  var dirRe = which === "comp" ? /(?:^|[\\/])compositions[\\/]/ : /(?:^|[\\/])xrds[\\/]/;
   var kindRe = which === "comp"
     ? /^kind:\s*Composition\s*$/m
     : /^kind:\s*CompositeResourceDefinition\s*$/m;
@@ -278,7 +278,7 @@ function currentText() {
   if (tab === "runtime") {
     var g = store.state.lastGenerate;
     var rts = (g && g.outputs || []).filter(function (o) {
-      return /[\\/]runtime[\\/]/.test(o.path);
+      return /(?:^|[\\/])runtime[\\/]/.test(o.path);
     });
     return rts.length ? rts[0].body : "";
   }
@@ -286,7 +286,7 @@ function currentText() {
     var file = tab.slice(4);
     var g = store.state.lastGenerate;
     var tpls = (g && g.outputs || []).filter(function (o) {
-      return o.path.endsWith("/" + file) || o.path.endsWith("\\" + file);
+      return o.path.endsWith("/" + file) || o.path.endsWith("\\" + file) || o.path === file;
     });
     return tpls.length ? tpls[0].body : "";
   }
@@ -415,7 +415,7 @@ function updateNextSteps(result) {
   if (result && result.outputs && result.outputs.length > 0) {
     var outPath = "out";
     var first = result.outputs[0].path || "";
-    var m = /^(.*?)(?:[\\/]compositions[\\/]|[\\/]xrds[\\/]|[\\/]templates[\\/]|[\\/]runtime[\\/]|[\\/]providerconfigs[\\/]|functions\.yaml|package\.yaml)/.exec(first);
+    var m = /^(.*?)(?:(?:^|[\\/])compositions[\\/]|(?:^|[\\/])xrds[\\/]|(?:^|[\\/])templates[\\/]|(?:^|[\\/])runtime[\\/]|(?:^|[\\/])providerconfigs[\\/]|functions\.yaml|package\.yaml)/.exec(first);
     if (m && m[1]) {
       outPath = m[1].replace(/[\\/]$/, "") || "out";
     } else if (first.indexOf("/") !== -1 || first.indexOf("\\") !== -1) {
