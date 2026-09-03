@@ -1,0 +1,35 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: metalosses.platform.example.org
+spec:
+  pipeline:
+  - functionRef: function-auto-ready
+    name: auto-ready
+    package: xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0
+    position: after
+  resources:
+  - fields: {}
+    kind: ServiceAccount
+    name: sa
+    provider: k8s
+  - fields:
+      data[app]:
+        from: params.appName
+    kind: ConfigMap
+    name: cm
+    provider: k8s
+  xrd:
+    group: platform.example.org
+    kind: MetaLoss
+    parameters:
+      appName:
+        required: false
+        type: string
+      providerName:
+        description: Crossplane ProviderConfig name to use for managed resources
+        required: true
+        type: string
+    plural: metalosss
+    scope: Namespaced
+    version: v1alpha1

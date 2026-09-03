@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tp-int
+  namespace: cf-agent-a287eb9767f100a9d-089857
+spec:
+  selector:
+    app: demo
+  ports:
+    - port: 80
+      targetPort: 8080

@@ -1,0 +1,15 @@
+apiVersion: elasticache.aws.m.upbound.io/v1beta1
+kind: Cluster
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: cache
+  name: shop-8f8a2870ec9b
+  namespace: cf-agent-a287eb9767f100a9d-089857
+  labels:
+    crossplane.io/composite: shop
+spec:
+  forProvider:
+    region: eu-north-1
+status:
+  atProvider:
+    clusterAddress: "true"

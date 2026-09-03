@@ -1,0 +1,31 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: statuswire
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-elasticache:v2.7.0
+  xrd:
+    group: platform.example.org
+    version: v1alpha1
+    kind: StatusWire
+    plural: statuswires
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+      region: {type: string, required: true}
+  resources:
+    - name: cache
+      kind: Cluster
+      provider: ghcr.io/crossplane-contrib/provider-aws-elasticache:v2.7.0
+      fields:
+        region: {from: params.region}
+        engine: {value: redis}
+
+    - name: cm
+      kind: ConfigMap
+      provider: k8s
+      annotations:
+        platform.example.org/endpoint: {from: resources.cache.status.atProvider.clusterAddress}
+      fields:
+        data[endpoint]: {from: resources.cache.status.atProvider.clusterAddress}

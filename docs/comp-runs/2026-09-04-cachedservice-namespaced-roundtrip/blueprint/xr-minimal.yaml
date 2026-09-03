@@ -1,0 +1,9 @@
+apiVersion: platform.example.org/v1alpha1
+kind: CachedService
+metadata:
+  name: shop
+  namespace: cf-agent-a287eb9767f100a9d-089857
+spec:
+  appName: shop
+  providerName: default
+  region: eu-north-1

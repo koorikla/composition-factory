@@ -1,0 +1,7 @@
+apiVersion: v1
+data:
+  endpoint: true
+kind: ConfigMap
+metadata:
+  name: probe-cm
+  namespace: cf-agent-a287eb9767f100a9d-089857

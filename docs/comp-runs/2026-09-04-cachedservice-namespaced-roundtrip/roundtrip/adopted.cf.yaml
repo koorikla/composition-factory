@@ -1,0 +1,151 @@
+# adopt: dropped metadata.creationTimestamp (scrubbed server-side metadata field)
+# adopt: dropped metadata.uid (scrubbed server-side metadata field)
+# adopt: dropped metadata.resourceVersion (scrubbed server-side metadata field)
+# adopt: dropped metadata.generation (scrubbed server-side metadata field)
+# adopt: dropped metadata.annotations[kubectl.kubernetes.io/last-applied-configuration] (scrubbed server-side annotation)
+# adopt: dropped status (scrubbed runtime status block)
+# adopt: dropped metadata.creationTimestamp (scrubbed server-side metadata field)
+# adopt: dropped metadata.uid (scrubbed server-side metadata field)
+# adopt: dropped metadata.resourceVersion (scrubbed server-side metadata field)
+# adopt: dropped metadata.generation (scrubbed server-side metadata field)
+# adopt: dropped metadata.annotations[kubectl.kubernetes.io/last-applied-configuration] (scrubbed server-side annotation)
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: cachedservices.platform.example.org.w089857.cf-test
+spec:
+  pipeline:
+  - functionRef: function-auto-ready
+    name: auto-ready
+    package: xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0
+    position: after
+  resources:
+  - fields: {}
+    kind: ServiceAccount
+    name: sa
+    provider: k8s
+  - fields:
+      applyImmediately:
+        value: "true"
+      engine:
+        value: redis
+      nodeType:
+        from: params.cacheNodeType
+      numCacheNodes:
+        value: "1"
+      region:
+        from: params.region
+    kind: Cluster
+    name: cache
+    provider: ghcr.io/crossplane-contrib/provider-aws-elasticache:v2.7.0
+    when: params.enableCache
+  - annotations:
+      platform.example.org/cache-endpoint:
+        from: resources.cache.status.atProvider.clusterAddress
+    fields:
+      spec.replicas:
+        from: params.replicas
+      spec.selector.matchLabels[app]:
+        from: params.appName
+      spec.template.metadata.labels[app]:
+        from: params.appName
+      spec.template.spec.containers[0].env[0].name:
+        value: CACHE_ENDPOINT
+      spec.template.spec.containers[0].env[0].value:
+        from: resources.cache.status.atProvider.clusterAddress
+      spec.template.spec.containers[0].image:
+        from: params.image
+      spec.template.spec.containers[0].name:
+        value: app
+      spec.template.spec.containers[0].ports[0].containerPort:
+        value: "8080"
+      spec.template.spec.containers[0].ports[0].name:
+        value: http
+      spec.template.spec.serviceAccountName:
+        from: resources.sa.metadata.name
+    kind: Deployment
+    name: deployment
+    provider: k8s
+  - fields:
+      spec.ports[0].port:
+        value: "80"
+      spec.ports[0].targetPort:
+        value: http
+      spec.selector[app]:
+        from: params.appName
+    kind: Service
+    name: service
+    provider: k8s
+  - fields:
+      spec.maxReplicas:
+        from: params.maxReplicas
+      spec.minReplicas:
+        from: params.replicas
+      spec.scaleTargetRef.apiVersion:
+        value: apps/v1
+      spec.scaleTargetRef.kind:
+        value: Deployment
+      spec.scaleTargetRef.name:
+        from: resources.deployment.metadata.name
+    kind: HorizontalPodAutoscaler
+    name: hpa
+    provider: k8s
+  - fields:
+      data[app]:
+        from: params.appName
+      data[shard]:
+        raw: '{{ $i | quote }}'
+    forEach: params.shardCount
+    kind: ConfigMap
+    name: shard-config
+    provider: k8s
+  sources:
+  - provider: ghcr.io/crossplane-contrib/provider-aws-elasticache:v2.7.0
+  xrd:
+    group: platform.example.org.w089857.cf-test
+    kind: CachedService
+    parameters:
+      appName:
+        description: DNS label used for the workload and its selectors.
+        required: true
+        type: string
+      cacheNodeType:
+        description: Optional ElastiCache node type. Omit to let AWS pick the default.
+        required: false
+        type: string
+      enableCache:
+        default: "true"
+        description: Whether to provision the managed cache.
+        required: false
+        type: boolean
+      image:
+        default: nginx:1.27-alpine
+        description: Container image for the service workload.
+        required: false
+        type: string
+      maxReplicas:
+        default: "5"
+        description: Upper bound for the HorizontalPodAutoscaler.
+        required: false
+        type: integer
+      providerName:
+        description: Name of the ProviderConfig to use.
+        required: true
+        type: string
+      region:
+        description: AWS region for the ElastiCache cluster.
+        required: true
+        type: string
+      replicas:
+        default: "2"
+        description: Desired replica count for the Deployment.
+        required: false
+        type: integer
+      shardCount:
+        default: "2"
+        description: Number of per-shard ConfigMaps to render.
+        required: false
+        type: integer
+    plural: cachedservices
+    scope: Namespaced
+    version: v1alpha1

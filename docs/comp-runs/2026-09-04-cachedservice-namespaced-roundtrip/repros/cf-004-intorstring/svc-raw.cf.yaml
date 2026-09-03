@@ -1,0 +1,21 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: svc-only
+spec:
+  xrd:
+    group: platform.example.org
+    version: v1alpha1
+    kind: SvcOnly
+    plural: svconlys
+    scope: Namespaced
+    parameters:
+      appName: {type: string, required: true}
+  resources:
+    - name: service
+      kind: Service
+      provider: k8s
+      fields:
+        spec.selector[app]: {from: params.appName}
+        spec.ports[0].port: {value: 80}
+        spec.ports[0].targetPort: {raw: "8080"}

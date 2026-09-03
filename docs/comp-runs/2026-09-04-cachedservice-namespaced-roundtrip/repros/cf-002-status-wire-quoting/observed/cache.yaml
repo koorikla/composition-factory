@@ -1,0 +1,15 @@
+apiVersion: elasticache.aws.m.upbound.io/v1beta1
+kind: Cluster
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: cache
+  name: probe-abc123
+  namespace: default
+  labels:
+    crossplane.io/composite: probe
+spec:
+  forProvider:
+    region: eu-north-1
+status:
+  atProvider:
+    clusterAddress: "true"

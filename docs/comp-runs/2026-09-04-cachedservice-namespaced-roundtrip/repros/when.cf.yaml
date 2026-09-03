@@ -1,0 +1,37 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: when-optional
+spec:
+  xrd:
+    group: platform.example.org
+    version: v1alpha1
+    kind: WhenOptional
+    plural: whenoptionals
+    scope: Namespaced
+    parameters:
+      appName: {type: string, required: true}
+      # optional boolean, no default -- absent from a stored XR unless the user sets it
+      enableExtra: {type: boolean}
+      # optional integer, no default
+      extraCount: {type: integer}
+  resources:
+    - name: base
+      kind: ConfigMap
+      provider: k8s
+      fields:
+        data[app]: {from: params.appName}
+
+    - name: extra
+      kind: ConfigMap
+      provider: k8s
+      when: params.enableExtra
+      fields:
+        data[app]: {from: params.appName}
+
+    - name: looped
+      kind: ConfigMap
+      provider: k8s
+      forEach: params.extraCount
+      fields:
+        data[app]: {from: params.appName}

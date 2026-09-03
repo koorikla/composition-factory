@@ -1,0 +1,24 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: intstr
+spec:
+  xrd:
+    group: platform.example.org
+    version: v1alpha1
+    kind: IntStr
+    plural: intstrs
+    scope: Namespaced
+    parameters:
+      appName: {type: string, required: true}
+  resources:
+    - name: deployment
+      kind: Deployment
+      provider: k8s
+      fields:
+        spec.selector.matchLabels[app]: {from: params.appName}
+        spec.template.metadata.labels[app]: {from: params.appName}
+        spec.template.spec.containers[0].name: {value: app}
+        spec.template.spec.containers[0].image: {value: "nginx:1.27-alpine"}
+        spec.strategy.type: {value: RollingUpdate}
+        spec.strategy.rollingUpdate.maxUnavailable: {value: 1}

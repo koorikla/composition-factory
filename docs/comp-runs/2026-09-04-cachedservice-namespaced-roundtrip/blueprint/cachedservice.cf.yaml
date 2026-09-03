@@ -1,0 +1,109 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: cached-service
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-elasticache:v2.7.0
+  xrd:
+    group: platform.example.org
+    version: v1alpha1
+    kind: CachedService
+    plural: cachedservices
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: Name of the ProviderConfig to use.
+      appName:
+        type: string
+        required: true
+        description: DNS label used for the workload and its selectors.
+      region:
+        type: string
+        required: true
+        description: AWS region for the ElastiCache cluster.
+      image:
+        type: string
+        default: nginx:1.27-alpine
+        description: Container image for the service workload.
+      replicas:
+        type: integer
+        default: 2
+        description: Desired replica count for the Deployment.
+      maxReplicas:
+        type: integer
+        default: 5
+        description: Upper bound for the HorizontalPodAutoscaler.
+      cacheNodeType:
+        type: string
+        description: Optional ElastiCache node type. Omit to let AWS pick the default.
+      enableCache:
+        type: boolean
+        default: true
+        description: Whether to provision the managed cache.
+      shardCount:
+        type: integer
+        default: 2
+        description: Number of per-shard ConfigMaps to render.
+  resources:
+    - name: sa
+      kind: ServiceAccount
+      provider: k8s
+      fields:
+        metadata.labels[app]: {from: params.appName}
+
+    - name: cache
+      kind: Cluster
+      provider: ghcr.io/crossplane-contrib/provider-aws-elasticache:v2.7.0
+      when: params.enableCache
+      fields:
+        region: {from: params.region}
+        engine: {value: redis}
+        numCacheNodes: {value: 1}
+        applyImmediately: {value: true}
+        nodeType: {from: params.cacheNodeType}
+
+    - name: deployment
+      kind: Deployment
+      provider: k8s
+      annotations:
+        platform.example.org/cache-endpoint: {from: resources.cache.status.atProvider.clusterAddress}
+      fields:
+        spec.replicas: {from: params.replicas}
+        spec.selector.matchLabels[app]: {from: params.appName}
+        spec.template.metadata.labels[app]: {from: params.appName}
+        spec.template.spec.serviceAccountName: {from: resources.sa.metadata.name}
+        spec.template.spec.containers[0].name: {value: app}
+        spec.template.spec.containers[0].image: {from: params.image}
+        spec.template.spec.containers[0].ports[0].name: {value: http}
+        spec.template.spec.containers[0].ports[0].containerPort: {value: 8080}
+        spec.template.spec.containers[0].env[0].name: {value: CACHE_ENDPOINT}
+        spec.template.spec.containers[0].env[0].value: {from: resources.cache.status.atProvider.clusterAddress}
+
+    - name: service
+      kind: Service
+      provider: k8s
+      fields:
+        spec.selector[app]: {from: params.appName}
+        spec.ports[0].port: {value: 80}
+        spec.ports[0].targetPort: {value: http}
+
+    - name: hpa
+      kind: HorizontalPodAutoscaler
+      provider: k8s
+      fields:
+        spec.scaleTargetRef.apiVersion: {value: apps/v1}
+        spec.scaleTargetRef.kind: {value: Deployment}
+        spec.scaleTargetRef.name: {from: resources.deployment.metadata.name}
+        spec.minReplicas: {from: params.replicas}
+        spec.maxReplicas: {from: params.maxReplicas}
+
+    - name: shard-config
+      kind: ConfigMap
+      provider: k8s
+      forEach: params.shardCount
+      fields:
+        data[app]: {from: params.appName}
+        data[shard]: {raw: '{{ $i | quote }}'}

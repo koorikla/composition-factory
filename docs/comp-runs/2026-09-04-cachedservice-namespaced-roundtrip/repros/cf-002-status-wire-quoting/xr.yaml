@@ -1,0 +1,8 @@
+apiVersion: platform.example.org/v1alpha1
+kind: StatusWire
+metadata:
+  name: probe
+  namespace: default
+spec:
+  providerName: default
+  region: eu-north-1

@@ -1,0 +1,143 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"apiextensions.crossplane.io/v1","kind":"Composition","metadata":{"annotations":{},"name":"cachedservices.platform.example.org.w089857.cf-test"},"spec":{"compositeTypeRef":{"apiVersion":"platform.example.org.w089857.cf-test/v1alpha1","kind":"CachedService"},"mode":"Pipeline","pipeline":[{"functionRef":{"name":"function-go-templating"},"input":{"apiVersion":"gotemplating.fn.crossplane.io/v1beta1","inline":{"template":"{{- $spec := .observed.composite.resource.spec -}}\n{{- $xr := .observed.composite.resource.metadata.name -}}\n{{- $xrMeta := .observed.composite.resource.metadata -}}\n---\napiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: {{ $xr }}-sa\n  annotations:\n    {{ setResourceNameAnnotation \"sa\" }}\n  labels:\n    app: {{ $spec.appName | quote }}\n{{- if $spec.enableCache }}\n---\napiVersion: elasticache.aws.m.upbound.io/v1beta1\nkind: Cluster\nmetadata:\n  annotations:\n    {{ setResourceNameAnnotation \"cache\" }}\nspec:\n  forProvider:\n    applyImmediately: true\n    engine: 'redis'\n    {{- if hasKey $spec \"cacheNodeType\" }}\n    nodeType: {{ $spec.cacheNodeType | quote }}\n    {{- end }}\n    numCacheNodes: 1\n    region: {{ $spec.region | quote }}\n  providerConfigRef:\n    kind: ClusterProviderConfig\n    name: {{ $spec.providerName }}\n{{- end }}\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{ $xr }}-deployment\n  annotations:\n    {{ setResourceNameAnnotation \"deployment\" }}\n    {{- if hasKey (dig \"resources\" \"cache\" \"resource\" \"status\" \"atProvider\" dict $.observed) \"clusterAddress\" }}\n    'platform.example.org/cache-endpoint': {{ (index $.observed.resources \"cache\").resource.status.atProvider.clusterAddress | quote }}\n    {{- end }}\nspec:\n  {{- if hasKey $spec \"replicas\" }}\n  replicas: {{ $spec.replicas }}\n  {{- end }}\n  selector:\n    matchLabels:\n      app: {{ $spec.appName | quote }}\n  template:\n    metadata:\n      labels:\n        app: {{ $spec.appName | quote }}\n    spec:\n      containers:\n        -\n          env:\n            - name: 'CACHE_ENDPOINT'\n              {{- if hasKey (dig \"resources\" \"cache\" \"resource\" \"status\" \"atProvider\" dict $.observed) \"clusterAddress\" }}\n              value: {{ (index $.observed.resources \"cache\").resource.status.atProvider.clusterAddress }}\n              {{- end }}\n          {{- if hasKey $spec \"image\" }}\n          image: {{ $spec.image | quote }}\n          {{- end }}\n          name: 'app'\n          ports:\n            - containerPort: 8080\n              name: 'http'\n      serviceAccountName: {{ $xr }}-sa\n---\napiVersion: v1\nkind: Service\nmetadata:\n  name: {{ $xr }}-service\n  annotations:\n    {{ setResourceNameAnnotation \"service\" }}\nspec:\n  ports:\n    - port: 80\n      targetPort: 'http'\n  selector:\n    app: {{ $spec.appName | quote }}\n---\napiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: {{ $xr }}-hpa\n  annotations:\n    {{ setResourceNameAnnotation \"hpa\" }}\nspec:\n  {{- if hasKey $spec \"maxReplicas\" }}\n  maxReplicas: {{ $spec.maxReplicas }}\n  {{- end }}\n  {{- if hasKey $spec \"replicas\" }}\n  minReplicas: {{ $spec.replicas }}\n  {{- end }}\n  scaleTargetRef:\n    apiVersion: 'apps/v1'\n    kind: 'Deployment'\n    name: {{ $xr }}-deployment\n{{- range $i := until (int $spec.shardCount) }}\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ printf \"%s-shard-config-%d\" $xr $i }}\n  annotations:\n    {{ setResourceNameAnnotation (printf \"shard-config-%d\" $i) }}\ndata:\n  app: {{ $spec.appName | quote }}\n  shard: {{ $i | quote }}\n{{- end }}\n"},"kind":"GoTemplate","options":["missingkey=error"],"source":"Inline"},"step":"render-resources"},{"functionRef":{"name":"function-auto-ready"},"step":"auto-ready"}]}}
+  creationTimestamp: "2026-09-03T21:31:49Z"
+  generation: 1
+  name: cachedservices.platform.example.org.w089857.cf-test
+  resourceVersion: "187481"
+  uid: 5dd0c73b-0cdc-4c76-b090-10148f6d0e9e
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org.w089857.cf-test/v1alpha1
+    kind: CachedService
+  mode: Pipeline
+  pipeline:
+  - functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $xr := .observed.composite.resource.metadata.name -}}
+          {{- $xrMeta := .observed.composite.resource.metadata -}}
+          ---
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: {{ $xr }}-sa
+            annotations:
+              {{ setResourceNameAnnotation "sa" }}
+            labels:
+              app: {{ $spec.appName | quote }}
+          {{- if $spec.enableCache }}
+          ---
+          apiVersion: elasticache.aws.m.upbound.io/v1beta1
+          kind: Cluster
+          metadata:
+            annotations:
+              {{ setResourceNameAnnotation "cache" }}
+          spec:
+            forProvider:
+              applyImmediately: true
+              engine: 'redis'
+              {{- if hasKey $spec "cacheNodeType" }}
+              nodeType: {{ $spec.cacheNodeType | quote }}
+              {{- end }}
+              numCacheNodes: 1
+              region: {{ $spec.region | quote }}
+            providerConfigRef:
+              kind: ClusterProviderConfig
+              name: {{ $spec.providerName }}
+          {{- end }}
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: {{ $xr }}-deployment
+            annotations:
+              {{ setResourceNameAnnotation "deployment" }}
+              {{- if hasKey (dig "resources" "cache" "resource" "status" "atProvider" dict $.observed) "clusterAddress" }}
+              'platform.example.org/cache-endpoint': {{ (index $.observed.resources "cache").resource.status.atProvider.clusterAddress | quote }}
+              {{- end }}
+          spec:
+            {{- if hasKey $spec "replicas" }}
+            replicas: {{ $spec.replicas }}
+            {{- end }}
+            selector:
+              matchLabels:
+                app: {{ $spec.appName | quote }}
+            template:
+              metadata:
+                labels:
+                  app: {{ $spec.appName | quote }}
+              spec:
+                containers:
+                  -
+                    env:
+                      - name: 'CACHE_ENDPOINT'
+                        {{- if hasKey (dig "resources" "cache" "resource" "status" "atProvider" dict $.observed) "clusterAddress" }}
+                        value: {{ (index $.observed.resources "cache").resource.status.atProvider.clusterAddress }}
+                        {{- end }}
+                    {{- if hasKey $spec "image" }}
+                    image: {{ $spec.image | quote }}
+                    {{- end }}
+                    name: 'app'
+                    ports:
+                      - containerPort: 8080
+                        name: 'http'
+                serviceAccountName: {{ $xr }}-sa
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: {{ $xr }}-service
+            annotations:
+              {{ setResourceNameAnnotation "service" }}
+          spec:
+            ports:
+              - port: 80
+                targetPort: 'http'
+            selector:
+              app: {{ $spec.appName | quote }}
+          ---
+          apiVersion: autoscaling/v2
+          kind: HorizontalPodAutoscaler
+          metadata:
+            name: {{ $xr }}-hpa
+            annotations:
+              {{ setResourceNameAnnotation "hpa" }}
+          spec:
+            {{- if hasKey $spec "maxReplicas" }}
+            maxReplicas: {{ $spec.maxReplicas }}
+            {{- end }}
+            {{- if hasKey $spec "replicas" }}
+            minReplicas: {{ $spec.replicas }}
+            {{- end }}
+            scaleTargetRef:
+              apiVersion: 'apps/v1'
+              kind: 'Deployment'
+              name: {{ $xr }}-deployment
+          {{- range $i := until (int $spec.shardCount) }}
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: {{ printf "%s-shard-config-%d" $xr $i }}
+            annotations:
+              {{ setResourceNameAnnotation (printf "shard-config-%d" $i) }}
+          data:
+            app: {{ $spec.appName | quote }}
+            shard: {{ $i | quote }}
+          {{- end }}
+      kind: GoTemplate
+      options:
+      - missingkey=error
+      source: Inline
+    step: render-resources
+  - functionRef:
+      name: function-auto-ready
+    step: auto-ready

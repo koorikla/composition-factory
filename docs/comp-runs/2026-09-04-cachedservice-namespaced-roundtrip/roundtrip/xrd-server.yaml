@@ -1,0 +1,83 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"apiextensions.crossplane.io/v2","kind":"CompositeResourceDefinition","metadata":{"annotations":{},"name":"cachedservices.platform.example.org.w089857.cf-test"},"spec":{"group":"platform.example.org.w089857.cf-test","names":{"kind":"CachedService","plural":"cachedservices"},"scope":"Namespaced","versions":[{"name":"v1alpha1","referenceable":true,"schema":{"openAPIV3Schema":{"properties":{"spec":{"properties":{"appName":{"description":"DNS label used for the workload and its selectors.","type":"string"},"cacheNodeType":{"description":"Optional ElastiCache node type. Omit to let AWS pick the default.","type":"string"},"enableCache":{"default":true,"description":"Whether to provision the managed cache.","type":"boolean"},"image":{"default":"nginx:1.27-alpine","description":"Container image for the service workload.","type":"string"},"maxReplicas":{"default":5,"description":"Upper bound for the HorizontalPodAutoscaler.","type":"integer"},"providerName":{"description":"Name of the ProviderConfig to use.","type":"string"},"region":{"description":"AWS region for the ElastiCache cluster.","type":"string"},"replicas":{"default":2,"description":"Desired replica count for the Deployment.","type":"integer"},"shardCount":{"default":2,"description":"Number of per-shard ConfigMaps to render.","type":"integer"}},"required":["appName","providerName","region"],"type":"object"}},"type":"object"}},"served":true}]}}
+  creationTimestamp: "2026-09-03T21:31:49Z"
+  finalizers:
+  - defined.apiextensions.crossplane.io
+  generation: 1
+  name: cachedservices.platform.example.org.w089857.cf-test
+  resourceVersion: "187489"
+  uid: d044e1f9-c264-4233-8546-3a00f2c72f48
+spec:
+  defaultCompositeDeletePolicy: Background
+  defaultCompositionUpdatePolicy: Automatic
+  group: platform.example.org.w089857.cf-test
+  names:
+    kind: CachedService
+    plural: cachedservices
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              appName:
+                description: DNS label used for the workload and its selectors.
+                type: string
+              cacheNodeType:
+                description: Optional ElastiCache node type. Omit to let AWS pick
+                  the default.
+                type: string
+              enableCache:
+                default: true
+                description: Whether to provision the managed cache.
+                type: boolean
+              image:
+                default: nginx:1.27-alpine
+                description: Container image for the service workload.
+                type: string
+              maxReplicas:
+                default: 5
+                description: Upper bound for the HorizontalPodAutoscaler.
+                type: integer
+              providerName:
+                description: Name of the ProviderConfig to use.
+                type: string
+              region:
+                description: AWS region for the ElastiCache cluster.
+                type: string
+              replicas:
+                default: 2
+                description: Desired replica count for the Deployment.
+                type: integer
+              shardCount:
+                default: 2
+                description: Number of per-shard ConfigMaps to render.
+                type: integer
+            required:
+            - appName
+            - providerName
+            - region
+            type: object
+        type: object
+    served: true
+status:
+  conditions:
+  - lastTransitionTime: "2026-09-03T21:31:50Z"
+    observedGeneration: 1
+    reason: WatchingCompositeResource
+    status: "True"
+    type: Established
+  controllers:
+    compositeResourceClaimType:
+      apiVersion: ""
+      kind: ""
+    compositeResourceType:
+      apiVersion: platform.example.org.w089857.cf-test/v1alpha1
+      kind: CachedService

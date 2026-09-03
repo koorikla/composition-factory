@@ -1,0 +1,27 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: meta-loss
+spec:
+  xrd:
+    group: platform.example.org
+    version: v1alpha1
+    kind: MetaLoss
+    plural: metalosses
+    scope: Namespaced
+    parameters:
+      appName: {type: string, required: true}
+  resources:
+    - name: sa
+      kind: ServiceAccount
+      provider: k8s
+      fields:
+        metadata.labels[app]: {from: params.appName}
+        metadata.labels[tier]: {value: backend}
+
+    - name: cm
+      kind: ConfigMap
+      provider: k8s
+      fields:
+        metadata.labels[app]: {from: params.appName}
+        data[app]: {from: params.appName}
