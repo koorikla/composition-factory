@@ -43,7 +43,10 @@ not an exception for the importer to special-case.
 
 Method: four agents built a composition end to end and reported only what they
 personally triggered, each finding reproduced at least twice — CLI-only, canvas,
-HTTP API, and a probe of the three features that shipped that morning. Plus a
+HTTP API, and a probe of the three features that shipped that morning. Two
+defects were found independently by two journeys (`$observed` unbound, `raw:`
+emitted verbatim) and one by three (required fields unchecked), which is the
+strongest signal in the set. Plus a
 static pass (gofmt/vet/staticcheck/deadcode/coverage). Items marked **[V]** were
 re-verified by hand afterwards, independently of the agent that found them.
 
@@ -102,6 +105,35 @@ do not reach.
       The template guards on `hasKey` and emits nothing when the key is absent, so a
       declared default never applies — the author writes `default: 3` and gets zero
       resources instead of three. Either emit the default or reject the field.
+
+- [ ] **The canvas says it wrote files to disk. It never writes anything. [V]**
+      After Generate the output drawer shows "✓ Output written to `<path>` ·
+      Apply: `kubectl apply -f <path>`" — and the directory does not exist. No
+      caller in `web-proto/js/` ever invokes `store.generate(true)`, so `req.Write`
+      is always false and `internal/api/generate.go` only previews. The server
+      even returns `"written": false`, which `output.js` ignores in favour of
+      `outputs.length > 0`. A user who copies the offered command gets
+      path-not-found. Either write, or say "preview only".
+- [ ] **Every rejected canvas action fails completely silently.** A type-mismatched
+      wire, a map field wired with `from:`, an unknown custom field path — the
+      picker closes, no wire appears, no toast, no banner, and the header chip
+      stays green. The server's reason exists only in the browser console. The
+      store emits an `error` topic but its only subscribers filter on
+      `source === "generate" | "loadDoc" | "importBlueprint" | "adoptComposition"`,
+      so wire and field-set failures have no UI subscriber at all. This is the
+      single highest-value fix in the product: the messages are already written,
+      already excellent, and already correct — they just never reach the screen.
+- [ ] **Wired values land in a Secret's `data:` as unquoted plaintext.** No
+      `b64enc` and no `| quote`, though the sibling spec scalar two blocks up *is*
+      quoted. Kubernetes requires `data` to be base64, so the Secret fails on apply,
+      and any value containing `:` breaks the YAML. The inspector's own help text
+      says the value must be base64-encoded. Validate still reports `render ok`.
+      Emit `b64enc`, or steer the author to `stringData`.
+- [ ] **The wire picker lowercases the custom field path you type.** Typing
+      `stringData.host` offers `stringdata.host`, which the server then correctly
+      rejects as not in the schema — and per the silent-failure item above, says
+      nothing. Almost every settable Kubernetes field is camelCase, so the custom-path
+      escape hatch can currently never produce a valid one.
 
 ### P1 — round-trip losses (Engine Truth #5)
 
@@ -179,8 +211,10 @@ fail reads exactly like a passing gate.
       `teir`→`tier` get no suggestion while 5-char cases all work. Inconsistent
       rather than absent, which is worse.
 - [ ] Required CRD fields are never checked: omitting a required field, or feeding
-      one from an optional parameter, emits happily and `--validate` passes. The
-      analysis exists — the `when:`-on-optional-param refusal proves it.
+      one from an optional parameter, emits happily and `--validate` passes. Found
+      independently by the CLI and canvas journeys; in the canvas, Validate reports
+      `render ok` on an Instance whose `region` the palette itself badges required.
+      The analysis exists — the `when:`-on-optional-param refusal proves it.
 - [ ] `cf gen --check` reports drift on orphaned files in its own output tree that
       `cf gen` will never remove, so the remedy it prints does not fix it.
 - [ ] No CLI scaffold. `cf --help` has no `init`, and the `providerName` error tells
@@ -195,6 +229,34 @@ fail reads exactly like a passing gate.
       plus three `"env." + key` concatenations in `adopt.go`). It sits beside
       `ParamRef`/`StatusRef`/`MetadataRef` as the canonical parser and has zero
       callers.
+
+- [ ] The Inspector clips its own controls at its default width: XRD parameter-name
+      inputs render **16 px wide** (measured) while `default value` gets 58 px, in a
+      179 px panel whose content needs 251 px with `overflow-x: hidden`. Clicking a
+      filter can leave it at `scrollLeft: 72` with no way to scroll back — every
+      row's left edge permanently cut off. Widening the panel by hand fixes it;
+      nothing hints that it is required.
+- [ ] The wire-target picker for native kinds leads with read-only, server-populated
+      metadata — `metadata.ownerReferences[0].uid` and friends, several badged **REQ**,
+      some carrying their own "Populated by the system. Read-only." description —
+      while `data`/`stringData`, the only sane targets on a Secret, surface only if
+      you type them. There is also no SUGGESTED MATCHES section here, though there is
+      one for parameter wires, where it works beautifully. Exclude `managedFields`,
+      `ownerReferences`, `uid`, `resourceVersion`, `creationTimestamp`, `generation`.
+- [ ] Undo after a duplicate leaves the Inspector showing `Resource "secret-2" not
+      found in blueprint.` until another node is clicked; Enter does not commit an
+      XRD parameter rename (only blur does); the toolbar chip reads `ok · 4 files`
+      while the artifacts panel beside it reads `7 files`; and the node
+      Duplicate/Remove targets measure 17×14 and 14×14 CSS px, so a 2 px miss does
+      nothing with no feedback.
+- [ ] The blank-canvas hint's step 1 sends newcomers on a detour: it says "ADD A
+      PROVIDER IN SOURCES" first, but 14 native kinds are already draggable with no
+      provider. The sidebar tab strip also needs 163 px in a 160 px panel with
+      overflow hidden, so the fourth tab renders as `GUID`.
+- [ ] `cf provider add native` — the remedy the tool's own error prints when a
+      blueprint declares `provider: native` without it cached — tries to pull
+      `docker.io/library/native` and fails `UNAUTHORIZED`. Either make the pseudo-
+      provider resolvable by that command or print a remedy that works.
 
 ### P3 — documentation, all verified against the code
 

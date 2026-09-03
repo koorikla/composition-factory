@@ -17,7 +17,7 @@ consumer's git diff.
 
 ### Changed
 
-- `BACKLOG.md` records 35 defects found by four end-to-end journeys against
+- `BACKLOG.md` records 44 defects found by four end-to-end journeys against
   `075646f` (CLI, canvas, HTTP API, and a probe of the three features that
   shipped that morning), plus a static pass. Every finding was reproduced at
   least twice by the agent that found it; the most consequential were
