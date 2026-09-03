@@ -111,6 +111,96 @@ numbers and what was confirmed working, is in
 
 ---
 
+## Open — 2026-09-04 composition-tester run (at `0d3e914`)
+
+From one end-to-end run building a namespaced `CachedService` through the CLI and taking it
+to a real kind cluster and back. Report and re-runnable repros:
+[docs/comp-runs/2026-09-04-cachedservice-namespaced-roundtrip.md](docs/comp-runs/2026-09-04-cachedservice-namespaced-roundtrip.md).
+Both P0s were reproduced independently of the run that found them.
+
+### P0
+
+- [ ] **CF-049 — `cf adopt` silently drops every `metadata.*` field a resource declares, so
+      the Round-Trip Rule regenerates a Composition that strips labels off live objects. [V]**
+      `internal/adopt/adopt.go:1361` reads only `metadata.annotations`, and
+      `adopt.go:1429-1431` `continue`s unconditionally on `"metadata"` without calling
+      `report.Record` — so the loss is not even in the loss report. Repro:
+      `repros/cf-001-adopt-metadata-loss/meta.cf.yaml` (a ServiceAccount and ConfigMap each
+      with `metadata.labels[app]`), then `cf gen` → `cf adopt` → `cf gen`; the adopted
+      blueprint says `fields: {}`, the regenerated Composition has lost the whole `labels:`
+      block, and `cf adopt` exits 0. Verified on the cluster: a live ServiceAccount went from
+      `{"app":"shop","crossplane.io/composite":"shop"}` to `{"crossplane.io/composite":"shop"}`
+      20 s after applying the regenerated Composition. The fix must round-trip declared
+      `metadata.*` fields, and must record anything it still cannot carry in the loss report.
+
+- [ ] **CF-050 — A status wire into `fields:` is interpolated unquoted, so a string status
+      value that looks like a bool or number changes type and the API server rejects the
+      composed resource. [V]** The same wire is piped through `| quote` for an annotation and
+      emitted bare for a field: `internal/emit/composition.go:989-999` documents the asymmetry
+      as an assumption, `statusWire` (`composition.go:1056`) checks only that the source leaf
+      is a scalar, and `statusGuard` (`composition.go:1172`) returns a bare expression — the
+      target field's declared type is never consulted. Repro:
+      `repros/cf-002-status-wire-quoting/`, one value wired into both an annotation and
+      `data[endpoint]` with an observed `clusterAddress: "true"`; render gives
+      `endpoint: true` beside `platform.example.org/endpoint: "true"`, and
+      `kubectl apply --dry-run=server` fails with `cannot unmarshal bool into Go struct field
+      ConfigMap.data of type string`. `cf gen --validate` cannot catch it because it renders
+      without observed resources. Real CRDs hit this: this provider declares
+      `status.atProvider.autoMinorVersionUpgrade` as `type: string` with values
+      `"true"`/`"false"`.
+
+### P1
+
+- [ ] **CF-051 — `cf adopt` of a Composition without its XRD invents the plural by appending
+      `s`, ignoring the plural in the Composition's own name. [V]**
+      `internal/adopt/adopt.go:310-312` sets `Plural = strings.ToLower(Kind) + "s"`, though the
+      correct plural was already read at `adopt.go:258-260` into `bp.Metadata.Name`. Repro:
+      kind `MetaLoss`, plural `metalosses`; `cf gen` → `cf adopt` → `cf gen` writes
+      `metalosss.platform.example.org.yaml`, exit 0, no warning. Applying the regenerated pair
+      creates a second CRD instead of updating the original.
+
+### P2
+
+- [ ] **CF-052 — Every `x-kubernetes-int-or-string` field is typed `string`, so
+      `cf gen --validate` rejects the integer form and the form it demands is the one
+      Kubernetes refuses. [V]** `internal/schema/k8s/k8s.go:210-215` collapses
+      IntOrString/Quantity to `"type": "string"`, calling it deliberate on the premise that the
+      string spelling is always legal — which the API server disproves: `targetPort: 8080` is
+      accepted and `targetPort: "8080"` is rejected with
+      `must contain at least one letter (a-z)`. Repro:
+      `repros/cf-004-intorstring/svc.cf.yaml` →
+      `field "spec.ports[0].targetPort": invalid type: expected string, got integer 8080`;
+      `raw:` does not escape it. Not Service-specific —
+      `spec.strategy.rollingUpdate.maxUnavailable` behaves the same.
+      `internal/emit/render_validate.go:509` already knows how to detect these, but the
+      `oneOf` has been flattened before it runs.
+
+- [ ] **CF-053 — `cf function add` writes the lockfile pin and then exits 1 for any function
+      with no typed Input CRD, including the one cf's own pipeline emits. [V]**
+      `cmd/cf/function.go:30` calls `store.FetchAndSave` before the `inputs == 0` refusal at
+      `function.go:45-50`, so the lock is mutated by a command that reports failure. Repro is
+      the worked example in `docs/cli.md:269` verbatim:
+      `cf function add xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1` →
+      `contains 0 function input schemas`, exit 1, and `.cf.lock` afterwards carries the
+      auto-ready entry. A function with no input is normal, not an error.
+
+### P3
+
+- [ ] **CF-054 — The auto-ready package documented in `docs/dsl.md` and `docs/cli.md` is
+      neither the registry nor the version `cf gen` emits. [V]** Docs say
+      `xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1` (`dsl.md:352`,
+      `dsl.md:49`, `dsl.md:361`, `dsl.md:378`, `cli.md:269`); generated `functions.yaml` says
+      `xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0`. `dsl.md:352` is the
+      load-bearing one — it documents what the generator auto-injects.
+
+- [ ] **CF-055 — `docs/cli.md` names the wrong trigger for `rbac.yaml` and picks the two kinds
+      it is never emitted for. [V]** `cli.md:137`, `:156` and `:159` say the file appears
+      "when native Kubernetes kinds like Deployment or Service are composed"; Deployment and
+      Service are pre-granted, so composing only those correctly emits nothing. The generator
+      is right and the doc is wrong. The `cf gen` warning line has the same imprecision.
+
+---
+
 ## Non-findings (Recorded so they are not re-raised)
 
 - [x] `deploy/k8s/deployment.yaml` passes `--i-know-this-is-unauthenticated` with `--addr 0.0.0.0:8080`. Safe because the Service is ClusterIP.
