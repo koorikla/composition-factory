@@ -1,6 +1,7 @@
 package emit
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -22,6 +23,9 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 }
 
 func composition(b *blueprint.Blueprint, crds []schema.CRD, fsDir string) ([]byte, error) {
+	if _, err := ValidatePipelineInputs(b, crds); err != nil {
+		return nil, err
+	}
 	x := b.Spec.XRD
 	wantNamespaced := x.Scope == "Namespaced"
 
@@ -31,6 +35,14 @@ func composition(b *blueprint.Blueprint, crds []schema.CRD, fsDir string) ([]byt
 	d.Line(0, "kind: Composition")
 	d.Line(0, "metadata:")
 	d.Line(1, "name: %s.%s", x.Plural, x.Group)
+	if len(b.Spec.Environment) > 0 {
+		envJSON, err := json.Marshal(b.Spec.Environment)
+		if err != nil {
+			return nil, err
+		}
+		d.Line(1, "annotations:")
+		d.Line(2, "%s: %s", blueprint.EnvironmentKeysAnnotation, quoteYAML(string(envJSON)))
+	}
 	d.Line(0, "spec:")
 	d.Line(1, "compositeTypeRef:")
 	d.Line(2, "apiVersion: %s/%s", x.Group, x.Version)
@@ -176,6 +188,9 @@ func writeTemplatePreamble(d *Doc, ti int, b *blueprint.Blueprint) {
 	// composed native objects land — a fact of the XR, never a parameter),
 	// labels, annotations, uid. Always present on an observed composite.
 	d.Line(ti, "{{- $xrMeta := .observed.composite.resource.metadata -}}")
+	if len(b.Spec.Environment) > 0 {
+		d.Line(ti, `{{- $env := index .context "apiextensions.crossplane.io/environment" | default dict -}}`)
+	}
 }
 
 func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) error {
@@ -236,6 +251,11 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 			}
 			d.Line(ti, "{{- if %s }}", guard)
 			d.Line(ti, "{{- range $i := until (int %s) }}", expr)
+			loopGuarded = true
+		} else if strings.HasPrefix(r.ForEach, "env.") {
+			envKey := strings.TrimPrefix(r.ForEach, "env.")
+			d.Line(ti, "{{- if hasKey $env %q }}", envKey)
+			d.Line(ti, "{{- range $i := until (int $env.%s) }}", envKey)
 			loopGuarded = true
 		} else {
 			d.Line(ti, "{{- range $i := until (int $spec.%s) }}", strings.TrimPrefix(r.ForEach, "params."))
@@ -573,9 +593,19 @@ func conventionFields(r blueprint.Resource, b *blueprint.Blueprint, crd schema.C
 // no '\\', no control runes past checkScalar) is exactly the literal wrapped
 // in plain quotes — one written form, byte-deterministic.
 func whenCondition(when string) (string, error) {
-	param, op, literal, err := blueprint.ParseWhen(when)
+	source, param, op, literal, err := blueprint.ParseWhen(when)
 	if err != nil {
 		return "", err
+	}
+	if source == "env" {
+		switch op {
+		case "":
+			return fmt.Sprintf("and (hasKey $env %q) $env.%s", param, param), nil
+		case "==":
+			return fmt.Sprintf("and (hasKey $env %q) (eq $env.%s %q)", param, param, literal), nil
+		default: // "!="
+			return fmt.Sprintf("or (not (hasKey $env %q)) (ne $env.%s %q)", param, param, literal), nil
+		}
 	}
 	switch op {
 	case "":

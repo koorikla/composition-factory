@@ -71,6 +71,12 @@ func validateResourceEnvelope(b *Blueprint, r Resource) error {
 		}
 
 		if f.From != "" {
+			if envKey, ok := strings.CutPrefix(f.From, "env."); ok {
+				if _, exists := b.Spec.Environment[envKey]; !exists {
+					return UnknownEnvKeyError(fmt.Sprintf("resource %q envelope %q", r.Name, p), envKey, b.Spec.Environment)
+				}
+				continue
+			}
 			param, ok := strings.CutPrefix(f.From, "params.")
 			if !ok {
 				// Deliberately narrower than a field's from: a cross-resource
@@ -82,7 +88,7 @@ func validateResourceEnvelope(b *Blueprint, r Resource) error {
 				// admitting the grammar here would emit a guard that can never
 				// be true. Refused at the source until the planner learns the
 				// chain.
-				return fmt.Errorf("resource %q envelope %q: from must start with params. (got %q) -- "+
+				return fmt.Errorf("resource %q envelope %q: from must start with params. or env. (got %q) -- "+
 					"cross-resource status wires are supported in fields:, not in envelope entries, in v1",
 					r.Name, p, f.From)
 			}

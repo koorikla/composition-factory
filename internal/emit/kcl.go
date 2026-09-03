@@ -18,6 +18,9 @@ var (
 
 // kclTemplateBody generates idiomatic KCL code for function-kcl (krm.kcl.dev/v1alpha1).
 func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) {
+	if len(b.Spec.Environment) > 0 {
+		return "", fmt.Errorf("spec.environment: engine %q does not support spec.environment", b.Engine())
+	}
 	if err := refuseGoTemplateOnlyFeatures(b); err != nil {
 		return "", err
 	}

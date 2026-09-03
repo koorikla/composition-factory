@@ -65,6 +65,11 @@ type Metadata struct {
 type Spec struct {
 	Sources []Source `json:"sources"`
 	XRD     XRD      `json:"xrd"`
+	// Environment declares the keys a blueprint relies on and their types.
+	// When non-empty, the generator automatically injects the function-environment-configs
+	// pipeline step and allows from: env.<key> references in fields, annotations, envelope,
+	// forEach, and when.
+	Environment map[string]EnvironmentKey `json:"environment,omitempty"`
 	// Templates are user-defined Go templates, name -> body. Each is emitted
 	// as a {{- define "<name>" }} block heading the Composition's template
 	// and is callable from a field via template: <name> (or applied by a
@@ -134,6 +139,10 @@ const (
 	KCLFunctionPackage    = "xpkg.upbound.io/crossplane-contrib/function-kcl:v0.11.2"
 	PythonFunctionName    = "function-python"
 	PythonFunctionPackage = "xpkg.upbound.io/crossplane-contrib/function-python:v0.5.0"
+
+	EnvironmentKeysAnnotation         = "factory.crossplane.io/environment-keys"
+	EnvironmentConfigsFunctionName    = "function-environment-configs"
+	EnvironmentConfigsFunctionPackage = "xpkg.crossplane.io/crossplane-contrib/function-environment-configs:v0.4.0"
 )
 
 // SupportedEngines lists all composition rendering engines supported by composition-factory.
@@ -279,6 +288,51 @@ func (p *Parameter) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// EnvironmentKey declares one key and type in spec.environment.
+type EnvironmentKey struct {
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+	Default     string `json:"default,omitempty"`
+}
+
+// UnmarshalJSON permits scalar values (booleans, numbers, strings) for Default.
+func (k *EnvironmentKey) UnmarshalJSON(data []byte) error {
+	type rawKey struct {
+		Type        string `json:"type"`
+		Description string `json:"description,omitempty"`
+		Default     any    `json:"default,omitempty"`
+	}
+	var raw rawKey
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&raw); err != nil {
+		return err
+	}
+	k.Type = raw.Type
+	k.Description = raw.Description
+	if raw.Default != nil {
+		switch val := raw.Default.(type) {
+		case string:
+			k.Default = val
+		case bool:
+			if val {
+				k.Default = "true"
+			} else {
+				k.Default = "false"
+			}
+		case float64:
+			if val == float64(int64(val)) {
+				k.Default = strconv.FormatInt(int64(val), 10)
+			} else {
+				k.Default = strconv.FormatFloat(val, 'f', -1, 64)
+			}
+		default:
+			k.Default = fmt.Sprintf("%v", val)
+		}
+	}
+	return nil
+}
+
 // PipelineStep is one blueprint-declared Composition pipeline step, placed
 // relative to the built-in go-templating step (TemplatingStepName).
 //
@@ -407,26 +461,26 @@ type Resource struct {
 // '\\' so the emitted Go-syntax quoting (%q) is always the literal wrapped
 // in plain quotes — byte-deterministic, no escape sequences to reason about.
 var (
-	whenBareRE = regexp.MustCompile(`^params\.([a-zA-Z][a-zA-Z0-9]*)$`)
-	whenCmpRE  = regexp.MustCompile(`^params\.([a-zA-Z][a-zA-Z0-9]*) (==|!=) "([^"\\]*)"$`)
+	whenBareRE = regexp.MustCompile(`^(params|env)\.([a-zA-Z][a-zA-Z0-9]*)$`)
+	whenCmpRE  = regexp.MustCompile(`^(params|env)\.([a-zA-Z][a-zA-Z0-9]*) (==|!=) "([^"\\]*)"$`)
 )
 
-// ParseWhen splits a when expression into its parameter name, operator and
+// ParseWhen splits a when expression into its source ("params" or "env"), parameter/key name, operator and
 // literal. op is "" for the bare boolean form, "==" or "!=" for the
 // comparison forms (with literal carrying the compared string, which may be
 // empty: params.x == "" is legal). The grammar is exact — one space around
 // the operator, double quotes around the literal — so that a when expression
 // has exactly one written form and the emitted Composition is
 // byte-deterministic.
-func ParseWhen(expr string) (param, op, literal string, err error) {
+func ParseWhen(expr string) (source, param, op, literal string, err error) {
 	if m := whenBareRE.FindStringSubmatch(expr); m != nil {
-		return m[1], "", "", nil
+		return m[1], m[2], "", "", nil
 	}
 	if m := whenCmpRE.FindStringSubmatch(expr); m != nil {
-		return m[1], m[2], m[3], nil
+		return m[1], m[2], m[3], m[4], nil
 	}
-	return "", "", "", fmt.Errorf("when must be params.<name> (a boolean parameter), "+
-		`params.<name> == "<literal>" or params.<name> != "<literal>" — exactly one space around `+
+	return "", "", "", "", fmt.Errorf("when must be params.<name>/env.<key> (a boolean), "+
+		`params.<name>/env.<key> == "<literal>" or params.<name>/env.<key> != "<literal>" — exactly one space around `+
 		"the operator, double quotes around the literal, no backslashes or embedded quotes (got %q)", expr)
 }
 
@@ -515,6 +569,12 @@ func ParamRef(ref string) (param, member string, ok bool) {
 	}
 	param, member, _ = strings.Cut(rest, ".")
 	return param, member, true
+}
+
+// EnvRef splits an env.<key> reference into its environment key name.
+// ok is false when ref does not carry the env. prefix.
+func EnvRef(ref string) (key string, ok bool) {
+	return strings.CutPrefix(ref, "env.")
 }
 
 // statusRefPrefix marks a Field.From cross-resource status reference.

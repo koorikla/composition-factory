@@ -1255,15 +1255,18 @@ func whenBlueprint(mutate func(*Blueprint)) *Blueprint {
 
 func TestParseWhen(t *testing.T) {
 	cases := []struct {
-		expr               string
-		param, op, literal string
-		wantErr            bool
+		expr                       string
+		source, param, op, literal string
+		wantErr                    bool
 	}{
-		{expr: "params.auditEnabled", param: "auditEnabled"},
-		{expr: `params.tier == "pro"`, param: "tier", op: "==", literal: "pro"},
-		{expr: `params.tier != "standard"`, param: "tier", op: "!=", literal: "standard"},
-		{expr: `params.tier == ""`, param: "tier", op: "==", literal: ""},
-		{expr: "tier", wantErr: true},                   // no params. prefix
+		{expr: "params.auditEnabled", source: "params", param: "auditEnabled"},
+		{expr: `params.tier == "pro"`, source: "params", param: "tier", op: "==", literal: "pro"},
+		{expr: `params.tier != "standard"`, source: "params", param: "tier", op: "!=", literal: "standard"},
+		{expr: `params.tier == ""`, source: "params", param: "tier", op: "==", literal: ""},
+		{expr: "env.auditEnabled", source: "env", param: "auditEnabled"},
+		{expr: `env.tier == "pro"`, source: "env", param: "tier", op: "==", literal: "pro"},
+		{expr: `env.tier != "standard"`, source: "env", param: "tier", op: "!=", literal: "standard"},
+		{expr: "tier", wantErr: true},                   // no params. or env. prefix
 		{expr: `params.tier=="pro"`, wantErr: true},     // no spaces
 		{expr: `params.tier ==  "pro"`, wantErr: true},  // two spaces
 		{expr: `params.tier == 'pro'`, wantErr: true},   // single quotes
@@ -1275,19 +1278,19 @@ func TestParseWhen(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.expr, func(t *testing.T) {
-			param, op, literal, err := ParseWhen(tc.expr)
+			source, param, op, literal, err := ParseWhen(tc.expr)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("ParseWhen(%q) = (%q, %q, %q), want an error", tc.expr, param, op, literal)
+					t.Fatalf("ParseWhen(%q) = (%q, %q, %q, %q), want an error", tc.expr, source, param, op, literal)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("ParseWhen(%q): %v", tc.expr, err)
 			}
-			if param != tc.param || op != tc.op || literal != tc.literal {
-				t.Errorf("ParseWhen(%q) = (%q, %q, %q), want (%q, %q, %q)",
-					tc.expr, param, op, literal, tc.param, tc.op, tc.literal)
+			if source != tc.source || param != tc.param || op != tc.op || literal != tc.literal {
+				t.Errorf("ParseWhen(%q) = (%q, %q, %q, %q), want (%q, %q, %q, %q)",
+					tc.expr, source, param, op, literal, tc.source, tc.param, tc.op, tc.literal)
 			}
 		})
 	}

@@ -130,6 +130,28 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 				})
 				continue
 			}
+			if ref.Env != "" {
+				_, ok := b.Spec.Environment[ref.Env]
+				if !ok {
+					return nil, blueprint.UnknownEnvKeyError(fmt.Sprintf("resource %q annotation %q", r.Name, k), ref.Env, b.Spec.Environment)
+				}
+				rhs := fmt.Sprintf("{{ $env.%s | quote }}", ref.Env)
+				guard := fmt.Sprintf("hasKey $env %q", ref.Env)
+				plan = append(plan, forProviderField{
+					path:  k,
+					rhs:   rhs,
+					guard: guard,
+					structured: structuredRHS{
+						kind:      rhsEnv,
+						param:     ref.Env,
+						paramSegs: []string{ref.Env},
+						optional:  true,
+						guard:     guard,
+						rawExpr:   "$env." + ref.Env,
+					},
+				})
+				continue
+			}
 			decl, ok := b.Spec.XRD.Parameters[ref.Param]
 			if !ok {
 				return nil, fmt.Errorf("resource %q annotation %q: unknown parameter %q", r.Name, k, ref.Param)

@@ -1,3 +1,16 @@
+- [x] **EnvironmentConfig (Track 2)**:
+      In Crossplane v2, `spec.environment` is accessed via `index .context "apiextensions.crossplane.io/environment"` populated by `function-environment-configs`.
+      Implemented `spec.environment` in blueprint DSL declaring scalar keys (string, integer, number, boolean) with defaults/descriptions, supporting `from: env.<key>` across fields, annotations, envelope, `forEach` bounds, and `when` guards with `unknownPath` nearest-match suggestions and `isFieldTypeCompatible` type safety.
+      Auto-injects `function-environment-configs` step ahead of the templating step when `spec.environment` is non-empty, pinning `xpkg.upbound.io/crossplane-contrib/function-environment-configs:v0.4.0` in `functions.yaml`.
+      Go-templating emitter outputs `$env` context dictionary with `hasKey` guards and safe resolution; Python emitter extracts `env` from `req.context`; KCL emitter cleanly refuses `spec.environment`.
+      Composition emitter writes `factory.crossplane.io/environment-keys` annotation on metadata so `gen -> apply -> kubectl get -o yaml -> adopt -> gen` recovers the exact blueprint contract with byte-identical round-trip fidelity, with fallback inference for foreign compositions.
+      — completed 2026-09-03
+- [x] **Schema-aware function inputs (Track 1)**:
+      Cached Function Input CRDs through existing xpkg -> schema -> index path keyed by their own API group without collisions with provider MR kinds. Pinned function refs in `.cf.lock` and added `cf function add <ref>`. Validated `spec.pipeline[].input` against resolved Input CRDs with nearest-match suggestions (`did you mean ...?`) on unknown fields and explicit warnings for uncached functions. Rendered typed forms with required badges, descriptions, and raw YAML escape hatch in canvas inspector (`web-proto/js/regions/inspector.js`), with catalogue-known package versions.
+      — completed 2026-09-03
+- [x] **Expression authoring — preview and snippets (Track 3)**:
+      Implemented in-process Go template preview (`POST /api/preview-expression`, `internal/emit/preview.go`, `internal/api/preview.go`) executing Go-template expressions against a synthetic context (`$spec`, `$xr`, `$xrMeta`, `$env`, `$i`, sibling resource status, Sprig & function-go-templating helpers) with `missingkey=error`. Added scope-filtered snippet catalogue and real-time live preview under raw expression editors in the canvas inspector (`web-proto/js/regions/inspector.js`, `web-proto/css/proto.css`).
+      — completed 2026-09-03
 - [x] **The round-trip gate asserts byte-for-byte fidelity**:
       `scripts/cluster/test-cluster.sh` applies, reads live XRD and Composition back with `kubectl get -o yaml`, imports with `cf import`, regenerates, and verifies with strict `diff -u` against the original emitted manifests. In addition, Go unit tests in `internal/adopt/tree_test.go` (`TestRoundTripEmittedCompositionAndXRD`) verify round-trip fidelity with simulated server-side noise and scrubbing.
       — completed 2026-09-03

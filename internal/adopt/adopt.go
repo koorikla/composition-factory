@@ -211,6 +211,14 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		if name, ok := meta["name"].(string); ok {
 			bp.Metadata.Name = name
 		}
+		if anns, ok := meta["annotations"].(map[string]any); ok {
+			if envKeysRaw, ok := anns[blueprint.EnvironmentKeysAnnotation].(string); ok && envKeysRaw != "" {
+				var envKeys map[string]blueprint.EnvironmentKey
+				if err := json.Unmarshal([]byte(envKeysRaw), &envKeys); err == nil && len(envKeys) > 0 {
+					bp.Spec.Environment = envKeys
+				}
+			}
+		}
 	}
 	if bp.Metadata.Name == "" {
 		bp.Metadata.Name = "adopted-composition"
@@ -524,12 +532,17 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 var (
 	reDefine             = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
 	reParamVar           = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reEnvVar             = regexp.MustCompile(`\{\{-?\s*\$env\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*\(index\s+(?:\$\.?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reXRResourceRef      = regexp.MustCompile(`\{\{-?\s*\$xr\s*-?\}\}-([a-zA-Z0-9-]+)`)
 	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+\$spec\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
 	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+eq\s+\$spec\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
 	reWhenIfNe           = regexp.MustCompile(`\{\{-?\s*if\s+ne\s+\$spec\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
+	reWhenIfEnvSimple    = regexp.MustCompile(`\{\{-?\s*if\s+(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\$env\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
+	reWhenIfEnvEq        = regexp.MustCompile(`\{\{-?\s*if\s+(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\(?eq\s+\$env\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\)?\s*-?\}\}`)
+	reWhenIfEnvNe        = regexp.MustCompile(`\{\{-?\s*if\s+(?:or\s+\(not\s+\(hasKey\s+\$env\s+"[^"]+"\)\)\s+)?\(?ne\s+\$env\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\)?\s*-?\}\}`)
 	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+\$spec\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
+	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+\$env\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
 	reDocSeparator       = regexp.MustCompile(`(?m)^\s*---\s*$`)
 	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+"([^"]+)"`)
@@ -663,7 +676,14 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 		}
 	}
 
-	bp.Spec.Pipeline = otherSteps
+	var finalSteps []blueprint.PipelineStep
+	for _, s := range otherSteps {
+		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName && s.Input == "" && len(bp.Spec.Environment) > 0 {
+			continue
+		}
+		finalSteps = append(finalSteps, s)
+	}
+	bp.Spec.Pipeline = finalSteps
 	return nil
 }
 
@@ -679,7 +699,7 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 	}
 	cleanTmpl := reDefine.ReplaceAllString(tmpl, "")
 
-	// 2. Discover parameter references
+	// 2. Discover parameter and environment references
 	paramMatches := reParamVar.FindAllStringSubmatch(cleanTmpl, -1)
 	for _, m := range paramMatches {
 		if len(m) >= 2 {
@@ -688,6 +708,15 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 				ensureParamDeclared(bp, pName)
 			} else {
 				report.Record("template.param."+pName, "invalid parameter identifier")
+			}
+		}
+	}
+	envMatches := reEnvVar.FindAllStringSubmatch(cleanTmpl, -1)
+	for _, m := range envMatches {
+		if len(m) >= 2 {
+			key := m[1]
+			if isValidParamIdentifier(key) {
+				ensureEnvDeclared(bp, key)
 			}
 		}
 	}
@@ -706,7 +735,16 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 		nextWhen = ""
 		nextForEach = ""
 
-		if m := reWhenIfEq.FindStringSubmatch(chunk); len(m) >= 3 {
+		if m := reWhenIfEnvEq.FindStringSubmatch(chunk); len(m) >= 3 {
+			nextWhen = fmt.Sprintf("env.%s == %s", m[1], m[2])
+			ensureEnvDeclared(bp, m[1])
+		} else if m := reWhenIfEnvNe.FindStringSubmatch(chunk); len(m) >= 3 {
+			nextWhen = fmt.Sprintf("env.%s != %s", m[1], m[2])
+			ensureEnvDeclared(bp, m[1])
+		} else if m := reWhenIfEnvSimple.FindStringSubmatch(chunk); len(m) >= 2 {
+			nextWhen = fmt.Sprintf("env.%s", m[1])
+			ensureEnvDeclared(bp, m[1])
+		} else if m := reWhenIfEq.FindStringSubmatch(chunk); len(m) >= 3 {
 			nextWhen = fmt.Sprintf("params.%s == %s", m[1], m[2])
 		} else if m := reWhenIfNe.FindStringSubmatch(chunk); len(m) >= 3 {
 			nextWhen = fmt.Sprintf("params.%s != %s", m[1], m[2])
@@ -714,14 +752,22 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 			nextWhen = fmt.Sprintf("params.%s", m[1])
 		}
 
-		if m := reForEachLoop.FindStringSubmatch(chunk); len(m) >= 2 {
+		if m := reForEachEnvLoop.FindStringSubmatch(chunk); len(m) >= 2 {
+			nextForEach = fmt.Sprintf("env.%s", m[1])
+			ensureEnvDeclared(bp, m[1])
+		} else if m := reForEachLoop.FindStringSubmatch(chunk); len(m) >= 2 {
 			nextForEach = fmt.Sprintf("params.%s", m[1])
 		}
 
 		lines := strings.Split(chunk, "\n")
 		var filteredLines []string
+		skipNextEmptyBlock := false
 		for _, line := range lines {
 			trimmed := strings.TrimSpace(line)
+			if m := reSetResourceNameAnn.FindStringSubmatch(trimmed); len(m) >= 2 {
+				filteredLines = append(filteredLines, strings.Replace(line, trimmed, fmt.Sprintf(`"crossplane.io/composition-resource-name": "%s"`, m[1]), 1))
+				continue
+			}
 			if strings.HasPrefix(trimmed, "{{") && strings.HasSuffix(trimmed, "}}") {
 				inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "{{"), "}}"))
 				inner = strings.TrimPrefix(inner, "-")
@@ -732,9 +778,19 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 				}
 				if strings.HasPrefix(inner, "if ") || strings.HasPrefix(inner, "else") ||
 					strings.HasPrefix(inner, "end") || strings.HasPrefix(inner, "range ") {
+					if strings.HasPrefix(inner, "else") {
+						skipNextEmptyBlock = true
+					} else {
+						skipNextEmptyBlock = false
+					}
 					continue
 				}
 			}
+			if skipNextEmptyBlock && (trimmed == "{}" || trimmed == "[]") {
+				skipNextEmptyBlock = false
+				continue
+			}
+			skipNextEmptyBlock = false
 			filteredLines = append(filteredLines, line)
 		}
 		cleanYAML := strings.Join(filteredLines, "\n")
@@ -756,7 +812,7 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 		docs = unwrapListDocs(docs)
 		for _, doc := range docs {
 			ScrubDocument(doc, "", report)
-			res := resourceFromMap(doc, defaultProvider, placeholderTable, report, nameMapping)
+			res := resourceFromMap(doc, defaultProvider, placeholderTable, report, nameMapping, bp)
 			if res == nil {
 				continue
 			}
@@ -785,7 +841,7 @@ func parseClassicComposition(resources []any, bp *blueprint.Blueprint, defaultPr
 			continue
 		}
 
-		res := resourceFromMap(base, defaultProvider, nil, report, nameMapping)
+		res := resourceFromMap(base, defaultProvider, nil, report, nameMapping, bp)
 		if res == nil {
 			continue
 		}
@@ -905,7 +961,18 @@ func ensureParamDeclared(bp *blueprint.Blueprint, paramPath string) {
 	bp.Spec.XRD.Parameters[root] = rootParam
 }
 
-func resourceFromMap(m map[string]any, defaultProvider string, placeholders []string, report *LossReport, nameMapping map[string]string) *blueprint.Resource {
+func ensureEnvDeclared(bp *blueprint.Blueprint, envKey string) {
+	if bp.Spec.Environment == nil {
+		bp.Spec.Environment = make(map[string]blueprint.EnvironmentKey)
+	}
+	if _, exists := bp.Spec.Environment[envKey]; !exists {
+		bp.Spec.Environment[envKey] = blueprint.EnvironmentKey{
+			Type: "string",
+		}
+	}
+}
+
+func resourceFromMap(m map[string]any, defaultProvider string, placeholders []string, report *LossReport, nameMapping map[string]string, bp *blueprint.Blueprint) *blueprint.Resource {
 	kind, _ := m["kind"].(string)
 	if kind == "" {
 		return nil
@@ -917,6 +984,9 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 	if meta != nil {
 		name, _ = meta["name"].(string)
 		if anns, ok := meta["annotations"].(map[string]any); ok {
+			if annName, ok := anns["crossplane.io/composition-resource-name"].(string); ok && annName != "" {
+				name = annName
+			}
 			for k, v := range anns {
 				unmaskedK := unmaskString(fmt.Sprint(k), placeholders)
 				unmaskedV := unmaskString(fmt.Sprint(v), placeholders)
@@ -961,7 +1031,7 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 			for k, v := range anns {
 				rawK := unmaskString(fmt.Sprint(k), placeholders)
 				rawStr := unmaskString(fmt.Sprint(v), placeholders)
-				if strings.Contains(rawK, "setResourceNameAnnotation") || strings.Contains(rawStr, "setResourceNameAnnotation") {
+				if k == "crossplane.io/composition-resource-name" || strings.Contains(rawK, "setResourceNameAnnotation") || strings.Contains(rawStr, "setResourceNameAnnotation") {
 					continue
 				}
 				if err := checkScalarClean(rawStr); err != nil {
@@ -973,6 +1043,15 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 						res.Annotations[k] = blueprint.Field{From: "params." + m[1]}
 					} else {
 						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, k), "invalid parameter reference")
+					}
+				} else if m := reEnvVar.FindStringSubmatch(rawStr); len(m) >= 2 {
+					if isValidParamIdentifier(m[1]) {
+						res.Annotations[k] = blueprint.Field{From: "env." + m[1]}
+						if bp != nil {
+							ensureEnvDeclared(bp, m[1])
+						}
+					} else {
+						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, k), "invalid environment reference")
 					}
 				} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 4 {
 					srcRes := m[1]
@@ -1009,7 +1088,7 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 			continue
 		}
 		if mapVal, ok := v.(map[string]any); ok {
-			extractFields(k, mapVal, res.Fields, placeholders, res.Name, report, nameMapping)
+			extractFields(k, mapVal, res.Fields, placeholders, res.Name, report, nameMapping, bp)
 		} else {
 			rawStr := unmaskString(fmt.Sprint(v), placeholders)
 			if err := checkScalarClean(rawStr); err != nil {
@@ -1023,9 +1102,9 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 	// Extract spec fields
 	if spec, ok := m["spec"].(map[string]any); ok {
 		if forProvider, ok := spec["forProvider"].(map[string]any); ok {
-			extractFields("", forProvider, res.Fields, placeholders, res.Name, report, nameMapping)
+			extractFields("", forProvider, res.Fields, placeholders, res.Name, report, nameMapping, bp)
 		} else {
-			extractFields("spec", spec, res.Fields, placeholders, res.Name, report, nameMapping)
+			extractFields("spec", spec, res.Fields, placeholders, res.Name, report, nameMapping, bp)
 		}
 	}
 
@@ -1048,7 +1127,7 @@ func isMapFieldPrefix(prefix, nextKey string) bool {
 	return false
 }
 
-func extractFields(prefix string, obj map[string]any, out map[string]blueprint.Field, placeholders []string, resName string, report *LossReport, nameMapping map[string]string) {
+func extractFields(prefix string, obj map[string]any, out map[string]blueprint.Field, placeholders []string, resName string, report *LossReport, nameMapping map[string]string, bp *blueprint.Blueprint) {
 	for k, v := range obj {
 		path := k
 		if prefix != "" {
@@ -1060,7 +1139,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 		}
 		switch val := v.(type) {
 		case map[string]any:
-			extractFields(path, val, out, placeholders, resName, report, nameMapping)
+			extractFields(path, val, out, placeholders, resName, report, nameMapping, bp)
 		case string:
 			rawStr := unmaskString(val, placeholders)
 			if err := checkScalarClean(rawStr); err != nil {
@@ -1073,6 +1152,15 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 					out[path] = blueprint.Field{From: "params." + m[1]}
 				} else {
 					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid parameter reference")
+				}
+			} else if m := reEnvVar.FindStringSubmatch(rawStr); len(m) >= 2 {
+				if isValidParamIdentifier(m[1]) {
+					out[path] = blueprint.Field{From: "env." + m[1]}
+					if bp != nil {
+						ensureEnvDeclared(bp, m[1])
+					}
+				} else {
+					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid environment reference")
 				}
 			} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 4 {
 				srcRes := m[1]
@@ -1106,7 +1194,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 				elemPath := fmt.Sprintf("%s[%d]", path, elemIdx)
 				switch elemVal := item.(type) {
 				case map[string]any:
-					extractFields(elemPath, elemVal, out, placeholders, resName, report, nameMapping)
+					extractFields(elemPath, elemVal, out, placeholders, resName, report, nameMapping, bp)
 				case string:
 					rawStr := unmaskString(elemVal, placeholders)
 					if err := checkScalarClean(rawStr); err != nil {
@@ -1119,6 +1207,15 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 							out[elemPath] = blueprint.Field{From: "params." + m[1]}
 						} else {
 							report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid parameter reference")
+						}
+					} else if m := reEnvVar.FindStringSubmatch(rawStr); len(m) >= 2 {
+						if isValidParamIdentifier(m[1]) {
+							out[elemPath] = blueprint.Field{From: "env." + m[1]}
+							if bp != nil {
+								ensureEnvDeclared(bp, m[1])
+							}
+						} else {
+							report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid environment reference")
 						}
 					} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 4 {
 						srcRes := m[1]

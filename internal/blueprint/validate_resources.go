@@ -80,6 +80,10 @@ func (b *Blueprint) validateResources() error {
 				if err := b.validateForEachStatusRef(r); err != nil {
 					return err
 				}
+			} else if strings.HasPrefix(r.ForEach, "env.") {
+				if err := b.validateForEachEnvRef(r); err != nil {
+					return err
+				}
 			} else if err := validateForEachParamRef(b.Spec.XRD, r); err != nil {
 				return err
 			}
@@ -93,37 +97,58 @@ func (b *Blueprint) validateResources() error {
 				return fmt.Errorf("resource %q: when cannot reference an object member (got %q) — "+
 					"conditions reference top-level parameters only in v1", r.Name, head)
 			}
-			param, op, literal, err := ParseWhen(r.When)
+			source, name, op, literal, err := ParseWhen(r.When)
 			if err != nil {
 				return fmt.Errorf("resource %q: %w", r.Name, err)
 			}
-			decl, exists := b.Spec.XRD.Parameters[param]
-			if !exists {
-				return fmt.Errorf("resource %q: when references unknown parameter %q", r.Name, param)
-			}
-			if !decl.Required && decl.Default == "" {
-				return fmt.Errorf("resource %q: when parameter %q must be required or carry a default -- "+
-					"the condition dereferences it unguarded, and under options: [\"missingkey=error\"] "+
-					"an absent key hard-fails the whole render; only the XRD's required gate or its "+
-					"schema default makes the key's presence unconditional", r.Name, param)
-			}
-			switch op {
-			case "":
-				if decl.Type != "boolean" {
-					return fmt.Errorf("resource %q: when parameter %q has type %q, want boolean -- "+
-						"the bare form renders {{- if $spec.%s }}, a truthiness test; compare a string "+
-						"parameter explicitly: when: params.%s == \"<literal>\"",
-						r.Name, param, decl.Type, param, param)
+			if source == "env" {
+				decl, exists := b.Spec.Environment[name]
+				if !exists {
+					return UnknownEnvKeyError(fmt.Sprintf("resource %q: when", r.Name), name, b.Spec.Environment)
 				}
-			default:
-				if decl.Type != "string" {
-					return fmt.Errorf("resource %q: when parameter %q has type %q, want string -- "+
-						"the %s form compares against a string literal", r.Name, param, decl.Type, op)
+				switch op {
+				case "":
+					if decl.Type != "boolean" {
+						return fmt.Errorf("resource %q: when environment key %q has type %q, want boolean -- "+
+							"the bare form renders {{- if and (hasKey $env %q) $env.%s }}, a truthiness test; compare a string "+
+							"key explicitly: when: env.%s == \"<literal>\"",
+							r.Name, name, decl.Type, name, name, name)
+					}
+				default:
+					if decl.Type != "string" {
+						return fmt.Errorf("resource %q: when environment key %q has type %q, want string -- "+
+							"the %s form compares against a string literal", r.Name, name, decl.Type, op)
+					}
 				}
-				if len(decl.Enum) > 0 && !slices.Contains(decl.Enum, literal) {
-					return fmt.Errorf("resource %q: when literal %q is not among parameter %q's enum values %v -- "+
-						"the XRD schema admits no XR carrying it, so the condition would be constant: "+
-						"a resource that silently never (or always) exists", r.Name, literal, param, decl.Enum)
+			} else {
+				decl, exists := b.Spec.XRD.Parameters[name]
+				if !exists {
+					return fmt.Errorf("resource %q: when references unknown parameter %q", r.Name, name)
+				}
+				if !decl.Required && decl.Default == "" {
+					return fmt.Errorf("resource %q: when parameter %q must be required or carry a default -- "+
+						"the condition dereferences it unguarded, and under options: [\"missingkey=error\"] "+
+						"an absent key hard-fails the whole render; only the XRD's required gate or its "+
+						"schema default makes the key's presence unconditional", r.Name, name)
+				}
+				switch op {
+				case "":
+					if decl.Type != "boolean" {
+						return fmt.Errorf("resource %q: when parameter %q has type %q, want boolean -- "+
+							"the bare form renders {{- if $spec.%s }}, a truthiness test; compare a string "+
+							"parameter explicitly: when: params.%s == \"<literal>\"",
+							r.Name, name, decl.Type, name, name)
+					}
+				default:
+					if decl.Type != "string" {
+						return fmt.Errorf("resource %q: when parameter %q has type %q, want string -- "+
+							"the %s form compares against a string literal", r.Name, name, decl.Type, op)
+					}
+					if len(decl.Enum) > 0 && !slices.Contains(decl.Enum, literal) {
+						return fmt.Errorf("resource %q: when literal %q is not among parameter %q's enum values %v -- "+
+							"the XRD schema admits no XR carrying it, so the condition would be constant: "+
+							"a resource that silently never (or always) exists", r.Name, literal, name, decl.Enum)
+					}
 				}
 			}
 		}
@@ -224,6 +249,13 @@ func (b *Blueprint) validateFields(r Resource) error {
 					if err := b.validateStatusRef(r, fmt.Sprintf("field %q", p), f.From); err != nil {
 						return err
 					}
+				}
+				continue
+			}
+			if ref.Env != "" {
+				_, exists := b.Spec.Environment[ref.Env]
+				if !exists {
+					return UnknownEnvKeyError(fmt.Sprintf("resource %q field %q", r.Name, p), ref.Env, b.Spec.Environment)
 				}
 				continue
 			}

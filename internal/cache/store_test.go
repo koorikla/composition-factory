@@ -287,3 +287,41 @@ func TestStoreList(t *testing.T) {
 		t.Errorf("List mismatch (-want +got):\n%s", diff)
 	}
 }
+
+func TestLockFunctionsSupport(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), ".cf.lock")
+	l, err := ReadLock(tmp)
+	if err != nil {
+		t.Fatalf("ReadLock: %v", err)
+	}
+
+	l.Set("xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0", "sha256:prov123")
+	l.Set("xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0", "sha256:fn123")
+
+	if len(l.Providers) != 1 || l.Providers[0].Ref != "xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0" {
+		t.Errorf("Providers: %v", l.Providers)
+	}
+	if len(l.Functions) != 1 || l.Functions[0].Ref != "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0" {
+		t.Errorf("Functions: %v", l.Functions)
+	}
+
+	if err := l.Write(tmp); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	readBack, err := ReadLock(tmp)
+	if err != nil {
+		t.Fatalf("ReadLock after write: %v", err)
+	}
+	if diff := cmp.Diff(l, readBack); diff != "" {
+		t.Errorf("ReadLock roundtrip diff (-want +got):\n%s", diff)
+	}
+
+	// Remove function
+	if !readBack.Remove("xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0") {
+		t.Errorf("Remove returned false for existing function")
+	}
+	if len(readBack.Functions) != 0 {
+		t.Errorf("Functions after remove: %v", readBack.Functions)
+	}
+}

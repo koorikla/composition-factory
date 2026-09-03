@@ -202,7 +202,7 @@ func (s *Store) Delete(ref string) error {
 	return nil
 }
 
-// LockEntry pins one provider reference to a resolved digest.
+// LockEntry pins one provider or function reference to a resolved digest.
 type LockEntry struct {
 	Ref    string `json:"ref"`
 	Digest string `json:"digest"`
@@ -211,22 +211,46 @@ type LockEntry struct {
 // Lock is the contents of .cf.lock.
 type Lock struct {
 	Providers []LockEntry `json:"providers"`
+	Functions []LockEntry `json:"functions,omitempty"`
+}
+
+// isFunctionRef reports whether ref is a Crossplane function package reference.
+func isFunctionRef(ref string) bool {
+	return strings.Contains(ref, "/function-") || strings.HasPrefix(ref, "function-")
 }
 
 // Remove deletes the entry for ref, reporting whether one was present — so a
 // caller can skip rewriting the lockfile when nothing changed.
 func (l *Lock) Remove(ref string) bool {
+	removed := false
 	for i := range l.Providers {
 		if l.Providers[i].Ref == ref {
 			l.Providers = append(l.Providers[:i], l.Providers[i+1:]...)
-			return true
+			removed = true
+			break
 		}
 	}
-	return false
+	for i := range l.Functions {
+		if l.Functions[i].Ref == ref {
+			l.Functions = append(l.Functions[:i], l.Functions[i+1:]...)
+			removed = true
+			break
+		}
+	}
+	return removed
 }
 
 // Set adds or replaces the entry for ref and keeps the list sorted.
 func (l *Lock) Set(ref, digest string) {
+	if isFunctionRef(ref) {
+		l.SetFunction(ref, digest)
+		return
+	}
+	l.SetProvider(ref, digest)
+}
+
+// SetProvider adds or replaces a provider entry for ref.
+func (l *Lock) SetProvider(ref, digest string) {
 	for i := range l.Providers {
 		if l.Providers[i].Ref == ref {
 			l.Providers[i].Digest = digest
@@ -235,6 +259,18 @@ func (l *Lock) Set(ref, digest string) {
 	}
 	l.Providers = append(l.Providers, LockEntry{Ref: ref, Digest: digest})
 	sort.Slice(l.Providers, func(i, j int) bool { return l.Providers[i].Ref < l.Providers[j].Ref })
+}
+
+// SetFunction adds or replaces a function entry for ref.
+func (l *Lock) SetFunction(ref, digest string) {
+	for i := range l.Functions {
+		if l.Functions[i].Ref == ref {
+			l.Functions[i].Digest = digest
+			return
+		}
+	}
+	l.Functions = append(l.Functions, LockEntry{Ref: ref, Digest: digest})
+	sort.Slice(l.Functions, func(i, j int) bool { return l.Functions[i].Ref < l.Functions[j].Ref })
 }
 
 // ReadLock reads path. A missing file is an empty lock, not an error.
@@ -256,6 +292,7 @@ func ReadLock(path string) (*Lock, error) {
 // Write saves the lock with a trailing newline, sorted and stable.
 func (l *Lock) Write(path string) error {
 	sort.Slice(l.Providers, func(i, j int) bool { return l.Providers[i].Ref < l.Providers[j].Ref })
+	sort.Slice(l.Functions, func(i, j int) bool { return l.Functions[i].Ref < l.Functions[j].Ref })
 	body, err := json.MarshalIndent(l, "", " ")
 	if err != nil {
 		return fmt.Errorf("encode lock: %w", err)

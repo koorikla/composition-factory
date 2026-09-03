@@ -262,3 +262,52 @@ spec:
 		t.Errorf("expected all parsed CRDs from manifest to have Native=true")
 	}
 }
+
+func TestParseCRDsFunctionInput(t *testing.T) {
+	fnCRD := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: autoreadies.autoready.fn.crossplane.io
+spec:
+  group: autoready.fn.crossplane.io
+  scope: Namespaced
+  names:
+    kind: AutoReady
+    plural: autoreadies
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          apiVersion: {type: string}
+          kind: {type: string}
+          ignore:
+            type: array
+            items: {type: string}
+`)
+	crds, err := ParseCRDs([][]byte{fnCRD})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+	if len(crds) != 1 {
+		t.Fatalf("got %d CRDs, want 1", len(crds))
+	}
+	c := crds[0]
+	if !c.IsFunctionInput() {
+		t.Errorf("IsFunctionInput() = false, want true for group %q", c.Group)
+	}
+	if !c.Function {
+		t.Errorf("Function = false, want true")
+	}
+	nodes, err := c.FieldTree()
+	if err != nil {
+		t.Fatalf("FieldTree: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].Name != "ignore" {
+		t.Errorf("FieldTree() got %v, want [ignore]", nodes)
+	}
+}

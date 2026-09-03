@@ -34,7 +34,9 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 	sb.WriteString("    dcds = req.desired.resources\n")
 	sb.WriteString("    spec = oxr.get(\"spec\", {})\n")
 	sb.WriteString("    xr_name = oxr.get(\"metadata\", {}).get(\"name\", \"\")\n")
-	sb.WriteString("    xr_meta = oxr.get(\"metadata\", {})\n\n")
+	sb.WriteString("    xr_meta = oxr.get(\"metadata\", {})\n")
+	sb.WriteString("    ctx = MessageToDict(req.context)\n")
+	sb.WriteString("    env = ctx.get(\"apiextensions.crossplane.io/environment\", {})\n\n")
 
 	for _, r := range b.Spec.Resources {
 		pres, err := planSingleResource(r, b, crds, wantNamespaced)
@@ -182,6 +184,8 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 		return sb.String()
 	case rhsMetadata:
 		return fmt.Sprintf("f\"{xr_name}-%s\"", s.resource)
+	case rhsEnv:
+		return fmt.Sprintf("env.get(%q)", s.param)
 	default:
 		return pythonRHS(fallbackRHS, s.targetType)
 	}
@@ -196,6 +200,10 @@ func pythonRHS(rhs string, targetType string) string {
 		if strings.HasPrefix(inner, "$spec.") {
 			param := strings.TrimPrefix(inner, "$spec.")
 			return translateParamAccessToPython(param)
+		}
+		if strings.HasPrefix(inner, "$env.") {
+			key := strings.TrimPrefix(inner, "$env.")
+			return fmt.Sprintf("env.get(%q)", key)
 		}
 		if strings.HasPrefix(inner, "$observed.") || strings.Contains(inner, "$observed") {
 			return translateObservedAccessToPython(inner)
@@ -252,33 +260,59 @@ func translateObservedAccessToPython(expr string) string {
 
 func translateWhenToPython(when string) string {
 	when = strings.TrimSpace(when)
-	if strings.HasPrefix(when, "params.") {
-		p := strings.TrimPrefix(when, "params.")
-		if strings.Contains(when, "==") {
-			parts := strings.SplitN(when, "==", 2)
-			param := strings.TrimSpace(strings.TrimPrefix(parts[0], "params."))
-			val := strings.TrimSpace(parts[1])
-			if val == "true" {
-				return fmt.Sprintf("bool(spec.get(%q)) is True", param)
-			}
-			if val == "false" {
-				return fmt.Sprintf("bool(spec.get(%q)) is False", param)
-			}
-			return fmt.Sprintf("spec.get(%q) == %s", param, pythonFormatLiteral(val, ""))
+	source, name, op, literal, err := blueprint.ParseWhen(when)
+	if err == nil {
+		targetDict := "spec"
+		if source == "env" {
+			targetDict = "env"
 		}
-		if strings.Contains(when, "!=") {
-			parts := strings.SplitN(when, "!=", 2)
-			param := strings.TrimSpace(strings.TrimPrefix(parts[0], "params."))
-			val := strings.TrimSpace(parts[1])
-			if val == "true" {
-				return fmt.Sprintf("bool(spec.get(%q)) is not True", param)
+		switch op {
+		case "":
+			return fmt.Sprintf("bool(%s.get(%q))", targetDict, name)
+		case "==":
+			if literal == "true" {
+				return fmt.Sprintf("bool(%s.get(%q)) is True", targetDict, name)
 			}
-			if val == "false" {
-				return fmt.Sprintf("bool(spec.get(%q)) is not False", param)
+			if literal == "false" {
+				return fmt.Sprintf("bool(%s.get(%q)) is False", targetDict, name)
 			}
-			return fmt.Sprintf("spec.get(%q) != %s", param, pythonFormatLiteral(val, ""))
+			return fmt.Sprintf("%s.get(%q) == %s", targetDict, name, pythonFormatLiteral(literal, ""))
+		case "!=":
+			if literal == "true" {
+				return fmt.Sprintf("bool(%s.get(%q)) is not True", targetDict, name)
+			}
+			if literal == "false" {
+				return fmt.Sprintf("bool(%s.get(%q)) is not False", targetDict, name)
+			}
+			return fmt.Sprintf("%s.get(%q) != %s", targetDict, name, pythonFormatLiteral(literal, ""))
 		}
-		return fmt.Sprintf("bool(spec.get(%q))", p)
+	}
+	for _, op := range []string{"==", "!="} {
+		for _, bVal := range []string{"true", "false"} {
+			suffix := fmt.Sprintf(" %s %s", op, bVal)
+			if strings.HasSuffix(when, suffix) {
+				prefix := strings.TrimSuffix(when, suffix)
+				targetDict := "spec"
+				var name string
+				if strings.HasPrefix(prefix, "params.") {
+					name = strings.TrimPrefix(prefix, "params.")
+				} else if strings.HasPrefix(prefix, "env.") {
+					targetDict = "env"
+					name = strings.TrimPrefix(prefix, "env.")
+				}
+				if name != "" {
+					isNot := ""
+					if op == "!=" {
+						isNot = " not"
+					}
+					pyBool := "True"
+					if bVal == "false" {
+						pyBool = "False"
+					}
+					return fmt.Sprintf("bool(%s.get(%q)) is%s %s", targetDict, name, isNot, pyBool)
+				}
+			}
+		}
 	}
 	if strings.HasPrefix(when, "!params.") {
 		p := strings.TrimPrefix(when, "!params.")
@@ -291,6 +325,10 @@ func translateForEachToPython(forEach string) string {
 	if strings.HasPrefix(forEach, "params.") {
 		param := strings.TrimPrefix(forEach, "params.")
 		return fmt.Sprintf("range(int(spec.get(%q, 0)))", param)
+	}
+	if strings.HasPrefix(forEach, "env.") {
+		key := strings.TrimPrefix(forEach, "env.")
+		return fmt.Sprintf("range(int(env.get(%q, 0)))", key)
 	}
 	if strings.HasPrefix(forEach, "resources.") {
 		res, path, _ := blueprint.StatusRef(forEach)

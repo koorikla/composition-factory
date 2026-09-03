@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/schema"
 	"sigs.k8s.io/yaml"
 )
 
@@ -284,5 +285,149 @@ func TestPipelineTemplateStillRenders(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "kind: Queue") {
 		t.Errorf("rendered template lost its composed resource\n---\n%s", rendered)
+	}
+}
+
+func functionCRDs() []schema.CRD {
+	return []schema.CRD{
+		{
+			Group:    "autoready.fn.crossplane.io",
+			Kind:     "AutoReady",
+			Plural:   "autoreadies",
+			Scope:    "Namespaced",
+			Function: true,
+			Versions: []schema.Version{{
+				Name:    "v1alpha1",
+				Served:  true,
+				Storage: true,
+				Properties: map[string]any{
+					"apiVersion": map[string]any{"type": "string"},
+					"kind":       map[string]any{"type": "string"},
+					"ignore": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "string"},
+					},
+				},
+			}},
+		},
+		{
+			Group:    "gotemplating.fn.crossplane.io",
+			Kind:     "GoTemplate",
+			Plural:   "gotemplates",
+			Scope:    "Namespaced",
+			Function: true,
+			Versions: []schema.Version{{
+				Name:    "v1beta1",
+				Served:  true,
+				Storage: true,
+				Properties: map[string]any{
+					"apiVersion": map[string]any{"type": "string"},
+					"kind":       map[string]any{"type": "string"},
+					"source": map[string]any{
+						"type": "string",
+						"enum": []any{"Inline", "FileSystem"},
+					},
+					"inline": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"template": map[string]any{"type": "string"},
+						},
+					},
+				},
+			}},
+		},
+	}
+}
+
+func TestValidatePipelineInputs_ValidInput(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "template-step",
+			FunctionRef: "function-go-templating",
+			Package:     "xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.4.1",
+			Input: "apiVersion: gotemplating.fn.crossplane.io/v1beta1\n" +
+				"kind: GoTemplate\n" +
+				"source: Inline\n" +
+				"inline:\n" +
+				"  template: \"{{ . }}\"\n",
+		},
+	}
+	crds := append(testCRDs(t), functionCRDs()...)
+	warnings, err := ValidatePipelineInputs(b, crds)
+	if err != nil {
+		t.Fatalf("ValidatePipelineInputs: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected 0 warnings, got %v", warnings)
+	}
+}
+
+func TestValidatePipelineInputs_UnknownFieldSuggestsNearest(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "template-step",
+			FunctionRef: "function-go-templating",
+			Package:     "xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.4.1",
+			Input: "apiVersion: gotemplating.fn.crossplane.io/v1beta1\n" +
+				"kind: GoTemplate\n" +
+				"sourc: Inline\n", // typo: sourc instead of source
+		},
+	}
+	crds := append(testCRDs(t), functionCRDs()...)
+	_, err := ValidatePipelineInputs(b, crds)
+	if err == nil {
+		t.Fatal("expected error for unknown field 'sourc', got nil")
+	}
+	if !strings.Contains(err.Error(), `field "sourc" is not in GoTemplate schema; did you mean "source"?`) {
+		t.Errorf("error %q does not contain nearest-match suggestion", err.Error())
+	}
+}
+
+func TestValidatePipelineInputs_UncachedFunctionProducesWarning(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "custom-fn",
+			FunctionRef: "function-custom",
+			Package:     "example.org/function-custom:v1.0.0",
+			Input: "apiVersion: custom.fn.example.org/v1\n" +
+				"kind: CustomInput\n" +
+				"foo: bar\n",
+		},
+	}
+	crds := testCRDs(t) // no function CRDs in cache
+	warnings, err := ValidatePipelineInputs(b, crds)
+	if err != nil {
+		t.Fatalf("ValidatePipelineInputs should accept uncached function with warning, got err: %v", err)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected explicit warning for uncached function, got none")
+	}
+	if !strings.Contains(warnings[0], "custom.fn.example.org/v1 CustomInput") || !strings.Contains(warnings[0], "not cached") {
+		t.Errorf("warning %q does not match expected format", warnings[0])
+	}
+}
+
+func TestValidatePipelineInputs_EnumValidation(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "template-step",
+			FunctionRef: "function-go-templating",
+			Package:     "xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.4.1",
+			Input: "apiVersion: gotemplating.fn.crossplane.io/v1beta1\n" +
+				"kind: GoTemplate\n" +
+				"source: InvalidSource\n",
+		},
+	}
+	crds := append(testCRDs(t), functionCRDs()...)
+	_, err := ValidatePipelineInputs(b, crds)
+	if err == nil {
+		t.Fatal("expected error for invalid enum value, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid value \"InvalidSource\"") {
+		t.Errorf("error %q does not mention invalid enum value", err.Error())
 	}
 }

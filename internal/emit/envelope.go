@@ -162,6 +162,50 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 			e.rhs = rhs
 			e.structured = structuredRHS{kind: rhsLiteral, value: f.Value, targetType: n.Type}
 		case f.From != "":
+			if envKey, ok := strings.CutPrefix(f.From, "env."); ok {
+				envDecl, exists := b.Spec.Environment[envKey]
+				if !exists {
+					return nil, blueprint.UnknownEnvKeyError(fmt.Sprintf("resource %q envelope %q", r.Name, p), envKey, b.Spec.Environment)
+				}
+				switch {
+				case n.Type == "array":
+					return nil, fmt.Errorf("resource %q: envelope %q is an array, and a from: wire cannot "+
+						"render a list in v1 — a scalar parameter renders one scalar, and array parameters "+
+						"are not supported. Use value: with comma-separated entries, or raw: for literal "+
+						"YAML", r.Name, p)
+				case branch:
+					return nil, fmt.Errorf("resource %q: envelope %q is an object; a from: wire renders one "+
+						"scalar and cannot fill it — wire its individual children (e.g. %s.<key>), or set "+
+						"the whole node with raw:", r.Name, p, p)
+				case n.Type == "map":
+					return nil, fmt.Errorf("resource %q: envelope %q is a map, and a from: wire cannot "+
+						"render one in v1. Set it with raw:", r.Name, p)
+				}
+				if !envelopeTypeCompatible(n.Type, envDecl.Type) {
+					return nil, fmt.Errorf("resource %q: envelope %q has type %q in the CRD schema, but "+
+						"environment key %q has type %q — the wire would render a YAML scalar of the wrong type, "+
+						"which the API server rejects on apply", r.Name, p, n.Type, envKey, envDecl.Type)
+				}
+				deref := "$env." + envKey
+				if n.Type == "string" {
+					e.rhs = fmt.Sprintf("{{ %s | quote }}", deref)
+				} else {
+					e.rhs = fmt.Sprintf("{{ %s }}", deref)
+				}
+				g := fmt.Sprintf("hasKey $env %q", envKey)
+				e.optional, e.guard = true, g
+				e.structured = structuredRHS{
+					kind:       rhsEnv,
+					param:      envKey,
+					paramSegs:  []string{envKey},
+					rawExpr:    deref,
+					targetType: n.Type,
+					optional:   true,
+					guard:      g,
+				}
+				plan = append(plan, e)
+				continue
+			}
 			param, member, _ := blueprint.ParamRef(f.From)
 			chainRef := param
 			if member != "" {

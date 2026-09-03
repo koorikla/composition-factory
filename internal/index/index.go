@@ -27,6 +27,7 @@ type Kind struct {
 	Scope      string `json:"scope"`    // Namespaced | Cluster
 	Provider   string `json:"provider"` // the xpkg ref it came from, or "k8s" for a vendored native kind
 	Namespaced bool   `json:"namespaced"`
+	Function   bool   `json:"function,omitempty"`
 	Required   int    `json:"required"` // count of required settable leaves (schema.CRD.FieldTree)
 	Fields     int    `json:"fields"`   // count of settable leaves (schema.CRD.FieldTree)
 }
@@ -71,12 +72,11 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 
 	for _, provider := range providers {
 		for _, c := range byProvider[provider] {
-			// Two families of composable kinds: a provider's managed
-			// resources, and the vendored native Kubernetes kinds (indexed
-			// under blueprint.NativeProvider by the callers that load them).
+			// Three families of composable kinds: a provider's managed
+			// resources, vendored native Kubernetes kinds, and Function Input CRDs.
 			// Everything else a package ships — ProviderConfigs and friends —
 			// stays out of the index.
-			if !c.IsManaged() && !c.Native {
+			if !c.IsManaged() && !c.Native && !c.IsFunctionInput() && !c.Function {
 				continue
 			}
 			attempted++
@@ -123,6 +123,7 @@ func Build(byProvider map[string][]schema.CRD) (*Index, error) {
 				Scope:      c.Scope,
 				Provider:   provider,
 				Namespaced: c.Namespaced(),
+				Function:   c.Function || c.IsFunctionInput(),
 				Required:   required,
 				Fields:     len(leaves),
 			}

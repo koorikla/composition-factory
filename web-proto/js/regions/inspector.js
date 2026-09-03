@@ -161,6 +161,131 @@ async function kindDetail(apiVersion, kind) {
   return kindDetailCache[key];
 }
 
+var catalogueFnsCache = null;
+async function getCatalogueFunctions() {
+  if (catalogueFnsCache) return catalogueFnsCache;
+  try {
+    var res = await api.getCatalogue("", "function");
+    catalogueFnsCache = (res && res.providers) || [];
+  } catch (_) {
+    catalogueFnsCache = [];
+  }
+  return catalogueFnsCache;
+}
+
+var pipeInputMode = {};
+
+function inferFnMeta(step) {
+  if (!step) return null;
+  var pkg = step.package || "";
+  var fn = step.functionRef || step.name || "";
+  if (pkg.indexOf("function-auto-ready") !== -1 || fn.indexOf("auto-ready") !== -1) {
+    return { apiVersion: "autoready.fn.crossplane.io/v1alpha1", kind: "AutoReady" };
+  }
+  if (pkg.indexOf("function-environment-configs") !== -1 || fn.indexOf("environment-configs") !== -1) {
+    return { apiVersion: "environmentconfigs.fn.crossplane.io/v1beta1", kind: "Input" };
+  }
+  if (pkg.indexOf("function-go-templating") !== -1 || fn.indexOf("go-templating") !== -1) {
+    return { apiVersion: "gotemplating.fn.crossplane.io/v1beta1", kind: "GoTemplate" };
+  }
+  if (pkg.indexOf("function-cel-filter") !== -1 || fn.indexOf("cel-filter") !== -1) {
+    return { apiVersion: "cel.fn.crossplane.io/v1alpha1", kind: "Filter" };
+  }
+  if (pkg.indexOf("function-extra-resources") !== -1 || fn.indexOf("extra-resources") !== -1) {
+    return { apiVersion: "extraresources.fn.crossplane.io/v1alpha1", kind: "ExtraResources" };
+  }
+  return null;
+}
+
+function parseInputYAML(str) {
+  if (!str) return {};
+  var out = {};
+  var lines = str.split("\n");
+  var stack = [{ obj: out, indent: -1 }];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    var indent = line.search(/\S/);
+    var colonIdx = line.indexOf(":");
+    if (colonIdx === -1) continue;
+    var key = line.slice(indent, colonIdx).trim();
+    var val = line.slice(colonIdx + 1).trim();
+    while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
+      stack.pop();
+    }
+    var parent = stack[stack.length - 1].obj;
+    if (val === "" || val === "|") {
+      var newObj = {};
+      parent[key] = newObj;
+      stack.push({ obj: newObj, indent: indent });
+    } else {
+      var unquoted = val.replace(/^["']|["']$/g, "");
+      parent[key] = unquoted;
+    }
+  }
+  return out;
+}
+
+function serializeInputYAML(obj, indent) {
+  indent = indent || 0;
+  var pad = "  ".repeat(indent);
+  var lines = [];
+  var keys = Object.keys(obj);
+  if (indent === 0) {
+    keys.sort(function (a, b) {
+      if (a === "apiVersion") return -1;
+      if (b === "apiVersion") return 1;
+      if (a === "kind") return -1;
+      if (b === "kind") return 1;
+      return a.localeCompare(b);
+    });
+  } else {
+    keys.sort();
+  }
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    var v = obj[k];
+    if (v === undefined || v === null || v === "") continue;
+    if (typeof v === "object" && !Array.isArray(v)) {
+      var nested = serializeInputYAML(v, indent + 1);
+      if (nested) {
+        lines.push(pad + k + ":\n" + nested);
+      }
+    } else if (typeof v === "string" && v.indexOf("\n") !== -1) {
+      lines.push(pad + k + ": |\n" + v.split("\n").map(function (l) { return pad + "  " + l; }).join("\n"));
+    } else {
+      lines.push(pad + k + ": " + v);
+    }
+  }
+  return lines.join("\n");
+}
+
+function getPathVal(obj, path) {
+  var parts = path.split(".");
+  var cur = obj;
+  for (var i = 0; i < parts.length; i++) {
+    if (!cur || typeof cur !== "object") return "";
+    cur = cur[parts[i]];
+  }
+  return cur === undefined || cur === null ? "" : String(cur);
+}
+
+function setPathVal(obj, path, val) {
+  var parts = path.split(".");
+  var cur = obj;
+  for (var i = 0; i < parts.length - 1; i++) {
+    var p = parts[i];
+    if (!cur[p] || typeof cur[p] !== "object") cur[p] = {};
+    cur = cur[p];
+  }
+  if (val === "" || val === undefined) {
+    delete cur[parts[parts.length - 1]];
+  } else {
+    cur[parts[parts.length - 1]] = val;
+  }
+}
+
 /**
  * Run a store operation, capturing the "error" the store emits for it so the
  * inspector can show the server's message verbatim in its warnbar.
@@ -287,6 +412,133 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
   return h;
 }
 
+function buildSnippets(res, fieldPath, params, otherResources, otherStatusMap, doc) {
+  var groups = [];
+
+  // 1. XRD Parameters
+  var paramItems = [];
+  Object.keys(params || {}).sort().forEach(function (pn) {
+    var p = params[pn] || {};
+    if (p.type === "object") {
+      paramItems.push({ label: "$spec." + pn + " (toYaml)", snippet: "{{ toYaml $spec." + pn + " | nindent 6 }}" });
+      if (p.properties) {
+        Object.keys(p.properties).sort().forEach(function (mn) {
+          paramItems.push({ label: "$spec." + pn + "." + mn, snippet: "{{ $spec." + pn + "." + mn + " }}" });
+        });
+      }
+    } else {
+      paramItems.push({ label: "$spec." + pn, snippet: "{{ $spec." + pn + " }}" });
+      paramItems.push({ label: "default($spec." + pn + ")", snippet: '{{ default "' + (p.default || "value") + '" $spec.' + pn + " }}" });
+    }
+  });
+  if (paramItems.length > 0) {
+    groups.push({ label: "XRD Parameters", items: paramItems });
+  }
+
+  // 2. Composite ($xr) & Loop ($i) Context
+  var ctxItems = [
+    { label: "$xr (Composite Name)", snippet: "{{ $xr }}" },
+    { label: "$xrMeta.namespace", snippet: "{{ $xrMeta.namespace }}" }
+  ];
+  if (res && res.forEach) {
+    ctxItems.push({ label: "$i (Loop Index)", snippet: "{{ $i }}" });
+    ctxItems.push({ label: 'printf "%s-%d" $xr $i', snippet: '{{ printf "%s-%d" $xr $i }}' });
+  }
+  groups.push({ label: "Context & Loops", items: ctxItems });
+
+  // 3. Sibling Resource Status
+  if (otherResources && otherResources.length > 0) {
+    var statusItems = [];
+    otherResources.forEach(function (or) {
+      var sfs = (otherStatusMap && otherStatusMap[or.name]) || [
+        { path: "atProvider.id", type: "string" },
+        { path: "atProvider.arn", type: "string" },
+        { path: "atProvider.url", type: "string" }
+      ];
+      sfs.forEach(function (sf) {
+        statusItems.push({
+          label: or.name + ".status." + sf.path,
+          snippet: '{{ (index $.observed.resources "' + or.name + '").resource.status.' + sf.path + " }}"
+        });
+      });
+    });
+    if (statusItems.length > 0) {
+      groups.push({ label: "Sibling Resource Status", items: statusItems });
+    }
+  }
+
+  // 4. Environment
+  var envItems = [
+    { label: "$env.env", snippet: "{{ $env.env }}" },
+    { label: "$env.region", snippet: "{{ $env.region }}" },
+    { label: "$env.account", snippet: "{{ $env.account }}" }
+  ];
+  groups.push({ label: "Environment ($env)", items: envItems });
+
+  // 5. Templates
+  var tmpls = (doc && doc.spec && doc.spec.templates) || {};
+  var tmplNames = Object.keys(tmpls).sort();
+  if (tmplNames.length > 0) {
+    var tmplItems = tmplNames.map(function (tn) {
+      return { label: 'include "' + tn + '"', snippet: '{{ include "' + tn + '" . }}' };
+    });
+    groups.push({ label: "Templates", items: tmplItems });
+  }
+
+  return groups;
+}
+
+function rawEditorHtml(path, val, isEnv, res, params, otherResources, otherStatusMap) {
+  var doc = store.state.doc;
+  var groups = buildSnippets(res, path, params, otherResources, otherStatusMap, doc);
+  var rawAttr = isEnv ? 'data-env-raw="' : 'data-raw="';
+  var snippetAttr = isEnv ? 'data-env-insert-snippet="' : 'data-insert-snippet="';
+  var previewFor = isEnv ? ("env:" + path) : path;
+
+  var h = '<div class="raw-editor-wrap">' +
+    '<textarea class="val raw" ' + rawAttr + esc(path) + '" rows="2" placeholder="{{ }}">' + esc(val || "") + '</textarea>' +
+    '<div class="snippets-bar">' +
+    '<span class="snippets-lbl">Snippets:</span>' +
+    '<select class="tsel snippet-select" ' + snippetAttr + esc(path) + '" aria-label="Insert snippet">' +
+    '<option value="">+ Insert snippet…</option>';
+
+  groups.forEach(function (g) {
+    h += '<optgroup label="' + esc(g.label) + '">';
+    g.items.forEach(function (item) {
+      h += '<option value="' + esc(item.snippet) + '">' + esc(item.label) + '</option>';
+    });
+    h += '</optgroup>';
+  });
+
+  h += '</select>';
+
+  var quickList = [];
+  quickList.push({ label: "$xr", snippet: "{{ $xr }}" });
+  if (res && res.forEach) {
+    quickList.push({ label: "$i", snippet: "{{ $i }}" });
+  }
+  var pnames = Object.keys(params || {});
+  if (pnames.length > 0) {
+    quickList.push({ label: "$" + pnames[0], snippet: "{{ $spec." + pnames[0] + " }}" });
+  }
+  quickList.forEach(function (qc) {
+    var chipAttr = isEnv ? 'data-env-quick-snippet="' : 'data-quick-snippet="';
+    h += '<button type="button" class="snippet-chip" ' + chipAttr + esc(path) + '" data-snippet-val="' + esc(qc.snippet) + '" title="Insert ' + esc(qc.snippet) + '">' + esc(qc.label) + '</button>';
+  });
+
+  h += '</div>' +
+    '<div class="expr-preview" data-preview-for="' + esc(previewFor) + '" style="display:none">' +
+    '<div class="expr-preview-h">' +
+    '<span class="expr-preview-title">Live Preview</span>' +
+    '<span class="expr-preview-badge"></span>' +
+    '</div>' +
+    '<div class="expr-preview-body"></div>' +
+    '</div>' +
+    '</div>';
+
+  return h;
+}
+
 function fieldRow(res, f, params, otherResources, otherStatusMap) {
   var entry = entryOf(res, f.path);
   var dm = docMode(entry);
@@ -328,8 +580,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
         h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false);
       }
     } else if (m === "r") {
-      h += '<textarea class="val raw" data-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
-        esc((dm === "r" && entry) ? entry.raw : "") + "</textarea>";
+      h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", false, res, params, otherResources, otherStatusMap);
     } else {
       if (entry) {
         h += '<input class="val" data-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
@@ -366,8 +617,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
             h += wireSelectHtml(me.fullPath, "string", params, otherResources, otherStatusMap, false);
           }
         } else if (meM === "r") {
-          h += '<textarea class="val raw" data-raw="' + esc(me.fullPath) + '" rows="1" placeholder="{{ }}">' +
-            esc((meDm === "r" && meEntry) ? meEntry.raw : "") + "</textarea>";
+          h += rawEditorHtml(me.fullPath, (meDm === "r" && meEntry) ? meEntry.raw : "", false, res, params, otherResources, otherStatusMap);
         } else {
           h += '<input class="val" data-v="' + esc(me.fullPath) + '" value="' + esc((meDm === "v" && meEntry) ? meEntry.value : "") +
             '" placeholder="value">';
@@ -396,8 +646,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
         h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false);
       }
     } else if (m === "r") {
-      h += '<textarea class="val raw" data-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
-        esc((dm === "r" && entry) ? entry.raw : "") + "</textarea>";
+      h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", false, res, params, otherResources, otherStatusMap);
     } else {
       h += '<input class="val" data-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
         '" placeholder="' + (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from output") + '">';
@@ -436,8 +685,7 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
       h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, true);
     }
   } else if (m === "r") {
-    h += '<textarea class="val raw" data-env-raw="' + esc(f.path) + '" rows="2" placeholder="{{ }}">' +
-      esc((dm === "r" && entry) ? entry.raw : "") + "</textarea>";
+    h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", true, res, params, otherResources, otherStatusMap);
   } else {
     var ph = f.path === "providerConfigRef.name"
       ? "auto: ClusterProviderConfig / $spec.providerName"
@@ -791,11 +1039,13 @@ async function renderResource(res) {
   var __snap = snapshotFocusedEdit();
   box.innerHTML = h;
   restoreFocusedEdit(__snap);
+  updateAllPreviews();
 }
 
 /* ---------------- rendering: XRD ---------------- */
 
-function renderXRD() {
+async function renderXRD() {
+  var myToken = renderToken;
   var doc = store.state.doc;
   var xrd = doc.spec && doc.spec.xrd || {};
   var params = paramsOf(doc);
@@ -904,8 +1154,30 @@ function renderXRD() {
       '<button class="btn sm" id="addAutoReadyBtn" style="margin-left:auto;font-size:10px">+ Pin step</button>' +
       '</div></div>';
   } else {
-    pipeline.forEach(function (step, i) {
+    for (var i = 0; i < pipeline.length; i++) {
+      var step = pipeline[i];
       var pos = step.position || "after";
+      var parsedInp = parseInputYAML(step.input || "");
+      var apiVer = parsedInp.apiVersion;
+      var fKind = parsedInp.kind;
+      if (!apiVer || !fKind) {
+        var inf = inferFnMeta(step);
+        if (inf) {
+          apiVer = inf.apiVersion;
+          fKind = inf.kind;
+        }
+      }
+      var flds = null;
+      if (apiVer && fKind) {
+        try {
+          flds = await fieldsFor(apiVer, fKind);
+        } catch (_) {
+          flds = null;
+        }
+      }
+      var hasSchema = flds && flds.fields && flds.fields.length > 0;
+      var mode = pipeInputMode[i] || (hasSchema ? "form" : "raw");
+
       h += '<div class="fld" style="margin:0 12px 8px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--rule);border-radius:6px">' +
         '<div class="frow" style="margin-bottom:4px">' +
         '<input class="tin bold" data-pipe-name="' + i + '" value="' + esc(step.name || "") + '" placeholder="step-name" aria-label="Step name" style="flex:1">' +
@@ -917,15 +1189,55 @@ function renderXRD() {
         '<input class="tin" data-pipe-fn="' + i + '" value="' + esc(step.functionRef || "") + '" placeholder="functionRef (e.g. function-auto-ready)" aria-label="Function ref">' +
         '</div>' +
         '<div class="frow" style="margin-bottom:4px">' +
-        '<input class="tin" data-pipe-pkg="' + i + '" value="' + esc(step.package || "") + '" placeholder="xpkg.crossplane.io/... (package)" aria-label="Function package">' +
+        '<input class="tin" list="catalogueFnPkgs" data-pipe-pkg="' + i + '" value="' + esc(step.package || "") + '" placeholder="xpkg.crossplane.io/... (package)" aria-label="Function package">' +
         '</div>' +
-        '<div style="margin-top:4px">' +
-        '<div class="dg" style="font-size:10px;margin-bottom:2px">Input YAML (optional):</div>' +
-        '<textarea class="tin" data-pipe-input="' + i + '" rows="3" style="font-family:var(--mono);font-size:10px;width:100%;resize:vertical" placeholder="apiVersion: ...\nkind: ...">' + esc(step.input || "") + '</textarea>' +
-        '</div>' +
-        '</div>';
-    });
+        '<div style="margin-top:4px">';
+
+      if (hasSchema && mode === "form") {
+        h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">' +
+          '<span class="dg" style="font-size:10px;font-weight:600">Input (' + esc(fKind) + '):</span>' +
+          '<button class="btn sm" data-pipe-mode="' + i + '" data-mode-to="raw" style="font-size:9px;padding:1px 5px">Raw YAML</button>' +
+          '</div>';
+        flds.fields.forEach(function (f) {
+          var curVal = getPathVal(parsedInp, f.path);
+          h += '<div style="margin-bottom:4px;padding:3px 0">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;font-size:11px">' +
+            '<span><code style="font-family:var(--mono);color:var(--ink)">' + esc(f.path) + '</code>' +
+            (f.required ? '<span class="rq" style="margin-left:4px;font-size:9px">req</span>' : "") + '</span>' +
+            '<span style="color:var(--faint);font-size:10px">' + esc(f.type) + '</span></div>' +
+            (f.description ? '<div class="g" style="font-size:10px;margin:1px 0 2px">' + esc(f.description) + '</div>' : "");
+          if (f.type === "boolean") {
+            h += '<select class="tsel" data-pipe-fld="' + i + '" data-fld-path="' + esc(f.path) + '">' +
+              '<option value=""' + (!curVal ? " selected" : "") + '>unset</option>' +
+              '<option value="true"' + (curVal === "true" ? " selected" : "") + '>true</option>' +
+              '<option value="false"' + (curVal === "false" ? " selected" : "") + '>false</option></select>';
+          } else if (f.type === "string" && (f.path.indexOf("template") !== -1 || f.path.indexOf("script") !== -1)) {
+            h += '<textarea class="tin" data-pipe-fld="' + i + '" data-fld-path="' + esc(f.path) + '" rows="2" style="font-family:var(--mono);font-size:10px;width:100%">' + esc(curVal) + '</textarea>';
+          } else {
+            h += '<input class="tin" data-pipe-fld="' + i + '" data-fld-path="' + esc(f.path) + '" value="' + esc(curVal) + '" placeholder="' + esc(f.type) + '">';
+          }
+          h += '</div>';
+        });
+      } else {
+        h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">' +
+          '<span class="dg" style="font-size:10px">Input YAML' + (hasSchema ? "" : " (uncached)") + ':</span>' +
+          (hasSchema ? '<button class="btn sm" data-pipe-mode="' + i + '" data-mode-to="form" style="font-size:9px;padding:1px 5px">Typed Form</button>' : "") +
+          '</div>' +
+          '<textarea class="tin" data-pipe-input="' + i + '" rows="3" style="font-family:var(--mono);font-size:10px;width:100%;resize:vertical" placeholder="apiVersion: ...\nkind: ...">' + esc(step.input || "") + '</textarea>';
+      }
+
+      h += '</div></div>';
+    }
   }
+
+  var catFns = await getCatalogueFunctions().catch(function () { return []; });
+  h += '<datalist id="catalogueFnPkgs">';
+  catFns.forEach(function (cf) {
+    if (cf.ref) {
+      h += '<option value="' + esc(cf.ref) + '">' + esc(cf.name || "") + '</option>';
+    }
+  });
+  h += '</datalist>';
 
   h += '<div style="padding:4px 12px 14px;display:flex;gap:6px;flex-wrap:wrap">' +
     '<select class="tsel" id="pipePresetSelect" style="flex:1">' +
@@ -938,6 +1250,7 @@ function renderXRD() {
     '<button class="btn sm pri" id="addPipeStepBtn">+ Add step</button>' +
     '</div>';
 
+  if (myToken !== renderToken) return;
   var __snap = snapshotFocusedEdit();
   box.innerHTML = h;
   restoreFocusedEdit(__snap);
@@ -1098,6 +1411,87 @@ function commitMembers(paramName, props) {
     paramFrom(params[paramName], { properties: Object.keys(props).length ? props : null }));
 }
 
+/* ---------------- expression preview & snippets ---------------- */
+
+var previewTimers = {};
+
+function triggerExpressionPreview(textarea, isEnv, path) {
+  var val = textarea.value.trim();
+  var previewKey = isEnv ? ("env:" + path) : path;
+  var previewEl = box.querySelector('.expr-preview[data-preview-for="' + CSS.escape(previewKey) + '"]');
+  if (!previewEl) return;
+
+  if (!val) {
+    previewEl.style.display = "none";
+    previewEl.className = "expr-preview";
+    return;
+  }
+
+  if (previewTimers[previewKey]) {
+    clearTimeout(previewTimers[previewKey]);
+  }
+
+  previewTimers[previewKey] = setTimeout(function () {
+    var selRes = selectedResource();
+    var resName = selRes ? selRes.name : "";
+    api.previewExpression(val, resName).then(function (resp) {
+      if (!previewEl) return;
+      previewEl.style.display = "block";
+      var badge = previewEl.querySelector(".expr-preview-badge");
+      var body = previewEl.querySelector(".expr-preview-body");
+      if (resp && resp.error) {
+        previewEl.className = "expr-preview err";
+        if (badge) badge.textContent = "error";
+        if (body) body.textContent = resp.error;
+      } else {
+        previewEl.className = "expr-preview ok";
+        if (badge) badge.textContent = "ok";
+        if (body) body.textContent = (resp && resp.rendered) || "(empty output)";
+      }
+    }).catch(function (err) {
+      if (!previewEl) return;
+      previewEl.style.display = "block";
+      previewEl.className = "expr-preview err";
+      var badge = previewEl.querySelector(".expr-preview-badge");
+      var body = previewEl.querySelector(".expr-preview-body");
+      if (badge) badge.textContent = "error";
+      if (body) body.textContent = err.message || String(err);
+    });
+  }, 100);
+}
+
+function updateAllPreviews() {
+  if (!box) return;
+  var rawTextareas = box.querySelectorAll("textarea.raw");
+  Array.prototype.forEach.call(rawTextareas, function (ta) {
+    var isEnv = ta.hasAttribute("data-env-raw");
+    var path = ta.getAttribute(isEnv ? "data-env-raw" : "data-raw");
+    if (ta.value.trim()) {
+      triggerExpressionPreview(ta, isEnv, path);
+    }
+  });
+}
+
+function insertSnippetIntoTextarea(textarea, snippet) {
+  var start = textarea.selectionStart;
+  var end = textarea.selectionEnd;
+  var text = textarea.value;
+  if (start !== null && end !== null && start !== undefined) {
+    textarea.value = text.substring(0, start) + snippet + text.substring(end);
+    textarea.selectionStart = textarea.selectionEnd = start + snippet.length;
+  } else {
+    textarea.value = (text ? text + " " : "") + snippet;
+  }
+  var isEnv = textarea.hasAttribute("data-env-raw");
+  var path = textarea.getAttribute(isEnv ? "data-env-raw" : "data-raw");
+  triggerExpressionPreview(textarea, isEnv, path);
+  if (isEnv) {
+    commitEnvelopeValue(path, "raw", textarea.value);
+  } else {
+    commitValue(path, "raw", textarea.value);
+  }
+}
+
 /* ---------------- events ---------------- */
 
 async function commitValue(path, kind, text) {
@@ -1143,6 +1537,20 @@ async function commitEnvelopeValue(path, kind, text) {
 }
 
 var boxClickActions = [
+  {
+    selector: "[data-quick-snippet], [data-env-quick-snippet]",
+    run: function (chip) {
+      var isEnv = chip.hasAttribute("data-env-quick-snippet");
+      var path = chip.getAttribute(isEnv ? "data-env-quick-snippet" : "data-quick-snippet");
+      var snippet = chip.getAttribute("data-snippet-val");
+      if (!snippet) return;
+      var taSelector = isEnv ? ('textarea[data-env-raw="' + CSS.escape(path) + '"]') : ('textarea[data-raw="' + CSS.escape(path) + '"]');
+      var ta = box.querySelector(taSelector);
+      if (ta) {
+        insertSnippetIntoTextarea(ta, snippet);
+      }
+    }
+  },
   {
     selector: "[data-toggle-desc]",
     run: function (el) {
@@ -1284,6 +1692,16 @@ var boxClickActions = [
         .then(function (r) {
           if (r !== null) { pendingNewParam = null; delete uiMode[p2]; }
         });
+    }
+  },
+  {
+    selector: "[data-pipe-mode]",
+    needsDoc: true,
+    run: function (btn) {
+      var pidx = parseInt(btn.getAttribute("data-pipe-mode"), 10);
+      var target = btn.getAttribute("data-mode-to");
+      pipeInputMode[pidx] = target;
+      render();
     }
   },
   {
@@ -1570,6 +1988,19 @@ function onBoxChange(e) {
   var t = e.target;
   if (!t) return;
   var doc = store.state.doc;
+  if (t.matches("select[data-insert-snippet], select[data-env-insert-snippet]")) {
+    var isEnv = t.hasAttribute("data-env-insert-snippet");
+    var path = t.getAttribute(isEnv ? "data-env-insert-snippet" : "data-insert-snippet");
+    var snippet = t.value;
+    t.value = "";
+    if (!snippet) return;
+    var taSelector = isEnv ? ('textarea[data-env-raw="' + CSS.escape(path) + '"]') : ('textarea[data-raw="' + CSS.escape(path) + '"]');
+    var ta = box.querySelector(taSelector);
+    if (ta) {
+      insertSnippetIntoTextarea(ta, snippet);
+    }
+    return;
+  }
   if (t.matches("[data-when-param],[data-when-op],[data-when-val]")) {
     var wrn = t.getAttribute("data-when-param") ||
       t.getAttribute("data-when-op") || t.getAttribute("data-when-val");
@@ -1728,6 +2159,33 @@ function onBoxChange(e) {
     return;
   }
 
+  if (t.hasAttribute("data-pipe-fld")) {
+    var pidx = parseInt(t.getAttribute("data-pipe-fld"), 10);
+    var fpath = t.getAttribute("data-fld-path");
+    var fval = t.value;
+    (function (idx, path, val) {
+      op(function () {
+        return store.replaceDoc(function (d) {
+          if (!d.spec.pipeline || !d.spec.pipeline[idx]) return;
+          var cur = d.spec.pipeline[idx].input || "";
+          var obj = parseInputYAML(cur);
+          if (!obj.apiVersion || !obj.kind) {
+            var inf = inferFnMeta(d.spec.pipeline[idx]);
+            if (inf) {
+              obj.apiVersion = obj.apiVersion || inf.apiVersion;
+              obj.kind = obj.kind || inf.kind;
+            }
+          }
+          setPathVal(obj, path, val);
+          var serialized = serializeInputYAML(obj);
+          if (serialized.trim()) d.spec.pipeline[idx].input = serialized;
+          else delete d.spec.pipeline[idx].input;
+        });
+      }).then(function (r) { if (r === null) render(); });
+    })(pidx, fpath, fval);
+    return;
+  }
+
   for (var pipeAttr in pipeAttrs) {
     if (t.hasAttribute(pipeAttr)) {
       var pidx2 = parseInt(t.getAttribute(pipeAttr), 10);
@@ -1782,6 +2240,13 @@ export function init(rootEl, deps) {
 
   box.addEventListener("click", onBoxClick);
   box.addEventListener("change", onBoxChange);
+  box.addEventListener("input", function (e) {
+    var t = e.target;
+    if (!t || !t.matches("textarea.raw")) return;
+    var isEnv = t.hasAttribute("data-env-raw");
+    var path = t.getAttribute(isEnv ? "data-env-raw" : "data-raw");
+    triggerExpressionPreview(t, isEnv, path);
+  });
   if (fseg) fseg.addEventListener("click", onFsegClick);
 
   var lastSourcesSig = "";

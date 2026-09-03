@@ -199,6 +199,7 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("POST /api/cluster/connect", srv.handleConnectCluster)
 	mux.HandleFunc("POST /api/generate", srv.handleGenerate)
 	mux.HandleFunc("POST /api/render", srv.handleRender)
+	mux.HandleFunc("POST /api/preview-expression", srv.handlePreviewExpression)
 
 	return wrap(mux), nil
 }
@@ -486,6 +487,15 @@ func BuildIndex(store *cache.Store, providers []string, b *blueprint.Blueprint, 
 					return nil, fmt.Errorf("parse crd manifest %s: %w", p, err)
 				}
 				byProvider[s.CRDs] = scanned
+			}
+		}
+		if store != nil {
+			for _, step := range b.Spec.Pipeline {
+				if step.Package != "" && byProvider[step.Package] == nil {
+					if funcCRDs, err := store.Load(step.Package); err == nil {
+						byProvider[step.Package] = funcCRDs
+					}
+				}
 			}
 		}
 	}

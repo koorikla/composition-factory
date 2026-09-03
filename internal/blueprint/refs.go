@@ -34,6 +34,7 @@ import (
 //     cannot cross an array in M-scope.
 type FromRef struct {
 	Param        string
+	Env          string
 	Resource     string
 	StatusPath   []string
 	MetadataPath string
@@ -50,12 +51,21 @@ func (r FromRef) IsMetadataName() bool {
 var statusSegmentRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // ParseFrom parses a Field.From value into its reference form. It performs
-// only grammar checks; whether the named parameter or resource exists is
+// only grammar checks; whether the named parameter, env key, or resource exists is
 // Validate's job (it has the document), and whether the status path exists
 // in the source CRD's schema is the emit layer's (it has the CRDs).
 func ParseFrom(s string) (FromRef, error) {
 	if param, ok := strings.CutPrefix(s, "params."); ok {
 		return FromRef{Param: param}, nil
+	}
+	if envKey, ok := strings.CutPrefix(s, "env."); ok {
+		if envKey == "" {
+			return FromRef{}, fmt.Errorf("from: %q is missing an environment key name", s)
+		}
+		if !paramNameRE.MatchString(envKey) {
+			return FromRef{}, fmt.Errorf("from: %q is not a valid environment key name (must be camelCase, e.g. env.region)", s)
+		}
+		return FromRef{Env: envKey}, nil
 	}
 	if rest, ok := strings.CutPrefix(s, "resources."); ok {
 		if name, ok := strings.CutSuffix(rest, ".metadata.name"); ok {
@@ -89,5 +99,5 @@ func ParseFrom(s string) (FromRef, error) {
 		return FromRef{Resource: name, StatusPath: segs}, nil
 	}
 	return FromRef{}, fmt.Errorf("from must start with params.<name>, "+
-		"params.<name>.<member>, resources.<name>.status.<path> or resources.<name>.metadata.name (got %q)", s)
+		"params.<name>.<member>, env.<key>, resources.<name>.status.<path> or resources.<name>.metadata.name (got %q)", s)
 }

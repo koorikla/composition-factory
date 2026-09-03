@@ -19,6 +19,7 @@ type CLI struct {
 	VersionFlag kong.VersionFlag `name:"version" help:"Print the cf version."`
 	Version     VersionCmd       `cmd:"" help:"Print the cf version."`
 	Provider    ProviderCmd      `cmd:"" help:"Manage provider schema sources."`
+	Function    FunctionCmd      `cmd:"" help:"Manage function schema sources."`
 	Gen         GenCmd           `cmd:"" help:"Generate XRD, Composition and functions.yaml from a blueprint."`
 	Serve       ServeCmd         `cmd:"" help:"Serve the compositionfactory HTTP API, loopback-only by default."`
 	MCP         MCPCmd           `cmd:"" name:"mcp" help:"Serve the compositionfactory MCP server over stdio, for agent tooling."`

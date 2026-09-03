@@ -325,3 +325,14 @@ export function loadExample(id) {
   return request("POST", "/api/examples/" + encodeURIComponent(id) + "/load");
 }
 
+/**
+ * POST /api/preview-expression — execute an expression in-process against synthetic context.
+ * @param {string} expression
+ * @param {string} [resource]
+ * @returns {Promise<{rendered: string, error: string}>}
+ */
+export function previewExpression(expression, resource) {
+  return request("POST", "/api/preview-expression", { expression: expression, resource: resource });
+}
+
+

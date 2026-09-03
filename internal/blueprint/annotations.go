@@ -182,6 +182,13 @@ func (b *Blueprint) validateResourceAnnotations(r Resource) error {
 				}
 				continue
 			}
+			if ref.Env != "" {
+				_, exists := b.Spec.Environment[ref.Env]
+				if !exists {
+					return UnknownEnvKeyError(fmt.Sprintf("resource %q %s", r.Name, label), ref.Env, b.Spec.Environment)
+				}
+				continue
+			}
 			decl, exists := x.Parameters[ref.Param]
 			if !exists {
 				return fmt.Errorf("resource %q %s: references unknown parameter %q",

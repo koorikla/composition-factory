@@ -33,10 +33,23 @@ func (c *ProviderAddCmd) Run(out io.Writer) error {
 	}
 
 	managed := 0
+	inputs := 0
 	for _, crd := range crds {
 		if crd.IsManaged() {
 			managed++
 		}
+		if crd.IsFunctionInput() || crd.Function {
+			inputs++
+		}
+	}
+	if inputs > 0 && managed == 0 {
+		noun := "function input schemas"
+		if inputs == 1 {
+			noun = "function input schema"
+		}
+		fmt.Fprintf(out, "added %s\n  digest %s\n  %d %s of %d CRDs\n",
+			c.Ref, pkg.Digest, inputs, noun, len(crds))
+		return nil
 	}
 	noun := "managed resources"
 	if managed == 1 {

@@ -89,8 +89,8 @@ func whenParam(when string) string {
 	if when == "" {
 		return ""
 	}
-	param, _, _, err := ParseWhen(when)
-	if err != nil {
+	source, param, _, _, err := ParseWhen(when)
+	if err != nil || source != "params" {
 		return ""
 	}
 	return param
@@ -414,7 +414,7 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 		// canonical form rather than string-replaced, so the rewrite cannot
 		// touch a literal that happens to contain "params.<from>".
 		if whenParam(r.When) == from {
-			_, op, literal, _ := ParseWhen(r.When) // parseable: whenParam just parsed it
+			_, _, op, literal, _ := ParseWhen(r.When) // parseable: whenParam just parsed it
 			if op == "" {
 				cp.Spec.Resources[i].When = newRef
 			} else {

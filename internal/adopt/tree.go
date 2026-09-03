@@ -1,6 +1,7 @@
 package adopt
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -160,10 +161,18 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 
 	nameMapping := make(map[string]string)
 	for _, compDoc := range compDocs {
-		if bp.Metadata.Name == "" {
-			if meta, ok := compDoc["metadata"].(map[string]any); ok {
+		if meta, ok := compDoc["metadata"].(map[string]any); ok {
+			if bp.Metadata.Name == "" {
 				if name, ok := meta["name"].(string); ok && name != "" {
 					bp.Metadata.Name = name
+				}
+			}
+			if anns, ok := meta["annotations"].(map[string]any); ok {
+				if envKeysRaw, ok := anns[blueprint.EnvironmentKeysAnnotation].(string); ok && envKeysRaw != "" {
+					var envKeys map[string]blueprint.EnvironmentKey
+					if err := json.Unmarshal([]byte(envKeysRaw), &envKeys); err == nil && len(envKeys) > 0 {
+						bp.Spec.Environment = envKeys
+					}
 				}
 			}
 		}

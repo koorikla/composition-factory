@@ -414,6 +414,9 @@ func (b *Blueprint) Validate() error {
 	if err := validateXRD(b.Spec.XRD); err != nil {
 		return err
 	}
+	if err := b.validateEnvironment(); err != nil {
+		return err
+	}
 	if err := b.validateParameters(); err != nil {
 		return err
 	}
@@ -515,6 +518,26 @@ func validateForEachParamRef(x XRD, r Resource) error {
 			`the loop bound is dereferenced unguarded, and under options: ["missingkey=error"] `+
 			"an absent key hard-fails the whole render; only the XRD's required gate or its "+
 			"schema default makes the key's presence unconditional", r.Name, param)
+	}
+	return nil
+}
+
+// validateForEachEnvRef checks the env.<key> forEach form: the loop bound is an integer environment key.
+func (b *Blueprint) validateForEachEnvRef(r Resource) error {
+	envKey, ok := strings.CutPrefix(r.ForEach, "env.")
+	if !ok {
+		return fmt.Errorf("resource %q: forEach must reference a parameter as params.<name>, an environment key as env.<key>, "+
+			"or another resource's observed status as resources.<name>.status.<path> (got %q)",
+			r.Name, r.ForEach)
+	}
+	decl, exists := b.Spec.Environment[envKey]
+	if !exists {
+		return UnknownEnvKeyError(fmt.Sprintf("resource %q: forEach", r.Name), envKey, b.Spec.Environment)
+	}
+	if decl.Type != "integer" {
+		return fmt.Errorf("resource %q: forEach environment key %q has type %q, want integer -- "+
+			"the loop bound renders as until (int $env.%s), a repetition count",
+			r.Name, envKey, decl.Type, envKey)
 	}
 	return nil
 }

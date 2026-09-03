@@ -314,7 +314,7 @@ func (c CRD) ForProvider() ([]*Node, error) {
 // and status (server-owned). Paths therefore read exactly the way they do in
 // a manifest: spec.template.spec.containers[0].image, or data on a ConfigMap.
 func (c CRD) FieldTree() ([]*Node, error) {
-	if !c.Native {
+	if !c.Native && !c.IsFunctionInput() {
 		return c.ForProvider()
 	}
 	return c.getCachedTree("fieldTree", func() ([]*Node, error) {
@@ -327,6 +327,10 @@ func (c CRD) FieldTree() ([]*Node, error) {
 			switch k {
 			case "apiVersion", "kind", "status":
 				continue
+			case "metadata":
+				if c.IsFunctionInput() {
+					continue
+				}
 			}
 			rest[k] = val
 		}

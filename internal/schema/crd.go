@@ -4,6 +4,7 @@ package schema
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
@@ -50,6 +51,9 @@ type CRD struct {
 	// providerConfigRef). Only internal/schema/k8s sets it; ParseCRDs never
 	// does, so no fetched package can smuggle a kind into the native path.
 	Native bool `json:"native,omitempty"`
+
+	// Function marks a Crossplane Function Input CRD.
+	Function bool `json:"function,omitempty"`
 
 	cache *crdCache
 }
@@ -109,6 +113,7 @@ func ParseCRDs(docs [][]byte) ([]CRD, error) {
 			Plural:     doc.Spec.Names.Plural,
 			Scope:      doc.Spec.Scope,
 			Categories: doc.Spec.Names.Categories,
+			Function:   strings.HasSuffix(doc.Spec.Group, ".fn.crossplane.io") || strings.Contains(doc.Spec.Group, ".fn."),
 			cache:      &crdCache{trees: make(map[string][]*Node)},
 		}
 		for _, v := range doc.Spec.Versions {
@@ -153,6 +158,14 @@ func (c CRD) IsManaged() bool {
 		}
 	}
 	return false
+}
+
+// IsFunctionInput reports whether this CRD is a Crossplane function input object.
+func (c CRD) IsFunctionInput() bool {
+	if c.Function {
+		return true
+	}
+	return strings.HasSuffix(c.Group, ".fn.crossplane.io") || strings.Contains(c.Group, ".fn.")
 }
 
 // Namespaced reports whether the CRD is namespace-scoped. In Crossplane v2 the

@@ -21,6 +21,7 @@ const (
 	rhsParam
 	rhsStatus
 	rhsMetadata
+	rhsEnv
 )
 
 // structuredRHS represents a typed, backend-independent representation of a field,
@@ -193,6 +194,45 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 				s.targetType = "string"
 			}
 			rhs = "{{ " + expr + " }}"
+			guard = g
+		} else if ref.Env != "" {
+			envDecl, exists := b.Spec.Environment[ref.Env]
+			if !exists {
+				return s, "", "", blueprint.UnknownEnvKeyError(fmt.Sprintf("resource %q field %q", r.Name, p), ref.Env, b.Spec.Environment)
+			}
+			if branch {
+				return s, "", "", fmt.Errorf("resource %q field %q is an object; a from: wire renders one scalar and cannot fill it — wire its individual children (e.g. %s.<key>), or set the whole node with raw:", r.Name, p, p)
+			}
+			if targetType == "array" {
+				return s, "", "", fmt.Errorf("resource %q field %q is an array, and a from: wire cannot render a list in v1 — a scalar parameter renders one scalar, and array parameters are not supported. Use value: with comma-separated entries, or raw: for literal YAML", r.Name, p)
+			}
+			if targetType == "map" && !isMap {
+				return s, "", "", fmt.Errorf("resource %q field %q is a map, and a from: wire cannot render one in v1. Set it with raw:", r.Name, p)
+			}
+			if !isFieldTypeCompatible(targetType, envDecl.Type, isMap) {
+				return s, "", "", fmt.Errorf("resource %q field %q has type %q in the CRD schema, but environment key %q has type %q — the wire would render a YAML scalar of the wrong type, which the API server rejects on apply", r.Name, p, targetType, ref.Env, envDecl.Type)
+			}
+
+			g := fmt.Sprintf("hasKey $env %q", ref.Env)
+			s.kind = rhsEnv
+			s.param = ref.Env
+			s.paramSegs = []string{ref.Env}
+			s.optional = true
+			s.guard = g
+			s.rawExpr = fmt.Sprintf("$env.%s", ref.Env)
+			s.targetType = targetType
+			if isMap {
+				s.targetType = "string"
+			}
+			intIntoIntOrString := isIntOrStringNode(node) && envDecl.Type == "integer"
+			if intIntoIntOrString {
+				s.targetType = "integer"
+			}
+			if (s.targetType == "string" || isMap) && !intIntoIntOrString {
+				rhs = fmt.Sprintf("{{ $env.%s | quote }}", ref.Env)
+			} else {
+				rhs = fmt.Sprintf("{{ $env.%s }}", ref.Env)
+			}
 			guard = g
 		} else {
 			param, member, _ := blueprint.ParamRef(f.From)

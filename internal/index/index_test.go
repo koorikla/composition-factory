@@ -333,3 +333,54 @@ func TestBuildIndexesNativeKindsUnderTheirOwnProviderLabel(t *testing.T) {
 		t.Error("LookupKind(apps/v1, Deployment) did not resolve the native kind")
 	}
 }
+
+func TestBuildIndexesFunctionCRDs(t *testing.T) {
+	fnCRD := schema.CRD{
+		Kind:     "AutoReady",
+		Group:    "autoready.fn.crossplane.io",
+		Plural:   "autoreadies",
+		Scope:    "Namespaced",
+		Function: true,
+		Versions: []schema.Version{{
+			Name:    "v1alpha1",
+			Served:  true,
+			Storage: true,
+			Properties: map[string]any{
+				"apiVersion": map[string]any{"type": "string"},
+				"kind":       map[string]any{"type": "string"},
+				"ignore": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+			},
+		}},
+	}
+
+	const pkg = "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0"
+	idx, err := Build(map[string][]schema.CRD{
+		pkg: {fnCRD},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	all := idx.All()
+	if len(all) != 1 {
+		t.Fatalf("indexed %d kinds, want 1", len(all))
+	}
+	k := all[0]
+	if !k.Function {
+		t.Errorf("Function = false, want true")
+	}
+	if k.APIVersion != "autoready.fn.crossplane.io/v1alpha1" {
+		t.Errorf("APIVersion = %q, want autoready.fn.crossplane.io/v1alpha1", k.APIVersion)
+	}
+	if k.Fields != 1 {
+		t.Errorf("Fields = %d, want 1 (ignore)", k.Fields)
+	}
+
+	_, _, ok := idx.LookupKind("autoready.fn.crossplane.io/v1alpha1", "AutoReady")
+	if !ok {
+		t.Errorf("LookupKind failed for Function Input CRD")
+	}
+}

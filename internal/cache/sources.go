@@ -40,5 +40,16 @@ func LoadSources(store *Store, b *blueprint.Blueprint, blueprintDir string) ([]s
 		}
 		crds = append(crds, got...)
 	}
+
+	if b != nil && store != nil {
+		for _, step := range b.Spec.Pipeline {
+			if step.Package != "" {
+				if got, err := store.Load(step.Package); err == nil {
+					crds = append(crds, got...)
+				}
+			}
+		}
+	}
+
 	return crds, nil
 }

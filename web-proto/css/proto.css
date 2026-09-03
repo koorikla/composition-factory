@@ -216,6 +216,26 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .val:focus{outline:none;border-color:var(--wire-xrd)}
 .val.raw{background:var(--sunk);color:var(--wire-xrd);height:auto;padding:5px 7px;
   white-space:pre-wrap;word-break:break-all;line-height:1.45;display:block;border-style:dashed}
+.raw-editor-wrap{display:flex;flex-direction:column;gap:4px;width:100%}
+.snippets-bar{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px}
+.snippets-lbl{font-family:var(--cond);font-size:9.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.snippet-select{height:20px;padding:0 4px;font-size:10px;border-radius:3px;flex:1;min-width:110px}
+.snippet-chip{height:19px;padding:0 5px;border:1px solid var(--rule-2);border-radius:3px;background:var(--surface);
+  font-family:var(--mono);font-size:10px;color:var(--ink-2);cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center}
+.snippet-chip:hover{background:var(--sunk);border-color:var(--wire-xrd);color:var(--wire-xrd)}
+.expr-preview{margin-top:3px;border-radius:4px;border:1px solid var(--rule);background:var(--surface-2);padding:5px 8px;font-size:11px}
+.expr-preview.ok{border-color:var(--ok);background:rgba(13,109,75,.06)}
+.expr-preview.err{border-color:var(--err);background:rgba(177,42,50,.06)}
+.expr-preview-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:2px}
+.expr-preview-title{font-family:var(--cond);font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)}
+.expr-preview.ok .expr-preview-title{color:var(--ok)}
+.expr-preview.err .expr-preview-title{color:var(--err)}
+.expr-preview-badge{font-family:var(--cond);font-size:9px;font-weight:600;text-transform:uppercase;padding:0 4px;border-radius:2px}
+.expr-preview.ok .expr-preview-badge{background:var(--ok);color:#fff}
+.expr-preview.err .expr-preview-badge{background:var(--err);color:#fff}
+.expr-preview-body{font-family:var(--mono);font-size:10.5px;line-height:1.4;word-break:break-all;white-space:pre-wrap}
+.expr-preview.ok .expr-preview-body{color:var(--ink)}
+.expr-preview.err .expr-preview-body{color:var(--err)}
 .bound{display:flex;align-items:center;gap:5px;padding:4px 7px;border-radius:4px;
   background:var(--surface);border:1px solid var(--rule-2);font-family:var(--mono);font-size:10.5px}
 .bound .src{color:var(--wire-xrd);font-weight:500}
