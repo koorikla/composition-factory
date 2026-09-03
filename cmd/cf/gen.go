@@ -163,18 +163,12 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 				drift = true
 			}
 		}
-		if _, err := os.Stat(c.Out); err == nil {
-			_ = filepath.Walk(c.Out, func(path string, info os.FileInfo, err error) error {
-				if err != nil || info.IsDir() {
-					return nil
-				}
-				cleanPath := filepath.Clean(path)
-				if !expected[cleanPath] {
-					fmt.Fprintf(out, "drift: %s\n", path)
-					drift = true
-				}
-				return nil
-			})
+		existingFiles, _ := c.findExistingManagedFiles()
+		for _, path := range existingFiles {
+			if !expected[path] {
+				fmt.Fprintf(out, "drift: %s\n", path)
+				drift = true
+			}
 		}
 		if drift {
 			fmt.Fprintln(out, "generated output is stale; run: cf gen")
@@ -188,7 +182,9 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 	// loop can leave a partially-written tree. Accepted for M1 — output is
 	// fully regenerable from the blueprint, and the next --check reports
 	// exactly this as drift rather than silently trusting a stale file.
+	expected := make(map[string]bool, len(outputs))
 	for _, o := range outputs {
+		expected[filepath.Clean(o.Path)] = true
 		if err := os.MkdirAll(filepath.Dir(o.Path), 0o755); err != nil {
 			return 1, err
 		}
@@ -197,10 +193,68 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 		}
 		fmt.Fprintf(out, "wrote %s\n", o.Path)
 	}
+
+	// Clean up orphaned/stale files in managed locations
+	existingFiles, _ := c.findExistingManagedFiles()
+	for _, path := range existingFiles {
+		if !expected[path] {
+			if err := os.Remove(path); err == nil {
+				fmt.Fprintf(out, "removed %s\n", path)
+				// Prune empty parent directory if inside managed scope
+				dir := filepath.Dir(path)
+				for dir != "." && dir != c.Out && dir != "/" {
+					if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
+						_ = os.Remove(dir)
+						dir = filepath.Dir(dir)
+					} else {
+						break
+					}
+				}
+			}
+		}
+	}
+
 	for _, o := range outputs {
 		if filepath.Base(o.Path) == "rbac.yaml" {
 			fmt.Fprintf(out, "warning: composed native Kubernetes kinds require cluster RBAC permissions; apply %s to your cluster\n", o.Path)
 		}
 	}
 	return 0, nil
+}
+
+func (c *GenCmd) findExistingManagedFiles() ([]string, error) {
+	cleanOut := filepath.Clean(c.Out)
+	var found []string
+
+	if cleanOut == "." {
+		managedDirs := []string{"compositions", "xrds", "providerconfigs", "runtime", "templates"}
+		for _, d := range managedDirs {
+			if _, err := os.Stat(d); err == nil {
+				_ = filepath.Walk(d, func(path string, info os.FileInfo, err error) error {
+					if err != nil || info.IsDir() {
+						return nil
+					}
+					found = append(found, filepath.Clean(path))
+					return nil
+				})
+			}
+		}
+		topFiles := []string{"functions.yaml", "rbac.yaml"}
+		for _, f := range topFiles {
+			if _, err := os.Stat(f); err == nil {
+				found = append(found, filepath.Clean(f))
+			}
+		}
+	} else {
+		if _, err := os.Stat(cleanOut); err == nil {
+			_ = filepath.Walk(cleanOut, func(path string, info os.FileInfo, err error) error {
+				if err != nil || info.IsDir() {
+					return nil
+				}
+				found = append(found, filepath.Clean(path))
+				return nil
+			})
+		}
+	}
+	return found, nil
 }

@@ -24,9 +24,18 @@ func functionList(b *blueprint.Blueprint) ([]fn, error) {
 			blueprint.PythonFunctionPackage,
 		}
 	}
+	for _, s := range b.Spec.Pipeline {
+		if s.FunctionRef == primaryFn.name && s.Package != "" {
+			primaryFn.pkg = s.Package
+			break
+		}
+	}
 	fns := []fn{primaryFn}
 	declared := map[string]string{primaryFn.name: primaryFn.pkg}
 	for _, s := range effectivePipeline(b) {
+		if s.FunctionRef == primaryFn.name {
+			continue
+		}
 		if pkg, ok := declared[s.FunctionRef]; ok {
 			if pkg != s.Package {
 				// Validate rejects both ways this can happen (a functionRef

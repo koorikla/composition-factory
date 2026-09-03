@@ -83,3 +83,36 @@ func placeholderValue(p blueprint.Parameter) any {
 		return "sample"
 	}
 }
+
+func envPlaceholderValue(k blueprint.EnvironmentKey) any {
+	if k.Default != "" {
+		switch k.Type {
+		case "integer":
+			var n int
+			if _, err := fmt.Sscanf(k.Default, "%d", &n); err == nil {
+				return n
+			}
+		case "number":
+			var f float64
+			if _, err := fmt.Sscanf(k.Default, "%f", &f); err == nil {
+				return f
+			}
+		case "boolean":
+			if k.Default == "true" {
+				return true
+			} else if k.Default == "false" {
+				return false
+			}
+		case "string":
+			return k.Default
+		}
+	}
+	switch k.Type {
+	case "integer", "number":
+		return 1
+	case "boolean":
+		return true
+	default:
+		return "sample"
+	}
+}

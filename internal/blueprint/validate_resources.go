@@ -80,7 +80,7 @@ func (b *Blueprint) validateResources() error {
 				if err := b.validateForEachStatusRef(r); err != nil {
 					return err
 				}
-			} else if strings.HasPrefix(r.ForEach, "env.") {
+			} else if _, ok := EnvRef(r.ForEach); ok {
 				if err := b.validateForEachEnvRef(r); err != nil {
 					return err
 				}
@@ -219,8 +219,8 @@ func (b *Blueprint) validateFields(r Resource) error {
 			}
 		}
 
-		if f.Raw != "" && b.Engine() != EngineGoTemplating && strings.Contains(f.Raw, "{{") {
-			return fmt.Errorf("resource %q field %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)",
+		if f.Raw != "" && b.Engine() != EngineGoTemplating && (strings.Contains(f.Raw, "{{") || IsBareGoTemplateExpr(f.Raw)) {
+			return fmt.Errorf("resource %q field %q: raw %q contains Go-template syntax which is only supported with the go-templating engine (current engine is %q)",
 				r.Name, p, f.Raw, b.Engine())
 		}
 		if f.Template != "" {

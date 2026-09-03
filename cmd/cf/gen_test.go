@@ -34,6 +34,7 @@ spec:
       kind: Queue
       provider: example.org/provider-test:v2
       fields:
+        region: {value: "us-east-1"}
         maxMessageSize: {from: params.maxMessageSize}
 `
 
@@ -296,6 +297,8 @@ spec:
       provider: k8s
       fields:
         spec.rules[0].host: {value: "example.com"}
+        spec.rules[0].http.paths[0].path: {value: "/"}
+        spec.rules[0].http.paths[0].pathType: {value: "Prefix"}
 `
 	if err := os.WriteFile(bpPath, []byte(bpContent), 0o644); err != nil {
 		t.Fatal(err)
@@ -375,5 +378,41 @@ func TestGenCheckDetectsExtraStaleFiles(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "drift: "+staleFile) {
 		t.Errorf("check output = %q, want it to report drift for stale file %q", buf.String(), staleFile)
+	}
+}
+
+func TestGenCleansUpOrphanedFiles(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	out := filepath.Join(dir, "out")
+	var buf bytes.Buffer
+
+	// Generate once
+	if err := (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir}).Run(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add an orphaned file in out/
+	staleFile := filepath.Join(out, "orphaned.yaml")
+	if err := os.WriteFile(staleFile, []byte("orphaned\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-run gen in write mode: it should delete the orphaned file
+	buf.Reset()
+	if err := (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir}).Run(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "removed "+staleFile) {
+		t.Errorf("gen output = %q, want it to report removed %q", buf.String(), staleFile)
+	}
+	if _, err := os.Stat(staleFile); !os.IsNotExist(err) {
+		t.Errorf("stale file %s was not deleted", staleFile)
+	}
+
+	// Now check should report in sync
+	buf.Reset()
+	code, err := (&GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir, Check: true}).run(&buf)
+	if err != nil || code != 0 {
+		t.Fatalf("check after cleanup: code=%d err=%v, want 0/nil", code, err)
 	}
 }

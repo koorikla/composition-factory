@@ -136,23 +136,47 @@ if [ "$SVC_FOUND" = false ]; then
   exit 1
 fi
 
-echo "==> Testing Round-Trip Gate: Reading live XRD and Composition from API server..."
-LIVE_TREE="${OUT_DIR}/live-tree"
-mkdir -p "${LIVE_TREE}/apis"
-kubectl get xrd "${XRD_NAME}" -o yaml > "${LIVE_TREE}/apis/definition.yaml"
-kubectl get composition "${COMP_NAME}" -o yaml > "${LIVE_TREE}/composition.yaml"
+echo "==> Teardown: deleting XR..."
+kubectl delete -f "${XR_MANIFEST}" --timeout=60s || true
 
-ROUNDTRIP_BP="${OUT_DIR}/roundtrip.cf.yaml"
+echo "==> Teardown: deleting reconcile workload definitions..."
+kubectl delete -f "${OUT_DIR}/compositions/" --timeout=30s || true
+kubectl delete -f "${OUT_DIR}/xrds/" --timeout=30s || true
+
+echo "==> Testing Round-Trip Gate with full features fixture (managed resource, atProvider status wire, envelope, forEach, spec.environment)..."
+RT_FIXTURE="internal/examples/testdata/roundtrip-full.cf.yaml"
+RT_OUT_DIR="${OUT_DIR}/roundtrip-full-orig"
+mkdir -p "${RT_OUT_DIR}"
+./bin/cf gen "${RT_FIXTURE}" --out "${RT_OUT_DIR}" --group-suffix="${WORKSPACE_GROUP_SUFFIX}"
+
+echo "==> Applying full round-trip XRD and Composition to API server..."
+kubectl apply -f "${RT_OUT_DIR}/xrds/"
+kubectl apply -f "${RT_OUT_DIR}/compositions/"
+
+RT_XRD_NAME="xworkloadfulls.platform.sparky.ee.${WORKSPACE_GROUP_SUFFIX}"
+RT_COMP_NAME="xworkloadfulls.platform.sparky.ee.${WORKSPACE_GROUP_SUFFIX}"
+
+echo "==> Waiting for XRD ${RT_XRD_NAME} to become Established..."
+kubectl wait --for=condition=Established "xrd/${RT_XRD_NAME}" --timeout=60s
+
+echo "==> Reading live XRD and Composition from API server..."
+LIVE_TREE="${OUT_DIR}/live-tree"
+rm -rf "${LIVE_TREE}"
+mkdir -p "${LIVE_TREE}/apis"
+kubectl get xrd "${RT_XRD_NAME}" -o yaml > "${LIVE_TREE}/apis/definition.yaml"
+kubectl get composition "${RT_COMP_NAME}" -o yaml > "${LIVE_TREE}/composition.yaml"
+
+ROUNDTRIP_BP="${OUT_DIR}/roundtrip-full.cf.yaml"
 echo "==> Importing live server-side Configuration tree with cf import..."
 ./bin/cf import "${LIVE_TREE}" -o "${ROUNDTRIP_BP}"
 
-ROUNDTRIP_OUT="${OUT_DIR}/roundtrip-gen"
+ROUNDTRIP_REGEN_OUT="${OUT_DIR}/roundtrip-full-regen"
 echo "==> Regenerating Crossplane artifacts from adopted blueprint..."
-./bin/cf gen "${ROUNDTRIP_BP}" --out "${ROUNDTRIP_OUT}"
+./bin/cf gen "${ROUNDTRIP_BP}" --out "${ROUNDTRIP_REGEN_OUT}" --group-suffix="${WORKSPACE_GROUP_SUFFIX}"
 
 echo "==> Verifying regenerated Composition against original emitted composition..."
-COMP_ORIG=("${OUT_DIR}/compositions/"*.yaml)
-COMP_RT=("${ROUNDTRIP_OUT}/compositions/"*.yaml)
+COMP_ORIG=("${RT_OUT_DIR}/compositions/"*.yaml)
+COMP_RT=("${ROUNDTRIP_REGEN_OUT}/compositions/"*.yaml)
 if [ ! -f "${COMP_RT[0]}" ]; then
   echo "ERROR: Round-trip generated composition is missing" >&2
   exit 1
@@ -163,8 +187,8 @@ diff -u -I '^# Source:' "${COMP_ORIG[0]}" "${COMP_RT[0]}" || {
 }
 
 echo "==> Verifying regenerated XRD against original emitted XRD..."
-XRD_ORIG=("${OUT_DIR}/xrds/"*.yaml)
-XRD_RT=("${ROUNDTRIP_OUT}/xrds/"*.yaml)
+XRD_ORIG=("${RT_OUT_DIR}/xrds/"*.yaml)
+XRD_RT=("${ROUNDTRIP_REGEN_OUT}/xrds/"*.yaml)
 if [ ! -f "${XRD_RT[0]}" ]; then
   echo "ERROR: Round-trip generated XRD is missing" >&2
   exit 1
@@ -174,11 +198,8 @@ diff -u -I '^# Source:' "${XRD_ORIG[0]}" "${XRD_RT[0]}" || {
   exit 1
 }
 
-echo "==> Teardown: deleting XR..."
-kubectl delete -f "${XR_MANIFEST}" --timeout=60s || true
-
-echo "==> Teardown: deleting workspace definitions..."
-kubectl delete -f "${OUT_DIR}/compositions/" --timeout=30s || true
-kubectl delete -f "${OUT_DIR}/xrds/" --timeout=30s || true
+echo "==> Teardown: deleting full round-trip definitions..."
+kubectl delete -f "${RT_OUT_DIR}/compositions/" --timeout=30s || true
+kubectl delete -f "${RT_OUT_DIR}/xrds/" --timeout=30s || true
 
 echo "==> Lane C cluster test passed successfully!"

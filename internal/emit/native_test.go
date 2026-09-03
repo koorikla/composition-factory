@@ -204,9 +204,9 @@ func TestNativeOptionalFieldsAreOmittedNotNulled(t *testing.T) {
 	t.Run("subtree whose every leaf is optional vanishes entirely", func(t *testing.T) {
 		only := *b
 		only.Spec.Resources = []blueprint.Resource{{
-			Name: "web", Kind: "Deployment", Provider: blueprint.NativeProvider,
+			Name: "web-svc", Kind: "Service", Provider: blueprint.NativeProvider,
 			Fields: map[string]blueprint.Field{
-				"spec.replicas": {From: "params.replicas"},
+				"spec.clusterIP": {From: "params.replicas"},
 			},
 		}}
 		comp, err := Composition(&only, nativeTestCRDs(t))
@@ -214,14 +214,14 @@ func TestNativeOptionalFieldsAreOmittedNotNulled(t *testing.T) {
 			t.Fatalf("Composition: %v", err)
 		}
 		docs := renderedNativeDocs(t, comp, map[string]any{"providerName": "aws-provider", "image": "x"})
-		dep := docs["Deployment"]
-		if v, present := dep["spec"]; present {
+		svc := docs["Service"]
+		if v, present := svc["spec"]; present {
 			t.Errorf("spec rendered as %v with no set field under it — a bare key is a YAML null the API server rejects", v)
 		}
 
-		withParam := renderedNativeDocs(t, comp, map[string]any{"providerName": "p", "image": "x", "replicas": 2})
-		if got := dig(t, withParam["Deployment"], "spec", "replicas"); got != float64(2) && got != 2 {
-			t.Errorf("spec.replicas = %v, want 2 once the parameter is set", got)
+		withParam := renderedNativeDocs(t, comp, map[string]any{"providerName": "p", "image": "x", "replicas": "10.0.0.1"})
+		if got := dig(t, withParam["Service"], "spec", "clusterIP"); got != "10.0.0.1" {
+			t.Errorf("spec.clusterIP = %v, want 10.0.0.1 once the parameter is set", got)
 		}
 	})
 }
@@ -537,8 +537,10 @@ func TestNewNativeKindsRenderInComposition(t *testing.T) {
 		{
 			kind: "HorizontalPodAutoscaler",
 			fields: map[string]blueprint.Field{
-				"spec.minReplicas": {Raw: "2"},
-				"spec.maxReplicas": {Raw: "10"},
+				"spec.scaleTargetRef.kind": {Value: "Deployment"},
+				"spec.scaleTargetRef.name": {Value: "web"},
+				"spec.minReplicas":         {Raw: "2"},
+				"spec.maxReplicas":         {Raw: "10"},
 			},
 		},
 		{
@@ -568,8 +570,9 @@ func TestNewNativeKindsRenderInComposition(t *testing.T) {
 		{
 			kind: "RoleBinding",
 			fields: map[string]blueprint.Field{
-				"roleRef.kind": {Value: "Role"},
-				"roleRef.name": {Value: "reader"},
+				"roleRef.apiGroup": {Value: "rbac.authorization.k8s.io"},
+				"roleRef.kind":     {Value: "Role"},
+				"roleRef.name":     {Value: "reader"},
 			},
 		},
 	}
@@ -688,5 +691,45 @@ func TestNativeSiblingMetadataNameReference(t *testing.T) {
 	saName, _ := pspec["serviceAccountName"].(string)
 	if saName != "my-xqueue-sa" {
 		t.Errorf("serviceAccountName = %q, want test-xr-sa", saName)
+	}
+}
+
+func TestSecretDataB64enc(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xsec"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XSec", Plural: "xsecs",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"password": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "db-secret", Kind: "Secret", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"data[password]":   {From: "params.password"},
+						"stringData[host]": {From: "params.password"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	comp, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(comp)
+	if !strings.Contains(s, `{{ $spec.password | b64enc | quote }}`) {
+		t.Errorf("Secret data wire missing b64enc and quote:\n%s", s)
+	}
+	if !strings.Contains(s, `host: {{ $spec.password | quote }}`) {
+		t.Errorf("Secret stringData wire missing quote without b64enc:\n%s", s)
 	}
 }

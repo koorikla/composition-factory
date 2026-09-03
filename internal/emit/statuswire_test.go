@@ -76,7 +76,6 @@ spec:
           spec:
             properties:
               forProvider:
-                required: [region]
                 properties:
                   region: {type: string}
                   policy: {type: string}

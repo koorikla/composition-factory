@@ -39,6 +39,19 @@ type structuredRHS struct {
 	targetType string   // "string", "integer", "number", "boolean", "array", "map"
 }
 
+func isByteTarget(node *schema.Node, r blueprint.Resource, p string, isMap bool) bool {
+	if node != nil && node.Format == "byte" {
+		return true
+	}
+	if r.Kind == "Secret" {
+		basePath, _, _ := blueprint.ParseFieldPath(p)
+		if basePath == "data" || strings.HasPrefix(p, "data.") || strings.HasPrefix(p, "data[") || p == "data" {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveFieldRHS resolves a single blueprint field into its structured form and Go-template RHS/guard.
 func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool, node *schema.Node, isMap bool) (structuredRHS, string, string, error) {
 	var s structuredRHS
@@ -54,6 +67,8 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 		targetType = "string"
 	}
 	s.targetType = targetType
+	isByte := isByteTarget(node, r, p, isMap)
+	_ = isByte
 
 	switch {
 	case f.Value != "":
@@ -134,7 +149,7 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 	case f.Raw != "":
 		s.kind = rhsRaw
 		s.value = f.Raw
-		rhs = f.Raw
+		rhs = blueprint.NormalizeRawGoTemplate(f.Raw)
 
 	case f.Template != "":
 		if _, ok := b.Spec.Templates[f.Template]; !ok {
@@ -193,7 +208,11 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 			if isMap {
 				s.targetType = "string"
 			}
-			rhs = "{{ " + expr + " }}"
+			if isByte {
+				rhs = fmt.Sprintf("{{ %s | b64enc | quote }}", expr)
+			} else {
+				rhs = "{{ " + expr + " }}"
+			}
 			guard = g
 		} else if ref.Env != "" {
 			envDecl, exists := b.Spec.Environment[ref.Env]
@@ -213,13 +232,9 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 				return s, "", "", fmt.Errorf("resource %q field %q has type %q in the CRD schema, but environment key %q has type %q — the wire would render a YAML scalar of the wrong type, which the API server rejects on apply", r.Name, p, targetType, ref.Env, envDecl.Type)
 			}
 
-			g := fmt.Sprintf("hasKey $env %q", ref.Env)
 			s.kind = rhsEnv
 			s.param = ref.Env
 			s.paramSegs = []string{ref.Env}
-			s.optional = true
-			s.guard = g
-			s.rawExpr = fmt.Sprintf("$env.%s", ref.Env)
 			s.targetType = targetType
 			if isMap {
 				s.targetType = "string"
@@ -228,12 +243,35 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 			if intIntoIntOrString {
 				s.targetType = "integer"
 			}
-			if (s.targetType == "string" || isMap) && !intIntoIntOrString {
-				rhs = fmt.Sprintf("{{ $env.%s | quote }}", ref.Env)
+
+			if envDecl.Default != "" {
+				defVal := formatEnvDefault(envDecl)
+				expr := fmt.Sprintf("default %s (index $env %q)", defVal, ref.Env)
+				s.optional = false
+				s.guard = ""
+				s.rawExpr = expr
+				if isByte {
+					rhs = fmt.Sprintf("{{ %s | b64enc | quote }}", expr)
+				} else if (s.targetType == "string" || isMap) && !intIntoIntOrString {
+					rhs = fmt.Sprintf("{{ %s | quote }}", expr)
+				} else {
+					rhs = fmt.Sprintf("{{ %s }}", expr)
+				}
+				guard = ""
 			} else {
-				rhs = fmt.Sprintf("{{ $env.%s }}", ref.Env)
+				g := fmt.Sprintf("hasKey $env %q", ref.Env)
+				s.optional = true
+				s.guard = g
+				s.rawExpr = fmt.Sprintf("$env.%s", ref.Env)
+				if isByte {
+					rhs = fmt.Sprintf("{{ $env.%s | b64enc | quote }}", ref.Env)
+				} else if (s.targetType == "string" || isMap) && !intIntoIntOrString {
+					rhs = fmt.Sprintf("{{ $env.%s | quote }}", ref.Env)
+				} else {
+					rhs = fmt.Sprintf("{{ $env.%s }}", ref.Env)
+				}
+				guard = g
 			}
-			guard = g
 		} else {
 			param, member, _ := blueprint.ParamRef(f.From)
 			chainRef := param
@@ -292,7 +330,9 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 			if intIntoIntOrString {
 				s.targetType = "integer"
 			}
-			if (s.targetType == "string" || isMap) && !intIntoIntOrString {
+			if isByte {
+				rhs = fmt.Sprintf("{{ $spec.%s | b64enc | quote }}", refName)
+			} else if (s.targetType == "string" || isMap) && !intIntoIntOrString {
 				rhs = fmt.Sprintf("{{ $spec.%s | quote }}", refName)
 			} else {
 				rhs = fmt.Sprintf("{{ $spec.%s }}", refName)

@@ -78,7 +78,7 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 			// owns making it a string in the rendered document.
 			plan = append(plan, forProviderField{
 				path:       k,
-				rhs:        f.Raw,
+				rhs:        blueprint.NormalizeRawGoTemplate(f.Raw),
 				structured: structuredRHS{kind: rhsRaw, value: f.Raw},
 			})
 		case f.Template != "":
@@ -131,25 +131,41 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 				continue
 			}
 			if ref.Env != "" {
-				_, ok := b.Spec.Environment[ref.Env]
+				envDecl, ok := b.Spec.Environment[ref.Env]
 				if !ok {
 					return nil, blueprint.UnknownEnvKeyError(fmt.Sprintf("resource %q annotation %q", r.Name, k), ref.Env, b.Spec.Environment)
 				}
-				rhs := fmt.Sprintf("{{ $env.%s | quote }}", ref.Env)
-				guard := fmt.Sprintf("hasKey $env %q", ref.Env)
-				plan = append(plan, forProviderField{
-					path:  k,
-					rhs:   rhs,
-					guard: guard,
-					structured: structuredRHS{
-						kind:      rhsEnv,
-						param:     ref.Env,
-						paramSegs: []string{ref.Env},
-						optional:  true,
-						guard:     guard,
-						rawExpr:   "$env." + ref.Env,
-					},
-				})
+				if envDecl.Default != "" {
+					defVal := formatEnvDefault(envDecl)
+					expr := fmt.Sprintf("default %s (index $env %q)", defVal, ref.Env)
+					rhs := fmt.Sprintf("{{ %s | quote }}", expr)
+					plan = append(plan, forProviderField{
+						path: k,
+						rhs:  rhs,
+						structured: structuredRHS{
+							kind:      rhsEnv,
+							param:     ref.Env,
+							paramSegs: []string{ref.Env},
+							rawExpr:   expr,
+						},
+					})
+				} else {
+					rhs := fmt.Sprintf("{{ $env.%s | quote }}", ref.Env)
+					guard := fmt.Sprintf("hasKey $env %q", ref.Env)
+					plan = append(plan, forProviderField{
+						path:  k,
+						rhs:   rhs,
+						guard: guard,
+						structured: structuredRHS{
+							kind:      rhsEnv,
+							param:     ref.Env,
+							paramSegs: []string{ref.Env},
+							optional:  true,
+							guard:     guard,
+							rawExpr:   "$env." + ref.Env,
+						},
+					})
+				}
 				continue
 			}
 			decl, ok := b.Spec.XRD.Parameters[ref.Param]

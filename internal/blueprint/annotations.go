@@ -148,8 +148,8 @@ func (b *Blueprint) validateResourceAnnotations(r Resource) error {
 			}
 		}
 
-		if f.Raw != "" && b.Engine() != EngineGoTemplating && strings.Contains(f.Raw, "{{") {
-			return fmt.Errorf("resource %q %s: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)",
+		if f.Raw != "" && b.Engine() != EngineGoTemplating && (strings.Contains(f.Raw, "{{") || IsBareGoTemplateExpr(f.Raw)) {
+			return fmt.Errorf("resource %q %s: raw %q contains Go-template syntax which is only supported with the go-templating engine (current engine is %q)",
 				r.Name, label, f.Raw, b.Engine())
 		}
 

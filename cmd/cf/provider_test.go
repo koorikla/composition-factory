@@ -130,3 +130,54 @@ func TestProviderAddLockFailureLeavesCacheUnpopulated(t *testing.T) {
 		t.Errorf("cache dir stat = %v, want it not to exist: Run must pin the lock before it caches schemas", err)
 	}
 }
+
+func TestProviderAddRejectsFunctionPackage(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".cf.lock")
+	fnFetch := func(ref string) (*xpkg.Package, error) {
+		return &xpkg.Package{
+			Ref:    ref,
+			Digest: "sha256:fn123",
+			Docs: [][]byte{[]byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: autoreadies.autoready.fn.crossplane.io}
+spec:
+  group: autoready.fn.crossplane.io
+  scope: Namespaced
+  names: {kind: AutoReady, plural: autoreadies}
+  versions:
+  - {name: v1alpha1, served: true, storage: true}
+`)},
+		}, nil
+	}
+	cmd := &ProviderAddCmd{
+		Ref:      "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0",
+		CacheDir: filepath.Join(dir, "cache"),
+		Lock:     lockPath,
+		fetch:    fnFetch,
+	}
+	var out bytes.Buffer
+	err := cmd.Run(&out)
+	if err == nil {
+		t.Fatal("expected error when adding function package to provider add, got nil")
+	}
+	if !strings.Contains(err.Error(), "is a function package, not a provider") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestProviderAddNative(t *testing.T) {
+	for _, ref := range []string{"native", "k8s"} {
+		t.Run(ref, func(t *testing.T) {
+			cmd := &ProviderAddCmd{Ref: ref}
+			var out bytes.Buffer
+			if err := cmd.Run(&out); err != nil {
+				t.Fatalf("cf provider add %s failed: %v", ref, err)
+			}
+			if !strings.Contains(out.String(), "built into cf") {
+				t.Errorf("output = %q, want built-in native message", out.String())
+			}
+		})
+	}
+}

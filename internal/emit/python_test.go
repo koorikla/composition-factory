@@ -33,6 +33,7 @@ spec:
         required: true
       region:
         type: string
+        required: true
         description: Target AWS region
       retention:
         type: integer
@@ -482,10 +483,15 @@ spec:
 }
 
 func TestPythonRefusesGoTemplateInRaw(t *testing.T) {
-	b := &blueprint.Blueprint{}
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xqueue"},
+	}
 	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	b.Spec.Sources = []blueprint.Source{{Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0"}}
 	b.Spec.XRD = blueprint.XRD{
-		Group: "aws.example.org", Version: "v1alpha1", Kind: "XQueue", Scope: "Namespaced",
+		Group: "aws.example.org", Version: "v1alpha1", Kind: "XQueue", Plural: "xqueues", Scope: "Namespaced",
 		Parameters: map[string]blueprint.Parameter{"providerName": {Type: "string", Required: true}},
 	}
 	b.Spec.Resources = []blueprint.Resource{{
@@ -525,5 +531,114 @@ spec:
 	}
 	if !strings.Contains(err.Error(), "Go-template syntax") || !strings.Contains(err.Error(), "go-templating engine") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPythonDottedPathNesting(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xcomplex
+spec:
+  emit:
+    engine: python
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-s3:v1.0.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XComplex
+    plural: xcomplexes
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+  resources:
+    - name: bucket-item
+      provider: xpkg.upbound.io/upbound/provider-aws-s3:v1.0.0
+      kind: Bucket
+      fields:
+        bucketRef.name:
+          value: "my-bucket"
+        tags[team]:
+          value: "infra"
+        containers[0].name:
+          value: "web"
+        containers[0].image:
+          value: "nginx:latest"
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "xcomplex.cf.yaml")
+	if err := os.WriteFile(path, []byte(bpYAML), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("blueprint.Load: %v", err)
+	}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: buckets.s3.aws.m.upbound.io}
+spec:
+  group: s3.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Bucket, plural: buckets, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties:
+                  bucketRef:
+                    type: object
+                    properties:
+                      name: {type: string}
+                  tags:
+                    type: object
+                    additionalProperties: {type: string}
+                  containers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        image: {type: string}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+	crds, err := schema.ParseCRDs([][]byte{crdDoc})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	compBytes, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(compBytes)
+
+	// Verify nested structure and ensure no flat dotted keys exist
+	if strings.Contains(s, `"bucketRef.name":`) || strings.Contains(s, `"containers[0].name":`) {
+		t.Fatalf("Python output contains literal dotted keys:\n%s", s)
+	}
+	if !strings.Contains(s, "\"bucketRef\": _present({\n") || !strings.Contains(s, "\"name\": \"my-bucket\"") {
+		t.Errorf("Python output missing nested bucketRef object:\n%s", s)
+	}
+	if !strings.Contains(s, "\"containers\": [\n") || !strings.Contains(s, "\"image\": \"nginx:latest\"") {
+		t.Errorf("Python output missing nested containers array:\n%s", s)
+	}
+	if !strings.Contains(s, "\"tags\": _present({\n") || !strings.Contains(s, "\"team\": \"infra\"") {
+		t.Errorf("Python output missing nested tags map:\n%s", s)
 	}
 }

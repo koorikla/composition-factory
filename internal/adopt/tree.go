@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/cache"
 )
 
 // AdoptTree walks a Configuration package source tree directory containing
@@ -53,6 +54,28 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	var xrdDocs []map[string]any
 	var compDocs []map[string]any
 
+	if opts.FunctionPackages == nil {
+		opts.FunctionPackages = make(map[string]string)
+	}
+	if lock, _ := cache.ReadLock(filepath.Join(dirPath, ".cf.lock")); lock != nil {
+		for _, f := range lock.Functions {
+			opts.FunctionPackages[f.Ref] = f.Ref
+			clean := f.Ref
+			if i := strings.Index(clean, "@"); i >= 0 {
+				clean = clean[:i]
+			}
+			if i := strings.LastIndex(clean, ":"); i >= 0 {
+				clean = clean[:i]
+			}
+			if i := strings.LastIndex(clean, "/"); i >= 0 {
+				clean = clean[i+1:]
+			}
+			if clean != "" {
+				opts.FunctionPackages[clean] = f.Ref
+			}
+		}
+	}
+
 	for _, file := range yamlFiles {
 		data, err := os.ReadFile(file)
 		if err != nil {
@@ -73,6 +96,15 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 				xrdDocs = append(xrdDocs, doc)
 			case "Composition":
 				compDocs = append(compDocs, doc)
+			case "Function":
+				if meta, ok := doc["metadata"].(map[string]any); ok {
+					fnName, _ := meta["name"].(string)
+					if fSpec, ok := doc["spec"].(map[string]any); ok {
+						if pkg, ok := fSpec["package"].(string); ok && fnName != "" {
+							opts.FunctionPackages[fnName] = pkg
+						}
+					}
+				}
 			}
 		}
 	}
@@ -121,7 +153,30 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 						}
 					}
 					ver, _ := dep["version"].(string)
-					if depKind == "Provider" || (depKind == "" && pkg != "") {
+					if depKind == "Function" || (depKind == "" && dep["function"] != nil) {
+						fnName, _ := dep["function"].(string)
+						if fnName == "" {
+							fnName = pkg
+						}
+						fnPkg := pkg
+						if fnPkg == "" {
+							fnPkg = fnName
+						}
+						cleanVer := strings.TrimPrefix(ver, "=")
+						cleanVer = strings.TrimLeft(cleanVer, ">=<~^ ")
+						if cleanVer != "" && !strings.Contains(fnPkg, ":") && !strings.Contains(fnPkg, "@") {
+							fnPkg = fnPkg + ":" + cleanVer
+						}
+						if fnName != "" && fnPkg != "" {
+							opts.FunctionPackages[fnName] = fnPkg
+							clean := fnName
+							if i := strings.LastIndex(clean, "/"); i >= 0 {
+								clean = clean[i+1:]
+							}
+							opts.FunctionPackages[clean] = fnPkg
+						}
+					}
+					if depKind == "Provider" || (depKind == "" && pkg != "" && dep["function"] == nil) {
 						providerRef := pkg
 						if ver != "" && !strings.Contains(providerRef, ":") && !strings.Contains(providerRef, "@") {
 							cleanVer := strings.TrimPrefix(ver, "=")
@@ -199,11 +254,11 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 			}
 		}
 		if pipeline, ok := spec["pipeline"].([]any); ok && len(pipeline) > 0 {
-			if err := parsePipelineComposition(pipeline, bp, defaultProvider, report, nameMapping); err != nil {
+			if err := parsePipelineComposition(pipeline, bp, opts, report, nameMapping); err != nil {
 				return nil, nil, err
 			}
 		} else if resources, ok := spec["resources"].([]any); ok && len(resources) > 0 {
-			if err := parseClassicComposition(resources, bp, defaultProvider, report, nameMapping); err != nil {
+			if err := parseClassicComposition(resources, bp, opts, report, nameMapping); err != nil {
 				return nil, nil, err
 			}
 		}

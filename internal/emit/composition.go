@@ -23,7 +23,11 @@ func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 }
 
 func composition(b *blueprint.Blueprint, crds []schema.CRD, fsDir string) ([]byte, error) {
-	if _, err := ValidatePipelineInputs(b, crds); err != nil {
+	if err := b.Validate(); err != nil {
+		return nil, err
+	}
+	warnings, err := ValidatePipelineInputs(b, crds)
+	if err != nil {
 		return nil, err
 	}
 	x := b.Spec.XRD
@@ -31,6 +35,9 @@ func composition(b *blueprint.Blueprint, crds []schema.CRD, fsDir string) ([]byt
 
 	d := NewDoc()
 	header(d, blueprintSource(b))
+	for _, w := range warnings {
+		d.Comment("WARNING: %s", w)
+	}
 	d.Line(0, "apiVersion: apiextensions.crossplane.io/v1")
 	d.Line(0, "kind: Composition")
 	d.Line(0, "metadata:")
@@ -235,7 +242,7 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 	// is what makes it safe under missingkey=error.
 	conditional := r.When != ""
 	if conditional {
-		cond, err := whenCondition(r.When)
+		cond, err := whenCondition(r.When, b)
 		if err != nil {
 			return fmt.Errorf("resource %q: %w", r.Name, err)
 		}
@@ -252,11 +259,15 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 			d.Line(ti, "{{- if %s }}", guard)
 			d.Line(ti, "{{- range $i := until (int %s) }}", expr)
 			loopGuarded = true
-		} else if strings.HasPrefix(r.ForEach, "env.") {
-			envKey := strings.TrimPrefix(r.ForEach, "env.")
-			d.Line(ti, "{{- if hasKey $env %q }}", envKey)
-			d.Line(ti, "{{- range $i := until (int $env.%s) }}", envKey)
-			loopGuarded = true
+		} else if envKey, ok := blueprint.EnvRef(r.ForEach); ok {
+			if envDecl, ok := b.Spec.Environment[envKey]; ok && envDecl.Default != "" {
+				defVal := formatEnvDefault(envDecl)
+				d.Line(ti, "{{- range $i := until (int (default %s (index $env %q))) }}", defVal, envKey)
+			} else {
+				d.Line(ti, "{{- if hasKey $env %q }}", envKey)
+				d.Line(ti, "{{- range $i := until (int $env.%s) }}", envKey)
+				loopGuarded = true
+			}
 		} else {
 			d.Line(ti, "{{- range $i := until (int $spec.%s) }}", strings.TrimPrefix(r.ForEach, "params."))
 		}
@@ -592,12 +603,26 @@ func conventionFields(r blueprint.Resource, b *blueprint.Blueprint, crd schema.C
 // The literal is %q-quoted, which for ParseWhen's character class (no '"',
 // no '\\', no control runes past checkScalar) is exactly the literal wrapped
 // in plain quotes — one written form, byte-deterministic.
-func whenCondition(when string) (string, error) {
+func whenCondition(when string, b *blueprint.Blueprint) (string, error) {
 	source, param, op, literal, err := blueprint.ParseWhen(when)
 	if err != nil {
 		return "", err
 	}
 	if source == "env" {
+		if b != nil {
+			if envDecl, ok := b.Spec.Environment[param]; ok && envDecl.Default != "" {
+				defVal := formatEnvDefault(envDecl)
+				expr := fmt.Sprintf("default %s (index $env %q)", defVal, param)
+				switch op {
+				case "":
+					return expr, nil
+				case "==":
+					return fmt.Sprintf("eq (%s) %q", expr, literal), nil
+				default: // "!="
+					return fmt.Sprintf("ne (%s) %q", expr, literal), nil
+				}
+			}
+		}
 		switch op {
 		case "":
 			return fmt.Sprintf("and (hasKey $env %q) $env.%s", param, param), nil
@@ -734,59 +759,7 @@ func ancestorPaths(path string) []string {
 // deliberately tight: a wrong suggestion on a typo is worse than none,
 // because it invites a second blind edit.
 func closestPath(path string, candidates []string) string {
-	best, bestDist := "", 0
-	for _, c := range candidates {
-		d := editDistance(path, c)
-		if best == "" || d < bestDist {
-			best, bestDist = c, d
-		}
-	}
-	if best != "" && bestDist <= 3 && bestDist*2 < len(path) {
-		return best
-	}
-
-	// For nested paths (e.g. "spec.selector.machLabels"), check candidates sharing the parent prefix
-	if idx := strings.LastIndex(path, "."); idx != -1 {
-		prefix := path[:idx]
-		leaf := path[idx+1:]
-		var leafCandidates []string
-		prefixDot := prefix + "."
-		for _, c := range candidates {
-			if strings.HasPrefix(c, prefixDot) {
-				leafCandidates = append(leafCandidates, strings.TrimPrefix(c, prefixDot))
-			}
-		}
-		if len(leafCandidates) > 0 {
-			bestLeaf := closestPath(leaf, leafCandidates)
-			if bestLeaf != "" {
-				return prefix + "." + bestLeaf
-			}
-		}
-	}
-
-	return ""
-}
-
-// editDistance is Levenshtein distance over runes, two rows at a time.
-func editDistance(a, b string) int {
-	ar, br := []rune(a), []rune(b)
-	prev := make([]int, len(br)+1)
-	curr := make([]int, len(br)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-	for i := 1; i <= len(ar); i++ {
-		curr[0] = i
-		for j := 1; j <= len(br); j++ {
-			cost := 1
-			if ar[i-1] == br[j-1] {
-				cost = 0
-			}
-			curr[j] = min(prev[j]+1, curr[j-1]+1, prev[j-1]+cost)
-		}
-		prev, curr = curr, prev
-	}
-	return prev[len(br)]
+	return blueprint.ClosestPath(path, candidates)
 }
 
 // forProviderField is one blueprint field resolved to a template line,
@@ -842,6 +815,32 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 		lookup := arrayIdxRE.ReplaceAllString(p, "[0]")
 		if isMap {
 			lookup = arrayIdxRE.ReplaceAllString(basePath, "[0]")
+		}
+		node := knownNodes[lookup]
+		if !isMap && f.Raw != "" && (node == nil || node.Type == "object" || node.Type == "map") {
+			if flowMap, ok := blueprint.ParseFlowStyleMap(f.Raw); ok {
+				keys := make([]string, 0, len(flowMap))
+				for k := range flowMap {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, k := range keys {
+					v := flowMap[k]
+					leaves = append(leaves, leafItem{
+						basePath: basePath,
+						key:      k,
+						isMap:    true,
+						rhs:      quoteYAML(v),
+						guard:    "",
+						structured: structuredRHS{
+							kind:       rhsLiteral,
+							value:      v,
+							targetType: "string",
+						},
+					})
+				}
+				continue
+			}
 		}
 		targetNode := knownNodes[lookup]
 		sRHS, rhs, guard, err := resolveFieldRHS(p, f, r, b, crds, wantNamespaced, targetNode, isMap)

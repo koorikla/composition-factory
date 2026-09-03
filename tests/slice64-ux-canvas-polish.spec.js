@@ -39,8 +39,8 @@ test("empty canvas displays onboarding hint and auto-offers examples on blank do
   // Empty canvas hint is visible
   const emptyState = page.locator("#canvas-empty-state")
   await expect(emptyState).toBeVisible()
-  await expect(emptyState).toContainText("1. Add a provider in SOURCES")
-  await expect(emptyState).toContainText("2. Drag kinds onto canvas to compose")
+  await expect(emptyState).toContainText("Drag kinds")
+  await expect(emptyState).toContainText("SOURCES")
 })
 
 test("catalogue add shows loading feedback and installed badge", async ({ page }) => {

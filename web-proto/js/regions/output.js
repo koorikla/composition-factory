@@ -425,10 +425,20 @@ function updateNextSteps(result) {
     }
     banner.hidden = false;
     banner.style.display = "flex";
-    banner.innerHTML = '<span style="color:var(--ok)">✓</span> ' +
-      'Output written to <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">' + esc(outPath) + '</code> ' +
-      '\u00b7 Apply: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">kubectl apply -f ' + esc(outPath) + '</code> ' +
-      '\u00b7 Package: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">cf package</code>';
+    if (result.written) {
+      banner.style.background = "rgba(16,185,129,0.08)";
+      banner.style.borderBottom = "1px solid rgba(16,185,129,0.2)";
+      banner.innerHTML = '<span style="color:var(--ok)">✓</span> ' +
+        'Output written to <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">' + esc(outPath) + '</code> ' +
+        '\u00b7 Apply: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">kubectl apply -f ' + esc(outPath) + '</code> ' +
+        '\u00b7 Package: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">cf package</code>';
+    } else {
+      banner.style.background = "rgba(59,130,246,0.08)";
+      banner.style.borderBottom = "1px solid rgba(59,130,246,0.2)";
+      banner.innerHTML = '<span style="color:var(--accent)">⚡</span> ' +
+        'Preview only \u00b7 Click <strong style="color:var(--ink)">Generate</strong> to write to <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">' + esc(outPath) + '</code> ' +
+        '\u00b7 Package: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">cf package</code>';
+    }
   } else {
     banner.hidden = true;
     banner.style.display = "none";
@@ -548,7 +558,7 @@ function initTheme() {
 
 function generateNow() {
   if (genTimer) { clearTimeout(genTimer); genTimer = null; }
-  store.generate(false);
+  store.generate(true);
 }
 
 function scheduleGenerate() {
@@ -826,8 +836,8 @@ function bindOutputStoreSubscriptions() {
   });
 
   store.subscribe("error", function (err) {
-    if (err && (err.source === "generate" || err.source === "loadDoc")) {
-      chipErr(err.message);
+    if (err) {
+      chipErr(err.message || String(err));
     }
   });
 

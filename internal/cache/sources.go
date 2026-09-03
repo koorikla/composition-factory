@@ -17,6 +17,11 @@ import (
 // one front door is supported in all of them.
 func LoadSources(store *Store, b *blueprint.Blueprint, blueprintDir string) ([]schema.CRD, error) {
 	var crds []schema.CRD
+	var lock *Lock
+	if blueprintDir != "" {
+		lock, _ = ReadLock(filepath.Join(blueprintDir, ".cf.lock"))
+	}
+
 	for _, s := range b.Spec.Sources {
 		if s.CRDs != "" {
 			path := s.CRDs
@@ -34,19 +39,44 @@ func LoadSources(store *Store, b *blueprint.Blueprint, blueprintDir string) ([]s
 			crds = append(crds, scanned...)
 			continue
 		}
-		got, err := store.Load(s.Provider)
+		ref := s.Provider
+		if lock != nil {
+			if entry, ok := lock.FindProvider(s.Provider); ok {
+				ref = entry.Ref
+			}
+		}
+		got, err := store.Load(ref)
 		if err != nil {
-			return nil, err
+			if ref != s.Provider {
+				got, err = store.Load(s.Provider)
+			}
+			if err != nil {
+				return nil, err
+			}
 		}
 		crds = append(crds, got...)
 	}
 
 	if b != nil && store != nil {
 		for _, step := range b.Spec.Pipeline {
-			if step.Package != "" {
-				if got, err := store.Load(step.Package); err == nil {
+			pkgRef := step.Package
+			if pkgRef == "" && lock != nil {
+				if entry, ok := lock.FindFunction(step.FunctionRef); ok {
+					pkgRef = entry.Ref
+				}
+			}
+			if pkgRef != "" {
+				if got, err := store.Load(pkgRef); err == nil {
 					crds = append(crds, got...)
 				}
+			}
+		}
+	}
+
+	if lock != nil && store != nil {
+		for _, f := range lock.Functions {
+			if got, err := store.Load(f.Ref); err == nil {
+				crds = append(crds, got...)
 			}
 		}
 	}

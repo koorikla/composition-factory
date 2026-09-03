@@ -54,11 +54,18 @@ func buildNativeTree(resourceName string, plan []forProviderField) (*nativeNode,
 	for i := range plan {
 		f := &plan[i]
 		if f.isMap {
-			for ei := range f.entries {
-				entry := &f.entries[ei]
-				segments := append(strings.Split(f.path, "."), entry.path)
-				if err := insertNativePath(resourceName, root, f.path+"["+entry.path+"]", segments, entry); err != nil {
+			if len(f.entries) == 0 {
+				segments := strings.Split(f.path, ".")
+				if err := insertNativePath(resourceName, root, f.path, segments, f); err != nil {
 					return nil, err
+				}
+			} else {
+				for ei := range f.entries {
+					entry := &f.entries[ei]
+					segments := append(strings.Split(f.path, "."), entry.path)
+					if err := insertNativePath(resourceName, root, f.path+"["+entry.path+"]", segments, entry); err != nil {
+						return nil, err
+					}
 				}
 			}
 		} else {

@@ -18,6 +18,7 @@ var version = "dev"
 type CLI struct {
 	VersionFlag kong.VersionFlag `name:"version" help:"Print the cf version."`
 	Version     VersionCmd       `cmd:"" help:"Print the cf version."`
+	Init        InitCmd          `cmd:"" help:"Scaffold a minimal valid blueprint."`
 	Provider    ProviderCmd      `cmd:"" help:"Manage provider schema sources."`
 	Function    FunctionCmd      `cmd:"" help:"Manage function schema sources."`
 	Gen         GenCmd           `cmd:"" help:"Generate XRD, Composition and functions.yaml from a blueprint."`

@@ -92,11 +92,8 @@ func TestEnvironmentEmission_GoTemplating(t *testing.T) {
 	}
 
 	// Field guard and value
-	if !strings.Contains(compStr, `{{- if hasKey $env "region" }}`) {
-		t.Errorf("expected hasKey guard for field region")
-	}
-	if !strings.Contains(compStr, `region: {{ $env.region | quote }}`) {
-		t.Errorf("expected quoted env wire for field region")
+	if !strings.Contains(compStr, `region: {{ default "us-east-1" (index $env "region") | quote }}`) {
+		t.Errorf("expected default fallback env wire for field region, got:\n%s", compStr)
 	}
 
 	// 2. Check functions.yaml emission
@@ -134,7 +131,7 @@ func TestEnvironmentEmission_Python(t *testing.T) {
 				},
 			},
 			Environment: map[string]blueprint.EnvironmentKey{
-				"region":  {Type: "string"},
+				"region":  {Type: "string", Default: "us-east-1"},
 				"enabled": {Type: "boolean"},
 				"count":   {Type: "integer"},
 			},

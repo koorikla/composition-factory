@@ -902,6 +902,13 @@ async function renderResource(res) {
     (flds ? " &#183; " + flds.total + " leaf fields &#183; " + reqCount + " required" : "") +
     "</div></div>";
 
+  if (res.kind === "Secret") {
+    h += '<div class="g" style="margin:4px 12px 6px;padding:6px 8px;background:var(--surface-2);border:1px solid var(--rule);border-radius:4px;font-size:11px;line-height:1.4">' +
+      '<strong style="color:var(--ink)">Secret data vs stringData:</strong><br>' +
+      'Use <code style="color:var(--ink);background:var(--sunk);padding:0 3px;border-radius:2px">stringData</code> for unencoded plaintext. Values wired to <code style="color:var(--ink);background:var(--sunk);padding:0 3px;border-radius:2px">data</code> will be automatically base64-encoded.' +
+      '</div>';
+  }
+
   // for-each: repeat this resource N times, N from an integer parameter
   var allParams = paramsOf(doc);
   var intParams = Object.keys(allParams).filter(function (n) { return allParams[n].type === "integer"; });
@@ -1099,21 +1106,21 @@ async function renderXRD() {
       mh += '<div style="padding:3px 0 4px"><button class="btn sm" data-madd="' + esc(n + "|") + '">+ member</button></div>';
       return mh;
     }
-    var h = '<div class="frow" style="margin-bottom:0">';
+    var h = '<div class="frow" style="margin-bottom:0;gap:4px">';
     if (p.type === "boolean") {
-      h += '<select class="tsel" data-pdef="' + esc(n) + '" aria-label="Default value">' +
+      h += '<select class="tsel" data-pdef="' + esc(n) + '" aria-label="Default value" style="flex:1">' +
         '<option value=""' + (!p.default ? " selected" : "") + ">no default</option>" +
         '<option' + (p.default === "true" ? " selected" : "") + ">true</option>" +
         '<option' + (p.default === "false" ? " selected" : "") + ">false</option></select>";
     } else if (p.enum && p.enum.length) {
-      h += '<span class="g" style="flex:1">enum: ' + esc(p.enum.join(", ")) + "</span>";
+      h += '<span class="g" style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis">enum: ' + esc(p.enum.join(", ")) + "</span>";
     } else {
       h += '<input class="tin" data-pdef="' + esc(n) + '" value="' + esc(p.default || "") +
-        '" placeholder="default value" aria-label="Default value">';
+        '" placeholder="default value" aria-label="Default value" style="flex:1;min-width:60px">';
     }
     if (p.type !== "boolean") {
       h += '<input class="tin" data-pe="' + esc(n) + '" value="' + esc((p.enum || []).join(",")) +
-        '" placeholder="enum,values" title="Comma-separated allowed values" aria-label="Enum values">';
+        '" placeholder="enum,values" title="Comma-separated allowed values" aria-label="Enum values" style="flex:1;min-width:60px">';
     }
     h += '<button class="del" data-pd="' + esc(n) + '" title="Delete parameter">&#215;</button></div>';
     return h;
@@ -1122,15 +1129,15 @@ async function renderXRD() {
   names.forEach(function (n) {
     var p = params[n] || {};
     var fo = fanOut(doc, n);
-    h += '<div class="fld"><div class="frow" style="margin-bottom:3px">' +
-      '<input class="tin bold" data-pn="' + esc(n) + '" value="' + esc(n) + '" aria-label="Parameter name">' +
-      '<select class="tsel" data-pt="' + esc(n) + '" aria-label="Parameter type">' +
+    h += '<div class="fld"><div class="frow" style="margin-bottom:3px;gap:4px">' +
+      '<input class="tin bold" data-pn="' + esc(n) + '" value="' + esc(n) + '" aria-label="Parameter name" style="min-width:70px;flex:1 1 auto">' +
+      '<select class="tsel" data-pt="' + esc(n) + '" aria-label="Parameter type" style="flex:0 0 auto">' +
       PARAM_TYPES.map(function (t) {
         return "<option" + (t === p.type ? " selected" : "") + ">" + t + "</option>";
       }).join("") + "</select>" +
-      '<label class="g" style="display:inline-flex;align-items:center;gap:3px;font-size:11px">' +
+      '<label class="g" style="display:inline-flex;align-items:center;gap:3px;font-size:11px;flex:0 0 auto;white-space:nowrap">' +
       '<input type="checkbox" data-pr="' + esc(n) + '"' + (p.required ? " checked" : "") + ">req</label>" +
-      '<span class="fan" title="Wired into ' + fo + ' field' + (fo === 1 ? "" : "s") + '">&#215;' + fo + "</span></div>" +
+      '<span class="fan" title="Wired into ' + fo + ' field' + (fo === 1 ? "" : "s") + '" style="flex:0 0 auto">&#215;' + fo + "</span></div>" +
       paramDetailRow(n, p) + "</div>";
   });
   h += '<div style="padding:8px 12px 14px">' +
@@ -2240,6 +2247,11 @@ export function init(rootEl, deps) {
 
   box.addEventListener("click", onBoxClick);
   box.addEventListener("change", onBoxChange);
+  box.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT")) {
+      e.target.blur();
+    }
+  });
   box.addEventListener("input", function (e) {
     var t = e.target;
     if (!t || !t.matches("textarea.raw")) return;
@@ -2252,6 +2264,14 @@ export function init(rootEl, deps) {
   var lastSourcesSig = "";
   store.subscribe("doc", function () {
     var d = store.state.doc;
+    var sel = store.state.selectedResource;
+    if (sel && sel !== "xrd") {
+      var found = d && d.spec && d.spec.resources && d.spec.resources.some(function (r) { return r.name === sel; });
+      if (!found) {
+        store.select(null);
+        return;
+      }
+    }
     var sig = ((d && d.spec && d.spec.sources) || [])
       .map(function (s) { return s.provider; }).join("|");
     if (sig !== lastSourcesSig) {

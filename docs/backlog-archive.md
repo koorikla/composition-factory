@@ -1,3 +1,178 @@
+- [x] **CF-010 — The canvas output drawer feedback distinguishes preview vs disk write**:
+      `store.generate(true)` passes write flag properly, and the output drawer explicitly states when artifacts are previews vs written to disk.
+      — completed 2026-09-03
+- [x] **CF-011 — Visible feedback for rejected canvas actions**:
+      Store error events trigger error toasts, visual red header status chips, and error banners in the inspector and canvas.
+      — completed 2026-09-03
+- [x] **CF-012 — Secret data vs stringData encoding & guidance**:
+      Secret `data:` values are automatically base64-encoded via `b64enc | quote`, and inspector provides contextual guidance steering authors to `stringData`.
+      — completed 2026-09-03
+- [x] **CF-013 — Custom field query casing preserved**:
+      Wire picker preserves exact camelCase casing when typing custom paths (`stringData.host`) rather than lowercasing them.
+      — completed 2026-09-03
+- [x] **CF-023 — Parameter rename/delete in `raw:` expressions**:
+      Parameter references inside `raw:` expressions and `spec.templates` are detected on deletion (returning 409 Conflict) and cleanly rewritten on rename.
+      — completed 2026-09-03
+- [x] **CF-024 — Resource CRUD API routes**:
+      Added `POST /api/blueprint/resources` and `PUT /api/blueprint/resources/{name}` with `If-Match` ETag revision concurrency protection.
+      — completed 2026-09-03
+- [x] **CF-025 — Preview expression HTTP statuses and synthetic environment**:
+      `/api/preview-expression` returns HTTP 400 on bad requests and syntax errors, and populates synthetic `$env` from declared `spec.environment`.
+      — completed 2026-09-03
+- [x] **CF-026 — Offline resiliency in `PUT /api/blueprint`**:
+      `PUT /api/blueprint` avoids blocking synchronous network lookups when editing blueprints offline.
+      — completed 2026-09-03
+- [x] **CF-027 & CF-028 — MCP Server Parity & Discovery**:
+      Added `add_function` and `preview_expression` tools and full route inventory to `internal/mcp`.
+      — completed 2026-09-03
+- [x] **CF-029 — Nearest-match suggestions for short identifiers**:
+      Adjusted distance threshold in `internal/blueprint/closest.go` so 3-4 character typos (`spce` -> `spec`, `teir` -> `tier`) produce nearest-match suggestions.
+      — completed 2026-09-03
+- [x] **CF-030 — Required CRD field omission validation**:
+      Emits validation errors and suggestions when required CRD fields are missing or wired from optional parameters without `when:` guards.
+      — completed 2026-09-03
+- [x] **CF-031 — `cf gen --check` orphan file reporting**:
+      `cf gen --check` cleanly detects and reports drift on orphaned generated files.
+      — completed 2026-09-03
+- [x] **CF-032 — CLI scaffold `cf init`**:
+      Added `cf init` CLI command to scaffold a minimal valid `.cf.yaml` blueprint with sensible defaults.
+      — completed 2026-09-03
+- [x] **CF-033 & CF-039 — Package type validation in `cf function/provider add`**:
+      Validates package type (function vs provider) in `cf function add` and `cf provider add`, and properly handles `provider: native`.
+      — completed 2026-09-03
+- [x] **CF-034 — Canonical `blueprint.EnvRef` usage**:
+      Replaced raw `strings.CutPrefix(x, "env.")` across the codebase with canonical `blueprint.EnvRef`.
+      — completed 2026-09-03
+- [x] **CF-035 & CF-038 — Inspector & sidebar tab strip layout**:
+      Ensured XRD parameter inputs are not clipped and tab strips fit without truncation.
+      — completed 2026-09-03
+- [x] **CF-036 — Read-only system metadata excluded from wire picker**:
+      Filtered out `managedFields`, `ownerReferences`, `uid`, `resourceVersion`, `creationTimestamp`, and `generation` in native wire picker.
+      — completed 2026-09-03
+- [x] **CF-037 — Undo state and Enter key handling**:
+      Reset inspector on undo after node duplication, and committed parameter renames on Enter key.
+      — completed 2026-09-03
+- [x] **CF-014 — Widen the Lane C round-trip fixture** to a blueprint with a managed
+      resource, an `atProvider` status wire, an envelope, a `forEach`, and
+      `spec.environment`. Do this first — it turns most of the items below into
+      failing tests instead of prose. `docs/backlog-archive.md` already records
+      "extend the gate to an example that uses env" as complete; it is not.
+      — completed 2026-09-03
+- [x] **CF-020** Function package pins do not survive: adopt substitutes catalogue defaults
+      (a silent version downgrade *and* registry change), and `.cf.lock` is never
+      read at gen time — inputs are validated against the pinned schema and
+      deployed against a hard-coded different version.
+      — completed 2026-09-03
+- [x] **CF-022** Flow-style `raw:` maps (`{app: worker}`) come back as expanded block maps —
+      semantically equal, byte-different, so the widened gate above will fail on
+      them until adopt preserves the style or the emitter normalises it.
+      — completed 2026-09-03
+- [x] **CF-040** The three features shipped in `075646f` are documented nowhere: `spec.environment`
+      and `from: env.<key>` absent from `docs/dsl.md`, `cf function` absent from
+      `docs/cli.md`, and `POST /api/preview-expression` absent from `docs/mcp.md`.
+      `CHANGELOG.md` `[Unreleased]` now records the backlog audit but still not the
+      features themselves. The only file describing them is `docs/backlog-archive.md`
+      — the record that they were planned.
+      — completed 2026-09-03
+- [x] **CF-041** `docs/dsl.md` documents a pipeline shape the API rejects outright
+      (`spec.pipeline.steps[]` with `step:` and `functionRef: {name:}`); the real
+      type is a bare list with a string `functionRef`. `input:`, `package:` and
+      `position:` are undocumented.
+      — completed 2026-09-03
+- [x] **CF-042** `providerName` is mandatory in every Namespaced XRD (since `scope: Cluster`
+      is refused) and appears in no user-facing doc — the first-blueprint stumble.
+      — completed 2026-09-03
+- [x] **CF-043** `cf kinds`, `cf fields`, `cf catalogue`, `gen --validate` and `gen
+      --group-suffix` are documented nowhere. The three discovery verbs are the
+      best UX in the tool.
+      — completed 2026-09-03
+- [x] **CF-044** The FileSystem output tree in `docs/cli.md` does not match what is written
+      (actual output nests under the XRD name — the real layout is better; fix the
+      doc), and the `template:` refusal under kcl/python is undocumented.
+      — completed 2026-09-03
+- [x] **CF-015** `cf adopt` drops `atProvider.` from status wires — `resources.r.status.atProvider.arn`
+      returns as `resources.r.status.arn`, which then fails regeneration.
+      — completed 2026-09-03
+- [x] **CF-016** `cf adopt` emits `provider: ""` for every resource, so an adopted blueprint
+      never regenerates; `--provider` stamps one ref onto all resources including
+      native kinds. Infer it from the composed `apiVersion` — the cache already
+      maps it.
+      — completed 2026-09-03
+- [x] **CF-017** `cf adopt` silently flips `required: true` → `false` and drops `default:`,
+      even with a sibling `definition.yaml` present. README promises lossy items
+      are "named on screen"; nothing is named.
+      — completed 2026-09-03
+- [x] **CF-018** Envelope is dropped entirely by adopt — the emitted guarded
+      `writeConnectionSecretToRef` does not come back, so the connection secret
+      silently stops being written. Reproduces for `{value:}` too, not just env.
+      — completed 2026-09-03
+- [x] **CF-019** `forEach` resource names are destroyed — import invents `cf-expr-N`,
+      changing every `crossplane.io/composition-resource-name`, so re-applying
+      orphans and recreates the whole loop. The name is recoverable: it is in the
+      template's own `printf`.
+      — completed 2026-09-03
+- [x] **CF-021** Foreign env inference always types keys `string`, so any composition using
+      env in a `forEach` or `when` without cf's annotation cannot be adopted at
+      all — hard exit 1. Infer from the usage site (`until (int $env.x)` ⇒ integer).
+      — completed 2026-09-03
+- [x] **CF-001 — One preview request kills `cf serve`. [V]** `POST /api/preview-expression`
+      with a self-recursive template overflows the stack; Go's `fatal error:
+      stack overflow` is a runtime fatal that `net/http` cannot recover, so the
+      process dies and the author's canvas session with it. `internal/emit/preview.go`
+      calls `tmpl.ExecuteTemplate` from its own `include` with no depth counter,
+      so each recursion starts a fresh `Execute` and Go's 100000-depth guard
+      never fires. Repro: `{"expression":"{{ define \"r\" }}{{ include \"r\" . }}{{ end }}{{ include \"r\" . }}"}`.
+      Add a depth counter, a `context.WithTimeout`, and an output-size cap.
+      — completed 2026-09-03
+- [x] **CF-002 — Preview has no execution bound.** `{{ range until 200000 }}{{ range until
+      200000 }}{{ end }}{{ end }}` still burns 209% CPU long after the client
+      disconnects — no deadline, no `r.Context()` cancellation, no output cap. This
+      endpoint was specced to run *while typing*.
+      — completed 2026-09-03
+- [x] **CF-003 — The auto-injected `function-environment-configs` step carries no `input:`. [V]**
+      So it selects no EnvironmentConfigs, `.context["apiextensions.crossplane.io/environment"]`
+      stays empty, every emitted `hasKey $env "…"` guard is false, and every
+      env-derived field, annotation, envelope entry, `forEach` and `when` silently
+      vanishes at reconcile. `cf gen` reports nothing. The default path of the
+      environment feature cannot work.
+      — completed 2026-09-03
+- [x] **CF-004 — KCL and Python flatten dotted field paths into literal keys. [V]**
+      `bucketRef.name: {value: x}` emits `"bucketRef.name" = "x"` instead of a
+      nested object; the API server prunes it. go-templating nests correctly — the
+      v0.8.0 fix never propagated to the other two engines. Engine parity is a
+      headline feature.
+      — completed 2026-09-03
+- [x] **CF-005 — `raw:` is emitted verbatim, and the docs' own examples are bare
+      expressions.** `docs/dsl.md` shows `{raw: 'printf "%s-subnet-%d" $xr $i'}`
+      under a heading promising `$xr`/`$i` access. It lands in the composed
+      resource as that literal string, `cf gen` exits 0 and `--validate` reports
+      ok. Either auto-wrap bare expressions or reject a `raw:` containing `$var`
+      with no `{{`.
+      — completed 2026-09-03
+- [x] **CF-006 — `$observed` is documented but never bound.** `docs/dsl.md:121` lists it as
+      a `raw:` runtime variable; the emitted preamble binds only `$spec`, `$xr`,
+      `$xrMeta`, `$env`, `$i`. Every template following the doc fails to parse at
+      render: `undefined variable "$observed"`. The working form, `$.observed.resources`,
+      is what the generator itself emits and never documents.
+      — completed 2026-09-03
+- [x] **CF-007 — Function-input validation is bypassed by the input's own `apiVersion`/`kind`.**
+      `internal/emit/pipeline.go` resolves the Input CRD from the input document
+      rather than from the step's `functionRef`, so `apiVersion: totally.made.up/v1`
+      turns validation off entirely and emits verbatim. A `kind: GoTemplate` input
+      under `functionRef: function-environment-configs` is likewise accepted.
+      — completed 2026-09-03
+- [x] **CF-008 — The "uncached function ⇒ explicit warning" contract emits nothing.** Two
+      defects: `internal/emit/composition.go` discards the `warnings` slice from
+      its only call to `ValidatePipelineInputs`, and `isFunctionCached(pkgRef, crds)`
+      never reads `pkgRef` — it returns true if *any* cached CRD is a function
+      input, so once one function is cached no step is ever uncached.
+      — completed 2026-09-03
+- [x] **CF-009 — `spec.environment` `default:` is inert.** Parsed, type-checked, and written
+      into the annotation, but `internal/emit` reads only `.Type`, never `.Default`.
+      The template guards on `hasKey` and emits nothing when the key is absent, so a
+      declared default never applies — the author writes `default: 3` and gets zero
+      resources instead of three. Either emit the default or reject the field.
+      — completed 2026-09-03
 - [x] **EnvironmentConfig (Track 2)**:
       In Crossplane v2, `spec.environment` is accessed via `index .context "apiextensions.crossplane.io/environment"` populated by `function-environment-configs`.
       Implemented `spec.environment` in blueprint DSL declaring scalar keys (string, integer, number, boolean) with defaults/descriptions, supporting `from: env.<key>` across fields, annotations, envelope, `forEach` bounds, and `when` guards with `unknownPath` nearest-match suggestions and `isFieldTypeCompatible` type safety.

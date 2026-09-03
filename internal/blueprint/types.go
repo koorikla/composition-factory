@@ -143,6 +143,7 @@ const (
 	EnvironmentKeysAnnotation         = "factory.crossplane.io/environment-keys"
 	EnvironmentConfigsFunctionName    = "function-environment-configs"
 	EnvironmentConfigsFunctionPackage = "xpkg.crossplane.io/crossplane-contrib/function-environment-configs:v0.4.0"
+	DefaultEnvironmentConfigsInput    = "apiVersion: environmentconfigs.fn.crossplane.io/v1beta1\nkind: Input\nspec:\n  environmentConfigs:\n  - type: Reference\n    ref:\n      name: default\n"
 )
 
 // SupportedEngines lists all composition rendering engines supported by composition-factory.

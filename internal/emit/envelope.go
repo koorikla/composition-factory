@@ -152,7 +152,27 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 		e := envField{path: strings.Split(p, ".")}
 		switch {
 		case f.Raw != "":
-			e.rhs = f.Raw
+			if flowMap, ok := blueprint.ParseFlowStyleMap(f.Raw); ok && branch {
+				keys := make([]string, 0, len(flowMap))
+				for k := range flowMap {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, k := range keys {
+					v := flowMap[k]
+					plan = append(plan, envField{
+						path: append(strings.Split(p, "."), k),
+						rhs:  quoteYAML(v),
+						structured: structuredRHS{
+							kind:       rhsLiteral,
+							value:      v,
+							targetType: "string",
+						},
+					})
+				}
+				continue
+			}
+			e.rhs = blueprint.NormalizeRawGoTemplate(f.Raw)
 			e.structured = structuredRHS{kind: rhsRaw, value: f.Raw}
 		case f.Value != "":
 			rhs, err := envelopeValueRHS(n, branch, f.Value)
@@ -162,7 +182,7 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 			e.rhs = rhs
 			e.structured = structuredRHS{kind: rhsLiteral, value: f.Value, targetType: n.Type}
 		case f.From != "":
-			if envKey, ok := strings.CutPrefix(f.From, "env."); ok {
+			if envKey, ok := blueprint.EnvRef(f.From); ok {
 				envDecl, exists := b.Spec.Environment[envKey]
 				if !exists {
 					return nil, blueprint.UnknownEnvKeyError(fmt.Sprintf("resource %q envelope %q", r.Name, p), envKey, b.Spec.Environment)
@@ -186,22 +206,43 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 						"environment key %q has type %q — the wire would render a YAML scalar of the wrong type, "+
 						"which the API server rejects on apply", r.Name, p, n.Type, envKey, envDecl.Type)
 				}
-				deref := "$env." + envKey
-				if n.Type == "string" {
-					e.rhs = fmt.Sprintf("{{ %s | quote }}", deref)
+				if envDecl.Default != "" {
+					defVal := formatEnvDefault(envDecl)
+					expr := fmt.Sprintf("default %s (index $env %q)", defVal, envKey)
+					if n.Type == "string" {
+						e.rhs = fmt.Sprintf("{{ %s | quote }}", expr)
+					} else {
+						e.rhs = fmt.Sprintf("{{ %s }}", expr)
+					}
+					e.optional = false
+					e.guard = ""
+					e.structured = structuredRHS{
+						kind:       rhsEnv,
+						param:      envKey,
+						paramSegs:  []string{envKey},
+						rawExpr:    expr,
+						targetType: n.Type,
+						optional:   false,
+						guard:      "",
+					}
 				} else {
-					e.rhs = fmt.Sprintf("{{ %s }}", deref)
-				}
-				g := fmt.Sprintf("hasKey $env %q", envKey)
-				e.optional, e.guard = true, g
-				e.structured = structuredRHS{
-					kind:       rhsEnv,
-					param:      envKey,
-					paramSegs:  []string{envKey},
-					rawExpr:    deref,
-					targetType: n.Type,
-					optional:   true,
-					guard:      g,
+					deref := "$env." + envKey
+					if n.Type == "string" {
+						e.rhs = fmt.Sprintf("{{ %s | quote }}", deref)
+					} else {
+						e.rhs = fmt.Sprintf("{{ %s }}", deref)
+					}
+					g := fmt.Sprintf("hasKey $env %q", envKey)
+					e.optional, e.guard = true, g
+					e.structured = structuredRHS{
+						kind:       rhsEnv,
+						param:      envKey,
+						paramSegs:  []string{envKey},
+						rawExpr:    deref,
+						targetType: n.Type,
+						optional:   true,
+						guard:      g,
+					}
 				}
 				plan = append(plan, e)
 				continue

@@ -46,7 +46,7 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 		crd := pres.CRD
 		apiVersion := pres.APIVersion
 		annPlan := pres.AnnPlan
-		plan := pres.Plan
+		bodyPlan := pres.BodyPlan
 		envPlan := pres.EnvPlan
 
 		indent := "    "
@@ -85,16 +85,22 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 
 		// Spec
 		if crd.Native {
-			sb.WriteString(fmt.Sprintf("%s\"spec\": _present({\n", inner))
-			writePythonMapEntries(&sb, inner+"    ", plan)
-			sb.WriteString(fmt.Sprintf("%s}),\n", inner))
+			root, err := buildNativeTree(r.Name, bodyPlan)
+			if err != nil {
+				return "", err
+			}
+			writePythonNodes(&sb, inner, root.children)
 		} else {
 			sb.WriteString(fmt.Sprintf("%s\"spec\": _present({\n", inner))
 			specInner := inner + "    "
 
 			// forProvider
 			sb.WriteString(fmt.Sprintf("%s\"forProvider\": _present({\n", specInner))
-			writePythonMapEntries(&sb, specInner+"    ", plan)
+			root, err := buildNativeTree(r.Name, bodyPlan)
+			if err != nil {
+				return "", err
+			}
+			writePythonNodes(&sb, specInner+"    ", root.children)
 			sb.WriteString(fmt.Sprintf("%s}),\n", specInner))
 
 			hasPCRInPlan := false
@@ -128,18 +134,49 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 	return sb.String(), nil
 }
 
-func writePythonMapEntries(sb *strings.Builder, indent string, fields []forProviderField) {
-	for _, f := range fields {
-		if f.isMap {
-			sb.WriteString(fmt.Sprintf("%s%q: _present({\n", indent, f.path))
-			writePythonMapEntries(sb, indent+"    ", f.entries)
-			sb.WriteString(fmt.Sprintf("%s}),\n", indent))
+func writePythonNodes(sb *strings.Builder, indent string, nodes []*nativeNode) {
+	for i := 0; i < len(nodes); {
+		c := nodes[i]
+		if !c.indexed {
+			writePythonNode(sb, indent, c)
+			i++
 			continue
 		}
+		j := i
+		for j < len(nodes) && nodes[j].indexed && nodes[j].seg == c.seg {
+			j++
+		}
+		run := nodes[i:j]
+		i = j
 
-		rhs := pythonStructuredRHS(f.structured, f.rhs)
-		sb.WriteString(fmt.Sprintf("%s%q: %s,\n", indent, f.path, rhs))
+		sb.WriteString(fmt.Sprintf("%s%q: [\n", indent, c.seg))
+		for _, elem := range run {
+			writePythonElement(sb, indent+"    ", elem)
+		}
+		sb.WriteString(fmt.Sprintf("%s],\n", indent))
 	}
+}
+
+func writePythonNode(sb *strings.Builder, indent string, n *nativeNode) {
+	if n.leaf != nil {
+		rhs := pythonStructuredRHS(n.leaf.structured, n.leaf.rhs)
+		sb.WriteString(fmt.Sprintf("%s%q: %s,\n", indent, n.seg, rhs))
+		return
+	}
+	sb.WriteString(fmt.Sprintf("%s%q: _present({\n", indent, n.seg))
+	writePythonNodes(sb, indent+"    ", n.children)
+	sb.WriteString(fmt.Sprintf("%s}),\n", indent))
+}
+
+func writePythonElement(sb *strings.Builder, indent string, elem *nativeNode) {
+	if elem.leaf != nil {
+		rhs := pythonStructuredRHS(elem.leaf.structured, elem.leaf.rhs)
+		sb.WriteString(fmt.Sprintf("%s%s,\n", indent, rhs))
+		return
+	}
+	sb.WriteString(fmt.Sprintf("%s_present({\n", indent))
+	writePythonNodes(sb, indent+"    ", elem.children)
+	sb.WriteString(fmt.Sprintf("%s}),\n", indent))
 }
 
 func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
@@ -296,9 +333,9 @@ func translateWhenToPython(when string) string {
 				var name string
 				if strings.HasPrefix(prefix, "params.") {
 					name = strings.TrimPrefix(prefix, "params.")
-				} else if strings.HasPrefix(prefix, "env.") {
+				} else if envKey, ok := blueprint.EnvRef(prefix); ok {
 					targetDict = "env"
-					name = strings.TrimPrefix(prefix, "env.")
+					name = envKey
 				}
 				if name != "" {
 					isNot := ""
@@ -326,8 +363,7 @@ func translateForEachToPython(forEach string) string {
 		param := strings.TrimPrefix(forEach, "params.")
 		return fmt.Sprintf("range(int(spec.get(%q, 0)))", param)
 	}
-	if strings.HasPrefix(forEach, "env.") {
-		key := strings.TrimPrefix(forEach, "env.")
+	if key, ok := blueprint.EnvRef(forEach); ok {
 		return fmt.Sprintf("range(int(env.get(%q, 0)))", key)
 	}
 	if strings.HasPrefix(forEach, "resources.") {

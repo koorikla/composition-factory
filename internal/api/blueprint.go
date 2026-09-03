@@ -143,6 +143,16 @@ func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
+	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" {
+		if cur, err := blueprint.Load(srv.Blueprint); err == nil {
+			curBytes, _ := json.Marshal(cur)
+			if !etagMatches(ifMatch, etagFor(curBytes)) {
+				writeJSONError(w, http.StatusPreconditionFailed, "precondition failed: If-Match header does not match current blueprint revision")
+				return
+			}
+		}
+	}
+
 	if err := b.Validate(); err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -154,13 +164,11 @@ func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	crds, err := srv.loadSourceCRDs(&b)
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := srv.validateBlueprintAgainstCRDs(&b, crds); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
+	if err == nil {
+		if err := srv.validateBlueprintAgainstCRDs(&b, crds); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	if err := writeBlueprintFile(srv.Blueprint, &b); err != nil {
@@ -215,6 +223,14 @@ func (srv *server) mutate(w http.ResponseWriter, r *http.Request, fn func(*bluep
 	b, ok := srv.loadBlueprint(w)
 	if !ok {
 		return
+	}
+
+	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" {
+		curBytes, err := json.Marshal(b)
+		if err == nil && !etagMatches(ifMatch, etagFor(curBytes)) {
+			writeJSONError(w, http.StatusPreconditionFailed, "precondition failed: If-Match header does not match current blueprint revision")
+			return
+		}
 	}
 
 	if status, err := fn(b); err != nil {
@@ -365,11 +381,60 @@ func (srv *server) handleDeleteParameter(w http.ResponseWriter, r *http.Request)
 			switch {
 			case !existed:
 				return http.StatusNotFound, err
-			case len(refs) > 0:
+			case len(refs) > 0 || strings.Contains(err.Error(), "still referenced"):
 				return http.StatusConflict, err
 			default:
 				return http.StatusBadRequest, err
 			}
+		}
+		return http.StatusOK, nil
+	})
+}
+
+// handleAddResource serves POST /api/blueprint/resources: declare a new composed resource.
+func (srv *server) handleAddResource(w http.ResponseWriter, r *http.Request) {
+	var res blueprint.Resource
+	if err := decodeJSON(r, &res); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	srv.mutate(w, r, func(b *blueprint.Blueprint) (int, error) {
+		existed := b.ResourceNamed(res.Name) != nil
+		if err := b.AddResource(res); err != nil {
+			status := http.StatusBadRequest
+			if existed {
+				status = http.StatusConflict
+			}
+			return status, err
+		}
+		return http.StatusOK, nil
+	})
+}
+
+// handleSetResource serves PUT /api/blueprint/resources/{name}: replace an
+// existing composed resource's declaration in full.
+func (srv *server) handleSetResource(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+
+	var res blueprint.Resource
+	if err := decodeJSON(r, &res); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if res.Name != "" && res.Name != name {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("resource name in body %q does not match URL path %q", res.Name, name))
+		return
+	}
+
+	srv.mutate(w, r, func(b *blueprint.Blueprint) (int, error) {
+		existed := b.ResourceNamed(name) != nil
+		if err := b.SetResource(name, res); err != nil {
+			status := http.StatusBadRequest
+			if !existed {
+				status = http.StatusNotFound
+			}
+			return status, err
 		}
 		return http.StatusOK, nil
 	})
@@ -484,8 +549,8 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 		// Otherwise fetch from remote registry
 		pkg, err := fetch(ref)
 		if err != nil {
-			srv.Providers = origProviders
-			return fmt.Errorf("fetch %s: %w", ref, err)
+			fmt.Fprintf(os.Stderr, "cf: warning: unable to fetch source %q: %v — continuing offline\n", ref, err)
+			continue
 		}
 		crds, err := schema.ParseCRDs(pkg.Docs)
 		if err != nil {

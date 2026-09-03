@@ -431,3 +431,25 @@ func TestValidatePipelineInputs_EnumValidation(t *testing.T) {
 		t.Errorf("error %q does not mention invalid enum value", err.Error())
 	}
 }
+
+func TestValidatePipelineInputs_MismatchedAPIVersionOrKind(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "template-step",
+			FunctionRef: "function-go-templating",
+			Package:     "xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.4.1",
+			Input: "apiVersion: invalid.group.fn/v1\n" +
+				"kind: WrongKind\n" +
+				"source: Inline\n",
+		},
+	}
+	crds := append(testCRDs(t), functionCRDs()...)
+	_, err := ValidatePipelineInputs(b, crds)
+	if err == nil {
+		t.Fatal("expected error for mismatched apiVersion/kind, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not match expected schema") {
+		t.Errorf("error %q should indicate schema mismatch", err.Error())
+	}
+}

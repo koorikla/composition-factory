@@ -33,10 +33,20 @@ func (c *FunctionAddCmd) Run(out io.Writer) error {
 	}
 
 	inputs := 0
+	managed := 0
 	for _, crd := range crds {
 		if crd.IsFunctionInput() || crd.Function {
 			inputs++
 		}
+		if crd.IsManaged() {
+			managed++
+		}
+	}
+	if inputs == 0 {
+		if managed > 0 {
+			return fmt.Errorf("package %q is a provider package, not a function (use 'cf provider add %s')", c.Ref, c.Ref)
+		}
+		return fmt.Errorf("package %q contains 0 function input schemas", c.Ref)
 	}
 	noun := "function input schemas"
 	if inputs == 1 {

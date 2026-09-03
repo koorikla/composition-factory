@@ -50,11 +50,40 @@ store.loadDoc();
 })();
 
 
+/* ---- global error toast for rejected store actions (CF-011) ---- */
+let toastTimer = null;
+export function showErrorToast(msg) {
+  if (!msg) return;
+  let t = document.getElementById("canvas-error-toast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "canvas-error-toast";
+    t.className = "toast-bar";
+    t.style.borderColor = "var(--err)";
+    document.body.appendChild(t);
+  }
+  t.innerHTML = '<span style="color:var(--err)">⚠️</span> <span class="toast-msg" style="flex:1">' + esc(msg) + '</span> <button class="toast-close" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px;padding:0 4px">&times;</button>';
+  t.querySelector(".toast-close").onclick = function () {
+    t.remove();
+  };
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () {
+    if (t.parentNode) t.remove();
+    toastTimer = null;
+  }, 6000);
+}
+
+store.subscribe("error", function (err) {
+  if (err && err.message) {
+    showErrorToast(err.message);
+  }
+});
+
 /* ---- resizable side columns: drag handles, clamped, persisted ---- */
 (function () {
   var cols = document.getElementById("cols");
   if (!cols) return;
-  var MIN_L = 160, MAX_L = 420, MIN_R = 180, MAX_R = 520, MIN_CANVAS = 300;
+  var MIN_L = 180, MAX_L = 420, MIN_R = 260, MAX_R = 520, MIN_CANVAS = 300;
   var widths = { l: 216, r: 330 };
   try {
     var saved = JSON.parse(localStorage.getItem("cf-col-widths") || "null");

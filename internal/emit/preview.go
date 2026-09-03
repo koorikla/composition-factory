@@ -2,26 +2,68 @@ package emit
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sort"
 	"strings"
 	"text/template"
+	"time"
 
 	sprig "github.com/Masterminds/sprig/v3"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"sigs.k8s.io/yaml"
 )
 
+const (
+	maxIncludeDepth       = 20
+	maxOutputSize         = 1 << 20 // 1MB
+	defaultPreviewTimeout = 5 * time.Second
+)
+
+type boundedWriter struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (w *boundedWriter) Write(p []byte) (int, error) {
+	if w.buf.Len()+len(p) > w.max {
+		return 0, fmt.Errorf("preview output size exceeded maximum limit of %d bytes", w.max)
+	}
+	return w.buf.Write(p)
+}
+
+func (w *boundedWriter) String() string {
+	return w.buf.String()
+}
+
 // PreviewExpression executes a Go template expression in-process against a
 // synthetic context built from the blueprint's parameters, $xr metadata,
 // and observed resource fixtures.
 func PreviewExpression(b *blueprint.Blueprint, resourceName string, expr string) (string, error) {
+	return PreviewExpressionContext(context.Background(), b, resourceName, expr)
+}
+
+// PreviewExpressionContext executes a Go template expression with context cancellation and deadline bounds.
+func PreviewExpressionContext(ctx context.Context, b *blueprint.Blueprint, resourceName string, expr string) (string, error) {
 	if strings.TrimSpace(expr) == "" {
 		return "", nil
 	}
 
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultPreviewTimeout)
+		defer cancel()
+	}
+
 	if b == nil {
 		b = &blueprint.Blueprint{}
+	}
+
+	if resourceName != "" && b.ResourceNamed(resourceName) == nil {
+		return "", fmt.Errorf("resource %q is not declared in blueprint", resourceName)
 	}
 
 	xrName := "sample-xr"
@@ -76,10 +118,9 @@ func PreviewExpression(b *blueprint.Blueprint, resourceName string, expr string)
 		}
 	}
 
-	envMap := map[string]any{
-		"env":     "dev",
-		"region":  "us-west-2",
-		"account": "123456789012",
+	envMap := make(map[string]any)
+	for name, k := range b.Spec.Environment {
+		envMap[name] = envPlaceholderValue(k)
 	}
 
 	data := map[string]any{
@@ -120,6 +161,7 @@ func PreviewExpression(b *blueprint.Blueprint, resourceName string, expr string)
 		"{{- $spec := .observed.composite.resource.spec -}}",
 		"{{- $xr := .observed.composite.resource.metadata.name -}}",
 		"{{- $xrMeta := .observed.composite.resource.metadata -}}",
+		"{{- $observed := .observed.resources -}}",
 		`{{- $env := index .context "apiextensions.crossplane.io/environment" | default dict -}}`,
 		"{{- $i := 0 -}}",
 		fmt.Sprintf("{{- $resource := %q -}}", resourceName),
@@ -132,6 +174,53 @@ func PreviewExpression(b *blueprint.Blueprint, resourceName string, expr string)
 	funcs := sprig.TxtFuncMap()
 	delete(funcs, "env")
 	delete(funcs, "expandenv")
+
+	funcs["until"] = func(count int) ([]int, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if count < 0 {
+			return nil, fmt.Errorf("negative count %d", count)
+		}
+		if count > 10000 {
+			return nil, fmt.Errorf("until count %d exceeds maximum limit of 10000", count)
+		}
+		out := make([]int, count)
+		for i := 0; i < count; i++ {
+			out[i] = i
+		}
+		return out, nil
+	}
+
+	funcs["untilStep"] = func(start, stop, step int) ([]int, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if step == 0 {
+			return nil, fmt.Errorf("untilStep with step 0 would loop indefinitely")
+		}
+		if (step > 0 && start > stop) || (step < 0 && start < stop) {
+			return []int{}, nil
+		}
+		count := (stop - start) / step
+		if count < 0 {
+			count = -count
+		}
+		if count > 10000 {
+			return nil, fmt.Errorf("untilStep iterations %d exceed maximum limit of 10000", count)
+		}
+		var out []int
+		if step > 0 {
+			for i := start; i < stop; i += step {
+				out = append(out, i)
+			}
+		} else {
+			for i := start; i > stop; i += step {
+				out = append(out, i)
+			}
+		}
+		return out, nil
+	}
 
 	funcs["randomChoice"] = func(args ...any) any {
 		if len(args) == 0 {
@@ -217,8 +306,18 @@ func PreviewExpression(b *blueprint.Blueprint, resourceName string, expr string)
 		return map[string]any{}
 	}
 
+	includeDepth := 0
 	funcs["include"] = func(name string, data any) (string, error) {
-		var buf bytes.Buffer
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if includeDepth >= maxIncludeDepth {
+			return "", fmt.Errorf("maximum template include depth (%d) exceeded", maxIncludeDepth)
+		}
+		includeDepth++
+		defer func() { includeDepth-- }()
+		var buf boundedWriter
+		buf.max = maxOutputSize
 		err := tmpl.ExecuteTemplate(&buf, name, data)
 		return buf.String(), err
 	}
@@ -228,10 +327,23 @@ func PreviewExpression(b *blueprint.Blueprint, resourceName string, expr string)
 		return "", err
 	}
 
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", err
+	type execResult struct {
+		rendered string
+		err      error
 	}
 
-	return buf.String(), nil
+	resCh := make(chan execResult, 1)
+	go func() {
+		var buf boundedWriter
+		buf.max = maxOutputSize
+		err := tmpl.Execute(&buf, data)
+		resCh <- execResult{rendered: buf.String(), err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case res := <-resCh:
+		return res.rendered, res.err
+	}
 }

@@ -2,6 +2,7 @@ package blueprint
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -105,7 +106,8 @@ func (b *Blueprint) ReferencingResources(name string) []string {
 	var refs []string
 	for _, r := range b.Spec.Resources {
 		if r.ForEach == want || whenParam(r.When) == name ||
-			anyFrom(r.Fields, want) || anyFrom(r.Envelope, want) || anyFrom(r.Annotations, want) {
+			anyFrom(r.Fields, want) || anyFrom(r.Envelope, want) || anyFrom(r.Annotations, want) ||
+			anyRawParam(r.Fields, name) || anyRawParam(r.Envelope, name) || anyRawParam(r.Annotations, name) {
 			refs = append(refs, r.Name)
 		}
 	}
@@ -168,6 +170,26 @@ func rawReferencesResource(raw, name string) bool {
 		strings.Contains(raw, "$observed.resources."+name)
 }
 
+// anyRawParam reports whether any entry in fields has a raw expression referencing param name.
+func anyRawParam(fields map[string]Field, name string) bool {
+	for _, f := range fields {
+		if rawReferencesParam(f.Raw, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// rawReferencesParam checks whether a raw template/expression string contains
+// references to the given parameter name.
+func rawReferencesParam(raw, name string) bool {
+	if raw == "" || name == "" {
+		return false
+	}
+	re := regexp.MustCompile(`(?:\$spec|\.spec|\$params|\.params|params)\.` + regexp.QuoteMeta(name) + `($|[^a-zA-Z0-9_])`)
+	return re.MatchString(raw)
+}
+
 // rewriteRawResource replaces references to from with to in a raw template/expression.
 func rewriteRawResource(raw, from, to string) string {
 	if raw == "" || from == "" || to == "" || from == to {
@@ -181,6 +203,15 @@ func rewriteRawResource(raw, from, to string) string {
 	r = strings.ReplaceAll(r, ".observed.resources."+from, ".observed.resources."+to)
 	r = strings.ReplaceAll(r, "$observed.resources."+from, "$observed.resources."+to)
 	return r
+}
+
+// rewriteRawParam replaces references to from with to in a raw template/expression.
+func rewriteRawParam(raw, from, to string) string {
+	if raw == "" || from == "" || to == "" || from == to {
+		return raw
+	}
+	re := regexp.MustCompile(`((\$spec|\.spec|\$params|\.params|params)\.)` + regexp.QuoteMeta(from) + `($|[^a-zA-Z0-9_])`)
+	return re.ReplaceAllString(raw, "${1}"+to+"${3}")
 }
 
 // anyStatusFrom reports whether any entry in fields wires from resource
@@ -431,6 +462,10 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 				f.From = rewritten
 				cp.Spec.Resources[i].Fields[path] = f
 			}
+			if f.Raw != "" && rawReferencesParam(f.Raw, from) {
+				f.Raw = rewriteRawParam(f.Raw, from, to)
+				cp.Spec.Resources[i].Fields[path] = f
+			}
 		}
 		// Envelope froms are the same reference shape and get the same
 		// rewrite: a dangling one would emit a Composition dereferencing a
@@ -441,6 +476,10 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 				f.From = rewritten
 				cp.Spec.Resources[i].Envelope[path] = f
 			}
+			if f.Raw != "" && rawReferencesParam(f.Raw, from) {
+				f.Raw = rewriteRawParam(f.Raw, from, to)
+				cp.Spec.Resources[i].Envelope[path] = f
+			}
 		}
 		// Annotation froms too, for exactly the same reason.
 		for key, f := range r.Annotations {
@@ -448,6 +487,15 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 				f.From = newRef
 				cp.Spec.Resources[i].Annotations[key] = f
 			}
+			if f.Raw != "" && rawReferencesParam(f.Raw, from) {
+				f.Raw = rewriteRawParam(f.Raw, from, to)
+				cp.Spec.Resources[i].Annotations[key] = f
+			}
+		}
+	}
+	for tName, body := range cp.Spec.Templates {
+		if rawReferencesParam(body, from) {
+			cp.Spec.Templates[tName] = rewriteRawParam(body, from, to)
 		}
 	}
 
@@ -495,11 +543,61 @@ func (b *Blueprint) DeleteParameter(name string) error {
 		}
 		return fmt.Errorf("delete parameter %q: still referenced by resources %s", name, strings.Join(quoted, ", "))
 	}
+	for tName, body := range b.Spec.Templates {
+		if rawReferencesParam(body, name) {
+			return fmt.Errorf("delete parameter %q: still referenced by template %q", name, tName)
+		}
+	}
 
 	cp := b.deepCopy()
 	delete(cp.Spec.XRD.Parameters, name)
 	if err := cp.Validate(); err != nil {
 		return fmt.Errorf("delete parameter %q: %w", name, err)
+	}
+
+	*b = *cp
+	return nil
+}
+
+// AddResource declares a new composed resource. It fails if a resource with
+// that name is already declared, or if the resulting blueprint does not
+// validate; in either case the receiver is left unchanged.
+func (b *Blueprint) AddResource(r Resource) error {
+	if r.Name == "" {
+		return fmt.Errorf("add resource: name is required")
+	}
+	if b.ResourceNamed(r.Name) != nil {
+		return fmt.Errorf("add resource: %q is already declared", r.Name)
+	}
+
+	cp := b.deepCopy()
+	cp.Spec.Resources = append(cp.Spec.Resources, r)
+	if err := cp.Validate(); err != nil {
+		return fmt.Errorf("add resource %q: %w", r.Name, err)
+	}
+
+	*b = *cp
+	return nil
+}
+
+// SetResource replaces an existing composed resource's declaration in place.
+// It fails if name is not already declared, or if the resulting blueprint
+// does not validate; in either case the receiver is left unchanged.
+func (b *Blueprint) SetResource(name string, r Resource) error {
+	idx := b.resourceIndex(name)
+	if idx < 0 {
+		return fmt.Errorf("set resource: %q is not declared", name)
+	}
+
+	cp := b.deepCopy()
+	if r.Name == "" {
+		r.Name = name
+	} else if r.Name != name {
+		return fmt.Errorf("set resource %q: cannot rename resource via PUT (use rename endpoint)", name)
+	}
+	cp.Spec.Resources[idx] = r
+	if err := cp.Validate(); err != nil {
+		return fmt.Errorf("set resource %q: %w", name, err)
 	}
 
 	*b = *cp

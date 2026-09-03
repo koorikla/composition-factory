@@ -1,0 +1,61 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xworkloadfulls.platform.sparky.ee
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  environment:
+    region:
+      type: string
+      default: eu-north-1
+    enableMetrics:
+      type: boolean
+      default: "true"
+    metricReplicas:
+      type: integer
+      default: "2"
+  xrd:
+    group: platform.sparky.ee
+    kind: XWorkloadFull
+    plural: xworkloadfulls
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: Crossplane ProviderConfig reference name.
+      queueName:
+        type: string
+        required: true
+        description: Primary SQS queue name.
+      replicas:
+        type: integer
+        default: "2"
+        description: Replica count for workload.
+  resources:
+    - name: primary-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      envelope:
+        writeConnectionSecretToRef.name: {from: params.queueName}
+        writeConnectionSecretToRef.namespace: {value: default}
+      fields:
+        region: {from: env.region}
+        sqsManagedSseEnabled: {value: true}
+    - name: primary-policy
+      kind: QueuePolicy
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {from: env.region}
+        queueUrl: {from: resources.primary-queue.status.atProvider.url}
+        policy: {value: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"*"},"Action":"sqs:SendMessage","Resource":"*"}]}'}
+    - name: metrics
+      kind: ConfigMap
+      provider: k8s
+      when: env.enableMetrics
+      forEach: env.metricReplicas
+      fields:
+        data[INDEX]: {from: params.replicas}
+        data[REGION]: {from: env.region}

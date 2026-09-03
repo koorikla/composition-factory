@@ -9,6 +9,7 @@ import (
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/emit"
+	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
@@ -583,5 +584,423 @@ func TestRoundTripK8sWorkloadExample(t *testing.T) {
 	}
 	if !bytes.Equal(origXRD, rtXRD) {
 		t.Errorf("Round-trip XRD mismatch:\n--- ORIGINAL ---\n%s\n--- REGENERATED ---\n%s", string(origXRD), string(rtXRD))
+	}
+}
+
+func TestAdoptTreeFullFeatures(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	crossplaneYaml := `apiVersion: meta.pkg.crossplane.io/v1
+kind: Configuration
+metadata:
+  name: configuration-full-app
+spec:
+  crossplane:
+    version: ">=v1.14.0"
+  dependsOn:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs
+      version: "=v1.14.0"
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "crossplane.yaml"), []byte(crossplaneYaml), 0644); err != nil {
+		t.Fatalf("write crossplane.yaml: %v", err)
+	}
+
+	apisDir := filepath.Join(tmpDir, "apis", "xfull")
+	if err := os.MkdirAll(apisDir, 0755); err != nil {
+		t.Fatalf("mkdir apis: %v", err)
+	}
+
+	xrdYaml := `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xfulls.example.org
+spec:
+  group: example.org
+  names:
+    kind: XFull
+    plural: xfulls
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - queueName
+                - replicaCount
+              properties:
+                queueName:
+                  type: string
+                  description: Primary queue name
+                replicaCount:
+                  type: integer
+                  default: 2
+                enableAudit:
+                  type: boolean
+                  default: false
+`
+	if err := os.WriteFile(filepath.Join(apisDir, "definition.yaml"), []byte(xrdYaml), 0644); err != nil {
+		t.Fatalf("write definition.yaml: %v", err)
+	}
+
+	compYaml := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xfulls.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XFull
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            ---
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: primary-queue
+            spec:
+              forProvider:
+                region: us-east-1
+              writeConnectionSecretToRef:
+                name: {{ $spec.queueName }}-secret
+                namespace: default
+            ---
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: QueuePolicy
+            metadata:
+              name: primary-policy
+            spec:
+              forProvider:
+                queueUrl: {{ (index $.observed.resources "primary-queue").resource.status.atProvider.url }}
+            {{- if $env.enableMetrics }}
+            {{- range $i := until (int $env.metricReplicas) }}
+            ---
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              annotations:
+                {{ setResourceNameAnnotation (printf "metrics-%d" $i) }}
+            spec:
+              forProvider:
+                region: eu-west-1
+            {{- end }}
+            {{- end }}
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "composition.yaml"), []byte(compYaml), 0644); err != nil {
+		t.Fatalf("write composition.yaml: %v", err)
+	}
+
+	bp, report, err := AdoptTree(tmpDir, Options{})
+	if err != nil {
+		t.Fatalf("AdoptTree failed: %v", err)
+	}
+	if report.HasTrueLoss() {
+		t.Errorf("unexpected true loss in report: %+v", report.Drops)
+	}
+
+	// 1. Verify status wire atProvider preservation
+	policy := bp.ResourceNamed("primary-policy")
+	if policy == nil {
+		t.Fatal("primary-policy resource not found")
+	}
+	if fld := policy.Fields["queueUrl"]; fld.From != "resources.primary-queue.status.atProvider.url" {
+		t.Errorf("queueUrl = %+v, want From: resources.primary-queue.status.atProvider.url", fld)
+	}
+
+	// 2. Verify provider inference
+	primaryQ := bp.ResourceNamed("primary-queue")
+	if primaryQ == nil {
+		t.Fatal("primary-queue resource not found")
+	}
+	if primaryQ.Provider != "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0" {
+		t.Errorf("primaryQ.Provider = %q, want 'xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0'", primaryQ.Provider)
+	}
+
+	// 3. Verify envelope writeConnectionSecretToRef
+	if fld, ok := primaryQ.Envelope["writeConnectionSecretToRef.name"]; !ok || fld.Raw == "" && fld.From == "" && fld.Value == "" {
+		t.Errorf("writeConnectionSecretToRef.name missing or empty in envelope: %+v", primaryQ.Envelope)
+	}
+	if fld, ok := primaryQ.Envelope["writeConnectionSecretToRef.namespace"]; !ok || fld.Value != "default" {
+		t.Errorf("writeConnectionSecretToRef.namespace = %+v, want Value: default", fld)
+	}
+
+	// 4. Verify XRD parameter required and defaults
+	repCount, ok := bp.Spec.XRD.Parameters["replicaCount"]
+	if !ok {
+		t.Fatal("replicaCount parameter missing")
+	}
+	if !repCount.Required || repCount.Default != "2" || repCount.Type != "integer" {
+		t.Errorf("replicaCount = %+v, want Required: true, Default: '2', Type: 'integer'", repCount)
+	}
+
+	// 5. Verify forEach loop resource clean naming
+	metricsQ := bp.ResourceNamed("metrics")
+	if metricsQ == nil {
+		t.Fatalf("expected resource named 'metrics', got resources: %+v", bp.Spec.Resources)
+	}
+	if metricsQ.ForEach != "env.metricReplicas" {
+		t.Errorf("metricsQ.ForEach = %q, want 'env.metricReplicas'", metricsQ.ForEach)
+	}
+	if metricsQ.When != "env.enableMetrics" {
+		t.Errorf("metricsQ.When = %q, want 'env.enableMetrics'", metricsQ.When)
+	}
+
+	// 6. Verify foreign environment types
+	if bp.Spec.Environment["enableMetrics"].Type != "boolean" {
+		t.Errorf("env.enableMetrics.Type = %q, want 'boolean'", bp.Spec.Environment["enableMetrics"].Type)
+	}
+	if bp.Spec.Environment["metricReplicas"].Type != "integer" {
+		t.Errorf("env.metricReplicas.Type = %q, want 'integer'", bp.Spec.Environment["metricReplicas"].Type)
+	}
+}
+
+func TestFunctionPackagePinsSurviveAdopt(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	crossplaneYaml := `apiVersion: meta.pkg.crossplane.io/v1
+kind: Configuration
+metadata:
+  name: configuration-custom-fn
+spec:
+  crossplane:
+    version: ">=v1.14.0"
+  dependsOn:
+    - function: xpkg.upbound.io/crossplane-contrib/function-auto-ready
+      version: "=v0.4.1"
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "crossplane.yaml"), []byte(crossplaneYaml), 0644); err != nil {
+		t.Fatalf("write crossplane.yaml: %v", err)
+	}
+
+	compYaml := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xcustoms.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XCustom
+  mode: Pipeline
+  pipeline:
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "composition.yaml"), []byte(compYaml), 0644); err != nil {
+		t.Fatalf("write composition.yaml: %v", err)
+	}
+
+	bp, report, err := AdoptTree(tmpDir, Options{})
+	if err != nil {
+		t.Fatalf("AdoptTree: %v", err)
+	}
+	if report.HasTrueLoss() {
+		t.Errorf("unexpected true loss: %+v", report.Drops)
+	}
+
+	found := false
+	for _, step := range bp.Spec.Pipeline {
+		if step.FunctionRef == "function-auto-ready" {
+			found = true
+			if step.Package != "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.4.1" {
+				t.Errorf("step.Package = %q, want 'xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.4.1'", step.Package)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("pipeline step function-auto-ready not found in adopted blueprint: %+v", bp.Spec.Pipeline)
+	}
+}
+
+func TestRoundTripFullFeaturesFixture(t *testing.T) {
+	fixtureData, err := os.ReadFile("../examples/testdata/roundtrip-full.cf.yaml")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	bOrig, err := blueprint.Parse(fixtureData)
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	bOrig.Metadata.Name = "xworkloadfulls.platform.sparky.ee"
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                type: object
+                properties:
+                  region: {type: string}
+                  sqsManagedSseEnabled: {type: boolean}
+              providerConfigRef:
+                type: object
+                properties: {kind: {type: string}, name: {type: string}}
+              writeConnectionSecretToRef:
+                type: object
+                properties: {name: {type: string}, namespace: {type: string}}
+          status:
+            type: object
+            properties:
+              atProvider:
+                type: object
+                properties:
+                  url: {type: string}
+                  arn: {type: string}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queuepolicies.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: QueuePolicy, plural: queuepolicies, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                type: object
+                properties:
+                  region: {type: string}
+                  queueUrl: {type: string}
+                  policy: {type: string}
+              providerConfigRef:
+                type: object
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+	crds, err := schema.ParseCRDs(blueprint.SplitDocs(crdDoc))
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+	native, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+	crds = append(crds, native...)
+
+	origOutputs, err := emit.Generate(bOrig, crds, "")
+	if err != nil {
+		t.Fatalf("emit.Generate orig: %v", err)
+	}
+
+	var origComp, origXRD, origFns []byte
+	for _, o := range origOutputs {
+		if strings.Contains(o.Path, "compositions") {
+			origComp = o.Body
+		} else if strings.Contains(o.Path, "xrds") {
+			origXRD = o.Body
+		} else if strings.Contains(o.Path, "functions.yaml") {
+			origFns = o.Body
+		}
+	}
+
+	// Build simulated live cluster tree
+	tmpDir := t.TempDir()
+	apisDir := filepath.Join(tmpDir, "apis", "xworkloadfull")
+	if err := os.MkdirAll(apisDir, 0755); err != nil {
+		t.Fatalf("mkdir apis: %v", err)
+	}
+	t.Logf("origComp:\n%s", string(origComp))
+
+	liveXRD := string(origXRD) + "\n" + `  status:
+    conditions:
+      - lastTransitionTime: "2026-09-03T12:00:00Z"
+        reason: Established
+        status: "True"
+        type: Established
+`
+	liveComp := strings.Replace(
+		string(origComp),
+		"metadata:\n  name: xworkloadfulls.platform.sparky.ee",
+		`metadata:
+  name: xworkloadfulls.platform.sparky.ee
+  uid: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  resourceVersion: "123456"
+  generation: 1
+  creationTimestamp: "2026-09-03T12:00:00Z"
+  managedFields:
+    - manager: crossplane
+      operation: Update
+      time: "2026-09-03T12:00:00Z"`,
+		1,
+	)
+
+	if err := os.WriteFile(filepath.Join(apisDir, "definition.yaml"), []byte(liveXRD), 0644); err != nil {
+		t.Fatalf("write definition.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "composition.yaml"), []byte(liveComp), 0644); err != nil {
+		t.Fatalf("write composition.yaml: %v", err)
+	}
+	if len(origFns) > 0 {
+		if err := os.WriteFile(filepath.Join(tmpDir, "functions.yaml"), origFns, 0644); err != nil {
+			t.Fatalf("write functions.yaml: %v", err)
+		}
+	}
+
+	adoptedBP, report, err := AdoptTree(tmpDir, Options{})
+	if err != nil {
+		t.Fatalf("AdoptTree: %v", err)
+	}
+	t.Logf("Adopted resources: %+v", adoptedBP.Spec.Resources)
+	if p := adoptedBP.ResourceNamed("primary-policy"); p != nil {
+		t.Logf("primary-policy fields: %+v", p.Fields)
+	}
+	if report.HasTrueLoss() {
+		t.Errorf("unexpected true loss in report: %+v", report.Drops)
+	}
+
+	rtOutputs, err := emit.Generate(adoptedBP, crds, "")
+	if err != nil {
+		t.Fatalf("emit.Generate rt: %v", err)
+	}
+
+	var rtComp, rtXRD []byte
+	for _, o := range rtOutputs {
+		if strings.Contains(o.Path, "compositions") {
+			rtComp = o.Body
+		} else if strings.Contains(o.Path, "xrds") {
+			rtXRD = o.Body
+		}
+	}
+
+	if !bytes.Equal(origComp, rtComp) {
+		t.Errorf("regenerated Composition differs from original emission:\n--- Orig ---\n%s\n--- RT ---\n%s", string(origComp), string(rtComp))
+	}
+	if !bytes.Equal(origXRD, rtXRD) {
+		t.Errorf("regenerated XRD differs from original emission:\n--- Orig ---\n%s\n--- RT ---\n%s", string(origXRD), string(rtXRD))
 	}
 }

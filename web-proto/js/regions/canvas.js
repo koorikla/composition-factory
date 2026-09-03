@@ -438,10 +438,10 @@ function render() {
   });
   if ((d.spec.resources || []).length === 0) {
     h += '<div class="canvas-empty-state" id="canvas-empty-state">' +
-      '<div class="canvas-empty-title">1. Add a provider in SOURCES  2. Drag kinds onto canvas to compose</div>' +
+      '<div class="canvas-empty-title">1. Drag kinds from KINDS  2. Add cloud providers in SOURCES</div>' +
       '<div class="canvas-empty-steps">' +
-        '<div class="canvas-empty-step"><span class="step-num">1</span> Add a provider in <strong>SOURCES</strong></div>' +
-        '<div class="canvas-empty-step"><span class="step-num">2</span> Drag kinds onto canvas to compose</div>' +
+        '<div class="canvas-empty-step"><span class="step-num">1</span> Drag kinds onto canvas from <strong>KINDS</strong> (14 native Kubernetes kinds ready without providers)</div>' +
+        '<div class="canvas-empty-step"><span class="step-num">2</span> Add cloud providers in <strong>SOURCES</strong> for AWS, Azure, GCP</div>' +
       '</div>' +
     '</div>';
   }
@@ -1131,18 +1131,40 @@ function renderFieldPickerItems(listEl, items, selectedIndex, srcPath) {
   listEl.innerHTML = h;
 }
 
+function isReadOnlyMetadataField(path) {
+  if (!path) return false;
+  const p = path.replace(/^metadata\./, "");
+  return (
+    p === "managedFields" || p.startsWith("managedFields[") || p.startsWith("managedFields.") ||
+    p === "ownerReferences" || p.startsWith("ownerReferences[") || p.startsWith("ownerReferences.") ||
+    p === "uid" || p === "resourceVersion" || p === "creationTimestamp" || p === "generation" ||
+    p === "deletionTimestamp" || p === "deletionGracePeriodSeconds" || p === "selfLink"
+  );
+}
+
 function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
-  const q = (filter || "").toLowerCase().trim();
+  const rawQuery = (filter || "").trim();
+  const q = rawQuery.toLowerCase();
   const items = [];
-  const srcTerm = (ctx.srcPath || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const leafName = (ctx.srcPath || "").split(".").pop() || "";
+  const srcTerm = leafName.toLowerCase().replace(/[^a-z0-9]/g, "");
   const srcType = ctx.srcType || "string";
   const res = ctx.resource || {};
+  const isSecret = res.kind === "Secret";
 
   // 1. Spec / forProvider fields
   (specFields || []).forEach(function (f) {
     const p = f.path;
+    if (isReadOnlyMetadataField(p)) return;
     const pLower = p.toLowerCase();
-    const desc = f.description || "";
+    let desc = f.description || "";
+    if (isSecret) {
+      if (p === "data" || p.startsWith("data.") || p.startsWith("data[")) {
+        desc = desc ? desc + " (base64 encoded)" : "Secret data (base64 encoded, auto-encoded on wire)";
+      } else if (p === "stringData" || p.startsWith("stringData.") || p.startsWith("stringData[")) {
+        desc = desc ? desc + " (plaintext)" : "Secret stringData (unencoded plaintext)";
+      }
+    }
     const descLower = desc.toLowerCase();
     const pNorm = pLower.replace(/[^a-z0-9]/g, "");
     if (q && pLower.indexOf(q) === -1 && descLower.indexOf(q) === -1) {
@@ -1154,6 +1176,7 @@ function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
     const isMatch = srcTerm && (pNorm.indexOf(srcTerm) >= 0 || srcTerm.indexOf(pNorm) >= 0);
     let score = 20;
     if (isReq) score += 40;
+    if (isSecret && (p === "stringData" || p.startsWith("stringData."))) score += 15;
     if (isMatch && typeMatch) score += 100;
     else if (isMatch) score += 30;
     if (!typeMatch) score -= 30;
@@ -1181,6 +1204,7 @@ function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
   // 2. Envelope fields
   (envelopeFields || []).forEach(function (ef) {
     const p = ef.path;
+    if (isReadOnlyMetadataField(p)) return;
     const pLower = p.toLowerCase();
     const desc = ef.description || "";
     if (q && pLower.indexOf(q) === -1 && desc.toLowerCase().indexOf(q) === -1) {
@@ -1240,13 +1264,13 @@ function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
     });
   }
 
-  // 4. Custom query option if typed (always lower score than real schema fields)
-  if (q) {
-    if (!items.some(function (it) { return it.path === q && it.applyType === "ann"; })) {
+  // 4. Custom query option if typed (preserves exact casing)
+  if (rawQuery) {
+    if (!items.some(function (it) { return it.path === rawQuery && it.applyType === "ann"; })) {
       items.push({
         type: "string",
-        path: q,
-        label: "annotations." + q,
+        path: rawQuery,
+        label: "annotations." + rawQuery,
         category: "Custom",
         required: false,
         suggested: false,
@@ -1256,11 +1280,11 @@ function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
         score: -10,
       });
     }
-    if (!items.some(function (it) { return it.path === q && it.applyType === "field"; })) {
+    if (!items.some(function (it) { return it.path === rawQuery && it.applyType === "field"; })) {
       items.push({
         type: "string",
-        path: q,
-        label: q,
+        path: rawQuery,
+        label: rawQuery,
         category: "Custom",
         required: false,
         suggested: false,

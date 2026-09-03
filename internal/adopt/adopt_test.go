@@ -455,8 +455,8 @@ spec:
 		t.Fatalf("expected normalized resource app-sa")
 	}
 	ann := sa.Annotations["queue-url"]
-	if ann.From != "resources.bad-name-with-underscores.status.url" {
-		t.Errorf("status wire = %q, want From: resources.bad-name-with-underscores.status.url", ann.From)
+	if ann.From != "resources.bad-name-with-underscores.status.atProvider.url" {
+		t.Errorf("status wire = %q, want From: resources.bad-name-with-underscores.status.atProvider.url", ann.From)
 	}
 }
 
@@ -644,8 +644,8 @@ spec:
 	}
 
 	ann := sa.Annotations["eks.amazonaws.com/role-arn"]
-	if ann.From != "resources.app-role.status.arn" {
-		t.Errorf("annotation wire = %+v, want From: resources.app-role.status.arn", ann)
+	if ann.From != "resources.app-role.status.atProvider.arn" {
+		t.Errorf("annotation wire = %+v, want From: resources.app-role.status.atProvider.arn", ann)
 	}
 }
 
@@ -833,11 +833,11 @@ spec:
 	if policy == nil {
 		t.Fatal("resource queue-policy not found")
 	}
-	if fld := policy.Fields["queueUrl"]; fld.From != "resources.main-queue.status.url" {
-		t.Errorf("queueUrl field = %+v, want From: resources.main-queue.status.url", fld)
+	if fld := policy.Fields["queueUrl"]; fld.From != "resources.main-queue.status.atProvider.url" {
+		t.Errorf("queueUrl field = %+v, want From: resources.main-queue.status.atProvider.url", fld)
 	}
-	if ann := policy.Annotations["example.com/queue-url"]; ann.From != "resources.main-queue.status.url" {
-		t.Errorf("annotation = %+v, want From: resources.main-queue.status.url", ann)
+	if ann := policy.Annotations["example.com/queue-url"]; ann.From != "resources.main-queue.status.atProvider.url" {
+		t.Errorf("annotation = %+v, want From: resources.main-queue.status.atProvider.url", ann)
 	}
 }
 
@@ -898,8 +898,8 @@ spec:
 	if policy == nil {
 		t.Fatal("resource queue-policy not found")
 	}
-	if fld := policy.Fields["queueUrl"]; fld.From != "resources.main-queue.status.url" {
-		t.Errorf("queueUrl field = %+v, want From: resources.main-queue.status.url", fld)
+	if fld := policy.Fields["queueUrl"]; fld.From != "resources.main-queue.status.atProvider.url" {
+		t.Errorf("queueUrl field = %+v, want From: resources.main-queue.status.atProvider.url", fld)
 	}
 }
 

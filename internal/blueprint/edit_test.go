@@ -530,3 +530,124 @@ func TestDeleteResourceRefusesWhenMetadataNameReferenced(t *testing.T) {
 		t.Fatal("DeleteResource(sa) = nil, want refusal when metadata.name is referenced")
 	}
 }
+
+func TestRenameParameterRewritesRawReferences(t *testing.T) {
+	b := editable()
+	b.Spec.XRD.Parameters["tier"] = Parameter{Type: "string"}
+	b.Spec.Resources[0].Fields["rawField"] = Field{Raw: `{{ $spec.tier }}`}
+	b.Spec.Resources[0].Envelope = map[string]Field{
+		"providerConfigRef.name": {Raw: `params.tier`},
+	}
+	b.Spec.Resources[0].Annotations = map[string]Field{
+		"example.org/tier": {Raw: `printf "%s" $spec.tier`},
+	}
+	if b.Spec.Templates == nil {
+		b.Spec.Templates = make(map[string]string)
+	}
+	b.Spec.Templates["helper"] = `{{ .spec.tier }}`
+
+	if err := b.RenameParameter("tier", "ranking"); err != nil {
+		t.Fatalf("RenameParameter: %v", err)
+	}
+
+	if got := b.Spec.Resources[0].Fields["rawField"].Raw; got != `{{ $spec.ranking }}` {
+		t.Errorf("raw field = %q, want {{ $spec.ranking }}", got)
+	}
+	if got := b.Spec.Resources[0].Envelope["providerConfigRef.name"].Raw; got != `params.ranking` {
+		t.Errorf("raw envelope = %q, want params.ranking", got)
+	}
+	if got := b.Spec.Resources[0].Annotations["example.org/tier"].Raw; got != `printf "%s" $spec.ranking` {
+		t.Errorf("raw annotation = %q, want printf \"%%s\" $spec.ranking", got)
+	}
+	if got := b.Spec.Templates["helper"]; got != `{{ .spec.ranking }}` {
+		t.Errorf("template = %q, want {{ .spec.ranking }}", got)
+	}
+}
+
+func TestDeleteParameterRefusesWhenRawReferencesExist(t *testing.T) {
+	b := editable()
+	b.Spec.XRD.Parameters["tier"] = Parameter{Type: "string"}
+	b.Spec.Resources[0].Fields["rawField"] = Field{Raw: `{{ $spec.tier }}`}
+
+	err := b.DeleteParameter("tier")
+	if err == nil {
+		t.Fatal("DeleteParameter = nil, want refusal when raw field references parameter")
+	}
+	if !strings.Contains(err.Error(), "main-queue") {
+		t.Errorf("err = %v, want it to mention main-queue", err)
+	}
+
+	// Also test template reference
+	b.Spec.Resources[0].Fields["rawField"] = Field{Value: "static"}
+	if b.Spec.Templates == nil {
+		b.Spec.Templates = make(map[string]string)
+	}
+	b.Spec.Templates["helper"] = `{{ $spec.tier }}`
+
+	err = b.DeleteParameter("tier")
+	if err == nil {
+		t.Fatal("DeleteParameter = nil, want refusal when template references parameter")
+	}
+	if !strings.Contains(err.Error(), "helper") {
+		t.Errorf("err = %v, want it to mention template helper", err)
+	}
+}
+
+func TestAddResource(t *testing.T) {
+	b := editable()
+	newRes := Resource{
+		Name: "audit-queue",
+		Kind: "Queue",
+		Fields: map[string]Field{
+			"region": {Value: "eu-west-1"},
+		},
+	}
+	if err := b.AddResource(newRes); err != nil {
+		t.Fatalf("AddResource: %v", err)
+	}
+	if b.ResourceNamed("audit-queue") == nil {
+		t.Fatal("expected audit-queue to be added")
+	}
+
+	// Duplicate name should error
+	if err := b.AddResource(newRes); err == nil {
+		t.Fatal("AddResource with duplicate name should fail")
+	}
+
+	// Empty name should error
+	if err := b.AddResource(Resource{Kind: "Queue"}); err == nil {
+		t.Fatal("AddResource with empty name should fail")
+	}
+}
+
+func TestSetResource(t *testing.T) {
+	b := editable()
+	updated := Resource{
+		Name: "main-queue",
+		Kind: "Queue",
+		Fields: map[string]Field{
+			"region": {Value: "us-east-1"},
+		},
+	}
+	if err := b.SetResource("main-queue", updated); err != nil {
+		t.Fatalf("SetResource: %v", err)
+	}
+	res := b.ResourceNamed("main-queue")
+	if res == nil || res.Fields["region"].Value != "us-east-1" {
+		t.Fatalf("SetResource did not update field, got %+v", res)
+	}
+
+	// Nonexistent resource should error
+	if err := b.SetResource("nonexistent", updated); err == nil {
+		t.Fatal("SetResource with nonexistent name should fail")
+	}
+
+	// Renaming via SetResource should error
+	mismatched := Resource{
+		Name: "other-name",
+		Kind: "Queue",
+	}
+	if err := b.SetResource("main-queue", mismatched); err == nil {
+		t.Fatal("SetResource with mismatched body name should fail")
+	}
+}

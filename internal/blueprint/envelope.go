@@ -65,13 +65,13 @@ func validateResourceEnvelope(b *Blueprint, r Resource) error {
 			}
 		}
 
-		if f.Raw != "" && b.Engine() != EngineGoTemplating && strings.Contains(f.Raw, "{{") {
-			return fmt.Errorf("resource %q envelope %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)",
+		if f.Raw != "" && b.Engine() != EngineGoTemplating && (strings.Contains(f.Raw, "{{") || IsBareGoTemplateExpr(f.Raw)) {
+			return fmt.Errorf("resource %q envelope %q: raw %q contains Go-template syntax which is only supported with the go-templating engine (current engine is %q)",
 				r.Name, p, f.Raw, b.Engine())
 		}
 
 		if f.From != "" {
-			if envKey, ok := strings.CutPrefix(f.From, "env."); ok {
+			if envKey, ok := EnvRef(f.From); ok {
 				if _, exists := b.Spec.Environment[envKey]; !exists {
 					return UnknownEnvKeyError(fmt.Sprintf("resource %q envelope %q", r.Name, p), envKey, b.Spec.Environment)
 				}

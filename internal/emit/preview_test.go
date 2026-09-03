@@ -1,6 +1,7 @@
 package emit
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -46,6 +47,9 @@ func TestPreviewExpression(t *testing.T) {
 			},
 			Templates: map[string]string{
 				"cf.customTag": `env: {{ .spec.tier }}`,
+			},
+			Environment: map[string]blueprint.EnvironmentKey{
+				"region": {Type: "string", Default: "us-west-2"},
 			},
 		},
 	}
@@ -158,4 +162,56 @@ func TestPreviewExpression(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPreviewExpression_ExecutionBounds(t *testing.T) {
+	t.Run("infinite recursion in template include", func(t *testing.T) {
+		bp := &blueprint.Blueprint{
+			Spec: blueprint.Spec{
+				Templates: map[string]string{
+					"cf.recursive": `{{ include "cf.recursive" . }}`,
+				},
+			},
+		}
+		_, err := PreviewExpression(bp, "", `{{ include "cf.recursive" . }}`)
+		if err == nil {
+			t.Fatal("expected recursion limit error, got nil")
+		}
+		if !strings.Contains(err.Error(), "maximum template include depth") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("output size cap exceeded", func(t *testing.T) {
+		bp := &blueprint.Blueprint{}
+		// Generate an expression that produces >1MB output
+		_, err := PreviewExpression(bp, "", `{{ range $i := until 10000 }}{{ repeat 120 "A" }}{{ end }}`)
+		if err == nil {
+			t.Fatal("expected output size cap error, got nil")
+		}
+		if !strings.Contains(err.Error(), "preview output size exceeded maximum limit") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("until upper bound exceeded", func(t *testing.T) {
+		bp := &blueprint.Blueprint{}
+		_, err := PreviewExpression(bp, "", `{{ until 20000 }}`)
+		if err == nil {
+			t.Fatal("expected until limit error, got nil")
+		}
+		if !strings.Contains(err.Error(), "exceeds maximum limit of 10000") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("context cancellation terminates execution", func(t *testing.T) {
+		bp := &blueprint.Blueprint{}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately
+		_, err := PreviewExpressionContext(ctx, bp, "", `{{ $spec }}`)
+		if err == nil {
+			t.Fatal("expected canceled context error, got nil")
+		}
+	})
 }

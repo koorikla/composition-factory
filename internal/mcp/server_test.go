@@ -242,8 +242,8 @@ func TestListToolsAdvertisesTheFullOperationSet(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 	want := []string{
-		"add_parameter", "add_provider", "adopt_composition", "delete_parameter", "generate",
-		"get_blueprint", "get_kind_fields", "list_kinds", "list_providers",
+		"add_function", "add_parameter", "add_provider", "adopt_composition", "delete_parameter", "generate",
+		"get_blueprint", "get_kind_fields", "list_kinds", "list_providers", "preview_expression",
 		"rename_parameter", "render_check", "replace_blueprint", "update_parameter",
 	}
 	var got []string
@@ -789,5 +789,23 @@ func TestReplaceBlueprintValidationAndAtomic(t *testing.T) {
 	after, _ := os.ReadFile(s.blueprint)
 	if !bytes.Equal(before, after) {
 		t.Error("blueprint file changed on disk despite invalid replace_blueprint")
+	}
+}
+
+func TestAddFunctionParity(t *testing.T) {
+	s := newStack(t)
+	// Invalid ref error parity
+	s.assertToolErrorMatchesHTTP(t, "add_function", map[string]any{"ref": ""}, http.MethodPost, "/api/functions", `{"ref":""}`)
+}
+
+func TestPreviewExpressionParity(t *testing.T) {
+	s := newStack(t)
+	// Invalid template syntax error parity
+	s.assertToolErrorMatchesHTTP(t, "preview_expression", map[string]any{"expression": "{{ unclosed"}, http.MethodPost, "/api/preview-expression", `{"expression":"{{ unclosed"}`)
+
+	// Valid expression success
+	res := s.toolOK(t, "preview_expression", map[string]any{"expression": "hello {{ $xr }}"})
+	if res["rendered"] != "hello sample-xqueue" {
+		t.Errorf("rendered = %v, want hello sample-xqueue", res["rendered"])
 	}
 }

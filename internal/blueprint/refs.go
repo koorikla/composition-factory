@@ -58,7 +58,7 @@ func ParseFrom(s string) (FromRef, error) {
 	if param, ok := strings.CutPrefix(s, "params."); ok {
 		return FromRef{Param: param}, nil
 	}
-	if envKey, ok := strings.CutPrefix(s, "env."); ok {
+	if envKey, ok := EnvRef(s); ok {
 		if envKey == "" {
 			return FromRef{}, fmt.Errorf("from: %q is missing an environment key name", s)
 		}

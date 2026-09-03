@@ -15,6 +15,12 @@ consumer's git diff.
 
 ## [Unreleased]
 
+- `cf init`: CLI command to scaffold a minimal valid blueprint document with Namespaced XRD and required `providerName` parameter.
+- `spec.environment` & `from: env.<key>`: declared environment keys in blueprint DSL (Crossplane v2 EnvironmentConfigs) with scalar type validation (`string`, `integer`, `number`, `boolean`), supporting `from: env.<key>` across `fields:`, `annotations:`, `envelope:`, `when:` conditionals, and `forEach:` loops. Automatically injects `function-environment-configs` pipeline step and preserves schema via `factory.crossplane.io/environment-keys` metadata annotation for round-trip fidelity.
+- `cf function`: schema-aware Function Input caching and management CLI (`cf function add <ref>`) that fetches function packages, extracts Input CRDs, and pins digests in `.cf.lock`.
+- `POST /api/preview-expression`: in-process Go template preview endpoint evaluating expressions against a synthetic context (`$spec`, `$xr`, `$xrMeta`, `$observed`, `$env`, `$i`, `$resource`) with execution timeout, output cap, and recursion depth protection.
+- Documentation for `spec.environment`, bare pipeline step schema (`spec.pipeline`), mandatory `providerName` parameter requirement for Namespaced XRDs, discovery CLI commands (`cf kinds`, `cf fields`, `cf catalogue`), and `cf gen` flags (`--validate`, `--group-suffix`).
+
 ### Changed
 
 - `BACKLOG.md` records 44 defects found by four end-to-end journeys against
@@ -24,6 +30,7 @@ consumer's git diff.
   re-verified by hand. Static gates stayed clean throughout — every defect is in
   behaviour gofmt, vet, staticcheck, the race detector and 859 Go tests do not
   reach.
+
 
 
 ## [0.9.0] - 2026-09-03

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
@@ -18,15 +17,14 @@ type previewExpressionRequest struct {
 // previewExpressionResponse is POST /api/preview-expression's JSON response body.
 type previewExpressionResponse struct {
 	Rendered string `json:"rendered"`
-	Error    string `json:"error"`
 }
 
 // handlePreviewExpression executes a single Go template expression against the
 // synthetic context of the current blueprint (or an inline blueprint in the body).
 func (srv *server) handlePreviewExpression(w http.ResponseWriter, r *http.Request) {
 	var req previewExpressionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -41,14 +39,18 @@ func (srv *server) handlePreviewExpression(w http.ResponseWriter, r *http.Reques
 		b = loaded
 	}
 
-	rendered, err := emit.PreviewExpression(b, req.Resource, req.Expression)
-	errStr := ""
+	if req.Resource != "" && b.ResourceNamed(req.Resource) == nil {
+		writeJSONError(w, http.StatusBadRequest, "resource \""+req.Resource+"\" is not declared in blueprint")
+		return
+	}
+
+	rendered, err := emit.PreviewExpressionContext(r.Context(), b, req.Resource, req.Expression)
 	if err != nil {
-		errStr = err.Error()
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	writeJSON(w, http.StatusOK, previewExpressionResponse{
 		Rendered: rendered,
-		Error:    errStr,
 	})
 }

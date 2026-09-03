@@ -48,7 +48,7 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 		crd := pres.CRD
 		apiVersion := pres.APIVersion
 		annPlan := pres.AnnPlan
-		plan := pres.Plan
+		bodyPlan := pres.BodyPlan
 		envPlan := pres.EnvPlan
 
 		indent := "    "
@@ -92,16 +92,22 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 
 		// Spec
 		if crd.Native {
-			sb.WriteString(fmt.Sprintf("%sspec = {\n", inner))
-			writeKCLMapEntries(&sb, inner+"    ", plan)
-			sb.WriteString(fmt.Sprintf("%s}\n", inner))
+			root, err := buildNativeTree(r.Name, bodyPlan)
+			if err != nil {
+				return "", err
+			}
+			writeKCLNodes(&sb, inner, root.children)
 		} else {
 			sb.WriteString(fmt.Sprintf("%sspec = {\n", inner))
 			specInner := inner + "    "
 
 			// forProvider
 			sb.WriteString(fmt.Sprintf("%sforProvider = {\n", specInner))
-			writeKCLMapEntries(&sb, specInner+"    ", plan)
+			root, err := buildNativeTree(r.Name, bodyPlan)
+			if err != nil {
+				return "", err
+			}
+			writeKCLNodes(&sb, specInner+"    ", root.children)
 			sb.WriteString(fmt.Sprintf("%s}\n", specInner))
 
 			hasPCRInPlan := false
@@ -145,23 +151,54 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 	return sb.String(), nil
 }
 
-func writeKCLMapEntries(sb *strings.Builder, indent string, fields []forProviderField) {
-	for _, f := range fields {
-		if f.isMap {
-			sb.WriteString(fmt.Sprintf("%s%s = {\n", indent, quoteKCLKey(f.path)))
-			writeKCLMapEntries(sb, indent+"    ", f.entries)
-			sb.WriteString(fmt.Sprintf("%s}\n", indent))
+func writeKCLNodes(sb *strings.Builder, indent string, nodes []*nativeNode) {
+	for i := 0; i < len(nodes); {
+		c := nodes[i]
+		if !c.indexed {
+			writeKCLNode(sb, indent, c)
+			i++
 			continue
 		}
-
-		rhs := kclStructuredRHS(f.structured, f.rhs)
-		if f.structured.kind == rhsStatus {
-			sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, rhs))
-			sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(f.path), rhs))
-		} else {
-			sb.WriteString(fmt.Sprintf("%s%s = %s\n", indent, quoteKCLKey(f.path), rhs))
+		j := i
+		for j < len(nodes) && nodes[j].indexed && nodes[j].seg == c.seg {
+			j++
 		}
+		run := nodes[i:j]
+		i = j
+
+		sb.WriteString(fmt.Sprintf("%s%s = [\n", indent, quoteKCLKey(c.seg)))
+		for _, elem := range run {
+			writeKCLElement(sb, indent+"    ", elem)
+		}
+		sb.WriteString(fmt.Sprintf("%s]\n", indent))
 	}
+}
+
+func writeKCLNode(sb *strings.Builder, indent string, n *nativeNode) {
+	if n.leaf != nil {
+		rhs := kclStructuredRHS(n.leaf.structured, n.leaf.rhs)
+		if n.leaf.structured.kind == rhsStatus {
+			sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, rhs))
+			sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.seg), rhs))
+		} else {
+			sb.WriteString(fmt.Sprintf("%s%s = %s\n", indent, quoteKCLKey(n.seg), rhs))
+		}
+		return
+	}
+	sb.WriteString(fmt.Sprintf("%s%s = {\n", indent, quoteKCLKey(n.seg)))
+	writeKCLNodes(sb, indent+"    ", n.children)
+	sb.WriteString(fmt.Sprintf("%s}\n", indent))
+}
+
+func writeKCLElement(sb *strings.Builder, indent string, elem *nativeNode) {
+	if elem.leaf != nil {
+		rhs := kclStructuredRHS(elem.leaf.structured, elem.leaf.rhs)
+		sb.WriteString(fmt.Sprintf("%s%s\n", indent, rhs))
+		return
+	}
+	sb.WriteString(fmt.Sprintf("%s{\n", indent))
+	writeKCLNodes(sb, indent+"    ", elem.children)
+	sb.WriteString(fmt.Sprintf("%s}\n", indent))
 }
 
 func quoteKCLKey(k string) string {

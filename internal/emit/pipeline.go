@@ -48,6 +48,7 @@ func effectivePipeline(b *blueprint.Blueprint) []blueprint.PipelineStep {
 				FunctionRef: blueprint.EnvironmentConfigsFunctionName,
 				Package:     blueprint.EnvironmentConfigsFunctionPackage,
 				Position:    blueprint.PositionBefore,
+				Input:       blueprint.DefaultEnvironmentConfigsInput,
 			}
 			steps = append([]blueprint.PipelineStep{envStep}, steps...)
 		}
@@ -114,24 +115,57 @@ func ValidatePipelineInputs(b *blueprint.Blueprint, crds []schema.CRD) (warnings
 		return nil, nil
 	}
 	for _, step := range b.Spec.Pipeline {
-		if step.Input == "" {
-			if step.Package != "" && !isFunctionCached(step.Package, crds) {
-				warnings = append(warnings, fmt.Sprintf("pipeline step %q: function package %q is not cached; run cf function add %s to cache its schema",
-					step.Name, step.Package, step.Package))
+		expectedCRD, ver, found := findFunctionCRD(step, crds)
+		if !found {
+			if step.Name == "environment-configs" && step.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
+				continue
+			}
+			if step.Input == "" {
+				if step.Package != "" && step.FunctionRef != "function-auto-ready" && step.Name != "auto-ready" && !isFunctionCached(step.Package, crds) {
+					warnings = append(warnings, fmt.Sprintf("pipeline step %q: function package %q is not cached; run cf function add %s to cache its schema",
+						step.Name, step.Package, step.Package))
+				}
+			} else {
+				targetRef := step.Package
+				if targetRef == "" {
+					targetRef = step.FunctionRef
+				}
+				v, _ := blueprint.ParsePipelineInput(step.Input)
+				apiVersion, _ := v["apiVersion"].(string)
+				kind, _ := v["kind"].(string)
+				fnDesc := step.FunctionRef
+				if apiVersion != "" && kind != "" {
+					fnDesc = fmt.Sprintf("%s %s", apiVersion, kind)
+				}
+				warnings = append(warnings, fmt.Sprintf("pipeline step %q: function %s (package %q) is not cached; input schema validation skipped (run: cf function add %s)",
+					step.Name, fnDesc, step.Package, targetRef))
 			}
 			continue
 		}
+
+		if step.Input == "" {
+			continue
+		}
+
 		v, err := blueprint.ParsePipelineInput(step.Input)
 		if err != nil {
 			return nil, fmt.Errorf("pipeline step %q input: %w", step.Name, err)
 		}
 		apiVersion, _ := v["apiVersion"].(string)
 		kind, _ := v["kind"].(string)
-		_, ver, found := findCRDForRendered(crds, apiVersion, kind)
-		if !found {
-			warnings = append(warnings, fmt.Sprintf("pipeline step %q: function %s %s (package %q) is not cached; input schema validation skipped (run: cf function add %s)",
-				step.Name, apiVersion, kind, step.Package, step.Package))
-			continue
+
+		expectedGroup := expectedCRD.Group
+		var inputGroup string
+		if parts := strings.Split(apiVersion, "/"); len(parts) == 2 {
+			inputGroup = parts[0]
+		} else {
+			inputGroup = apiVersion
+		}
+
+		if (expectedGroup != "" && inputGroup != expectedGroup) || kind != expectedCRD.Kind {
+			expectedAPIVersion, _ := expectedCRD.APIVersion()
+			return nil, fmt.Errorf("pipeline step %q input: apiVersion/kind %q/%q does not match expected schema %s/%s for function %q",
+				step.Name, apiVersion, kind, expectedAPIVersion, expectedCRD.Kind, step.FunctionRef)
 		}
 
 		if err := validateInputMap(step.Name, kind, "", v, ver.Properties); err != nil {
@@ -141,13 +175,79 @@ func ValidatePipelineInputs(b *blueprint.Blueprint, crds []schema.CRD) (warnings
 	return warnings, nil
 }
 
-func isFunctionCached(pkgRef string, crds []schema.CRD) bool {
+func findFunctionCRD(step blueprint.PipelineStep, crds []schema.CRD) (schema.CRD, schema.Version, bool) {
 	for _, c := range crds {
-		if c.IsFunctionInput() || c.Function {
+		if !c.IsFunctionInput() && !c.Function {
+			continue
+		}
+		if (step.FunctionRef != "" && matchFunctionCRD(step.FunctionRef, c)) ||
+			(step.Package != "" && matchFunctionCRD(step.Package, c)) {
+			v, err := c.Preferred()
+			if err == nil {
+				return c, v, true
+			}
+		}
+	}
+	return schema.CRD{}, schema.Version{}, false
+}
+
+func isFunctionCached(pkgRef string, crds []schema.CRD) bool {
+	if pkgRef == "" {
+		return false
+	}
+	for _, c := range crds {
+		if (c.IsFunctionInput() || c.Function) && matchFunctionCRD(pkgRef, c) {
 			return true
 		}
 	}
 	return false
+}
+
+func matchFunctionCRD(ref string, c schema.CRD) bool {
+	cleanRef := ref
+	if idx := strings.Index(cleanRef, "@"); idx != -1 {
+		cleanRef = cleanRef[:idx]
+	}
+	if idx := strings.LastIndex(cleanRef, ":"); idx != -1 {
+		cleanRef = cleanRef[:idx]
+	}
+	if idx := strings.LastIndex(cleanRef, "/"); idx != -1 {
+		cleanRef = cleanRef[idx+1:]
+	}
+	normRef := normalizeFunctionName(cleanRef)
+	if normRef == "" {
+		return false
+	}
+
+	normGroup := normalizeFunctionName(c.Group)
+	normKind := normalizeFunctionName(c.Kind)
+	normPlural := normalizeFunctionName(c.Plural)
+
+	if normGroup != "" && (normRef == normGroup || (len(normGroup) >= 3 && strings.Contains(normRef, normGroup)) || (len(normRef) >= 3 && strings.Contains(normGroup, normRef))) {
+		return true
+	}
+	if normKind != "" && normKind != "input" && (normRef == normKind || (len(normKind) >= 3 && strings.Contains(normRef, normKind))) {
+		return true
+	}
+	if normPlural != "" && normPlural != "inputs" && (normRef == normPlural || (len(normPlural) >= 3 && strings.Contains(normRef, normPlural))) {
+		return true
+	}
+	return false
+}
+
+func normalizeFunctionName(s string) string {
+	s = strings.ToLower(s)
+	s = strings.TrimPrefix(s, "function-")
+	s = strings.TrimPrefix(s, "fn-")
+	s = strings.TrimSuffix(s, ".fn.crossplane.io")
+	s = strings.TrimSuffix(s, ".crossplane.io")
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func validateInputMap(stepName, kind, prefix string, inMap map[string]any, schemaProps map[string]any) error {

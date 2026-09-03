@@ -26,6 +26,11 @@ type ProviderAddCmd struct {
 }
 
 func (c *ProviderAddCmd) Run(out io.Writer) error {
+	if c.Ref == "native" || c.Ref == "k8s" {
+		fmt.Fprintln(out, "native Kubernetes kinds are built into cf; no provider installation needed")
+		return nil
+	}
+
 	store := cache.New(c.CacheDir)
 	pkg, crds, err := store.FetchAndSave(context.Background(), c.Lock, c.Ref, c.fetch)
 	if err != nil {
@@ -43,13 +48,7 @@ func (c *ProviderAddCmd) Run(out io.Writer) error {
 		}
 	}
 	if inputs > 0 && managed == 0 {
-		noun := "function input schemas"
-		if inputs == 1 {
-			noun = "function input schema"
-		}
-		fmt.Fprintf(out, "added %s\n  digest %s\n  %d %s of %d CRDs\n",
-			c.Ref, pkg.Digest, inputs, noun, len(crds))
-		return nil
+		return fmt.Errorf("package %q is a function package, not a provider (use 'cf function add %s')", c.Ref, c.Ref)
 	}
 	noun := "managed resources"
 	if managed == 1 {

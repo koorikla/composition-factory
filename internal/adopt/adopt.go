@@ -12,7 +12,9 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/koorikla/compositionfactory/catalogue"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/cache"
 )
 
 // Options configures the adoption parser.
@@ -22,6 +24,8 @@ type Options struct {
 	DefaultProviderRef string
 	// CacheDir is the schema cache directory used for schema lookups.
 	CacheDir string
+	// FunctionPackages maps function names to pinned package references.
+	FunctionPackages map[string]string
 }
 
 // LossReport records any dropped fields, unsupported patches, or schema discrepancies.
@@ -139,7 +143,7 @@ func cleanAdoptedMap(v any, isRoot bool) any {
 				}
 			}
 			if childMap, ok := child.(map[string]any); ok && len(childMap) == 0 {
-				if k == "templates" || k == "envelope" || k == "annotations" || k == "properties" {
+				if k == "templates" || k == "envelope" || k == "annotations" || k == "properties" || k == "environment" {
 					continue
 				}
 			}
@@ -177,6 +181,10 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	report := &LossReport{}
 	ScrubDocuments(docs, report)
 
+	if opts.FunctionPackages == nil {
+		opts.FunctionPackages = make(map[string]string)
+	}
+
 	var compDoc map[string]any
 	var xrdDoc map[string]any
 
@@ -187,6 +195,46 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 			compDoc = d
 		case "CompositeResourceDefinition":
 			xrdDoc = d
+		case "Function":
+			if meta, ok := d["metadata"].(map[string]any); ok {
+				fnName, _ := meta["name"].(string)
+				if fSpec, ok := d["spec"].(map[string]any); ok {
+					if pkg, ok := fSpec["package"].(string); ok && fnName != "" {
+						opts.FunctionPackages[fnName] = pkg
+					}
+				}
+			}
+		case "Configuration":
+			if cSpec, ok := d["spec"].(map[string]any); ok {
+				if deps, ok := cSpec["dependsOn"].([]any); ok {
+					for _, depRaw := range deps {
+						if dep, ok := depRaw.(map[string]any); ok {
+							depKind, _ := dep["kind"].(string)
+							depFn, _ := dep["function"].(string)
+							depPkg, _ := dep["package"].(string)
+							depVer, _ := dep["version"].(string)
+							if depKind == "Function" || depFn != "" {
+								name := depFn
+								if name == "" {
+									name = depPkg
+								}
+								pkg := depPkg
+								if pkg == "" {
+									pkg = depFn
+								}
+								cleanVer := strings.TrimPrefix(depVer, "=")
+								cleanVer = strings.TrimLeft(cleanVer, ">=<~^ ")
+								if cleanVer != "" && !strings.Contains(pkg, ":") && !strings.Contains(pkg, "@") {
+									pkg = pkg + ":" + cleanVer
+								}
+								if name != "" && pkg != "" {
+									opts.FunctionPackages[name] = pkg
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -278,11 +326,11 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	// 4. Parse Pipeline or Classic Resources
 	nameMapping := make(map[string]string)
 	if pipeline, ok := spec["pipeline"].([]any); ok && len(pipeline) > 0 {
-		if err := parsePipelineComposition(pipeline, bp, opts.DefaultProviderRef, report, nameMapping); err != nil {
+		if err := parsePipelineComposition(pipeline, bp, opts, report, nameMapping); err != nil {
 			return nil, nil, err
 		}
 	} else if resources, ok := spec["resources"].([]any); ok && len(resources) > 0 {
-		if err := parseClassicComposition(resources, bp, opts.DefaultProviderRef, report, nameMapping); err != nil {
+		if err := parseClassicComposition(resources, bp, opts, report, nameMapping); err != nil {
 			return nil, nil, err
 		}
 	} else {
@@ -347,15 +395,36 @@ func parseXRDDoc(xrdDoc map[string]any, bp *blueprint.Blueprint, report *LossRep
 	}
 
 	if versions, ok := spec["versions"].([]any); ok && len(versions) > 0 {
-		if v0, ok := versions[0].(map[string]any); ok {
-			if vName, ok := v0["name"].(string); ok && bp.Spec.XRD.Version == "" {
+		var matchedVersion map[string]any
+		for _, v := range versions {
+			if vMap, ok := v.(map[string]any); ok {
+				vName, _ := vMap["name"].(string)
+				if bp.Spec.XRD.Version != "" && vName == bp.Spec.XRD.Version {
+					matchedVersion = vMap
+					break
+				}
+				if matchedVersion == nil {
+					matchedVersion = vMap
+				}
+			}
+		}
+		if matchedVersion != nil {
+			if vName, ok := matchedVersion["name"].(string); ok && bp.Spec.XRD.Version == "" {
 				bp.Spec.XRD.Version = vName
 			}
-			if schema, ok := v0["schema"].(map[string]any); ok {
+			if schema, ok := matchedVersion["schema"].(map[string]any); ok {
 				if openAPI, ok := schema["openAPIV3Schema"].(map[string]any); ok {
 					parseOpenAPISpec(openAPI, bp, report)
 				}
 			}
+		}
+	} else if validation, ok := spec["validation"].(map[string]any); ok {
+		if openAPI, ok := validation["openAPIV3Schema"].(map[string]any); ok {
+			parseOpenAPISpec(openAPI, bp, report)
+		}
+	} else if schema, ok := spec["schema"].(map[string]any); ok {
+		if openAPI, ok := schema["openAPIV3Schema"].(map[string]any); ok {
+			parseOpenAPISpec(openAPI, bp, report)
 		}
 	}
 }
@@ -417,10 +486,17 @@ func collectRequired(obj map[string]any, reqSet map[string]bool) {
 				reqSet[s] = true
 			}
 		}
+	} else if reqList, ok := obj["required"].([]string); ok {
+		for _, s := range reqList {
+			reqSet[s] = true
+		}
 	}
 }
 
 func parseParameter(pName string, pObj map[string]any, isRequired bool, report *LossReport, path string) (blueprint.Parameter, bool) {
+	if reqBool, ok := pObj["required"].(bool); ok && reqBool {
+		isRequired = true
+	}
 	pType, _ := pObj["type"].(string)
 	if pType == "" {
 		if _, hasProps := pObj["properties"].(map[string]any); hasProps {
@@ -494,6 +570,12 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 				pEnum = append(pEnum, s)
 			}
 		}
+	} else if enumRaw, ok := pObj["enum"].([]string); ok {
+		for _, e := range enumRaw {
+			if checkScalarClean(e) == nil {
+				pEnum = append(pEnum, e)
+			}
+		}
 	}
 
 	var defStr string
@@ -505,6 +587,10 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 			} else {
 				defStr = "false"
 			}
+		case int:
+			defStr = strconv.Itoa(v)
+		case int64:
+			defStr = strconv.FormatInt(v, 10)
 		case float64:
 			if v == float64(int64(v)) {
 				defStr = strconv.FormatInt(int64(v), 10)
@@ -532,21 +618,22 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 var (
 	reDefine             = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
 	reParamVar           = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
-	reEnvVar             = regexp.MustCompile(`\{\{-?\s*\$env\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
-	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*\(index\s+(?:\$\.?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reEnvVar             = regexp.MustCompile(`\{\{-?\s*(?:default\s+(?:"[^"]*"|\S+)\s+)?(?:\$env\.([a-zA-Z0-9_.-]+?)|\(index\s+\$env\s+"([a-zA-Z0-9_.-]+?)"\)|index\s+\$env\s+"([a-zA-Z0-9_.-]+?)")(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*(?:\(index\s+(?:\$\.?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)|(?:\$\.?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+))\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reXRResourceRef      = regexp.MustCompile(`\{\{-?\s*\$xr\s*-?\}\}-([a-zA-Z0-9-]+)`)
 	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+\$spec\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
 	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+eq\s+\$spec\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
 	reWhenIfNe           = regexp.MustCompile(`\{\{-?\s*if\s+ne\s+\$spec\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
-	reWhenIfEnvSimple    = regexp.MustCompile(`\{\{-?\s*if\s+(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\$env\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
-	reWhenIfEnvEq        = regexp.MustCompile(`\{\{-?\s*if\s+(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\(?eq\s+\$env\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\)?\s*-?\}\}`)
-	reWhenIfEnvNe        = regexp.MustCompile(`\{\{-?\s*if\s+(?:or\s+\(not\s+\(hasKey\s+\$env\s+"[^"]+"\)\)\s+)?\(?ne\s+\$env\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\)?\s*-?\}\}`)
+	reWhenIfEnvSimple    = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\$env\.([a-zA-Z0-9_.-]+)|default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\))\s*-?\}\}`)
+	reWhenIfEnvEq        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\(?eq\s+\$env\.([a-zA-Z0-9_.-]+)\s+"?([^"]+?)"?\)?|eq\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\s+"?([^"]+?)"?)\s*-?\}\}`)
+	reWhenIfEnvNe        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:or\s+\(not\s+\(hasKey\s+\$env\s+"[^"]+"\)\)\s+)?\(?ne\s+\$env\.([a-zA-Z0-9_.-]+)\s+"?([^"]+?)"?\)?|ne\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\s+"?([^"]+?)"?)\s*-?\}\}`)
 	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+\$spec\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
-	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+\$env\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
+	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$env\.([a-zA-Z0-9_.-]+)|\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\))\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
 	reDocSeparator       = regexp.MustCompile(`(?m)^\s*---\s*$`)
-	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+"([^"]+)"`)
-	reExprPrefix         = regexp.MustCompile(`^(__CF_EXPR_\d+__|cf-expr-\d+|__cf_expr_\d+__)-`)
+	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+(?:\(printf\s+"([^"]+)"|"([^"]+)")`)
+	rePrintfFormat       = regexp.MustCompile(`printf\s+"([^"]+)"`)
+	reXRNameSuffix       = regexp.MustCompile(`\{\{-?\s*\$xr\s*-?\}\}-([a-zA-Z0-9_-]+)`)
 	paramNameRE          = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
 	dnsInvalidRE         = regexp.MustCompile(`[^a-z0-9-]+`)
 	yamlKeywords         = map[string]bool{
@@ -554,6 +641,17 @@ var (
 		"on": true, "off": true, "null": true, "y": true, "n": true,
 	}
 )
+
+func matchEnvVar(s string) string {
+	if m := reEnvVar.FindStringSubmatch(s); len(m) > 1 {
+		for i := 1; i < len(m); i++ {
+			if m[i] != "" {
+				return m[i]
+			}
+		}
+	}
+	return ""
+}
 
 func isReservedCompositeField(name string) bool {
 	root := strings.Split(name, ".")[0]
@@ -597,7 +695,214 @@ func normalizeDNSLabel(name string) string {
 	return s
 }
 
-func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultProvider string, report *LossReport, nameMapping map[string]string) error {
+func inferProvider(apiVersion, kind string, defaultProvider string, cacheDir string, bp *blueprint.Blueprint) string {
+	if strings.Contains(apiVersion, "k8s.io") || !strings.Contains(apiVersion, ".") {
+		return blueprint.NativeProvider
+	}
+
+	// 1. Check if an existing source in bp matches
+	if bp != nil {
+		for _, s := range bp.Spec.Sources {
+			if s.Provider != "" {
+				pkgName := s.Provider
+				if i := strings.LastIndex(pkgName, "/"); i >= 0 {
+					pkgName = pkgName[i+1:]
+				}
+				if i := strings.Index(pkgName, ":"); i >= 0 {
+					pkgName = pkgName[:i]
+				}
+				for _, k := range catalogue.Kinds(pkgName) {
+					if strings.EqualFold(k, kind) {
+						return s.Provider
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Check local schema cache if available
+	if cacheDir != "" {
+		store := cache.New(cacheDir)
+		if list, err := store.List(); err == nil && len(list) > 0 {
+			for _, ref := range list {
+				if crds, err := store.Load(ref); err == nil {
+					for _, c := range crds {
+						crdKind := c.Kind
+						crdGroup := c.Group
+						group := strings.Split(apiVersion, "/")[0]
+						if (crdGroup == group || strings.TrimSuffix(crdGroup, ".m.upbound.io") == strings.TrimSuffix(group, ".upbound.io")) && strings.EqualFold(crdKind, kind) {
+							return ref
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Infer from catalogue and group
+	group := strings.Split(apiVersion, "/")[0]
+	var candidatePkg string
+	if strings.HasSuffix(group, ".upbound.io") {
+		trimmed := strings.TrimSuffix(group, ".upbound.io")
+		trimmed = strings.TrimSuffix(trimmed, ".m")
+		parts := strings.Split(trimmed, ".")
+		if len(parts) >= 2 {
+			service := parts[0]
+			cloud := parts[1]
+			candidatePkg = fmt.Sprintf("provider-%s-%s", cloud, service)
+		} else if len(parts) == 1 {
+			candidatePkg = fmt.Sprintf("provider-%s", parts[0])
+		}
+	} else if strings.HasSuffix(group, ".crossplane.io") {
+		svc := strings.TrimSuffix(group, ".crossplane.io")
+		candidatePkg = fmt.Sprintf("provider-%s", svc)
+	}
+
+	if candidatePkg == "" {
+		pkgs := catalogue.PackagesForKind(kind)
+		if len(pkgs) > 0 {
+			candidatePkg = pkgs[0]
+		}
+	}
+
+	if candidatePkg != "" {
+		if providers, err := catalogue.Load(); err == nil {
+			for _, p := range providers {
+				if p.Name == candidatePkg {
+					if p.Ref != "" {
+						return p.Ref
+					}
+					return p.Name
+				}
+			}
+		}
+		return candidatePkg
+	}
+
+	if defaultProvider != "" {
+		return defaultProvider
+	}
+
+	return ""
+}
+
+func extractResourceName(m map[string]any, kind string, placeholders []string) string {
+	meta, _ := m["metadata"].(map[string]any)
+	name := ""
+	if meta != nil {
+		if anns, ok := meta["annotations"].(map[string]any); ok {
+			if annName, ok := anns["crossplane.io/composition-resource-name"].(string); ok && annName != "" {
+				unmasked := unmaskString(annName, placeholders)
+				if clean := extractCleanName(unmasked); clean != "" {
+					return clean
+				}
+				name = annName
+			}
+			for k, v := range anns {
+				unmaskedK := unmaskString(fmt.Sprint(k), placeholders)
+				unmaskedV := unmaskString(fmt.Sprint(v), placeholders)
+				if m := reSetResourceNameAnn.FindStringSubmatch(unmaskedK); len(m) >= 2 {
+					candidate := m[1]
+					if candidate == "" && len(m) >= 3 {
+						candidate = m[2]
+					}
+					if clean := extractCleanName(candidate); clean != "" {
+						return clean
+					}
+				}
+				if m := reSetResourceNameAnn.FindStringSubmatch(unmaskedV); len(m) >= 2 {
+					candidate := m[1]
+					if candidate == "" && len(m) >= 3 {
+						candidate = m[2]
+					}
+					if clean := extractCleanName(candidate); clean != "" {
+						return clean
+					}
+				}
+			}
+		}
+		if rawName, ok := meta["name"].(string); ok && rawName != "" {
+			unmasked := unmaskString(rawName, placeholders)
+			if clean := extractCleanName(unmasked); clean != "" {
+				return clean
+			}
+			name = unmasked
+		}
+	}
+	if name != "" {
+		if clean := extractCleanName(name); clean != "" {
+			return clean
+		}
+	}
+	return strings.ToLower(kind)
+}
+
+func extractCleanName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "__CF_EXPR_") || strings.HasPrefix(raw, "cf-expr-") || strings.HasPrefix(raw, "__cf_expr_") {
+		return ""
+	}
+
+	if m := rePrintfFormat.FindStringSubmatch(raw); len(m) >= 2 {
+		fmtStr := m[1]
+		clean := cleanFormatString(fmtStr)
+		if clean != "" {
+			return clean
+		}
+	}
+
+	if m := reXRNameSuffix.FindStringSubmatch(raw); len(m) >= 2 {
+		clean := m[1]
+		clean = strings.TrimSuffix(clean, "-{{ $i }}")
+		clean = strings.TrimSuffix(clean, "-$i")
+		return clean
+	}
+
+	if strings.Contains(raw, "%") {
+		clean := cleanFormatString(raw)
+		if clean != "" {
+			return clean
+		}
+	}
+
+	cleaned := reMustacheExpr.ReplaceAllString(raw, "")
+	cleaned = strings.Trim(cleaned, "-_ ")
+	if strings.HasPrefix(cleaned, "$xr-") || strings.HasPrefix(cleaned, "$xr_") {
+		cleaned = cleaned[4:]
+	}
+	if cleaned != "" && !strings.Contains(cleaned, "%") && !strings.HasPrefix(cleaned, "__") {
+		return cleaned
+	}
+
+	if !strings.Contains(raw, "{{") && !strings.Contains(raw, " ") {
+		return raw
+	}
+	return ""
+}
+
+func cleanFormatString(fmtStr string) string {
+	s := fmtStr
+	s = strings.TrimPrefix(s, "%s-")
+	s = strings.TrimPrefix(s, "%s_")
+	s = strings.TrimPrefix(s, "$xr-")
+	s = strings.TrimPrefix(s, "$xr_")
+	s = strings.TrimSuffix(s, "-%d")
+	s = strings.TrimSuffix(s, "_%d")
+	s = strings.TrimSuffix(s, "-%s")
+	s = strings.TrimSuffix(s, "_%s")
+	s = strings.TrimSuffix(s, "-%i")
+	s = strings.TrimSuffix(s, "_%i")
+	s = strings.Trim(s, "-_ ")
+	if s != "" && s != "%s" && s != "%d" && s != "%i" && !strings.Contains(s, "%") {
+		return s
+	}
+	return ""
+}
+
+func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
 	var otherSteps []blueprint.PipelineStep
 	seenEngineStep := false
 
@@ -606,14 +911,14 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 		if !ok {
 			continue
 		}
-		stepName, _ := step["step"].(string)
-		if stepName == "" {
-			stepName, _ = step["name"].(string)
-		}
 		fnRef, _ := step["functionRef"].(map[string]any)
 		fnName, _ := fnRef["name"].(string)
 		if fnName == "" {
 			fnName, _ = step["function"].(string)
+		}
+		stepName, _ := step["step"].(string)
+		if stepName == "" {
+			stepName, _ = step["name"].(string)
 		}
 
 		if fnName == "function-go-templating" || strings.Contains(fnName, "gotemplating") {
@@ -622,7 +927,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 			inline, _ := input["inline"].(map[string]any)
 			tmpl, _ := inline["template"].(string)
 			if tmpl != "" {
-				if err := parseGoTemplateBody(tmpl, bp, defaultProvider, report, nameMapping); err != nil {
+				if err := parseGoTemplateBody(tmpl, bp, opts, report, nameMapping); err != nil {
 					return fmt.Errorf("parse go template: %w", err)
 				}
 			}
@@ -631,7 +936,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 			input, _ := step["input"].(map[string]any)
 			if input != nil {
 				if resources, ok := input["resources"].([]any); ok {
-					if err := parseClassicComposition(resources, bp, defaultProvider, report, nameMapping); err != nil {
+					if err := parseClassicComposition(resources, bp, opts, report, nameMapping); err != nil {
 						return fmt.Errorf("parse patch-and-transform resources: %w", err)
 					}
 				}
@@ -653,6 +958,13 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 					if yBytes, err := yaml.Marshal(inputCopy); err == nil {
 						inputYAML = strings.TrimSpace(string(yBytes))
 					}
+				}
+			}
+			if pkg == "" && opts.FunctionPackages != nil {
+				if p, ok := opts.FunctionPackages[fnName]; ok && p != "" {
+					pkg = p
+				} else if p, ok := opts.FunctionPackages[stepName]; ok && p != "" {
+					pkg = p
 				}
 			}
 			if pkg == "" {
@@ -678,8 +990,10 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 
 	var finalSteps []blueprint.PipelineStep
 	for _, s := range otherSteps {
-		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName && s.Input == "" && len(bp.Spec.Environment) > 0 {
-			continue
+		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName && len(bp.Spec.Environment) > 0 {
+			if s.Input == "" || strings.TrimSpace(s.Input) == strings.TrimSpace(blueprint.DefaultEnvironmentConfigsInput) {
+				continue
+			}
 		}
 		finalSteps = append(finalSteps, s)
 	}
@@ -687,7 +1001,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 	return nil
 }
 
-func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider string, report *LossReport, nameMapping map[string]string) error {
+func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
 	// 1. Extract defines
 	defines := reDefine.FindAllStringSubmatch(tmpl, -1)
 	for _, m := range defines {
@@ -711,13 +1025,11 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 			}
 		}
 	}
-	envMatches := reEnvVar.FindAllStringSubmatch(cleanTmpl, -1)
-	for _, m := range envMatches {
-		if len(m) >= 2 {
-			key := m[1]
-			if isValidParamIdentifier(key) {
-				ensureEnvDeclared(bp, key)
-			}
+	envMatches := reEnvVar.FindAllString(cleanTmpl, -1)
+	for _, raw := range envMatches {
+		key := matchEnvVar(raw)
+		if key != "" && isValidParamIdentifier(key) {
+			ensureEnvDeclared(bp, key, "string")
 		}
 	}
 
@@ -736,27 +1048,47 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 		nextForEach = ""
 
 		if m := reWhenIfEnvEq.FindStringSubmatch(chunk); len(m) >= 3 {
-			nextWhen = fmt.Sprintf("env.%s == %s", m[1], m[2])
-			ensureEnvDeclared(bp, m[1])
+			key, lit := m[1], m[2]
+			if key == "" && len(m) >= 5 {
+				key, lit = m[3], m[4]
+			}
+			nextWhen = fmt.Sprintf("env.%s == %s", key, lit)
+			ensureEnvDeclared(bp, key, "string")
 		} else if m := reWhenIfEnvNe.FindStringSubmatch(chunk); len(m) >= 3 {
-			nextWhen = fmt.Sprintf("env.%s != %s", m[1], m[2])
-			ensureEnvDeclared(bp, m[1])
+			key, lit := m[1], m[2]
+			if key == "" && len(m) >= 5 {
+				key, lit = m[3], m[4]
+			}
+			nextWhen = fmt.Sprintf("env.%s != %s", key, lit)
+			ensureEnvDeclared(bp, key, "string")
 		} else if m := reWhenIfEnvSimple.FindStringSubmatch(chunk); len(m) >= 2 {
-			nextWhen = fmt.Sprintf("env.%s", m[1])
-			ensureEnvDeclared(bp, m[1])
+			key := m[1]
+			if key == "" && len(m) >= 3 {
+				key = m[2]
+			}
+			nextWhen = fmt.Sprintf("env.%s", key)
+			ensureEnvDeclared(bp, key, "boolean")
 		} else if m := reWhenIfEq.FindStringSubmatch(chunk); len(m) >= 3 {
 			nextWhen = fmt.Sprintf("params.%s == %s", m[1], m[2])
+			ensureParamDeclared(bp, m[1])
 		} else if m := reWhenIfNe.FindStringSubmatch(chunk); len(m) >= 3 {
 			nextWhen = fmt.Sprintf("params.%s != %s", m[1], m[2])
+			ensureParamDeclared(bp, m[1])
 		} else if m := reWhenIfSimple.FindStringSubmatch(chunk); len(m) >= 2 {
 			nextWhen = fmt.Sprintf("params.%s", m[1])
+			ensureParamDeclared(bp, m[1])
 		}
 
 		if m := reForEachEnvLoop.FindStringSubmatch(chunk); len(m) >= 2 {
-			nextForEach = fmt.Sprintf("env.%s", m[1])
-			ensureEnvDeclared(bp, m[1])
+			key := m[1]
+			if key == "" && len(m) >= 3 {
+				key = m[2]
+			}
+			nextForEach = fmt.Sprintf("env.%s", key)
+			ensureEnvDeclared(bp, key, "integer")
 		} else if m := reForEachLoop.FindStringSubmatch(chunk); len(m) >= 2 {
 			nextForEach = fmt.Sprintf("params.%s", m[1])
+			ensureParamDeclared(bp, m[1])
 		}
 
 		lines := strings.Split(chunk, "\n")
@@ -765,7 +1097,11 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 		for _, line := range lines {
 			trimmed := strings.TrimSpace(line)
 			if m := reSetResourceNameAnn.FindStringSubmatch(trimmed); len(m) >= 2 {
-				filteredLines = append(filteredLines, strings.Replace(line, trimmed, fmt.Sprintf(`"crossplane.io/composition-resource-name": "%s"`, m[1]), 1))
+				annVal := m[1]
+				if annVal == "" && len(m) >= 3 {
+					annVal = m[2]
+				}
+				filteredLines = append(filteredLines, strings.Replace(line, trimmed, fmt.Sprintf(`"crossplane.io/composition-resource-name": "%s"`, annVal), 1))
 				continue
 			}
 			if strings.HasPrefix(trimmed, "{{") && strings.HasSuffix(trimmed, "}}") {
@@ -812,7 +1148,7 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 		docs = unwrapListDocs(docs)
 		for _, doc := range docs {
 			ScrubDocument(doc, "", report)
-			res := resourceFromMap(doc, defaultProvider, placeholderTable, report, nameMapping, bp)
+			res := resourceFromMap(doc, opts, placeholderTable, report, nameMapping, bp)
 			if res == nil {
 				continue
 			}
@@ -829,7 +1165,7 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 	return nil
 }
 
-func parseClassicComposition(resources []any, bp *blueprint.Blueprint, defaultProvider string, report *LossReport, nameMapping map[string]string) error {
+func parseClassicComposition(resources []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
 	for resIdx, resRaw := range resources {
 		resMap, ok := resRaw.(map[string]any)
 		if !ok {
@@ -841,7 +1177,7 @@ func parseClassicComposition(resources []any, bp *blueprint.Blueprint, defaultPr
 			continue
 		}
 
-		res := resourceFromMap(base, defaultProvider, nil, report, nameMapping, bp)
+		res := resourceFromMap(base, opts, nil, report, nameMapping, bp)
 		if res == nil {
 			continue
 		}
@@ -878,17 +1214,34 @@ func parseClassicComposition(resources []any, bp *blueprint.Blueprint, defaultPr
 						isParamPatch = true
 					}
 
-					targetField := strings.TrimPrefix(toPath, "spec.forProvider.")
-					targetField = strings.TrimPrefix(targetField, "spec.")
-
-					if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
-						if res.Fields == nil {
-							res.Fields = make(map[string]blueprint.Field)
+					if strings.HasPrefix(toPath, "spec.forProvider.") {
+						targetField := strings.TrimPrefix(toPath, "spec.forProvider.")
+						if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
+							if res.Fields == nil {
+								res.Fields = make(map[string]blueprint.Field)
+							}
+							res.Fields[targetField] = blueprint.Field{
+								From: "params." + paramName,
+							}
+							ensureParamDeclared(bp, paramName)
+						} else {
+							report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
+								fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
 						}
-						res.Fields[targetField] = blueprint.Field{
-							From: "params." + paramName,
+					} else if strings.HasPrefix(toPath, "spec.") {
+						targetField := strings.TrimPrefix(toPath, "spec.")
+						if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
+							if res.Envelope == nil {
+								res.Envelope = make(map[string]blueprint.Field)
+							}
+							res.Envelope[targetField] = blueprint.Field{
+								From: "params." + paramName,
+							}
+							ensureParamDeclared(bp, paramName)
+						} else {
+							report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
+								fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
 						}
-						ensureParamDeclared(bp, paramName)
 					} else {
 						report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
 							fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
@@ -961,61 +1314,40 @@ func ensureParamDeclared(bp *blueprint.Blueprint, paramPath string) {
 	bp.Spec.XRD.Parameters[root] = rootParam
 }
 
-func ensureEnvDeclared(bp *blueprint.Blueprint, envKey string) {
+func ensureEnvDeclared(bp *blueprint.Blueprint, envKey, typ string) {
 	if bp.Spec.Environment == nil {
 		bp.Spec.Environment = make(map[string]blueprint.EnvironmentKey)
 	}
-	if _, exists := bp.Spec.Environment[envKey]; !exists {
+	if typ == "" {
+		typ = "string"
+	}
+	existing, exists := bp.Spec.Environment[envKey]
+	if !exists {
 		bp.Spec.Environment[envKey] = blueprint.EnvironmentKey{
-			Type: "string",
+			Type: typ,
 		}
+		return
+	}
+	if existing.Type == "string" && typ != "string" {
+		existing.Type = typ
+		bp.Spec.Environment[envKey] = existing
 	}
 }
 
-func resourceFromMap(m map[string]any, defaultProvider string, placeholders []string, report *LossReport, nameMapping map[string]string, bp *blueprint.Blueprint) *blueprint.Resource {
+func resourceFromMap(m map[string]any, opts Options, placeholders []string, report *LossReport, nameMapping map[string]string, bp *blueprint.Blueprint) *blueprint.Resource {
 	kind, _ := m["kind"].(string)
 	if kind == "" {
 		return nil
 	}
 	apiVersion, _ := m["apiVersion"].(string)
 
-	meta, _ := m["metadata"].(map[string]any)
-	name := ""
-	if meta != nil {
-		name, _ = meta["name"].(string)
-		if anns, ok := meta["annotations"].(map[string]any); ok {
-			if annName, ok := anns["crossplane.io/composition-resource-name"].(string); ok && annName != "" {
-				name = annName
-			}
-			for k, v := range anns {
-				unmaskedK := unmaskString(fmt.Sprint(k), placeholders)
-				unmaskedV := unmaskString(fmt.Sprint(v), placeholders)
-				if m := reSetResourceNameAnn.FindStringSubmatch(unmaskedK); len(m) >= 2 {
-					name = m[1]
-					break
-				}
-				if m := reSetResourceNameAnn.FindStringSubmatch(unmaskedV); len(m) >= 2 {
-					name = m[1]
-					break
-				}
-			}
-		}
-	}
-	if name != "" {
-		name = reExprPrefix.ReplaceAllString(name, "")
-	}
-	if name == "" {
-		name = strings.ToLower(kind)
-	}
+	name := extractResourceName(m, kind, placeholders)
 	normName := normalizeDNSLabel(name)
 	if normName != name && nameMapping != nil {
 		nameMapping[name] = normName
 	}
 
-	provider := defaultProvider
-	if strings.Contains(apiVersion, "k8s.io") || !strings.Contains(apiVersion, ".") {
-		provider = blueprint.NativeProvider
-	}
+	provider := inferProvider(apiVersion, kind, opts.DefaultProviderRef, opts.CacheDir, bp)
 
 	res := &blueprint.Resource{
 		Name:        normName,
@@ -1023,8 +1355,10 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 		Provider:    provider,
 		Fields:      make(map[string]blueprint.Field),
 		Annotations: make(map[string]blueprint.Field),
+		Envelope:    make(map[string]blueprint.Field),
 	}
 
+	meta, _ := m["metadata"].(map[string]any)
 	// Extract annotations
 	if meta != nil {
 		if anns, ok := meta["annotations"].(map[string]any); ok {
@@ -1044,29 +1378,38 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 					} else {
 						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, k), "invalid parameter reference")
 					}
-				} else if m := reEnvVar.FindStringSubmatch(rawStr); len(m) >= 2 {
-					if isValidParamIdentifier(m[1]) {
-						res.Annotations[k] = blueprint.Field{From: "env." + m[1]}
+				} else if key := matchEnvVar(rawStr); key != "" {
+					if isValidParamIdentifier(key) {
+						res.Annotations[k] = blueprint.Field{From: "env." + key}
 						if bp != nil {
-							ensureEnvDeclared(bp, m[1])
+							ensureEnvDeclared(bp, key, "string")
 						}
 					} else {
 						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, k), "invalid environment reference")
 					}
-				} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 4 {
+				} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 5 {
 					srcRes := m[1]
+					if srcRes == "" {
+						srcRes = m[2]
+					}
 					if nameMapping != nil && nameMapping[srcRes] != "" {
 						srcRes = nameMapping[srcRes]
 					} else {
 						srcRes = normalizeDNSLabel(srcRes)
 					}
-					targetKind := m[2]
-					targetField := m[3]
+					targetKind := m[3]
+					targetField := m[4]
+					var fromPath string
 					if strings.HasPrefix(targetKind, "status") {
-						res.Annotations[k] = blueprint.Field{From: "resources." + srcRes + ".status." + targetField}
+						field := targetField
+						if !strings.HasPrefix(field, "atProvider.") && (strings.HasSuffix(targetKind, "atProvider") || targetKind == "status.atProvider") {
+							field = "atProvider." + field
+						}
+						fromPath = "resources." + srcRes + ".status." + field
 					} else {
-						res.Annotations[k] = blueprint.Field{From: "resources." + srcRes + ".metadata." + targetField}
+						fromPath = "resources." + srcRes + ".metadata." + targetField
 					}
+					res.Annotations[k] = blueprint.Field{From: fromPath}
 				} else if m := reXRResourceRef.FindStringSubmatch(rawStr); len(m) >= 2 {
 					srcRes := m[1]
 					if nameMapping != nil && nameMapping[srcRes] != "" {
@@ -1103,6 +1446,23 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 	if spec, ok := m["spec"].(map[string]any); ok {
 		if forProvider, ok := spec["forProvider"].(map[string]any); ok {
 			extractFields("", forProvider, res.Fields, placeholders, res.Name, report, nameMapping, bp)
+			for k, v := range spec {
+				if k == "forProvider" || k == "initProvider" {
+					continue
+				}
+				if k == "providerConfigRef" {
+					if pcrMap, ok := v.(map[string]any); ok {
+						pcrName, _ := pcrMap["name"].(string)
+						pcrKind, _ := pcrMap["kind"].(string)
+						pcrNameUnmasked := unmaskString(pcrName, placeholders)
+						if (pcrNameUnmasked == "{{ $spec.providerName }}" || pcrNameUnmasked == "{{ .spec.providerName }}") &&
+							(pcrKind == "ClusterProviderConfig" || pcrKind == "") {
+							continue
+						}
+					}
+				}
+				extractFields("", map[string]any{k: v}, res.Envelope, placeholders, res.Name, report, nameMapping, bp)
+			}
 		} else {
 			extractFields("spec", spec, res.Fields, placeholders, res.Name, report, nameMapping, bp)
 		}
@@ -1153,29 +1513,28 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 				} else {
 					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid parameter reference")
 				}
-			} else if m := reEnvVar.FindStringSubmatch(rawStr); len(m) >= 2 {
-				if isValidParamIdentifier(m[1]) {
-					out[path] = blueprint.Field{From: "env." + m[1]}
+			} else if key := matchEnvVar(rawStr); key != "" {
+				if isValidParamIdentifier(key) {
+					out[path] = blueprint.Field{From: "env." + key}
 					if bp != nil {
-						ensureEnvDeclared(bp, m[1])
+						ensureEnvDeclared(bp, key, "string")
 					}
 				} else {
 					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid environment reference")
 				}
-			} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 4 {
+			} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 5 {
 				srcRes := m[1]
+				if srcRes == "" {
+					srcRes = m[2]
+				}
 				if nameMapping != nil && nameMapping[srcRes] != "" {
 					srcRes = nameMapping[srcRes]
 				} else {
 					srcRes = normalizeDNSLabel(srcRes)
 				}
-				targetKind := m[2]
-				targetField := m[3]
-				if strings.HasPrefix(targetKind, "status") {
-					out[path] = blueprint.Field{From: "resources." + srcRes + ".status." + targetField}
-				} else {
-					out[path] = blueprint.Field{From: "resources." + srcRes + ".metadata." + targetField}
-				}
+				targetKind := m[3]
+				targetField := m[4]
+				out[path] = blueprint.Field{From: "resources." + srcRes + "." + targetKind + "." + targetField}
 			} else if m := reXRResourceRef.FindStringSubmatch(rawStr); len(m) >= 2 {
 				srcRes := m[1]
 				if nameMapping != nil && nameMapping[srcRes] != "" {
@@ -1208,29 +1567,28 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 						} else {
 							report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid parameter reference")
 						}
-					} else if m := reEnvVar.FindStringSubmatch(rawStr); len(m) >= 2 {
-						if isValidParamIdentifier(m[1]) {
-							out[elemPath] = blueprint.Field{From: "env." + m[1]}
+					} else if key := matchEnvVar(rawStr); key != "" {
+						if isValidParamIdentifier(key) {
+							out[elemPath] = blueprint.Field{From: "env." + key}
 							if bp != nil {
-								ensureEnvDeclared(bp, m[1])
+								ensureEnvDeclared(bp, key, "string")
 							}
 						} else {
 							report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid environment reference")
 						}
-					} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 4 {
+					} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 5 {
 						srcRes := m[1]
+						if srcRes == "" {
+							srcRes = m[2]
+						}
 						if nameMapping != nil && nameMapping[srcRes] != "" {
 							srcRes = nameMapping[srcRes]
 						} else {
 							srcRes = normalizeDNSLabel(srcRes)
 						}
-						targetKind := m[2]
-						targetField := m[3]
-						if strings.HasPrefix(targetKind, "status") {
-							out[elemPath] = blueprint.Field{From: "resources." + srcRes + ".status." + targetField}
-						} else {
-							out[elemPath] = blueprint.Field{From: "resources." + srcRes + ".metadata." + targetField}
-						}
+						targetKind := m[3]
+						targetField := m[4]
+						out[elemPath] = blueprint.Field{From: "resources." + srcRes + "." + targetKind + "." + targetField}
 					} else if m := reXRResourceRef.FindStringSubmatch(rawStr); len(m) >= 2 {
 						srcRes := m[1]
 						if nameMapping != nil && nameMapping[srcRes] != "" {
@@ -1308,6 +1666,12 @@ func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]str
 				r.Annotations[aName] = a
 			}
 		}
+		for eName, e := range r.Envelope {
+			if e.From != "" {
+				e.From = rewriteFromWire(e.From, nameMapping)
+				r.Envelope[eName] = e
+			}
+		}
 	}
 }
 
@@ -1317,10 +1681,10 @@ func rewriteFromWire(wire string, nameMapping map[string]string) string {
 	}
 	rest := strings.TrimPrefix(wire, "resources.")
 	parts := strings.SplitN(rest, ".", 3)
-	if len(parts) >= 3 && parts[1] == "status" {
+	if len(parts) >= 3 && (parts[1] == "status" || parts[1] == "metadata") {
 		origName := parts[0]
 		if newName, ok := nameMapping[origName]; ok {
-			return fmt.Sprintf("resources.%s.status.%s", newName, parts[2])
+			return fmt.Sprintf("resources.%s.%s.%s", newName, parts[1], parts[2])
 		}
 	}
 	return wire

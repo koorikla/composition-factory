@@ -79,3 +79,12 @@ func blueprintSource(b *blueprint.Blueprint) string {
 	}
 	return "blueprints/" + b.Metadata.Name + ".cf.yaml"
 }
+
+func formatEnvDefault(k blueprint.EnvironmentKey) string {
+	switch k.Type {
+	case "integer", "number", "boolean":
+		return k.Default
+	default:
+		return fmt.Sprintf("%q", k.Default)
+	}
+}

@@ -455,6 +455,30 @@ func validateSchemaNode(valNode *yaml.Node, propSchema map[string]any, path stri
 		}
 		sort.Strings(knownKeys)
 
+		if reqRaw, ok := propSchema["required"].([]any); ok {
+			for _, rItem := range reqRaw {
+				reqName, _ := rItem.(string)
+				if reqName == "" {
+					continue
+				}
+				found := false
+				for i := 0; i < len(valNode.Content); i += 2 {
+					if valNode.Content[i].Value == reqName {
+						found = true
+						break
+					}
+				}
+				if !found {
+					reqPath := reqName
+					if path != "" {
+						reqPath = path + "." + reqName
+					}
+					errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): missing required field %q in %s",
+						valNode.Line, resourceName, kind, reqPath, where))
+				}
+			}
+		}
+
 		for i := 0; i < len(valNode.Content); i += 2 {
 			kNode := valNode.Content[i]
 			vNode := valNode.Content[i+1]

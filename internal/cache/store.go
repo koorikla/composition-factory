@@ -273,6 +273,86 @@ func (l *Lock) SetFunction(ref, digest string) {
 	sort.Slice(l.Functions, func(i, j int) bool { return l.Functions[i].Ref < l.Functions[j].Ref })
 }
 
+// FindFunction returns the lock entry matching function name or ref, if found.
+func (l *Lock) FindFunction(nameOrRef string) (LockEntry, bool) {
+	if l == nil {
+		return LockEntry{}, false
+	}
+	clean := nameOrRef
+	if i := strings.Index(clean, "@"); i >= 0 {
+		clean = clean[:i]
+	}
+	if i := strings.LastIndex(clean, ":"); i >= 0 {
+		clean = clean[:i]
+	}
+	if i := strings.LastIndex(clean, "/"); i >= 0 {
+		clean = clean[i+1:]
+	}
+	clean = strings.ToLower(clean)
+	clean = strings.TrimPrefix(clean, "function-")
+	clean = strings.TrimPrefix(clean, "fn-")
+
+	for _, f := range l.Functions {
+		if f.Ref == nameOrRef {
+			return f, true
+		}
+		fClean := f.Ref
+		if i := strings.Index(fClean, "@"); i >= 0 {
+			fClean = fClean[:i]
+		}
+		if i := strings.LastIndex(fClean, ":"); i >= 0 {
+			fClean = fClean[:i]
+		}
+		if i := strings.LastIndex(fClean, "/"); i >= 0 {
+			fClean = fClean[i+1:]
+		}
+		fClean = strings.ToLower(fClean)
+		fClean = strings.TrimPrefix(fClean, "function-")
+		fClean = strings.TrimPrefix(fClean, "fn-")
+
+		if fClean == clean && clean != "" {
+			return f, true
+		}
+	}
+	return LockEntry{}, false
+}
+
+// FindProvider returns the lock entry matching provider ref, if found.
+func (l *Lock) FindProvider(providerRef string) (LockEntry, bool) {
+	if l == nil {
+		return LockEntry{}, false
+	}
+	for _, p := range l.Providers {
+		if p.Ref == providerRef || strings.HasPrefix(p.Ref, providerRef+":") || strings.HasPrefix(p.Ref, providerRef+"@") {
+			return p, true
+		}
+		pLast := p.Ref
+		if i := strings.Index(pLast, "@"); i >= 0 {
+			pLast = pLast[:i]
+		}
+		if i := strings.LastIndex(pLast, ":"); i >= 0 {
+			pLast = pLast[:i]
+		}
+		if i := strings.LastIndex(pLast, "/"); i >= 0 {
+			pLast = pLast[i+1:]
+		}
+		reqLast := providerRef
+		if i := strings.Index(reqLast, "@"); i >= 0 {
+			reqLast = reqLast[:i]
+		}
+		if i := strings.LastIndex(reqLast, ":"); i >= 0 {
+			reqLast = reqLast[:i]
+		}
+		if i := strings.LastIndex(reqLast, "/"); i >= 0 {
+			reqLast = reqLast[i+1:]
+		}
+		if pLast == reqLast && reqLast != "" {
+			return p, true
+		}
+	}
+	return LockEntry{}, false
+}
+
 // ReadLock reads path. A missing file is an empty lock, not an error.
 func ReadLock(path string) (*Lock, error) {
 	body, err := os.ReadFile(path)

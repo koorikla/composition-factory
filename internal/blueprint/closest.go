@@ -7,7 +7,8 @@ import (
 )
 
 // ClosestPath returns the candidate string closest in edit distance to target,
-// provided the edit distance is within reasonable bounds (dist <= 3 and dist*2 < len(target)).
+// provided the edit distance is within reasonable bounds (dist <= 2 for 3-4 char words,
+// dist <= 3 and dist*2 < len(target) for longer words).
 func ClosestPath(target string, candidates []string) string {
 	best, bestDist := "", 0
 	for _, c := range candidates {
@@ -16,7 +17,7 @@ func ClosestPath(target string, candidates []string) string {
 			best, bestDist = c, d
 		}
 	}
-	if best != "" && bestDist <= 3 && bestDist*2 < len(target) {
+	if best != "" && isCloseMatch(target, bestDist) {
 		return best
 	}
 
@@ -62,6 +63,19 @@ func editDistance(a, b string) int {
 		prev, curr = curr, prev
 	}
 	return prev[len(br)]
+}
+
+func isCloseMatch(target string, dist int) bool {
+	if dist <= 0 {
+		return true
+	}
+	if dist > 3 {
+		return false
+	}
+	if len(target) >= 3 && dist <= 2 {
+		return true
+	}
+	return dist*2 < len(target)
 }
 
 // UnknownEnvKeyError constructs an error for an unknown environment key reference,

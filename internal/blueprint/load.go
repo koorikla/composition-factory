@@ -524,7 +524,7 @@ func validateForEachParamRef(x XRD, r Resource) error {
 
 // validateForEachEnvRef checks the env.<key> forEach form: the loop bound is an integer environment key.
 func (b *Blueprint) validateForEachEnvRef(r Resource) error {
-	envKey, ok := strings.CutPrefix(r.ForEach, "env.")
+	envKey, ok := EnvRef(r.ForEach)
 	if !ok {
 		return fmt.Errorf("resource %q: forEach must reference a parameter as params.<name>, an environment key as env.<key>, "+
 			"or another resource's observed status as resources.<name>.status.<path> (got %q)",

@@ -1421,9 +1421,8 @@ func TestPutBlueprintWithUnknownFieldGivesDidYouMeanSuggestionAndLeavesFileUntou
 	}
 }
 
-func TestPutBlueprintWithUnknownSourceFetchFailureLeavesFileUntouched(t *testing.T) {
+func TestPutBlueprintWithUnknownSourceFetchFailureSucceedsOffline(t *testing.T) {
 	h, path := testHandlerWithPath(t)
-	before, _ := os.ReadFile(path)
 
 	rec := do(t, h, "GET", "/api/blueprint", "")
 	var doc blueprint.Blueprint
@@ -1431,19 +1430,220 @@ func TestPutBlueprintWithUnknownSourceFetchFailureLeavesFileUntouched(t *testing
 		t.Fatalf("GET body: %v", err)
 	}
 
-	// Add new unresolvable provider source
+	// Add unresolvable provider source
 	doc.Spec.Sources = append(doc.Spec.Sources, blueprint.Source{
 		Provider: "example.org/nonexistent/provider:v9.9.9",
 	})
 	body, _ := json.Marshal(doc)
 
 	rec = do(t, h, "PUT", "/api/blueprint", string(body))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
 	}
 
-	after, _ := os.ReadFile(path)
-	if !bytes.Equal(before, after) {
-		t.Error("the blueprint file changed despite a failed fetch on PUT")
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(reloaded.Spec.Sources) < 2 {
+		t.Errorf("expected updated sources, got %d", len(reloaded.Spec.Sources))
+	}
+}
+
+func TestAddResourceEndpoint(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	// Valid add resource
+	newRes := blueprint.Resource{
+		Name: "audit-queue",
+		Kind: "Queue",
+		Fields: map[string]blueprint.Field{
+			"region": {Value: "eu-west-1"},
+		},
+	}
+	body, _ := json.Marshal(newRes)
+	rec := do(t, h, "POST", "/api/blueprint/resources", string(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/blueprint/resources status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("reloading blueprint: %v", err)
+	}
+	if reloaded.ResourceNamed("audit-queue") == nil {
+		t.Fatal("audit-queue was not added to blueprint")
+	}
+
+	// Duplicate add returns 409
+	rec = do(t, h, "POST", "/api/blueprint/resources", string(body))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("POST duplicate resource status = %d, want 409: %s", rec.Code, rec.Body)
+	}
+
+	// Malformed JSON returns 400
+	rec = do(t, h, "POST", "/api/blueprint/resources", "{invalid")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST malformed body status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestSetResourceEndpoint(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	// Valid set resource
+	updated := blueprint.Resource{
+		Name: "main-queue",
+		Kind: "Queue",
+		Fields: map[string]blueprint.Field{
+			"region": {Value: "eu-north-1"},
+		},
+	}
+	body, _ := json.Marshal(updated)
+	rec := do(t, h, "PUT", "/api/blueprint/resources/main-queue", string(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT /api/blueprint/resources/main-queue status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("reloading blueprint: %v", err)
+	}
+	res := reloaded.ResourceNamed("main-queue")
+	if res == nil || res.Fields["region"].Value != "eu-north-1" {
+		t.Fatalf("main-queue was not updated, got %+v", res)
+	}
+
+	// Nonexistent returns 404
+	nonexistent := blueprint.Resource{Name: "nonexistent", Kind: "Queue"}
+	nonexistentBody, _ := json.Marshal(nonexistent)
+	rec = do(t, h, "PUT", "/api/blueprint/resources/nonexistent", string(nonexistentBody))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("PUT nonexistent resource status = %d, want 404: %s", rec.Code, rec.Body)
+	}
+
+	// Mismatched body name returns 400
+	mismatched := blueprint.Resource{Name: "other-name", Kind: "Queue"}
+	mismatchedBody, _ := json.Marshal(mismatched)
+	rec = do(t, h, "PUT", "/api/blueprint/resources/main-queue", string(mismatchedBody))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT mismatched name status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestIfMatchRevisionControl(t *testing.T) {
+	h, _ := testHandlerWithPath(t)
+
+	// GET blueprint to obtain ETag
+	getRec := do(t, h, "GET", "/api/blueprint", "")
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/blueprint status = %d, want 200", getRec.Code)
+	}
+	etag := getRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("GET /api/blueprint returned empty ETag")
+	}
+
+	// Request with mismatched If-Match returns 412
+	req, _ := http.NewRequest("PUT", "/api/blueprint/resources/main-queue", strings.NewReader(`{"name":"main-queue","kind":"Queue"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", `"mismatched-etag"`)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("mismatched If-Match returned %d, want 412 Precondition Failed", rec.Code)
+	}
+
+	// Request with matching If-Match returns 200
+	req, _ = http.NewRequest("PUT", "/api/blueprint/resources/main-queue", strings.NewReader(`{"name":"main-queue","kind":"Queue"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", etag)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("matching If-Match returned %d, want 200 OK: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestDeleteParameterReferencedInRawIs409(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	// Load blueprint and add a raw reference to a new parameter
+	b, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	b.Spec.XRD.Parameters["tier"] = blueprint.Parameter{Type: "string"}
+	b.Spec.Resources[0].Fields["rawTest"] = blueprint.Field{Raw: `{{ $spec.tier }}`}
+	if err := writeBlueprintFile(path, b); err != nil {
+		t.Fatalf("writeBlueprintFile: %v", err)
+	}
+
+	// DELETE /api/blueprint/parameters/tier should return 409 Conflict
+	rec := do(t, h, "DELETE", "/api/blueprint/parameters/tier", "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("DELETE parameter referenced in raw status = %d, want 409 Conflict: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestRenameParameterInRawRewritesRaw(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	// Load blueprint and add raw references to a parameter
+	b, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	b.Spec.XRD.Parameters["tier"] = blueprint.Parameter{Type: "string"}
+	b.Spec.Resources[0].Fields["rawTest"] = blueprint.Field{Raw: `{{ $spec.tier }}`}
+	if err := writeBlueprintFile(path, b); err != nil {
+		t.Fatalf("writeBlueprintFile: %v", err)
+	}
+
+	// Rename parameter
+	rec := do(t, h, "POST", "/api/blueprint/parameters/tier/rename", `{"to":"level"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST rename parameter status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("reloading blueprint: %v", err)
+	}
+	if got := reloaded.Spec.Resources[0].Fields["rawTest"].Raw; got != `{{ $spec.level }}` {
+		t.Errorf("rawTest raw = %q, want {{ $spec.level }}", got)
+	}
+}
+
+func TestPutBlueprintSurvivesOfflineFetchFailure(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	// Fetch current blueprint JSON
+	rec := do(t, h, "GET", "/api/blueprint", "")
+	if rec.Code != 200 {
+		t.Fatalf("GET /api/blueprint: %d", rec.Code)
+	}
+	var bp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &bp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Add an uncached provider to sources and edit a parameter description
+	spec := bp["spec"].(map[string]any)
+	sources := spec["sources"].([]any)
+	spec["sources"] = append(sources, map[string]any{"provider": "ghcr.io/example/provider-uncached:v1.0.0"})
+
+	bodyBytes, _ := json.Marshal(bp)
+	rec = do(t, h, "PUT", "/api/blueprint", string(bodyBytes))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT /api/blueprint status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	reloaded, err := blueprint.Load(path)
+	if err != nil {
+		t.Fatalf("reloading blueprint: %v", err)
+	}
+	if len(reloaded.Spec.Sources) < 2 {
+		t.Errorf("expected at least 2 sources, got %d", len(reloaded.Spec.Sources))
 	}
 }

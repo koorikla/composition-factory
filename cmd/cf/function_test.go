@@ -79,3 +79,39 @@ func TestFunctionAddCachesAndLocks(t *testing.T) {
 		t.Errorf("lockfile not written: %v", err)
 	}
 }
+
+func TestFunctionAddRejectsProviderPackage(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".cf.lock")
+	providerFetch := func(ref string) (*xpkg.Package, error) {
+		return &xpkg.Package{
+			Ref:    ref,
+			Digest: "sha256:provider123",
+			Docs: [][]byte{[]byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: widgets.test.m.example.org}
+spec:
+  group: test.m.example.org
+  scope: Namespaced
+  names: {kind: Widget, plural: widgets, categories: [managed]}
+  versions:
+  - {name: v1beta1, served: true, storage: true}
+`)},
+		}, nil
+	}
+	cmd := &FunctionAddCmd{
+		Ref:      "example.org/provider-test:v2",
+		CacheDir: filepath.Join(dir, "cache"),
+		Lock:     lockPath,
+		fetch:    providerFetch,
+	}
+	var out bytes.Buffer
+	err := cmd.Run(&out)
+	if err == nil {
+		t.Fatal("expected error when adding provider package to function add, got nil")
+	}
+	if !strings.Contains(err.Error(), "is a provider package, not a function") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}

@@ -142,6 +142,7 @@ spec:
       provider: ghcr.io/x/provider-aws-sqs:v2.7.0
       fields:
         maxMessageSize: {from: params.maxMessageSize}
+        region: {value: "eu-west-1"}
 `
 
 // testBlueprintPath writes testBlueprintYAML into t.TempDir() and returns

@@ -48,10 +48,12 @@ spec:
             replicas: {{ $spec.replicas }}
             {{- end }}
             selector:
-              matchLabels: {app: web}
+              matchLabels:
+                app: 'web'
             template:
               metadata:
-                labels: {app: web}
+                labels:
+                  app: 'web'
               spec:
                 containers:
                   - image: {{ $spec.image | quote }}
@@ -66,7 +68,8 @@ spec:
           spec:
             ports:
               - port: 80
-            selector: {app: web}
+            selector:
+              app: 'web'
             type: 'ClusterIP'
   - step: auto-ready
     functionRef:

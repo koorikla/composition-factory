@@ -211,6 +211,19 @@ func (s *server) register(srv *sdk.Server) {
 			"structured Blueprint document, inferring parameters, composed resources, fields, and wires. " +
 			"Set persist: true to replace the workspace blueprint with the adopted result.",
 	}, s.adoptComposition)
+
+	sdk.AddTool(srv, &sdk.Tool{
+		Name: "add_function",
+		Description: "Fetch a Crossplane function package from its OCI registry (network access " +
+			"required), cache its input CRD schemas, and pin its digest into the lockfile. " +
+			"ref is an xpkg reference like xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.4.1.",
+	}, s.addFunction)
+
+	sdk.AddTool(srv, &sdk.Tool{
+		Name: "preview_expression",
+		Description: "Evaluate a Go template expression (e.g. {{ $spec.location }}) against the " +
+			"synthetic context of the current blueprint. Returns {\"rendered\":\"...\"}.",
+	}, s.previewExpression)
 }
 
 // mustSchemaJSON parses a hand-written 2020-12 JSON schema literal. The
@@ -500,4 +513,29 @@ func (s *server) adoptComposition(_ context.Context, _ *sdk.CallToolRequest, in 
 		return nil, nil, fmt.Errorf("encode request: %w", err)
 	}
 	return s.bridge(http.MethodPost, "/api/blueprint/adopt", body)
+}
+
+type addFunctionInput struct {
+	Ref string `json:"ref" jsonschema:"xpkg reference, e.g. xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.4.1"`
+}
+
+func (s *server) addFunction(_ context.Context, _ *sdk.CallToolRequest, in addFunctionInput) (*sdk.CallToolResult, any, error) {
+	body, err := json.Marshal(in)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode request: %w", err)
+	}
+	return s.bridge(http.MethodPost, "/api/functions", body)
+}
+
+type previewExpressionInput struct {
+	Expression string `json:"expression" jsonschema:"The Go template expression to evaluate, e.g. '{{ $spec.location }}'"`
+	Resource   string `json:"resource,omitempty" jsonschema:"Optional resource name to evaluate expression in the context of."`
+}
+
+func (s *server) previewExpression(_ context.Context, _ *sdk.CallToolRequest, in previewExpressionInput) (*sdk.CallToolResult, any, error) {
+	body, err := json.Marshal(in)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode request: %w", err)
+	}
+	return s.bridge(http.MethodPost, "/api/preview-expression", body)
 }

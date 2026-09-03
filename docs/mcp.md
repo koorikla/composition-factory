@@ -74,8 +74,53 @@ column names the route each tool bridges to.
 | `delete_parameter` | `DELETE /api/blueprint/parameters/{name}` | Delete a parameter; refused while resource fields still reference it. |
 | `add_provider` | `POST /api/providers` | Fetch a provider package (network), cache its schemas, pin its digest, index its kinds. |
 | `list_providers` | `GET /api/providers` | The providers being served, with digest and kind count. |
+| `add_function` | `POST /api/functions` | Fetch a function package (network), cache its input schemas, pin its digest. |
 | `generate` | `POST /api/generate` | Render XRD, Composition and functions.yaml through the same engine `cf gen` uses; `write:false` previews, `write:true` writes into `--out` only. |
 | `render_check` | `POST /api/render` | Run a real `crossplane composition render` against a sample XR; the outcome (`ok`/`error`/`unavailable`) is the payload. |
 | `adopt_composition` | `POST /api/blueprint/adopt` | Import an existing Crossplane Composition (and optional XRD) YAML manifest into a structured Blueprint; `persist: true` saves to the workspace blueprint file. |
+| `preview_expression` | `POST /api/preview-expression` | Evaluate a Go template expression against synthetic context (`$spec`, `$xr`, `$xrMeta`, `$observed`, `$env`, `$i`, `$resource`). |
 
-The 13 MCP tools above bridge the core Crossplane authoring, schema query, generation, validation, provider ingestion, and adoption workflows. Endpoints tailored specifically to the browser canvas (such as `/api/catalogue` for package browsing, `/api/examples` for starter templates, `/api/cluster` for live cluster discovery, `/api/package` for archive downloads, `/api/rbac` for role definitions, `/api/sources/crds` for manifest uploads, and canvas-specific resource routes) are served over HTTP (`cf serve`) directly to the web GUI.
+The 15 MCP tools above bridge the core Crossplane authoring, schema query, expression preview, generation, validation, provider and function ingestion, and adoption workflows.
+
+### Complete HTTP API Route Inventory (`cf serve`)
+
+The full HTTP API route table exposed by `cf serve`:
+
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/healthz` | Plaintext liveness probe. |
+| `GET` | `/api/version` | Version metadata and supported rendering engines (`go-templating`, `kcl`, `python`). |
+| `GET` | `/api/kinds` | Search and list available CRD kinds. |
+| `GET` | `/api/kinds/{apiVersion}/{kind}` | Detailed kind envelope and metadata. |
+| `GET` | `/api/kinds/{apiVersion}/{kind}/fields` | Inspect spec/status fields for a CRD kind. |
+| `GET` | `/api/blueprint` | Read the active blueprint document. |
+| `PUT` | `/api/blueprint` | Replace and validate the active blueprint document. |
+| `POST` | `/api/blueprint/import` | Import an existing composition directory or file. |
+| `POST` | `/api/blueprint/adopt` | Import/adopt raw Crossplane YAML manifest. |
+| `POST` | `/api/blueprint/parameters` | Add an XRD parameter. |
+| `PUT` | `/api/blueprint/parameters/{name}` | Update an XRD parameter. |
+| `POST` | `/api/blueprint/parameters/{name}/rename` | Rename an XRD parameter. |
+| `DELETE` | `/api/blueprint/parameters/{name}` | Delete an XRD parameter. |
+| `POST` | `/api/blueprint/resources` | Add a composed resource. |
+| `PUT` | `/api/blueprint/resources/{name}` | Update a composed resource. |
+| `POST` | `/api/blueprint/resources/{name}/rename` | Rename a composed resource. |
+| `DELETE` | `/api/blueprint/resources/{name}` | Delete a composed resource. |
+| `GET` | `/api/providers` | List active providers and schema counts. |
+| `POST` | `/api/providers` | Ingest and cache a new provider package. |
+| `DELETE` | `/api/providers/{ref}` | Evict a provider package from cache and blueprint sources. |
+| `GET` | `/api/functions` | List active function packages in lockfile. |
+| `POST` | `/api/functions` | Ingest and cache a new function package. |
+| `GET` | `/api/rbac` | Generate aggregated ClusterRole RBAC manifests for composed native kinds. |
+| `GET` | `/api/package` | Build or inspect `.xpkg` Crossplane configuration package. |
+| `POST` | `/api/sources/crds` | Ingest CRD YAML manifest uploads. |
+| `GET` | `/api/catalogue` | Search the Upbound/Crossplane catalogue. |
+| `GET` | `/api/examples` | List starter templates and cache readiness. |
+| `GET` | `/api/examples/{id}` | Retrieve starter template blueprint. |
+| `POST` | `/api/examples/{id}/load` | Load starter template into active blueprint. |
+| `GET` | `/api/cluster` | Discovered cluster CRD schemas. |
+| `POST` | `/api/cluster/sync` | Sync cluster CRDs into local cache. |
+| `POST` | `/api/cluster/connect` | Connect to a remote Kubernetes cluster context. |
+| `POST` | `/api/generate` | Generate XRD, Composition, and functions.yaml. |
+| `POST` | `/api/render` | Execute real Crossplane composition render check. |
+| `POST` | `/api/preview-expression` | Evaluate Go template expression in-process. |
+

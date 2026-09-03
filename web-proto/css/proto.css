@@ -85,8 +85,8 @@ html,body{height:100%;overflow:hidden}
 .pane-b{overflow-y:auto;overflow-x:hidden;flex:1;min-height:0}
 
 .rtabs{display:flex;gap:1px;background:var(--sunk);border-radius:5px;padding:1.5px;width:100%}
-.rtabs button{flex:1;padding:3px 0;border-radius:3.5px;font-family:var(--cond);font-size:10px;
-  font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.rtabs button{flex:1;padding:3px 2px;border-radius:3.5px;font-family:var(--cond);font-size:9.5px;
+  font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rtabs button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.07)}
 
 .search{width:100%;height:27px;padding:0 9px;border:1px solid var(--rule-2);border-radius:5px;
@@ -600,6 +600,8 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 
 /* card actions and resize grip exist in the DOM always; visible when selected
    (selection is a class toggle, never a DOM rebuild) */
+.node [data-act]{min-width:22px;min-height:22px;padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border-radius:3px;cursor:pointer}
+.node [data-act]:hover{background:var(--sunk)}
 .node:not(.sel) [data-act]{display:none}
 .node:not(.sel) [data-resize]{display:none}
 

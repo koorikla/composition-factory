@@ -109,21 +109,21 @@ func refuseGoTemplateOnlyFeatures(b *blueprint.Blueprint) error {
 			if f.Template != "" {
 				return fmt.Errorf("resource %q field %q: engine %q does not support template: fields", r.Name, k, b.Engine())
 			}
-			if f.Raw != "" && strings.Contains(f.Raw, "{{") {
-				return fmt.Errorf("resource %q field %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)", r.Name, k, f.Raw, b.Engine())
+			if f.Raw != "" && (strings.Contains(f.Raw, "{{") || blueprint.IsBareGoTemplateExpr(f.Raw)) {
+				return fmt.Errorf("resource %q field %q: raw %q contains Go-template syntax which is only supported with the go-templating engine (current engine is %q)", r.Name, k, f.Raw, b.Engine())
 			}
 		}
 		for k, a := range r.Annotations {
 			if a.Template != "" {
 				return fmt.Errorf("resource %q annotation %q: engine %q does not support template: fields", r.Name, k, b.Engine())
 			}
-			if a.Raw != "" && strings.Contains(a.Raw, "{{") {
-				return fmt.Errorf("resource %q annotation %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)", r.Name, k, a.Raw, b.Engine())
+			if a.Raw != "" && (strings.Contains(a.Raw, "{{") || blueprint.IsBareGoTemplateExpr(a.Raw)) {
+				return fmt.Errorf("resource %q annotation %q: raw %q contains Go-template syntax which is only supported with the go-templating engine (current engine is %q)", r.Name, k, a.Raw, b.Engine())
 			}
 		}
 		for k, ef := range r.Envelope {
-			if ef.Raw != "" && strings.Contains(ef.Raw, "{{") {
-				return fmt.Errorf("resource %q envelope %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)", r.Name, k, ef.Raw, b.Engine())
+			if ef.Raw != "" && (strings.Contains(ef.Raw, "{{") || blueprint.IsBareGoTemplateExpr(ef.Raw)) {
+				return fmt.Errorf("resource %q envelope %q: raw %q contains Go-template syntax which is only supported with the go-templating engine (current engine is %q)", r.Name, k, ef.Raw, b.Engine())
 			}
 		}
 	}

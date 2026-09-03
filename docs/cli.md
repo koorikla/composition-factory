@@ -16,6 +16,97 @@ cf version
 
 ---
 
+### `cf init` — Scaffold Minimal Blueprint
+
+Scaffolds a minimal valid blueprint document (`blueprint.cf.yaml` by default) containing a Namespaced XRD identity and the required `providerName` parameter:
+
+```sh
+cf init [path]
+```
+
+#### Arguments:
+- `[path]`: Optional path for the created blueprint file (defaults to `blueprint.cf.yaml`). Refuses to overwrite existing files.
+
+Example:
+```sh
+cf init my-service.cf.yaml
+```
+
+---
+
+### `cf kinds` — Discover Available Kinds
+
+Lists available CRD kinds from cached providers, blueprint sources, and native Kubernetes kinds:
+
+```sh
+cf kinds [query] [flags]
+```
+
+#### Flags:
+- `[query]`: Optional substring/fuzzy filter matching kind name, API group, apiVersion, or provider.
+- `--blueprint <path>`: Path to blueprint file to include declared sources (defaults to `doc.cf.yaml`).
+- `--cache-dir <dir>`: Provider schema cache directory.
+
+Example:
+```sh
+cf kinds bucket
+# Output:
+# KIND    APIVERSION                       SCOPE       REQUIRED/FIELDS  PROVIDER
+# Bucket  s3.aws.m.upbound.io/v1beta1     Namespaced  0/8              ghcr.io/.../provider-aws-s3:v2.7.0
+```
+
+---
+
+### `cf fields` — Inspect Kind Schema Tree
+
+Displays the settable spec fields or observed status fields for a CRD kind:
+
+```sh
+cf fields <kind> [flags]
+```
+
+#### Flags:
+- `<kind>`: Kind name (e.g. `Queue`, `Instance`, `Deployment`) or fully qualified `apiVersion/Kind`.
+- `--required`: Print only required fields and required branch objects.
+- `--status`: Print status output fields instead of spec fields (for `resources.<name>.status` wiring).
+- `--blueprint <path>`: Path to blueprint file to include declared sources.
+- `--cache-dir <dir>`: Provider schema cache directory.
+
+Example:
+```sh
+# View required fields only
+cf fields Instance --required
+
+# View available status fields for cross-resource wiring
+cf fields Bucket --status
+```
+
+---
+
+### `cf catalogue` — Search Provider & Function Packages
+
+Searches the Upbound / Crossplane package catalogue:
+
+```sh
+cf catalogue [query] [flags]
+```
+
+#### Flags:
+- `[query]`: Optional search query matching package name, description, or served kinds.
+- `--type <type>`: Filter by package type: `provider` or `function`.
+- `--kind <kind>`: Filter packages that serve a specific CRD kind (e.g. `Bucket`, `DatabaseInstance`).
+
+Example:
+```sh
+# Find packages that serve SQS queues
+cf catalogue --kind Queue
+
+# Search for available function packages
+cf catalogue --type function
+```
+
+---
+
 ### `cf gen` — Generate Manifests
 
 Generates production-ready, byte-deterministic YAML from a blueprint file:
@@ -26,10 +117,12 @@ cf gen <blueprint.cf.yaml> -o <output-dir> [flags]
 
 #### Flags:
 - `-o`, `--out <dir>`: Output directory (defaults to `.`).
-- `--engine <engine>`: Composition rendering engine: `go-templating`, `kcl`, or `python` (overrides blueprint setting).
+- `--engine <engine>`: Composition rendering engine: `go-templating` (default), `kcl`, or `python` (overrides blueprint setting). Note that `template:` references, `spec.conventions`, and Go template expressions `{{ ... }}` in `raw:` are supported only in `go-templating` and are refused under `kcl` and `python`.
 - `--template-source <source>`: Where the Composition's go-template body lives: `inline` (default) or `filesystem` (`templates/` folder + ConfigMaps + DeploymentRuntimeConfig).
 - `--cache-dir <dir>`: Provider schema cache directory (defaults to `~/.cache/compositionfactory` on Linux or `~/Library/Caches/compositionfactory` on macOS).
 - `--check`: Validate that generated output matches blueprint without writing to disk (exits `0` if in sync, `2` if output has drifted or is missing).
+- `--validate`: Validate rendered output against CRD schemas by running `crossplane composition render` against a synthesized sample XR.
+- `--group-suffix <suffix>`: Appends a workspace isolation suffix to the XRD group (e.g. `.w1a2b3c.cf-test` to prevent cluster-scoped CRD collisions in a shared cluster).
 
 Output directory structure (Inline mode):
 ```
@@ -39,8 +132,9 @@ out/
 ├── xrds/
 │   └── <plural>.<group>.yaml
 ├── functions.yaml
-└── providerconfigs/
-    └── <provider-family>.yaml
+├── providerconfigs/
+│   └── <provider-family>.yaml
+└── rbac.yaml (emitted when native Kubernetes kinds are composed)
 ```
 
 Output directory structure (FileSystem mode with `templateSource: FileSystem`):
@@ -54,13 +148,15 @@ out/
 ├── providerconfigs/
 │   └── <provider-family>.yaml
 ├── templates/
-│   ├── 000-context.yaml
-│   └── <resource>.yaml
-└── runtime/
-    └── deploymentruntimeconfig.yaml
+│   └── <plural>.<group>/
+│       ├── 000-context.yaml
+│       └── <resource>.yaml
+├── runtime/
+│   └── <plural>.<group>.yaml
+└── rbac.yaml (emitted when native Kubernetes kinds are composed)
 ```
 
-*(Note: RBAC rules are not written to disk; they are dynamically queried via `GET /api/rbac` during live canvas sessions or CI automation).*
+*(Note: When native Kubernetes kinds like Deployment or Service are composed, `rbac.yaml` contains the aggregated ClusterRole required by Crossplane to manage them).*
 
 #### Drift Detection & CI Check (`--check`)
 Validates that generated files in the output directory match the blueprint without modifying disk:
@@ -156,6 +252,28 @@ cf provider add ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0
 
 ---
 
+### `cf function add` — Cache Function Input Schemas
+
+Fetches a Crossplane function package, extracts its Input CRDs, caches them locally, and pins the digest in `.cf.lock`:
+
+```sh
+cf function add <function-package-ref> [flags]
+```
+
+#### Flags:
+- `--cache-dir <dir>`: Schema cache directory.
+- `--lock <path>`: Path to lockfile (defaults to `.cf.lock`).
+
+Example:
+```sh
+cf function add xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1
+```
+
+- Schema validation checks `spec.pipeline[].input` against the cached Input CRD.
+- Warns explicitly if a pipeline step references an uncached function package.
+
+---
+
 ### `cf mcp` — Model Context Protocol Server
 
 Starts an MCP server over stdio for LLMs and AI coding assistants (Claude Code, Antigravity, Cursor):
@@ -165,3 +283,36 @@ cf mcp --blueprint <blueprint.cf.yaml> --out <output-dir>
 ```
 
 See the [MCP Server Guide](mcp.md) for tool documentation and setup instructions.
+
+---
+
+## Important: The `providerName` Parameter Requirement
+
+In Crossplane Compositions, managed resources require a reference to a `ProviderConfig` (via `providerConfigRef`) to authenticate with cloud providers. Composition Factory generates this binding dynamically:
+
+```yaml
+providerConfigRef:
+  kind: ClusterProviderConfig
+  name: {{ $spec.providerName }}
+```
+
+Because `scope: Cluster` is refused in M1 in favor of `scope: Namespaced`, **any blueprint containing managed resources (`provider != k8s`) must declare `providerName` as a required string parameter**:
+
+```yaml
+spec:
+  xrd:
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: "Name of the ProviderConfig to use for managed resources"
+```
+
+If `providerName` is missing or optional, `cf gen` will fail with:
+```
+spec.xrd.parameters.providerName is required for a Namespaced XRD: run cf serve without --blueprint to scaffold one, or add: providerName: {type: string, required: true}
+```
+
+*Exception*: If a blueprint is composed purely of native Kubernetes resources (`provider: k8s`), `providerConfigRef` is not generated and `providerName` is not required.
+
