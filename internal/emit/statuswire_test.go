@@ -226,6 +226,9 @@ func TestStatusWireOmitsTheFieldWhenUnobserved(t *testing.T) {
 		{"atProvider null", map[string]any{
 			"main-queue": map[string]any{"resource": map[string]any{
 				"status": map[string]any{"atProvider": nil}}}}},
+		{"atProvider is not a map", map[string]any{
+			"main-queue": map[string]any{"resource": map[string]any{
+				"status": map[string]any{"atProvider": "weird"}}}}},
 		{"url absent", map[string]any{
 			"main-queue": map[string]any{"resource": map[string]any{
 				"status": map[string]any{"atProvider": map[string]any{}}}}}},
@@ -303,9 +306,8 @@ func TestStatusWireNeverUsesWithGuards(t *testing.T) {
 	if strings.Contains(string(got), "{{- with") {
 		t.Error("emitted template uses a with-guard, which hard-fails under missingkey=error")
 	}
-	if !strings.Contains(string(got), `hasKey $.observed "resources"`) {
-		t.Errorf("status wire must guard the observed.resources key itself — the key is absent "+
-			"entirely when nothing is observed\n---\n%s", got)
+	if !strings.Contains(string(got), `hasKey (dig "resources"`) {
+		t.Errorf("status wire must use Sprig dig/hasKey guard — got:\n---\n%s", got)
 	}
 }
 

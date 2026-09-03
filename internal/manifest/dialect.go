@@ -22,8 +22,9 @@ var (
 	GuardedWireRe = regexp.MustCompile(`(?m)^(\s*)\{\{-\s*if\s+hasKey\s+\$spec\s+"([^"]+)"\s*\}\}\n(\s*)([a-zA-Z0-9_.-]+):\s*\{\{\s*\$spec\.[a-zA-Z0-9_.-]+\s*\}\}\n\s*\{\{-\s*end\s*\}\}`)
 
 	// StatusWireRe matches status-atProvider wires:
-	// {{- if and (hasKey $.observed.resources "res") ... }}\n  key: {{ (index $.observed.resources "res").resource.status.atProvider.field }}\n{{- end }}
-	StatusWireRe = regexp.MustCompile(`(?s)^(\s*)\{\{-\s*if\s+and\s+\([^)]*hasKey\s+\$\.observed\.resources\s+"([^"]+)"[^)]*\).*?\}\}\n(\s*)([a-zA-Z0-9_.-]+):\s*\{\{\s*\(index\s+\$\.observed\.resources\s+"[^"]+"\)\.resource\.status\.atProvider\.([a-zA-Z0-9_.-]+)\s*\}\}\n\s*\{\{-\s*end\s*\}\}`)
+	// {{- if hasKey (dig "resources" "res" "resource" "status" "atProvider" dict $.observed) "field" }}\n  key: {{ (index $.observed.resources "res").resource.status.atProvider.field }}\n{{- end }}
+	// Also matches legacy 11-term guard: {{- if and (hasKey $.observed.resources "res") ... }}
+	StatusWireRe = regexp.MustCompile(`(?s)^(\s*)\{\{-\s*if\s+(?:hasKey\s+\(dig\s+"resources"\s+"([^"]+)"\s+"resource"\s+"status"\s+"atProvider"\s+dict\s+\$\.observed\)\s+"[^"]+"|and\s+\([^)]*hasKey\s+\$\.observed\.resources\s+"([^"]+)"[^)]*\).*?)\s*\}\}\n(\s*)([a-zA-Z0-9_.-]+):\s*\{\{\s*\(index\s+\$\.observed\.resources\s+"[^"]+"\)\.resource\.status\.atProvider\.([a-zA-Z0-9_.-]+)\s*\}\}\n\s*\{\{-\s*end\s*\}\}`)
 
 	// LiteralFieldRe matches key: 'val', key: 123, key: true
 	LiteralFieldRe = regexp.MustCompile(`^(\s*)([a-zA-Z0-9_.-]+):\s*('([^']*)'|"([^"]*)"|true|false|-?\d+(\.\d+)?|\[.*?\]|\{.*?\})$`)

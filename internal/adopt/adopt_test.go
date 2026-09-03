@@ -746,7 +746,7 @@ spec:
             apiVersion: sqs.aws.upbound.io/v1beta1
             kind: Queue
             metadata:
-              name: {{ $xr }}-main-queue
+              name: main-queue
             spec:
               forProvider:
                 {{- if hasKey $spec "region" }}
@@ -771,5 +771,134 @@ spec:
 	r := bp.Spec.Resources[0]
 	if r.Fields["region"].From != "params.region" {
 		t.Errorf("region field = %+v, want From: params.region", r.Fields["region"])
+	}
+}
+
+func TestAdoptStatusWireNewConciseGuard(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-new-status-guard
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: render-resources
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            {{- $xr := .observed.composite.resource.metadata.name -}}
+            {{- $xrMeta := .observed.composite.resource.metadata -}}
+            ---
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+            ---
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: QueuePolicy
+            metadata:
+              name: queue-policy
+              annotations:
+                example.com/queue-url: {{ (index $.observed.resources "main-queue").resource.status.atProvider.url | quote }}
+            spec:
+              forProvider:
+                {{- if hasKey (dig "resources" "main-queue" "resource" "status" "atProvider" dict $.observed) "url" }}
+                queueUrl: {{ (index $.observed.resources "main-queue").resource.status.atProvider.url }}
+                {{- end }}
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.IsLossy() {
+		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	}
+	policy := bp.ResourceNamed("queue-policy")
+	if policy == nil {
+		t.Fatal("resource queue-policy not found")
+	}
+	if fld := policy.Fields["queueUrl"]; fld.From != "resources.main-queue.status.url" {
+		t.Errorf("queueUrl field = %+v, want From: resources.main-queue.status.url", fld)
+	}
+	if ann := policy.Annotations["example.com/queue-url"]; ann.From != "resources.main-queue.status.url" {
+		t.Errorf("annotation = %+v, want From: resources.main-queue.status.url", ann)
+	}
+}
+
+func TestAdoptStatusWireLegacyGuard(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-legacy-status-guard
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: render-resources
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            {{- $xr := .observed.composite.resource.metadata.name -}}
+            {{- $xrMeta := .observed.composite.resource.metadata -}}
+            ---
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+            ---
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: QueuePolicy
+            metadata:
+              name: queue-policy
+            spec:
+              forProvider:
+                {{- if (and (hasKey $.observed "resources") (kindIs "map" $.observed.resources) (hasKey $.observed.resources "main-queue") (kindIs "map" (index $.observed.resources "main-queue")) (hasKey (index $.observed.resources "main-queue") "resource") (kindIs "map" (index $.observed.resources "main-queue").resource) (hasKey (index $.observed.resources "main-queue").resource "status") (kindIs "map" (index $.observed.resources "main-queue").resource.status) (hasKey (index $.observed.resources "main-queue").resource.status "atProvider") (kindIs "map" (index $.observed.resources "main-queue").resource.status.atProvider) (hasKey (index $.observed.resources "main-queue").resource.status.atProvider "url")) }}
+                queueUrl: {{ (index $.observed.resources "main-queue").resource.status.atProvider.url }}
+                {{- end }}
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.IsLossy() {
+		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	}
+	policy := bp.ResourceNamed("queue-policy")
+	if policy == nil {
+		t.Fatal("resource queue-policy not found")
+	}
+	if fld := policy.Fields["queueUrl"]; fld.From != "resources.main-queue.status.url" {
+		t.Errorf("queueUrl field = %+v, want From: resources.main-queue.status.url", fld)
 	}
 }
