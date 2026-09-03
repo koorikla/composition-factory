@@ -201,6 +201,48 @@ Both P0s were reproduced independently of the run that found them.
 
 ---
 
+## Open — 2026-09-04 second pass (cross-engine render comparison)
+
+Found by doing the thing CF-045 asked the fix to be guarded by: render one blueprint
+through all three engines and compare the composed resources. The first blueprint put
+through that comparison was a shipped starter, and it diverged.
+
+### P1
+
+- [ ] **CF-056 — The shipped `k8s-workload` starter composes a ConfigMap the API server
+      rejects when generated with `--engine kcl` or `python`. [V]** `data[PORT]: {from:
+      params.port}` (`internal/examples/k8s-workload.cf.yaml:49`) is an integer parameter
+      going into a ConfigMap `data` map, which is `map[string]string`. go-templating renders
+      `PORT: "8080"`; KCL and Python render `PORT: 8080`. Repro:
+      `cf gen internal/examples/k8s-workload.cf.yaml -o out --engine kcl` then
+      `crossplane composition render` — exit 0 both times — and the rendered document fails
+      `kubectl apply --dry-run=server` with `ConfigMap in version "v1" cannot be handled as a
+      ConfigMap: json: cannot unmarshal number into Go struct field ConfigMap.data of type
+      string`. Same root cause as CF-050 (bare interpolation into `fields:` ignores the
+      target's declared type) but reached from a parameter rather than a status wire, and
+      only on two engines of three. Not fully silent: `cf gen --validate` reports
+      `field "data[PORT]": invalid type: expected string, got integer 8080` — but it is
+      opt-in, the default engine passes it, and the same message carries a false positive on
+      `spec.ports[0].targetPort` (CF-052), which trains the reader to disregard it.
+
+### P2
+
+- [ ] **CF-057 — Nothing renders one blueprint through every engine and compares the
+      composed output, so the class of defect behind CF-045, CF-004 and CF-056 stays
+      unguarded.** `acceptance_test.go` contains no cross-engine comparison:
+      `TestAcceptanceAlternativeEnginesRender:1482` loops over `{"kcl", "python"}` only —
+      it never renders the go-templating variant of the same blueprint, and asserts four
+      `strings.Contains` on provider fields rather than comparing resources. The unit test
+      added with CF-045's fix (`TestNativeMetadataNameParityAcrossEngines`) asserts KCL
+      *source* substrings such as `name = "${_xr}-web"`, which pins that one instance and
+      not the class — a rendered comparison is the only thing that sees what Crossplane
+      actually composes. Evidence that the gap is live rather than theoretical: the first
+      blueprint this audit put through such a comparison produced CF-056. The fix must add
+      a gate that renders one fixture through all three engines and diffs the composed
+      resources, with the engine-dependent fields it is allowed to ignore named explicitly.
+
+---
+
 ## Non-findings (Recorded so they are not re-raised)
 
 - [x] `deploy/k8s/deployment.yaml` passes `--i-know-this-is-unauthenticated` with `--addr 0.0.0.0:8080`. Safe because the Service is ClusterIP.

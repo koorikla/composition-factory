@@ -142,6 +142,29 @@ engine, and that ordering is the real result.
   managed resource with native kinds, through the Configuration-directory form
   of `cf adopt`.
 
+### Second pass, same day — the cross-engine render comparison
+
+CF-045 was fixed in the main tree by another agent while this audit was running;
+verified independently at the CLI — KCL and Python now emit `name: demo-sa-sa`
+and the sibling reference resolves. The fix ships a unit test asserting KCL
+source substrings; it does **not** ship the rendered comparison the finding
+asked for, and `acceptance_test.go` is untouched.
+
+So this pass ran that comparison by hand: one blueprint, generated with each of
+`--engine go-templating|kcl|python`, rendered through the real
+`crossplane composition render`, and diffed resource by resource. The first
+blueprint put through it was the shipped `k8s-workload` starter, and it
+diverged — `data.PORT` renders as `"8080"` under go-templating and `8080` under
+the other two, which the API server rejects
+(`cannot unmarshal number into Go struct field ConfigMap.data of type string`,
+confirmed by `kubectl apply --dry-run=server`). Filed as CF-056; the missing
+gate itself is CF-057.
+
+That is the whole argument for the gate, made in one run: three instances of
+this class are now on record (CF-004, CF-045, CF-056), each found by a person
+or an agent rather than by CI, and each time the fix was verified with a test
+that could not have caught the next one.
+
 ## Re-verified — 2026-09-03, at 8b58a1d, 31bd674 and 47949a3
 
 47 commits and two releases (v0.8.0, v0.9.0) after the audited tree. Every gate
