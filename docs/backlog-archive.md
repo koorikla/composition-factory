@@ -28,6 +28,28 @@ git — `git log -p BACKLOG.md`.
       `cf serve` and hit `/api/kinds/...` (and one reverse-engineered `cache/*/crds.json`).
       Add `cf kinds [q]`, `cf fields <kind> [--required] [--status]`, `cf catalogue <q>`. A, C.
       — completed 2026-09-03
+- [x] cf cannot adopt its own output: the `{{- $spec := … -}}` prelude and `{{- if hasKey }}`
+      guards break the mask-then-YAML parser (`cannot unmarshal string into … map`). Every
+      `{{ }}` is masked as a quoted scalar, so block-level actions become YAML values.
+      Decide: fix adopt's masking to treat control-flow lines as opaque blocks, or fold adopt
+      into the Backlog v3 reader (which must read cf's dialect anyway). Found by C and D.
+      — completed 2026-09-03
+- [x] Non-param mustache lands in `value:` and gen single-quotes it (`tags: '{{ toYaml … }}'`);
+      `.observed.composite.resource.spec.X` is not recognised as a param; nested maps are
+      flattened to dotted paths gen then refuses; arrays/objects serialised via fmt.Sprint
+      (`'[map[conditionStatus:False …]]'`); composed apiVersion is rebound to `--provider`
+      (cluster-scoped `iam.aws.upbound.io` → `.m.`); without `--provider`, `sources: null`.
+      — completed 2026-09-03
+- [x] The escape hatch does the real work: nested objects (until P0 lands), array elements,
+      typed literals, quoted strings, XR-derived names (`{{ $xr }}-sa-key`), per-index values
+      (`printf "10.0.%d.0/24" $i`, `index (list …) $i`) and aggregate status wires over a
+      forEach set (a 500-character one-line `range … append … toJson` with a hand-written
+      guard chain) all needed `raw:`. `raw:` must be single-line, and `$i`, `$spec`, `$xr`,
+      `$xrMeta` are undocumented — every agent read composition.go to learn them. Document the
+      raw contract now; then add first-class forms in this order: typed literals (P0 above),
+      `resources.<looped>[*].status.<path>` list wires, forEach index helpers (cidr/az from
+      index), XR-name interpolation in envelope/annotation values, paired forEach.
+      — completed 2026-09-03
 - [x] `template:` cannot see observed resources (`map has no entry for key "observed"`), so
       any string built around a status wire (a redrive policy JSON, `serviceAccount:<email>`)
       is raw with a hand-copied 11-term guard. Give templates the observed map and a helper

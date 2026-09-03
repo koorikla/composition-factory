@@ -104,11 +104,24 @@ fields:
 ```
 
 ### 3. `raw`
-Emits verbatim YAML or Go template expressions:
+Emits verbatim YAML or Go template expressions. This is the primary escape hatch for custom expressions, helper functions, and index-based math.
+
 ```yaml
 fields:
   spec.selector.matchLabels: {raw: "{app: web}"}
+  cidrBlock: {raw: 'printf "10.0.%d.0/24" $i'}
+  tags[Name]: {raw: 'printf "%s-subnet-%d" $xr $i'}
 ```
+
+#### Runtime Variables Available in `raw`:
+When using the default `go-templating` engine, `raw:` expressions have direct access to the following scoped template variables:
+- **`$spec`**: The composite resource's parameter map (`.observed.composite.resource.spec`). E.g., `$spec.region`, `$spec.dbName`.
+- **`$xr`**: The composite resource's metadata name string (`.observed.composite.resource.metadata.name`), useful for deterministic resource naming and tagging.
+- **`$xrMeta`**: The composite resource's entire `metadata` map (including `.labels`, `.annotations`, `.namespace`, and `.uid`).
+- **`$observed`**: The map of all observed composed resources (`.observed.resources`). Each resource is accessed via `(index $observed "<resource-name>").resource`.
+- **`$i`**: The current iteration index (`0, 1, 2, ...`) available inside looped resources (`forEach`).
+
+*Note: In `python` and `kcl` engines, `{{ ... }}` Go-template syntax inside `raw:` is rejected with a validation error.*
 
 ### 4. `template`
 Executes a reusable named template from `spec.templates`.

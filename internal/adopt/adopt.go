@@ -636,15 +636,41 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 		}
 	}
 
-	// 3. Mask template expressions to make YAML strictly parseable
+	// 3. Filter standalone control flow lines (preludes, guards, end statements)
+	// so YAML parsing doesn't unmarshal block-level control statements into values.
+	lines := strings.Split(cleanTmpl, "\n")
+	var filteredLines []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Check if line is purely a Go-template control action
+		if strings.HasPrefix(trimmed, "{{") && strings.HasSuffix(trimmed, "}}") {
+			inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "{{"), "}}"))
+			inner = strings.TrimPrefix(inner, "-")
+			inner = strings.TrimSuffix(inner, "-")
+			inner = strings.TrimSpace(inner)
+			if strings.HasPrefix(inner, "$") && strings.Contains(inner, ":=") {
+				// Prelude variable assignment (e.g. $spec := ...)
+				continue
+			}
+			if strings.HasPrefix(inner, "if ") || strings.HasPrefix(inner, "else") ||
+				strings.HasPrefix(inner, "end") || strings.HasPrefix(inner, "range ") {
+				// Standalone control-flow line
+				continue
+			}
+		}
+		filteredLines = append(filteredLines, line)
+	}
+	cleanYAMLTemplate := strings.Join(filteredLines, "\n")
+
+	// 4. Mask remaining inline template expressions to make YAML strictly parseable
 	var placeholderTable []string
-	maskedTmpl := reMustacheExpr.ReplaceAllStringFunc(cleanTmpl, func(match string) string {
+	maskedTmpl := reMustacheExpr.ReplaceAllStringFunc(cleanYAMLTemplate, func(match string) string {
 		idx := len(placeholderTable)
 		placeholderTable = append(placeholderTable, match)
-		return fmt.Sprintf(`"__CF_EXPR_%d__"`, idx)
+		return fmt.Sprintf(`__CF_EXPR_%d__`, idx)
 	})
 
-	// 4. Parse YAML documents embedded in masked template
+	// 5. Parse YAML documents embedded in masked template
 	docs, err := splitYAML([]byte(maskedTmpl))
 	if err != nil {
 		return fmt.Errorf("split masked template yaml: %w", err)
@@ -928,15 +954,19 @@ func checkScalarClean(s string) error {
 	return nil
 }
 
+var rePlaceholder = regexp.MustCompile(`__CF_EXPR_(\d+)__`)
+
 func unmaskString(s string, placeholders []string) string {
 	if len(placeholders) == 0 {
 		return s
 	}
-	var idx int
-	if n, _ := fmt.Sscanf(s, "__CF_EXPR_%d__", &idx); n == 1 && idx >= 0 && idx < len(placeholders) {
-		return placeholders[idx]
-	}
-	return s
+	return rePlaceholder.ReplaceAllStringFunc(s, func(m string) string {
+		var idx int
+		if n, _ := fmt.Sscanf(m, "__CF_EXPR_%d__", &idx); n == 1 && idx >= 0 && idx < len(placeholders) {
+			return placeholders[idx]
+		}
+		return m
+	})
 }
 
 func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]string) {

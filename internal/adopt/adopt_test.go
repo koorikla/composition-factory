@@ -717,3 +717,59 @@ spec:
 		t.Errorf("Kind = %q, want Blueprint", bp.Kind)
 	}
 }
+
+func TestAdoptSelfGeneratedComposition(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: aws.example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            {{- $xr := .observed.composite.resource.metadata.name -}}
+            {{- $xrMeta := .observed.composite.resource.metadata -}}
+            {{- $observed := .observed.resources -}}
+            ---
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: {{ $xr }}-main-queue
+            spec:
+              forProvider:
+                {{- if hasKey $spec "region" }}
+                region: '{{ $spec.region }}'
+                {{- end }}
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.IsLossy() {
+		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+	if r.Fields["region"].From != "params.region" {
+		t.Errorf("region field = %+v, want From: params.region", r.Fields["region"])
+	}
+}
