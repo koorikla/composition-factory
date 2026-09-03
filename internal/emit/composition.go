@@ -1124,50 +1124,35 @@ func forEachStatusBound(ref blueprint.FromRef, r blueprint.Resource, b *blueprin
 // statusGuard builds the render-time guard for a status dereference, plus
 // the BARE value expression it protects (callers wrap it: a status wire as
 // an interpolation, an observed forEach bound inside its range head). The
-// value lives at
-// $.observed.resources.<name>.resource.status.<path> — but nothing on that
-// chain is guaranteed to exist (the whole resources key is absent until
-// something is observed, and each level below appears as the resource
-// converges), and under missingkey=error every unguarded dereference of a
-// missing key is a hard render failure. So the guard is a single short-
-// circuiting `and` (text/template evaluates and/or lazily — measured, not
-// assumed) that proves each level with `hasKey` before the next level
-// touches it, exactly the spec §8 idiom; `{{- with }}` is banned there for
-// hard-failing the same case.
+// value lives at $.observed.resources.<name>.resource.status.<path> — but
+// nothing on that chain is guaranteed to exist (the whole resources key is
+// absent until something is observed, and each level below appears as the
+// resource converges), and under missingkey=error every unguarded dereference
+// of a missing key is a hard render failure.
 //
-// Two mechanics that are invisible in the output but load-bearing:
+// We guard the leaf using Sprig's dig and hasKey:
 //
-//   - The resource name is dereferenced with `index`, never `.name`: a
-//     composition-resource-name is a DNS label and may carry dashes, which
-//     template field-access syntax cannot address.
-//   - Each descent below the entry also proves `kindIs "map"` before the
-//     next hasKey, because hasKey's argument is typed map[string]any and a
-//     nil (or non-map) intermediate is a "wrong type for value" execution
-//     error, not a false — measured against the real engine. A
-//     half-populated or hand-written observed fixture (`status:` with
-//     nothing under it) must degrade to "field omitted", never to a failed
-//     render of the whole composition.
+//	hasKey (dig "resources" "<resName>" "resource" "status" ... dict $.observed) "<leaf>"
 //
-// The expression comes back BARE (no {{ }}): the field surface interpolates
-// it as-is, the annotation surface pipes it through quote first, and the
-// forEach bound wraps it in until (int …) — see each caller for why.
+// dig traverses through any missing, nil, or non-map intermediate and safely
+// falls back to dict (empty map), where hasKey safely checks for the leaf key.
+//
+// The expression returned is:
+//
+//	(index $.observed.resources "<resName>").resource.status...
 func statusGuard(resName string, segs []string) (guard, expr string) {
-	entry := fmt.Sprintf("(index $.observed.resources %q)", resName)
-	conds := []string{
-		`(hasKey $.observed "resources")`,
-		`(kindIs "map" $.observed.resources)`,
-		fmt.Sprintf("(hasKey $.observed.resources %q)", resName),
-		fmt.Sprintf(`(kindIs "map" %s)`, entry),
-		fmt.Sprintf(`(hasKey %s "resource")`, entry),
+	digKeys := []string{`"resources"`, fmt.Sprintf("%q", resName), `"resource"`, `"status"`}
+	for _, seg := range segs[:len(segs)-1] {
+		digKeys = append(digKeys, fmt.Sprintf("%q", seg))
 	}
-	cur := entry + ".resource"
+	leaf := segs[len(segs)-1]
+	guard = fmt.Sprintf(`hasKey (dig %s dict $.observed) %q`, strings.Join(digKeys, " "), leaf)
+
+	cur := fmt.Sprintf(`(index $.observed.resources %q).resource`, resName)
 	for _, seg := range append([]string{"status"}, segs...) {
-		conds = append(conds,
-			fmt.Sprintf(`(kindIs "map" %s)`, cur),
-			fmt.Sprintf("(hasKey %s %q)", cur, seg))
 		cur += "." + seg
 	}
-	return "(and " + strings.Join(conds, " ") + ")", cur
+	return guard, cur
 }
 
 // writeMapField emits "key:" (or "key: {}") at keyIndent, plus plan's fields

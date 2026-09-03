@@ -3,9 +3,8 @@ package emit
 import (
 	"bytes"
 	"fmt"
+	sprig "github.com/Masterminds/sprig/v3"
 	"path/filepath"
-	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 	"text/template"
@@ -158,77 +157,49 @@ func renderTemplateObserved(t *testing.T, tmplBody string, xrSpec map[string]any
 // presence or absence of .observed.resources is the thing under test) can.
 func renderTemplateData(t *testing.T, tmplBody string, data map[string]any) (string, error) {
 	t.Helper()
-	funcs := template.FuncMap{
-		"hasKey": func(d map[string]any, key string) bool {
-			_, ok := d[key]
-			return ok
-		},
-		"kindIs": func(kind string, v any) bool {
-			return reflect.ValueOf(v).Kind().String() == kind
-		},
-		"setResourceNameAnnotation": func(name string) string {
-			return "crossplane.io/composition-resource-name: " + name
-		},
-		"until": func(count int) []int {
-			step := 1
-			if count < 0 {
-				step = -1
-			}
-			out := []int{}
-			for i := 0; i != count; i += step {
-				out = append(out, i)
-			}
-			return out
-		},
-		"int": func(v any) int {
-			switch n := v.(type) {
-			case int:
-				return n
-			case int64:
-				return int(n)
-			case float64:
-				return int(n)
-			case string:
-				i, err := strconv.Atoi(n)
-				if err != nil {
-					t.Fatalf("int stub: %q is not an integer", n)
-				}
-				return i
-			default:
-				t.Fatalf("int stub: unhandled type %T", v)
-				return 0
-			}
-		},
+	funcs := sprig.TxtFuncMap()
+	delete(funcs, "env")
+	delete(funcs, "expandenv")
+	funcs["setResourceNameAnnotation"] = func(name string) string {
+		return "crossplane.io/composition-resource-name: " + name
 	}
-	// The user-template call chain, mirroring the real engine:
-	// function-go-templating's include (ExecuteTemplate into a buffer, the
-	// Helm idiom) and sprig's dict/trim/nindent, faithfully enough that the
-	// emitted `include ... | trim | nindent N` pipeline exercises the same
-	// indentation semantics the render will. nindent is sprig's exactly:
-	// indent every line by n and prepend a newline.
+	funcs["dig"] = func(args ...any) (any, error) {
+		if len(args) < 3 {
+			return nil, fmt.Errorf("dig needs at least 3 arguments")
+		}
+		target := args[len(args)-1]
+		fallback := args[len(args)-2]
+		keys := make([]string, len(args)-2)
+		for i := 0; i < len(keys); i++ {
+			var ok bool
+			keys[i], ok = args[i].(string)
+			if !ok {
+				return fallback, nil
+			}
+		}
+		curr := target
+		for _, k := range keys {
+			m, ok := curr.(map[string]any)
+			if !ok {
+				return fallback, nil
+			}
+			val, exists := m[k]
+			if !exists {
+				return fallback, nil
+			}
+			curr = val
+		}
+		if _, ok := curr.(map[string]any); !ok {
+			return fallback, nil
+		}
+		return curr, nil
+	}
 	tmpl := template.New("t").Option("missingkey=error")
 	funcs["include"] = func(name string, data any) (string, error) {
 		var buf bytes.Buffer
 		err := tmpl.ExecuteTemplate(&buf, name, data)
 		return buf.String(), err
 	}
-	funcs["trim"] = strings.TrimSpace
-	funcs["nindent"] = func(n int, s string) string {
-		pad := strings.Repeat(" ", n)
-		return "\n" + pad + strings.ReplaceAll(s, "\n", "\n"+pad)
-	}
-	funcs["dict"] = func(pairs ...any) map[string]any {
-		d := make(map[string]any, len(pairs)/2)
-		for i := 0; i+1 < len(pairs); i += 2 {
-			key, ok := pairs[i].(string)
-			if !ok {
-				t.Fatalf("dict stub: key %v is not a string", pairs[i])
-			}
-			d[key] = pairs[i+1]
-		}
-		return d
-	}
-	funcs["quote"] = func(v any) string { return strconv.Quote(fmt.Sprint(v)) }
 
 	tmpl, err := tmpl.Funcs(funcs).Parse(tmplBody)
 	if err != nil {

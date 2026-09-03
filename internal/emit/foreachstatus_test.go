@@ -115,16 +115,8 @@ func forEachStatusBlueprint() *blueprint.Blueprint {
 // The guard chain and dereference for main-queue's status.atProvider.nodeCount,
 // exactly as statusGuard builds them — shared by the golden below.
 const (
-	nodeCountGuard = `(and (hasKey $.observed "resources") (kindIs "map" $.observed.resources) ` +
-		`(hasKey $.observed.resources "main-queue") (kindIs "map" (index $.observed.resources "main-queue")) ` +
-		`(hasKey (index $.observed.resources "main-queue") "resource") ` +
-		`(kindIs "map" (index $.observed.resources "main-queue").resource) ` +
-		`(hasKey (index $.observed.resources "main-queue").resource "status") ` +
-		`(kindIs "map" (index $.observed.resources "main-queue").resource.status) ` +
-		`(hasKey (index $.observed.resources "main-queue").resource.status "atProvider") ` +
-		`(kindIs "map" (index $.observed.resources "main-queue").resource.status.atProvider) ` +
-		`(hasKey (index $.observed.resources "main-queue").resource.status.atProvider "nodeCount"))`
-	nodeCountExpr = `(index $.observed.resources "main-queue").resource.status.atProvider.nodeCount`
+	nodeCountGuard = `hasKey (dig "resources" "main-queue" "resource" "status" "atProvider" dict $.observed) "nodeCount"`
+	nodeCountExpr  = `(index $.observed.resources "main-queue").resource.status.atProvider.nodeCount`
 )
 
 // TestStatusForEachGoldenTemplate pins the emitted template body
@@ -271,6 +263,12 @@ func TestStatusForEachUnobservedRendersZeroInstances(t *testing.T) {
 		{"atProvider absent", map[string]any{
 			"main-queue": map[string]any{"resource": map[string]any{
 				"status": map[string]any{}}}}},
+		{"atProvider null", map[string]any{
+			"main-queue": map[string]any{"resource": map[string]any{
+				"status": map[string]any{"atProvider": nil}}}}},
+		{"atProvider is not a map", map[string]any{
+			"main-queue": map[string]any{"resource": map[string]any{
+				"status": map[string]any{"atProvider": "weird"}}}}},
 		{"nodeCount absent", map[string]any{
 			"main-queue": map[string]any{"resource": map[string]any{
 				"status": map[string]any{"atProvider": map[string]any{}}}}}},
@@ -309,7 +307,7 @@ func TestStatusForEachWhenStaysOutsideTheGuardedRange(t *testing.T) {
 	tmplBody := extractTemplate(t, got)
 
 	iWhen := strings.Index(tmplBody, "{{- if $spec.replicasEnabled }}")
-	iGuard := strings.Index(tmplBody, "{{- if (and (hasKey $.observed")
+	iGuard := strings.Index(tmplBody, "{{- if hasKey (dig \"resources\"")
 	iRange := strings.Index(tmplBody, "{{- range $i :=")
 	if iWhen == -1 || iGuard == -1 || iRange == -1 {
 		t.Fatalf("template missing the when condition, the observed guard or the range\n---\n%s", tmplBody)

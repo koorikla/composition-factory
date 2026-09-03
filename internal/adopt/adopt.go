@@ -497,7 +497,7 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 var (
 	reDefine         = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
 	reParamVar       = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
-	reObservedStatus = regexp.MustCompile(`\{\{-?\s*\(index\s+\$observed\s+"([^"]+)"\)\.resource\.status\.atProvider\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
+	reObservedStatus = regexp.MustCompile(`\{\{-?\s*\(index\s+(?:\$\.?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)\.resource\.status(?:\.atProvider)?\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reMustacheExpr   = regexp.MustCompile(`\{\{.*?\}\}`)
 	paramNameRE      = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
 	dnsInvalidRE     = regexp.MustCompile(`[^a-z0-9-]+`)
