@@ -66,6 +66,14 @@ The standard developer and CI workflows are encapsulated in `Makefile`:
 
 To prevent regressions and collisions between concurrent automation agents:
 
+- **Task Briefs & The Execution Contract**:
+  Work is dispatched as a brief in `docs/tasks/CF-NNN-<slug>.md`, carrying the repro, the
+  verbatim acceptance test, and the contract the implementation must satisfy. Any agent
+  executing one — spawned by any tool — reads
+  [`docs/task-execution-contract.md`](docs/task-execution-contract.md) first: it governs
+  worktree isolation, port allocation, the test-first loop, the gates, and the handover.
+  The authoring side of that loop is `.claude/skills/backlog-authoring/`.
+
 - **One-Driver Rule**: Exactly one driver merges to `main`. All other agents work in isolated topic branch worktrees and hand over PRs or clean branches.
 - **Pre-Merge Synchronization**: Always run `git fetch && git log main..origin/main` before any merge to ensure no stale assumptions.
 - **Post-Merge CI Check**: The driver that merges to `main` must watch the resulting `ci` run to completion (`gh run watch <id> --exit-status`) and fix or revert what it broke — a merge is not done until CI is green. Two of the five jobs (`cluster`, `e2e`) exercise a real kind cluster and a browser and cannot be reproduced by unit tests, so a locally-green tree says nothing about them. If `e2e` fails, rerun it once before treating it as a regression: its canvas drag tests are flaky in CI. Subagents working in topic-branch worktrees are exempt — they hand over branches and the driver owns the merge and its CI.
