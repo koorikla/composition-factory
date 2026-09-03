@@ -29,6 +29,7 @@ This document records the foundational architecture rules, testing loops, and co
 To prevent concurrent processes and test runners from trampling each other or the developer's live workspace:
 
 - **Port 8080**: Human developer default (`cf serve` with default `--addr 127.0.0.1:8080`).
+- **Port 8090**: UX tester canvas (`.claude/skills/canvas-ux-tester`), seeded from scratch dir `.testrun-ux`. One tester at a time — the engine holds a single live document, so a second tester on the same port corrupts both runs.
 - **Dynamic Worktree Port (18000–27999)**: Automated Playwright e2e test suite (`make test-e2e`, managed via `playwright.config.js` and `tests/helpers.js` hashing the git worktree path; overridable via `CF_E2E_PORT`).
 - **Dynamic Demo Port (28000–37999)**: Headless demo GIF recorder instance (`scripts/record-demos/`; overridable via `CF_DEMO_PORT`).
 - **Cluster Namespace & Group Isolation**: When running in a shared kind cluster, each workspace uses namespace `cf-<slug>` and appends `--group-suffix=w<hash>.cf-test` to XRD groups (`platform.w<hash>.cf-test`) to prevent cluster-scoped CRD/XRD collisions. The group suffix carries only the 6-char path hash, not the full slug: Crossplane copies the Composition name into a CompositionRevision *label*, and label values cap at 63 characters, so a longer suffix silently stops revisions (and therefore all composition) from being created.
