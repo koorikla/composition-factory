@@ -1476,3 +1476,56 @@ func TestUnavailableFailsWhenAcceptanceIsRequired(t *testing.T) {
 		})
 	}
 }
+
+// TestAcceptanceAlternativeEnginesRender renders KCL and Python engines through
+// their real function images to verify cross-engine render correctness.
+func TestAcceptanceAlternativeEnginesRender(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	bin := testBin
+	cacheDir := testCacheDir
+
+	for _, engine := range []string{"kcl", "python"} {
+		t.Run("engine="+engine, func(t *testing.T) {
+			outDir := filepath.Join(t.TempDir(), "out-"+engine)
+			bpPath := filepath.Join(t.TempDir(), "xqueue-"+engine+".cf.yaml")
+
+			raw, err := os.ReadFile("testdata/xqueue.cf.yaml")
+			if err != nil {
+				t.Fatalf("read testdata/xqueue.cf.yaml: %v", err)
+			}
+			content := string(raw) + fmt.Sprintf("\n  emit:\n    engine: %s\n", engine)
+			if err := os.WriteFile(bpPath, []byte(content), 0o644); err != nil {
+				t.Fatalf("write bp: %v", err)
+			}
+
+			gen := exec.Command(bin, "gen", bpPath, "-o", outDir, "--cache-dir", cacheDir)
+			if out, err := gen.CombinedOutput(); err != nil {
+				t.Fatalf("cf gen: %v\n%s", err, out)
+			}
+
+			comp := filepath.Join(outDir, "compositions", "xqueues.platform.sparky.ee.yaml")
+			xrd := filepath.Join(outDir, "xrds", "xqueues.platform.sparky.ee.yaml")
+			fns := filepath.Join(outDir, "functions.yaml")
+			rendered, err := renderComposition(t, "testdata/xr.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
+			if err != nil {
+				t.Fatalf("crossplane composition render (%s): %v\n%s", engine, err, rendered)
+			}
+			got := string(rendered)
+			for _, want := range []string{
+				"apiVersion: sqs.aws.m.upbound.io/v1beta1",
+				"kind: Queue",
+				"maxMessageSize: 2048",
+				"region: eu-north-1",
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("rendered %s output missing %q\n---\n%s", engine, want, got)
+				}
+			}
+		})
+	}
+}

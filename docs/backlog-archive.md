@@ -28,6 +28,10 @@ git — `git log -p BACKLOG.md`.
       `cf serve` and hit `/api/kinds/...` (and one reverse-engineered `cache/*/crds.json`).
       Add `cf kinds [q]`, `cf fields <kind> [--required] [--status]`, `cf catalogue <q>`. A, C.
       — completed 2026-09-03
+- [x] Lane B renders only go-templating. Extend the acceptance test to render each engine
+      through its real function image (function-kcl, function-python) on the same fixtures;
+      the Python `.get` bug would have been caught on day one.
+      — completed 2026-09-03
 - [x] cf cannot adopt its own output: the `{{- $spec := … -}}` prelude and `{{- if hasKey }}`
       guards break the mask-then-YAML parser (`cannot unmarshal string into … map`). Every
       `{{ }}` is masked as a quoted scalar, so block-level actions become YAML values.

@@ -81,12 +81,6 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
 (blueprints, outputs, renders, REPORT.md). Items marked (repro) were reproduced by hand.
 
 
-### P1 — alternative engines are broken for real blueprints
-
-- [ ] Lane B renders only go-templating. Extend the acceptance test to render each engine
-      through its real function image (function-kcl, function-python) on the same fixtures;
-      the Python `.get` bug would have been caught on day one.
-
 ### P2 — discovery and CLI
 
 - [ ] Every status wire is an 11-term hasKey/kindIs guard; correct but unreviewable by eye
