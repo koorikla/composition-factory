@@ -49,96 +49,10 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
 - [ ] Every status wire is an 11-term hasKey/kindIs guard; correct but unreviewable by eye
       (the same item Backlog v3 Phase 1 needs). A, E.
 
-### v2 half-fixes (verifier, 14 of 46 ticked items partially done)
+### Structure — canvas and modules
 
-- [ ] Design spec still "draft for review" with §11/§12 unsuperseded.
-- [ ] Drag-to-wire type warning ships but "change parameter type" does not;
-      catalogue-add spinner/toast/tab-switch and the managementPolicies "more" button have
-      no real spec coverage (the latter's spec passes vacuously); inspector "env:" vs canvas
-      "envelope." namespaces still split; output.js splitter still hand-rolled; `crds:` sources
-      still re-read per generate; api/server_test still retypes the Queue CRD; the Guide tab
-      is still a hardcoded copy of docs/guide.md.
-
-## Backlog v5 — whole-tree code audit (2026-09-02 @ ee61f82, re-verified 2026-09-03 @ 8b58a1d)
-
-Re-verification, 39 commits and one release later: findings 1 (Validate at 592
-lines) and 6 (no race detector in CI) are closed and archived, and the audit's
-strongest recommendation landed — CI Lane C now stands up a real kind cluster
-and runs `make test-cluster` on every push, which is the gate that closes the
-blind spot the caveat below names. What remains open moved the wrong way: the
-emitter triplication, both JS init closures and the worktree sprawl all grew.
-Numbers in each item are current as of 2026-09-03. Full delta:
-docs/code-audit.md, "Re-verified".
-
-Scope caveat, and it matters: this audit is static. It reads the tree, the
-tooling and the shapes; it never built a composition or applied one. Backlog
-v4 above ran the opposite method on the same commit — five agents building
-real compositions end to end — and found P0 defects in emitted output that
-nothing here could have surfaced (dotted forProvider keys, `value:` always
-quoted, `resolveKind` ignoring `provider:`). Read v4 first. The grades below
-are grades for the codebase as an artifact, not for whether it generates
-correct YAML; where the two disagree, v4 wins, because it checked.
-
-Method: tooling first, then a read of the largest units. `gofmt`/`go vet`,
-staticcheck v0.8.1, `deadcode ./cmd/...`, `go test ./... -short -cover`,
-`go test ./... -short -race`, `npm audit`, plus the CI workflows, Dockerfile,
-deploy manifests and a secrets scan. Full report with the numbers and the
-commands that produced them: docs/code-audit.md.
-
-Headline: there was very little to clean *at this level*. The consolidation
-backlog and Backlog v2 took the duplication; vet, staticcheck and the race
-detector are clean, and `deadcode` finds no dead production code at all (its
-four hits are test seams and a second `main`). 724 Go test functions + 150
-Playwright behaviors, 25 398 test LOC against 16 458 production LOC, 80-100%
-coverage on the packages that matter. What is left *in this dimension* is
-structural. That a suite this large stayed green through v4's P0s is itself
-the finding worth carrying forward: the tests pin the emitter's bytes against
-its own goldens, so an emitter that is wrong in the same way twice passes.
-
-### Structure — the five units carrying disproportionate complexity
-
-- [ ] The three emitters walk the same tree three times. Re-measured
-      2026-09-03: composition.go:writeResourceTemplate (294 lines, was 279),
-      python.go:pythonTemplateBody (176, was 165), kcl.go:kclTemplateBody
-      (186, was 164). Diffing the KCL and Python bodies gives 108 changed
-      lines out of ~185 (was 99 of ~165) — the gap widens every release, so
-      this item gets more expensive the longer it waits.
-      It is the same traversal in all three (refuse conventions, resolve
-      kind, plan fields/envelope/annotations, open when, open forEach, write
-      apiVersion/kind/metadata/spec/forProvider), differing only in syntax
-      tokens. The structured-RHS work already did the hard half; what remains
-      is to lift the walk: one `walkResources` over a small backend interface
-      (openResource, writeKey, openMap, formatLiteral, condition, loop), the
-      three current bodies becoming the three backends. Two days, medium risk
-      but bounded — every path has a byte-pinned golden. Do not start it with
-      anything else in flight.
-- [ ] Three canvas dispatch chains are 300-line if/else ladders on a
-      `data-a` action attribute: canvas.js openFieldPicker (317),
-      inspector.js onBoxClick (316), onBoxChange (295). Replace with a
-      `const actions = { … }` map, one small named function per action. One
-      day, low risk with 150 Playwright behaviors underneath — but the suite
-      needs an unshared port first (see the per-workspace e2e item above).
-      Biggest legibility win available in the canvas.
-- [ ] palette.js `init` is 906 lines and output.js `init` is 835 (2026-09-03;
-      882 and 830 at the audit — both still growing) — each
-      module's entire body lives inside its init, so nothing in it can be
-      reached or tested in isolation. Larger and separate from the dispatch
-      chains above; do those first and reassess.
-
-### Coverage and CI
-
-- [ ] Coverage thins where the tree touches the outside world. Re-measured
-      2026-09-03: internal/cluster 55.0% (unmoved), internal/cache 64.9%,
-      internal/xpkg 72.6%, cmd/cf 74.0%. internal/cluster is the only package
-      that talks to a live API server — bring its error paths (unreadable
-      kubeconfig, unreachable server, partial CRD listings) up as part of the
-      cluster lane, which now runs on every push.
-- [ ] Coverage fell in the two packages that took the most v0.8.0 work:
-      internal/adopt 85.9% → 77.3% (adopt engine + loss report),
-      internal/emit 87.7% → 82.8% (render-time validation, typed literals,
-      nested forProvider). Healthy in absolute terms, but both moved down
-      while the code beneath them moved up. Cover the new paths before the
-      next feature lands on them.
+- [ ] Three canvas dispatch chains are if/else ladders on a `data-a` action attribute: canvas.js openFieldPicker, inspector.js onBoxClick, onBoxChange. Replace with a `const actions = { … }` map, one small named function per action.
+- [ ] palette.js `init` and output.js `init` closures modularization: extract reusable component helpers out of init.
 
 ### Workspace hygiene (needs a decision, not a delete)
 

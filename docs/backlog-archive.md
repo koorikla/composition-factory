@@ -1,3 +1,8 @@
+- [x] Drag-to-wire type warning action "change parameter type" converts XRD parameter
+      type to matching target field type upon user confirmation (`canvas.js:1330`).
+      — completed 2026-09-03
+- [x] Unify inspector "env:" and canvas "envelope." target namespaces across wiring handlers.
+      — completed 2026-09-03
 - [x] The three emitters walk the same tree three times. Lift the common traversal,
       validation, kind resolution, conventions merge, and field/annotation planning
       into a shared `planSingleResource` in `internal/emit/plan.go`, used identically across
