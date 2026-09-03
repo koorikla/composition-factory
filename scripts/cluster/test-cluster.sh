@@ -146,7 +146,10 @@ kubectl delete -f "${OUT_DIR}/xrds/" --timeout=30s || true
 echo "==> Testing Round-Trip Gate with full features fixture (managed resource, atProvider status wire, envelope, forEach, spec.environment)..."
 RT_FIXTURE="internal/examples/testdata/roundtrip-full.cf.yaml"
 RT_OUT_DIR="${OUT_DIR}/roundtrip-full-orig"
-mkdir -p "${RT_OUT_DIR}"
+echo "==> Ensuring provider schema for full features fixture is cached..."
+./bin/cf provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0 || true
+
+echo "==> Generating full roundtrip artifacts..."
 ./bin/cf gen "${RT_FIXTURE}" --out "${RT_OUT_DIR}" --group-suffix="${WORKSPACE_GROUP_SUFFIX}"
 
 echo "==> Applying full round-trip XRD and Composition to API server..."
