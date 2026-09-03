@@ -51,13 +51,24 @@ consumer's git diff.
 ### Changed
 
 - Consolidated resource planning across Go-templating, KCL, and Python emitters into `planSingleResource` (`internal/emit/plan.go`), unifying schema validation, kind resolution, and field/annotation planning.
-- `docs/code-audit.md` re-verified against `main` at 8b58a1d, 39 commits after
-  the audited tree. Closed: `(*Blueprint).Validate` is split into seven named
-  validators, `make test-race` runs in CI lane A, and the kind-cluster lane the
-  audit called its strongest recommendation now runs on every push. Still open
-  and all grown since: both oversized canvas `init` closures and the worktree
-  sprawl. Closed: emitter planning triplication consolidated, catalogue kinds/packages
-  surfaced in `cf catalogue --kind`.
+- `docs/code-audit.md` re-verified twice on 2026-09-03, at 8b58a1d and again at
+  31bd674. Closed across the two passes: `(*Blueprint).Validate` split into
+  seven named validators; `make test-race` in CI lane A; the kind-cluster lane
+  running on every push; a shared `planSingleResource` for all three emitters
+  (294/186/176 → 194/147/137 lines); `internal/cluster` coverage 55.0% → 78.5%;
+  the working copy pruned 807 MB → 313 MB. Still open: the canvas dispatch
+  ladders and `init` closures, untouched across every pass.
+- `BACKLOG.md` records the round-trip rule as the acceptance bar for the
+  manifest-import track: anything cf generates must survive `kubectl apply` and
+  come back through `kubectl get -o yaml` into `cf import`. The DSL stays the
+  canonical IR; import is a converter into it, not a replacement for it.
+- Two archive entries corrected where they claimed more than shipped: the
+  emitter consolidation covers the planning half only (26 lines of engine-refusal
+  preamble are still duplicated byte-for-byte between the KCL and Python
+  emitters), and `cf catalogue --kind` was added but routes to the free-text
+  search, so it does not filter by served kind — `--kind Bucket` returns
+  `provider-bitbucket-server`, which serves no kinds — leaving
+  `catalogue.PackagesForKind` unreachable.
 
 ### Fixed
 

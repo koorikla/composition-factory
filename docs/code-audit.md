@@ -17,11 +17,12 @@ while ignoring `provider:`. Read that backlog alongside this. The grades below
 are grades for the codebase as an artifact, not a claim that it generates
 correct YAML; where the two disagree, the dogfooding wins, because it checked.
 
-## Re-verified — 2026-09-03, `main` at 8b58a1d
+## Re-verified — 2026-09-03, `main` at 8b58a1d, then again at 31bd674
 
-39 commits and one release (v0.8.0) after the audited tree. Every gate in the
-Method section was re-run and every finding re-measured with the same commands,
-so the numbers here are directly comparable to the ones below them.
+47 commits and two releases (v0.8.0, v0.9.0) after the audited tree. Every gate
+in the Method section was re-run and every finding re-measured with the same
+commands, so the numbers here are directly comparable to the ones below them.
+The second pass is folded in: where a finding moved twice, both steps are shown.
 
 ### Closed
 
@@ -43,34 +44,50 @@ so the numbers here are directly comparable to the ones below them.
   declared — `go.mod` at 1.27.0, five CI `go-version` keys, and
   `golang:1.27-alpine`.
 
-### Still open — and three moved the wrong way
+### Movement on the rest
 
-| Finding | 2026-09-02 | 2026-09-03 |
-|---|---|---|
-| 2. Emitter triplication | 279 / 165 / 164 lines, 99 differing | 294 / 186 / 176, 108 differing |
-| 3. JS `init` closures | 882 / 830 | 906 / 835 |
-| 3. JS dispatch ladders | 317 / 316 / 295 | unchanged |
-| 4. `internal/cluster` coverage | 55.0 % | 55.0 % |
-| 5. Working copy | 731 MB, 20 branches (15 merged) | 807 MB, 27 branches (22 merged) |
+| Finding | audit (ee61f82) | 8b58a1d | 31bd674 |
+|---|---|---|---|
+| 2. Emitter traversal | 279 / 165 / 164 | 294 / 186 / 176 | **194 / 147 / 137** |
+| 3. JS `init` closures | 882 / 830 | 906 / 835 | 906 / 835 |
+| 3. JS dispatch ladders | 317 / 316 / 295 | unchanged | unchanged |
+| 4. `internal/cluster` coverage | 55.0 % | 55.0 % | **78.5 %** |
+| 5. Working copy | 731 MB, 20 branches | 807 MB, 27 branches | **313 MB, 15 branches** |
 
-None of these is a regression in behaviour; each is the cost of adding features
-to a shape that was already flagged. The emitter finding in particular gets
-more expensive every release — the third traversal grew by 15 lines and the
-gap between the KCL and Python bodies widened by nine.
+Findings 2, 4 and 5 turned around in the second pass. A shared
+`planSingleResource` (`internal/emit/plan.go`) now does the validation, kind
+resolution, conventions merge and field planning for all three emitters, which
+is the lift the finding asked for; `internal/cluster` gained error-path and
+kubeconfig tests; the merged worktrees were pruned.
+
+Two remainders, both verified in code rather than inferred:
+
+- **The engine-refusal preamble is still duplicated byte-for-byte.** The first
+  26 lines of `kclTemplateBody` and `pythonTemplateBody` diff to zero lines.
+  `planSingleResource` took the planning half; this is the rest.
+- **`web/` is 158 MB of the remaining 313 MB** — the retired React canvas, out
+  of git, still on disk — and five branches still carry unmerged commits.
+
+Finding 3 has not moved at all, and it is now the whole of Track 2.
 
 ### New
 
-- **Coverage fell in the two packages that took the most feature work.**
-  `internal/adopt` 85.9 % → 77.3 % (the adopt engine and its loss report) and
-  `internal/emit` 87.7 % → 82.8 % (render-time validation, typed literals,
-  nested `forProvider`). Both are healthy in absolute terms. Both moved down
-  while the code beneath them moved up, which is the direction worth watching.
-- **`deadcode` reports six unreachable functions, up from four, and the two new
-  ones are real.** `catalogue.Kinds` and `catalogue.PackagesForKind`
-  (`catalogue/kinds.go:230,240`) are exported, covered by a test, and called by
-  nothing in production. The maps behind them are live — `Matches` uses them to
-  power `catalogue.Search` — so these are two accessors written for a caller
-  that never arrived. Wire them into `cf catalogue`, or unexport them.
+- **Coverage fell in the two packages that took the most feature work, then
+  partly recovered.** `internal/adopt` 85.9 % → 77.3 % → 78.6 % and
+  `internal/emit` 87.7 % → 82.8 % → 83.3 %. Healthy in absolute terms, but the
+  new code is still thinner-covered than what it sits beside. `internal/cache`
+  (64.9 %) and `internal/xpkg` (72.6 %) have not moved across any pass.
+- **`deadcode` went from four unreachable functions to six, then back to five.**
+  `catalogue.Kinds` was wired into the `cf catalogue` package table.
+  `catalogue.PackagesForKind` (`catalogue/kinds.go:240`) is still exported,
+  still tested, still called by nothing.
+- **`cf catalogue --kind` does not filter by kind** — found while checking the
+  above, and the two are the same defect. The flag concatenates its value into
+  the free-text query and calls `Search`, so it matches names and descriptions:
+  `cf catalogue --kind Bucket` returns `provider-bitbucket-server`, which
+  serves no kinds at all and matched on "Bitbucket", and its output is
+  byte-identical to `cf catalogue Bucket`. `PackagesForKind` is the exact-match
+  lookup the flag wants, sitting unused two functions away.
 
 ### Scale, for context
 

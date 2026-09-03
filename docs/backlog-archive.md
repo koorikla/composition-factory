@@ -10,10 +10,14 @@
       validation, kind resolution, conventions merge, and field/annotation planning
       into a shared `planSingleResource` in `internal/emit/plan.go`, used identically across
       `composition.go`, `python.go`, and `kcl.go`.
-      — completed 2026-09-03
-- [x] `catalogue.Kinds` and `catalogue.PackagesForKind` surfaced in `cf catalogue --kind <kind>`
-      and package table outputs to discover which package serves which CRD kind.
-      — completed 2026-09-03
+      — completed 2026-09-03 (planning half only: writeResourceTemplate 294→194,
+      kclTemplateBody 186→147, pythonTemplateBody 176→137. The engine-refusal
+      preamble is still duplicated byte-for-byte; carried forward as an open item.)
+- [x] `catalogue.Kinds` surfaced in the `cf catalogue` package table so a reader can
+      see which kinds a package serves.
+      — completed 2026-09-03 (only half: `--kind` was added but routes to the free-text
+      `Search`, so it does not filter by served kind and `PackagesForKind` is still
+      unreachable. Carried forward as an open item.)
 - [x] `internal/cluster` test coverage brought from 55% to 78.5% with comprehensive error path
       and kubeconfig TLS/context testing.
       — completed 2026-09-03
