@@ -40,7 +40,6 @@ spec:
       provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
       envelope:
         writeConnectionSecretToRef.name: {from: params.queueName}
-        writeConnectionSecretToRef.namespace: {value: default}
       fields:
         region: {from: env.region}
         sqsManagedSseEnabled: {value: true}
