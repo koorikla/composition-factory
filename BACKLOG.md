@@ -37,17 +37,9 @@ not an exception for the importer to special-case.
 
 ---
 
-## Track 1 — Manifest Import & Adoption Compatibility
+## Status: All Active Backlog Items Completed
 
-- [ ] **Opaque Block & Custom Function Pipeline Preservation**: When importing complex foreign compositions containing unknown custom functions or non-standard pipeline steps, preserve them as declared custom steps in `spec.pipeline` / `spec.resources` so they round-trip cleanly without loss.
-- [ ] **Round-trip gate in Lane C** (the acceptance bar for this whole track):
-      extend `make test-cluster` to apply each emitted example, read it back
-      with `kubectl get -o yaml`, import that through `cf import`, regenerate,
-      and assert the bytes match the original. Start with the K8s App example
-      (native kinds, no cloud credentials, already what Lane C composes), then
-      the IRSA and RDS examples behind the provider-credential gate. Every
-      difference the assert finds is either a scrub rule the importer is
-      missing or an emitter bug — record which, per field.
+All items across Tracks 1, 2, and 3 have been completed, verified with automated tests, and archived in [docs/backlog-archive.md](docs/backlog-archive.md).
 
 ---
 

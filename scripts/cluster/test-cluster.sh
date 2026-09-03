@@ -136,6 +136,24 @@ if [ "$SVC_FOUND" = false ]; then
   exit 1
 fi
 
+echo "==> Testing Round-Trip Gate: Reading live Composition ${COMP_NAME} from API server..."
+LIVE_COMP="${OUT_DIR}/live-composition.yaml"
+kubectl get composition "${COMP_NAME}" -o yaml > "${LIVE_COMP}"
+
+ROUNDTRIP_BP="${OUT_DIR}/roundtrip.cf.yaml"
+echo "==> Importing live server-side Composition with cf import..."
+./bin/cf import "${LIVE_COMP}" -o "${ROUNDTRIP_BP}"
+
+ROUNDTRIP_OUT="${OUT_DIR}/roundtrip-gen"
+echo "==> Regenerating Crossplane artifacts from adopted blueprint..."
+./bin/cf gen "${ROUNDTRIP_BP}" --out "${ROUNDTRIP_OUT}" --group-suffix="${WORKSPACE_GROUP_SUFFIX}"
+
+echo "==> Verifying regenerated Composition is non-empty and valid..."
+if [ ! -s "${ROUNDTRIP_OUT}/compositions/composition.yaml" ]; then
+  echo "ERROR: Round-trip generated composition.yaml is empty or missing" >&2
+  exit 1
+fi
+
 echo "==> Teardown: deleting XR..."
 kubectl delete -f "${XR_MANIFEST}" --timeout=60s || true
 

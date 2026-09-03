@@ -902,3 +902,76 @@ spec:
 		t.Errorf("queueUrl field = %+v, want From: resources.main-queue.status.url", fld)
 	}
 }
+
+func TestAdoptCustomPipelineStepsWithInputs(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-custom-pipeline-steps
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: custom-pre-processor
+      functionRef:
+        name: function-pre-step
+      input:
+        apiVersion: fn.example.org/v1alpha1
+        kind: PreStepInput
+        package: example.org/functions/pre-step:v1.0.0
+        spec:
+          strictMode: true
+    - step: render-resources
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+    - step: custom-post-processor
+      functionRef:
+        name: function-post-step
+      input:
+        apiVersion: fn.example.org/v1alpha1
+        kind: PostStepInput
+        package: example.org/functions/post-step:v2.0.0
+        spec:
+          tagAll: true
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.IsLossy() {
+		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	}
+
+	if len(bp.Spec.Pipeline) != 2 {
+		t.Fatalf("expected 2 custom pipeline steps, got %d", len(bp.Spec.Pipeline))
+	}
+
+	pre := bp.Spec.Pipeline[0]
+	if pre.Name != "custom-pre-processor" || pre.Position != "before" || pre.Package != "example.org/functions/pre-step:v1.0.0" {
+		t.Errorf("unexpected pre step: %+v", pre)
+	}
+	if !strings.Contains(pre.Input, "strictMode: true") {
+		t.Errorf("expected input to contain strictMode: true, got:\n%s", pre.Input)
+	}
+
+	post := bp.Spec.Pipeline[1]
+	if post.Name != "custom-post-processor" || post.Position != "after" || post.Package != "example.org/functions/post-step:v2.0.0" {
+		t.Errorf("unexpected post step: %+v", post)
+	}
+	if !strings.Contains(post.Input, "tagAll: true") {
+		t.Errorf("expected input to contain tagAll: true, got:\n%s", post.Input)
+	}
+}

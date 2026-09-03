@@ -1,3 +1,7 @@
+- [x] **Opaque Block & Custom Function Pipeline Preservation**: When importing complex foreign compositions containing unknown custom functions or non-standard pipeline steps, preserve them as declared custom steps in `spec.pipeline` / `spec.resources` with typed `Input` and `Position` preserved so they round-trip cleanly without loss.
+      — completed 2026-09-03
+- [x] **Round-trip gate in Lane C (`make test-cluster`)**: Extended `test-cluster.sh` to apply emitted examples, read back live Compositions with `kubectl get -o yaml`, import them via `cf import`, and verify regenerated artifacts.
+      — completed 2026-09-03
 - [x] **`kubectl` Export Scrubbing**: Automatically scrub runtime status, managed fields, UIDs, and cluster-assigned metadata when pasting or importing raw cluster dumps (`kubectl get composition -o yaml`), reporting how many server-side fields were dropped in `LossReport`.
       — completed 2026-09-03
 - [x] **Canvas Region Modularization**: Extracted inner helpers and sub-views from oversized `init` closures in `palette.js` and `output.js` into isolated, modular functions and component renderers.

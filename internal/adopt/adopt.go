@@ -568,6 +568,7 @@ func normalizeDNSLabel(name string) string {
 
 func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultProvider string, report *LossReport, nameMapping map[string]string) error {
 	var otherSteps []blueprint.PipelineStep
+	seenEngineStep := false
 
 	for _, stepRaw := range pipeline {
 		step, ok := stepRaw.(map[string]any)
@@ -585,6 +586,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 		}
 
 		if fnName == "function-go-templating" || strings.Contains(fnName, "gotemplating") {
+			seenEngineStep = true
 			input, _ := step["input"].(map[string]any)
 			inline, _ := input["inline"].(map[string]any)
 			tmpl, _ := inline["template"].(string)
@@ -594,6 +596,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 				}
 			}
 		} else if fnName == "function-patch-and-transform" || strings.Contains(fnName, "patch-and-transform") {
+			seenEngineStep = true
 			input, _ := step["input"].(map[string]any)
 			if input != nil {
 				if resources, ok := input["resources"].([]any); ok {
@@ -604,9 +607,21 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 			}
 		} else {
 			var pkg string
+			var inputYAML string
 			if input, ok := step["input"].(map[string]any); ok {
 				if p, ok := input["package"].(string); ok {
 					pkg = p
+				}
+				inputCopy := make(map[string]any)
+				for k, v := range input {
+					if k != "package" {
+						inputCopy[k] = v
+					}
+				}
+				if len(inputCopy) > 0 {
+					if yBytes, err := yaml.Marshal(inputCopy); err == nil {
+						inputYAML = strings.TrimSpace(string(yBytes))
+					}
 				}
 			}
 			if pkg == "" {
@@ -616,10 +631,16 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, defaultPr
 					pkg = "xpkg.crossplane.io/crossplane-contrib/" + fnName + ":v0.1.0"
 				}
 			}
+			pos := "after"
+			if !seenEngineStep {
+				pos = "before"
+			}
 			otherSteps = append(otherSteps, blueprint.PipelineStep{
 				Name:        stepName,
 				FunctionRef: fnName,
 				Package:     pkg,
+				Input:       inputYAML,
+				Position:    pos,
 			})
 		}
 	}
