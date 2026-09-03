@@ -64,43 +64,41 @@ One engine, `internal/emit`, powers all interfaces: the **`cf gen` CLI**, the **
 
 ## Quickstart (Docker)
 
-One command. No clone, no Go toolchain, and no blueprint to hand-write first:
+### Simple Example (Instant GUI)
+
+One command to launch the visual canvas on a blank blueprint. No clone, no Go toolchain, and nothing written to host disk:
 
 ```sh
-docker run --rm -p 127.0.0.1:8080:8080 ghcr.io/koorikla/compositionfactory:latest
+docker run --rm -it -p 127.0.0.1:8080:8080 ghcr.io/koorikla/compositionfactory:latest
 ```
 
-Open <http://localhost:8080>. The canvas comes up on a blank blueprint — add a
-provider under **SOURCES**, drag kinds onto the canvas, and wire them together.
-Schemas are fetched on demand as you add sources, so there is nothing to cache
-up front.
+Open **<http://localhost:8080>**. The canvas starts immediately with a blank blueprint — add a provider under **SOURCES**, drag kinds onto the canvas, and wire them together. Schemas are fetched on demand as you add sources.
 
 > **Why `-p 127.0.0.1:8080:8080` and not `-p 8080:8080`?** The server has no
 > authentication and writes files on your behalf, so it is meant to be reachable
 > only from your own machine. Publishing to `127.0.0.1` keeps it that way. Plain
-> `-p 8080:8080` publishes on every interface and puts it on your network.
+> `-p 8080:8080` publishes on every interface and puts it on your local network.
 
-### Keep your work
+### Persistent Example (Save Blueprints & Schema Cache)
 
-The blueprint above lives inside the container and disappears with it. Mount a
-directory to keep the blueprint, and a named volume so fetched provider schemas
-survive restarts:
+Mount your current directory to `/workspace` so your blueprint (`doc.cf.yaml`) and generated outputs persist on your host machine, and mount a named Docker volume (`cf-cache`) so fetched provider schemas survive container restarts:
 
 ```sh
-docker run --rm -p 127.0.0.1:8080:8080 \
+docker run --rm -it -p 127.0.0.1:8080:8080 \
   -v "$(pwd)":/workspace \
   -v cf-cache:/home/cf/.cache/compositionfactory \
   ghcr.io/koorikla/compositionfactory:latest
 ```
 
-Your blueprint is written to `doc.cf.yaml` in the current directory. To use a
-different file — new or existing — pass `--file`:
+If `doc.cf.yaml` does not exist in your current directory, it is scaffolded automatically on startup.
+
+To open or edit a specific blueprint file (existing or new), pass `--blueprint` (or `--file`):
 
 ```sh
-docker run --rm -p 127.0.0.1:8080:8080 \
+docker run --rm -it -p 127.0.0.1:8080:8080 \
   -v "$(pwd)":/workspace \
   -v cf-cache:/home/cf/.cache/compositionfactory \
-  ghcr.io/koorikla/compositionfactory:latest serve --file xqueue.cf.yaml
+  ghcr.io/koorikla/compositionfactory:latest serve --blueprint xqueue.cf.yaml
 ```
 
 ### Generate production YAML
