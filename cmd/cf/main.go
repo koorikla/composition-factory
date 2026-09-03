@@ -24,7 +24,7 @@ type CLI struct {
 	MCP         MCPCmd           `cmd:"" name:"mcp" help:"Serve the compositionfactory MCP server over stdio, for agent tooling."`
 	Package     PackageCmd       `cmd:"" help:"Build a Crossplane Configuration package (.xpkg) from a blueprint."`
 	Push        PushCmd          `cmd:"" help:"Push a built .xpkg to an OCI registry."`
-	Adopt       AdoptCmd         `cmd:"" help:"Import an existing Crossplane Composition into a blueprint."`
+	Adopt       AdoptCmd         `cmd:"" aliases:"import" help:"Import an existing Crossplane Composition or Configuration directory into a blueprint."`
 	Kinds       KindsCmd         `cmd:"" help:"List available CRD kinds from cached providers and native kinds."`
 	Fields      FieldsCmd        `cmd:"" help:"Print the field schema tree for a given kind."`
 	Catalogue   CatalogueCmd     `cmd:"" help:"Search the provider catalogue."`

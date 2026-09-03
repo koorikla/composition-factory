@@ -1,3 +1,5 @@
+- [x] **Direct Configuration Source Tree Import**: Extend `cf import` and `cf adopt` to read full Configuration repositories (`crossplane.yaml`, `apis/<xr>/definition.yaml`, `composition.yaml`), extracting XR schemas, resource templates, and parameters into a canonical `.cf.yaml` blueprint in one step.
+      — completed 2026-09-03
 - [x] `cf catalogue --kind` exact match filtering: wired `catalogue.PackagesForKind` to
       strictly filter packages serving the requested CRD kind.
       — completed 2026-09-03

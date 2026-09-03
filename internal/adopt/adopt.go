@@ -1007,20 +1007,32 @@ func rewriteFromWire(wire string, nameMapping map[string]string) string {
 
 func collectSources(bp *blueprint.Blueprint, defaultRef string) {
 	seen := make(map[string]bool)
+	var newSources []blueprint.Source
+	for _, s := range bp.Spec.Sources {
+		if s.Provider != "" {
+			if !seen[s.Provider] {
+				seen[s.Provider] = true
+				newSources = append(newSources, s)
+			}
+		} else if s.CRDs != "" {
+			newSources = append(newSources, s)
+		}
+	}
 	for _, r := range bp.Spec.Resources {
 		if r.Provider == "" || r.Provider == blueprint.NativeProvider {
 			continue
 		}
 		if !seen[r.Provider] {
 			seen[r.Provider] = true
-			bp.Spec.Sources = append(bp.Spec.Sources, blueprint.Source{
+			newSources = append(newSources, blueprint.Source{
 				Provider: r.Provider,
 			})
 		}
 	}
-	if len(bp.Spec.Sources) == 0 && defaultRef != "" {
-		bp.Spec.Sources = append(bp.Spec.Sources, blueprint.Source{
+	if len(newSources) == 0 && defaultRef != "" {
+		newSources = append(newSources, blueprint.Source{
 			Provider: defaultRef,
 		})
 	}
+	bp.Spec.Sources = newSources
 }
