@@ -87,30 +87,6 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
       through its real function image (function-kcl, function-python) on the same fixtures;
       the Python `.get` bug would have been caught on day one.
 
-### P1 — adopt loses most of what it reads, silently
-
-- [ ] cf cannot adopt its own output: the `{{- $spec := … -}}` prelude and `{{- if hasKey }}`
-      guards break the mask-then-YAML parser (`cannot unmarshal string into … map`). Every
-      `{{ }}` is masked as a quoted scalar, so block-level actions become YAML values.
-      Decide: fix adopt's masking to treat control-flow lines as opaque blocks, or fold adopt
-      into the Backlog v3 reader (which must read cf's dialect anyway). Found by C and D.
-- [ ] Non-param mustache lands in `value:` and gen single-quotes it (`tags: '{{ toYaml … }}'`);
-      `.observed.composite.resource.spec.X` is not recognised as a param; nested maps are
-      flattened to dotted paths gen then refuses; arrays/objects serialised via fmt.Sprint
-      (`'[map[conditionStatus:False …]]'`); composed apiVersion is rebound to `--provider`
-      (cluster-scoped `iam.aws.upbound.io` → `.m.`); without `--provider`, `sources: null`.
-
-### P2 — DSL expressiveness gaps every scenario hit
-
-- [ ] The escape hatch does the real work: nested objects (until P0 lands), array elements,
-      typed literals, quoted strings, XR-derived names (`{{ $xr }}-sa-key`), per-index values
-      (`printf "10.0.%d.0/24" $i`, `index (list …) $i`) and aggregate status wires over a
-      forEach set (a 500-character one-line `range … append … toJson` with a hand-written
-      guard chain) all needed `raw:`. `raw:` must be single-line, and `$i`, `$spec`, `$xr`,
-      `$xrMeta` are undocumented — every agent read composition.go to learn them. Document the
-      raw contract now; then add first-class forms in this order: typed literals (P0 above),
-      `resources.<looped>[*].status.<path>` list wires, forEach index helpers (cidr/az from
-      index), XR-name interpolation in envelope/annotation values, paired forEach.
 ### P2 — discovery and CLI
 
 - [ ] Every status wire is an 11-term hasKey/kindIs guard; correct but unreviewable by eye
@@ -126,7 +102,16 @@ re-verified all 46 ticked v2 items. Artifacts under the session scratchpad `dogf
       still re-read per generate; api/server_test still retypes the Queue CRD; the Guide tab
       is still a hardcoded copy of docs/guide.md.
 
-## Backlog v5 — whole-tree code audit (2026-09-02, main @ ee61f82)
+## Backlog v5 — whole-tree code audit (2026-09-02 @ ee61f82, re-verified 2026-09-03 @ 8b58a1d)
+
+Re-verification, 39 commits and one release later: findings 1 (Validate at 592
+lines) and 6 (no race detector in CI) are closed and archived, and the audit's
+strongest recommendation landed — CI Lane C now stands up a real kind cluster
+and runs `make test-cluster` on every push, which is the gate that closes the
+blind spot the caveat below names. What remains open moved the wrong way: the
+emitter triplication, both JS init closures and the worktree sprawl all grew.
+Numbers in each item are current as of 2026-09-03. Full delta:
+docs/code-audit.md, "Re-verified".
 
 Scope caveat, and it matters: this audit is static. It reads the tree, the
 tooling and the shapes; it never built a composition or applied one. Backlog
@@ -155,12 +140,14 @@ its own goldens, so an emitter that is wrong in the same way twice passes.
 
 ### Structure — the five units carrying disproportionate complexity
 
-- [ ] The three emitters walk the same tree three times:
-      composition.go:writeTemplateBody (279 lines),
-      python.go:pythonTemplateBody (165), kcl.go:kclTemplateBody (164).
-      Diffing the KCL and Python bodies gives 99 changed lines out of ~165 —
-      the same traversal (refuse conventions, resolve kind, plan
-      fields/envelope/annotations, open when, open forEach, write
+- [ ] The three emitters walk the same tree three times. Re-measured
+      2026-09-03: composition.go:writeResourceTemplate (294 lines, was 279),
+      python.go:pythonTemplateBody (176, was 165), kcl.go:kclTemplateBody
+      (186, was 164). Diffing the KCL and Python bodies gives 108 changed
+      lines out of ~185 (was 99 of ~165) — the gap widens every release, so
+      this item gets more expensive the longer it waits.
+      It is the same traversal in all three (refuse conventions, resolve
+      kind, plan fields/envelope/annotations, open when, open forEach, write
       apiVersion/kind/metadata/spec/forProvider), differing only in syntax
       tokens. The structured-RHS work already did the hard half; what remains
       is to lift the walk: one `walkResources` over a small backend interface
@@ -175,33 +162,53 @@ its own goldens, so an emitter that is wrong in the same way twice passes.
       day, low risk with 150 Playwright behaviors underneath — but the suite
       needs an unshared port first (see the per-workspace e2e item above).
       Biggest legibility win available in the canvas.
-- [ ] palette.js `init` is 882 lines and output.js `init` is 830 — each
+- [ ] palette.js `init` is 906 lines and output.js `init` is 835 (2026-09-03;
+      882 and 830 at the audit — both still growing) — each
       module's entire body lives inside its init, so nothing in it can be
       reached or tested in isolation. Larger and separate from the dispatch
       chains above; do those first and reassess.
 
 ### Coverage and CI
 
-- [ ] Coverage thins exactly where the tree touches the outside world:
-      internal/cluster 55.0%, internal/cache 64.3%, cmd/cf 71.9%,
-      internal/xpkg 72.6%. internal/cluster is both the newest package and the
-      only one that talks to a live API server. Bring its error paths
-      (unreadable kubeconfig, unreachable server, partial CRD listings) up as
-      part of the kind-cluster work above, not after it.
+- [ ] Coverage thins where the tree touches the outside world. Re-measured
+      2026-09-03: internal/cluster 55.0% (unmoved), internal/cache 64.9%,
+      internal/xpkg 72.6%, cmd/cf 74.0%. internal/cluster is the only package
+      that talks to a live API server — bring its error paths (unreadable
+      kubeconfig, unreachable server, partial CRD listings) up as part of the
+      cluster lane, which now runs on every push.
+- [ ] Coverage fell in the two packages that took the most v0.8.0 work:
+      internal/adopt 85.9% → 77.3% (adopt engine + loss report),
+      internal/emit 87.7% → 82.8% (render-time validation, typed literals,
+      nested forProvider). Healthy in absolute terms, but both moved down
+      while the code beneath them moved up. Cover the new paths before the
+      next feature lands on them.
 
 ### Workspace hygiene (needs a decision, not a delete)
 
-- [ ] The working copy is ~710 MB, of which ~625 MB is stale agent worktrees:
-      .claude/worktrees/ (321 MB, 7 worktrees), .worktrees/ (145 MB, 4), plus
-      web/ (159 MB, the retired React canvas — already out of git, still on
-      disk). Of the 20 local branches besides main, 15 are fully merged and
-      exist only as worktree anchors. Five carry unmerged commits and need a
-      call each: subagent-DX--Client---Test-Suite-Polish-Engineer-self-37c2a470
+- [ ] The working copy is 807 MB and growing (731 MB at the audit on
+      2026-09-02): .claude/worktrees/ (379 MB, was 321), .worktrees/ (145 MB),
+      plus web/ (159 MB, the retired React canvas — already out of git, still
+      on disk). 27 worktrees are registered. Of the 27 local branches besides
+      main, 22 are fully merged and exist only as worktree anchors — up from
+      15 of 20 a day ago, so this accretes faster than it is cleared. The same
+      five carry unmerged commits and need a call each: subagent-DX--Client---Test-Suite-Polish-Engineer-self-37c2a470
       (12 ahead), worktree-agent-a5a7710927acd2ff7 (12),
       worktree-agent-a7f7485202bdacadb (4),
       subagent-Canvas---UX-Authoring-Engineer-self-84d324ac (1),
       worktree-agent-a247d77332728f705 (1). The ~/.gemini/antigravity/…
       worktrees belong to a live parallel session — leave those alone.
+
+### Dead code introduced with the discovery CLI (found 2026-09-03)
+
+- [ ] `catalogue.Kinds` and `catalogue.PackagesForKind`
+      (catalogue/kinds.go:230,240) are exported, covered by
+      TestKindsAndPackagesForKind, and called by nothing in production —
+      `deadcode ./cmd/...` went from four unreachable functions to six, and
+      these are the two new ones. The maps behind them are live (`Matches`
+      uses them to power catalogue.Search), so these are accessors written
+      for a caller that never arrived. Either surface them (`cf catalogue`
+      showing which kinds a package serves, or a `--kind` lookup) or
+      unexport them and drop the test.
 
 ### Non-findings, recorded so they are not re-raised
 

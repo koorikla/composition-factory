@@ -17,6 +17,68 @@ while ignoring `provider:`. Read that backlog alongside this. The grades below
 are grades for the codebase as an artifact, not a claim that it generates
 correct YAML; where the two disagree, the dogfooding wins, because it checked.
 
+## Re-verified — 2026-09-03, `main` at 8b58a1d
+
+39 commits and one release (v0.8.0) after the audited tree. Every gate in the
+Method section was re-run and every finding re-measured with the same commands,
+so the numbers here are directly comparable to the ones below them.
+
+### Closed
+
+- **Finding 1, `(*Blueprint).Validate` at 592 lines.** Now a 22-line
+  orchestrator over `validateRoot` / `validateSources` / `validateXRD` /
+  `validateParameters` / `validateTemplates` / `validateResources` /
+  `validatePipeline`, split across four new `validate_*.go` files. `load.go`
+  fell from 1109 lines to 557. This is exactly the shape the finding asked for.
+- **Finding 6, the race detector missing from CI.** Lane A now runs
+  `make test-race` after `make test`.
+- **The strongest recommendation this audit made is in place.** CI has a Lane C
+  that stands up a real kind cluster with Crossplane and the pipeline
+  functions and runs `make test-cluster` — unconditionally, on every push and
+  pull request. That is the gate that closes the blind spot the scope caveat
+  named, the one v4's P0s walked straight through.
+- **The three small fixes from the first pass are holding**: lint scoped to
+  tracked files, `.dockerignore` trimmed, builder image pinned. Dependabot now
+  maintains the pin, and the toolchain agrees in all seven places it is
+  declared — `go.mod` at 1.27.0, five CI `go-version` keys, and
+  `golang:1.27-alpine`.
+
+### Still open — and three moved the wrong way
+
+| Finding | 2026-09-02 | 2026-09-03 |
+|---|---|---|
+| 2. Emitter triplication | 279 / 165 / 164 lines, 99 differing | 294 / 186 / 176, 108 differing |
+| 3. JS `init` closures | 882 / 830 | 906 / 835 |
+| 3. JS dispatch ladders | 317 / 316 / 295 | unchanged |
+| 4. `internal/cluster` coverage | 55.0 % | 55.0 % |
+| 5. Working copy | 731 MB, 20 branches (15 merged) | 807 MB, 27 branches (22 merged) |
+
+None of these is a regression in behaviour; each is the cost of adding features
+to a shape that was already flagged. The emitter finding in particular gets
+more expensive every release — the third traversal grew by 15 lines and the
+gap between the KCL and Python bodies widened by nine.
+
+### New
+
+- **Coverage fell in the two packages that took the most feature work.**
+  `internal/adopt` 85.9 % → 77.3 % (the adopt engine and its loss report) and
+  `internal/emit` 87.7 % → 82.8 % (render-time validation, typed literals,
+  nested `forProvider`). Both are healthy in absolute terms. Both moved down
+  while the code beneath them moved up, which is the direction worth watching.
+- **`deadcode` reports six unreachable functions, up from four, and the two new
+  ones are real.** `catalogue.Kinds` and `catalogue.PackagesForKind`
+  (`catalogue/kinds.go:230,240`) are exported, covered by a test, and called by
+  nothing in production. The maps behind them are live — `Matches` uses them to
+  power `catalogue.Search` — so these are two accessors written for a caller
+  that never arrived. Wire them into `cf catalogue`, or unexport them.
+
+### Scale, for context
+
+The tree grew through all of it: 724 → 815 Go test functions, 150 → 164
+Playwright behaviors, 16 458 → 19 888 production Go lines, 25 398 → 29 415 test
+lines. `gofmt`, `go vet`, staticcheck, the race detector and `npm audit` are all
+still clean.
+
 ## Method
 
 ```bash
@@ -80,6 +142,9 @@ Stated because an audit that only lists problems misrepresents the tree.
   says what is wrong *and* why it matters.
 
 ## Findings
+
+As written on 2026-09-02. Current status for each is in the re-verification
+above; findings 1 and 6 are closed.
 
 ### 1. `(*Blueprint).Validate` is 592 lines — Medium
 

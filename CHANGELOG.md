@@ -41,6 +41,17 @@ consumer's git diff.
   download and cannot work offline at all. `GET /api/examples` carries
   `sourcesReady` and `missingSources` for this.
 
+### Changed
+
+- `docs/code-audit.md` re-verified against `main` at 8b58a1d, 39 commits after
+  the audited tree. Closed: `(*Blueprint).Validate` is split into seven named
+  validators, `make test-race` runs in CI lane A, and the kind-cluster lane the
+  audit called its strongest recommendation now runs on every push. Still open
+  and all grown since: the three-way emitter triplication, both oversized
+  canvas `init` closures, and the worktree sprawl. Newly recorded:
+  `catalogue.Kinds` and `catalogue.PackagesForKind` are exported, tested and
+  called by nothing in production.
+
 ### Fixed
 
 - `web-proto`: the engine and templates selects in the editor drawer rendered
