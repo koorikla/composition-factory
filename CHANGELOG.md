@@ -15,6 +15,17 @@ consumer's git diff.
 
 ## [Unreleased]
 
+### Changed
+
+- `BACKLOG.md` records 35 defects found by four end-to-end journeys against
+  `075646f` (CLI, canvas, HTTP API, and a probe of the three features that
+  shipped that morning), plus a static pass. Every finding was reproduced at
+  least twice by the agent that found it; the most consequential were
+  re-verified by hand. Static gates stayed clean throughout — every defect is in
+  behaviour gofmt, vet, staticcheck, the race detector and 859 Go tests do not
+  reach.
+
+
 ## [0.9.0] - 2026-09-03
 
 ### Added
