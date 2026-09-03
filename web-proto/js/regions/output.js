@@ -28,203 +28,614 @@ import { esc } from "../dom.js";
  *    untouched.
  */
 
-
 var DEBOUNCE_MS = 300;
 var MIN_DRAWER = 64;   // px — keep the header + a few code lines reachable
 var MIN_CANVAS = 140;  // px — never let the drawer swallow the canvas
+var THEME_CYCLE = ["system", "light", "dark"];
 
-export function init(rootEl, deps) {
-  var store = deps.store;
-  var api = deps.api;
+/* ---------------- module-scoped state ---------------- */
 
-  var el = {
-    root: rootEl,
-    tabs: rootEl.querySelector("#tabs") || document.getElementById("tabs"),
-    meta: rootEl.querySelector("#meta") || document.getElementById("meta"),
-    warn: rootEl.querySelector("#warn") || document.getElementById("warn"),
-    code: rootEl.querySelector("#code") || document.getElementById("code"),
-    crumb: document.getElementById("crumb"),
-    ver: document.getElementById("ver"),
-    valid: document.getElementById("valid"),
-    themeBtn: document.getElementById("themeBtn"),
-    validateBtn: document.getElementById("validateBtn"),
-    generateBtn: document.getElementById("generateBtn"),
-    engineSel: document.getElementById("engineSel"),
-    tplSource: document.getElementById("tplSource"),
-    treeToggleBtn: document.getElementById("treeToggleBtn"),
-    treeRoot: document.getElementById("tree-root"),
-    treeCount: document.getElementById("tree-files-count"),
-    ebIcon: document.getElementById("eb-icon"),
-    ebPath: document.getElementById("eb-path"),
-    copyBtn: document.getElementById("code-copy-btn"),
-  };
+var store = null;
+var api = null;
+var root = null;
+var booted = false;
 
-  var tab = "comp";          // "comp" | "xrd" | "bp"
-  var genTimer = null;
-  var collapsedGroups = {};
+var el = {};
+var tab = "comp";          // "comp" | "xrd" | "fns" | "bp" | "pkg" | "rbac" | "runtime" | "tpl:<file>" | "pc:<family>"
+var genTimer = null;
+var collapsedGroups = {};
+var rbacCache = null;      // invalidated on every doc emit
+var pkgCache = null;       // same lifecycle: the package renders the live doc
+var onTabSelected = null;
 
-  /* ---------- tree explorer + tabs (built live) ---------- */
+var editBtn = null;
+var editor = null;
+var editBar = null;
 
-  function buildTree() {
-    if (!el.treeRoot) return;
-    var doc = store.state.doc;
-    var g = store.state.lastGenerate;
-    var outputs = (g && g.outputs || []);
-    var bpLabel = bpTabLabel(doc);
+/* ---------- tree explorer + tabs (built live) ---------- */
 
-    var categories = [];
+function bpTabLabel(doc) {
+  var name = doc && doc.metadata && doc.metadata.name || "blueprint";
+  return name + ".cf.yaml";
+}
 
-    // 1. Blueprints & Package
+function buildTree() {
+  if (!el.treeRoot) return;
+  var doc = store.state.doc;
+  var g = store.state.lastGenerate;
+  var outputs = (g && g.outputs || []);
+  var bpLabel = bpTabLabel(doc);
+
+  var categories = [];
+
+  // 1. Blueprints & Package
+  categories.push({
+    id: "meta",
+    title: "Blueprint & Package",
+    items: [
+      { key: "bp", name: bpLabel, icon: "⚡", path: "blueprints/" + bpLabel },
+      { key: "pkg", name: "package.yaml", icon: "📦", path: "package.yaml" },
+      { key: "rbac", name: "rbac", icon: "🛡️", path: "rbac" },
+    ]
+  });
+
+  // 2. Crossplane Compositions & Definitions
+  categories.push({
+    id: "engine",
+    title: "Compositions & XRDs",
+    items: [
+      { key: "comp", name: "composition.yaml", icon: "🧩", path: "compositions/" + (doc && doc.metadata && doc.metadata.name ? doc.metadata.name + ".yaml" : "composition.yaml") },
+      { key: "xrd", name: "definition.yaml", icon: "📋", path: "xrds/" + (doc && doc.metadata && doc.metadata.name ? doc.metadata.name + ".yaml" : "definition.yaml") },
+      { key: "fns", name: "functions.yaml", icon: "λ", path: "functions.yaml" },
+    ]
+  });
+
+  // 3. Templates (if FileSystem mode)
+  var tplOutputs = [];
+  outputs.forEach(function (o) {
+    var tm = /[\\/]templates[\\/][^\\/]+[\\/]([^\\/]+)$/.exec(o.path);
+    if (tm) tplOutputs.push({ file: tm[1], path: o.path });
+  });
+  if (tplOutputs.length > 0) {
+    tplOutputs.sort(function (a, b) { return a.file < b.file ? -1 : 1; });
     categories.push({
-      id: "meta",
-      title: "Blueprint & Package",
-      items: [
-        { key: "bp", name: bpLabel, icon: "⚡", path: "blueprints/" + bpLabel },
-        { key: "pkg", name: "package.yaml", icon: "📦", path: "package.yaml" },
-        { key: "rbac", name: "rbac", icon: "🛡️", path: "rbac" },
-      ]
+      id: "templates",
+      title: "Templates",
+      items: tplOutputs.map(function (to) {
+        return { key: "tpl:" + to.file, name: to.file, icon: "📄", path: to.path };
+      })
     });
+  }
 
-    // 2. Crossplane Compositions & Definitions
-    categories.push({
-      id: "engine",
-      title: "Compositions & XRDs",
-      items: [
-        { key: "comp", name: "composition.yaml", icon: "🧩", path: "compositions/" + (doc && doc.metadata && doc.metadata.name ? doc.metadata.name + ".yaml" : "composition.yaml") },
-        { key: "xrd", name: "definition.yaml", icon: "📋", path: "xrds/" + (doc && doc.metadata && doc.metadata.name ? doc.metadata.name + ".yaml" : "definition.yaml") },
-        { key: "fns", name: "functions.yaml", icon: "λ", path: "functions.yaml" },
-      ]
-    });
-
-    // 3. Templates (if FileSystem mode)
-    var tplOutputs = [];
-    outputs.forEach(function (o) {
-      var tm = /[\\/]templates[\\/][^\\/]+[\\/]([^\\/]+)$/.exec(o.path);
-      if (tm) tplOutputs.push({ file: tm[1], path: o.path });
-    });
-    if (tplOutputs.length > 0) {
-      tplOutputs.sort(function (a, b) { return a.file < b.file ? -1 : 1; });
-      categories.push({
-        id: "templates",
-        title: "Templates",
-        items: tplOutputs.map(function (to) {
-          return { key: "tpl:" + to.file, name: to.file, icon: "📄", path: to.path };
-        })
-      });
+  // 4. Runtime & ProviderConfigs
+  var runtimeAndPcs = [];
+  var hasRuntime = false;
+  outputs.forEach(function (o) {
+    if (/[\\/]runtime[\\/]/.test(o.path)) hasRuntime = true;
+    var m = /providerconfigs[\/\\]([^\/\\]+)\.yaml$/.exec(o.path);
+    if (m) {
+      runtimeAndPcs.push({ key: "pc:" + m[1], name: "providerconfigs/" + m[1] + ".yaml", icon: "☁️", path: o.path });
     }
+  });
+  if (hasRuntime) {
+    runtimeAndPcs.unshift({ key: "runtime", name: "runtime.yaml", icon: "⚙️", path: "runtime/runtime.yaml" });
+  }
+  if (runtimeAndPcs.length > 0) {
+    categories.push({
+      id: "runtime",
+      title: "Runtime & Providers",
+      items: runtimeAndPcs
+    });
+  }
 
-    // 4. Runtime & ProviderConfigs
-    var runtimeAndPcs = [];
-    var hasRuntime = false;
-    outputs.forEach(function (o) {
-      if (/[\\/]runtime[\\/]/.test(o.path)) hasRuntime = true;
-      var m = /providerconfigs[\/\\]([^\/\\]+)\.yaml$/.exec(o.path);
-      if (m) {
-        runtimeAndPcs.push({ key: "pc:" + m[1], name: "providerconfigs/" + m[1] + ".yaml", icon: "☁️", path: o.path });
+  var totalFiles = 0;
+  categories.forEach(function (c) { totalFiles += c.items.length; });
+  if (el.treeCount) el.treeCount.textContent = totalFiles + " file" + (totalFiles === 1 ? "" : "s");
+
+  var h = "";
+  categories.forEach(function (cat) {
+    var isCollapsed = !!collapsedGroups[cat.id];
+    h += '<div class="tree-group" data-gid="' + esc(cat.id) + '"' + (isCollapsed ? ' data-collapsed=""' : '') + '>';
+    h += '  <div class="tree-group-title"><span class="tg-arrow">▼</span><span>' + esc(cat.title) + '</span></div>';
+    h += '  <div class="tree-group-items">';
+    cat.items.forEach(function (it) {
+      var isActive = (tab === it.key);
+      h += '    <div class="tree-item' + (isActive ? ' active' : '') + '" data-t="' + esc(it.key) + '" data-path="' + esc(it.path) + '" data-icon="' + esc(it.icon) + '">';
+      h += '      <span class="tree-item-icon">' + esc(it.icon) + '</span>';
+      h += '      <span class="tree-item-name">' + esc(it.name) + '</span>';
+      h += '    </div>';
+    });
+    h += '  </div>';
+    h += '</div>';
+  });
+  el.treeRoot.innerHTML = h;
+}
+
+function updateBreadcrumb() {
+  if (!el.ebPath) return;
+  var activeItem = el.treeRoot && el.treeRoot.querySelector('.tree-item[data-t="' + tab + '"]');
+  if (activeItem) {
+    if (el.ebIcon) el.ebIcon.textContent = activeItem.getAttribute("data-icon") || "📄";
+    el.ebPath.textContent = activeItem.getAttribute("data-path") || activeItem.textContent.trim();
+  } else {
+    if (el.ebIcon) el.ebIcon.textContent = "📄";
+    el.ebPath.textContent = tab;
+  }
+}
+
+function buildTabs() {
+  var bpLabel = bpTabLabel(store.state.doc);
+  var h =
+    '<button data-t="comp" aria-pressed="' + (tab === "comp") + '">composition.yaml</button>' +
+    '<button data-t="xrd" aria-pressed="' + (tab === "xrd") + '">definition.yaml</button>' +
+    '<button data-t="fns" aria-pressed="' + (tab === "fns") + '">functions.yaml</button>' +
+    '<button data-t="bp" aria-pressed="' + (tab === "bp") + '">' + esc(bpLabel) + '</button>';
+  h += '<button data-t="pkg" aria-pressed="' + (tab === "pkg") + '">package.yaml</button>';
+
+  var g = store.state.lastGenerate;
+  var outputs = (g && g.outputs || []);
+  var hasRuntime = false;
+  var tplOutputs = [];
+  outputs.forEach(function (o) {
+    if (/[\\/]runtime[\\/]/.test(o.path)) hasRuntime = true;
+    var tm = /[\\/]templates[\\/][^\\/]+[\\/]([^\\/]+)$/.exec(o.path);
+    if (tm) tplOutputs.push({ file: tm[1], path: o.path });
+  });
+  tplOutputs.sort(function (a, b) { return a.file < b.file ? -1 : 1; });
+  tplOutputs.forEach(function (to) {
+    var key = "tpl:" + to.file;
+    h += '<button data-t="' + key + '" aria-pressed="' + (tab === key) + '">templates/' + esc(to.file) + '</button>';
+  });
+  if (hasRuntime) {
+    h += '<button data-t="runtime" aria-pressed="' + (tab === "runtime") + '">runtime.yaml</button>';
+  }
+
+  // one tab per generated providerconfig family (outputs carry the bodies)
+  outputs.forEach(function (o) {
+    var m = /providerconfigs[\/\\]([^\/\\]+)\.yaml$/.exec(o.path);
+    if (!m) return;
+    var key = "pc:" + m[1];
+    h += '<button data-t="' + key + '" aria-pressed="' + (tab === key) + '">providerconfigs/' + m[1] + ".yaml</button>";
+  });
+  h += '<button data-t="rbac" aria-pressed="' + (tab === "rbac") + '">rbac</button>';
+  el.tabs.innerHTML = h;
+
+  buildTree();
+}
+
+function selectTab(newTab) {
+  tab = newTab;
+  [].forEach.call(el.tabs.children, function (c) {
+    c.setAttribute("aria-pressed", String(c.getAttribute("data-t") === tab));
+  });
+  if (el.treeRoot) {
+    [].forEach.call(el.treeRoot.querySelectorAll(".tree-item"), function (ti) {
+      ti.classList.toggle("active", ti.getAttribute("data-t") === tab);
+    });
+  }
+  if (typeof onTabSelected === "function") onTabSelected(tab);
+  render();
+}
+
+/* ---------- output matching ---------- */
+
+function matchOutput(which) {
+  var g = store.state.lastGenerate;
+  var outputs = g && g.outputs || [];
+  if (which === "fns") {
+    for (var k = 0; k < outputs.length; k++) {
+      if (/functions\.yaml$/.test(outputs[k].path)) return outputs[k];
+    }
+    return null;
+  }
+  var dirRe = which === "comp" ? /[\\/]compositions[\\/]/ : /[\\/]xrds[\\/]/;
+  var kindRe = which === "comp"
+    ? /^kind:\s*Composition\s*$/m
+    : /^kind:\s*CompositeResourceDefinition\s*$/m;
+  for (var i = 0; i < outputs.length; i++) {
+    if (dirRe.test(outputs[i].path)) return outputs[i];
+  }
+  for (var j = 0; j < outputs.length; j++) {
+    if (kindRe.test(outputs[j].body || "")) return outputs[j];
+  }
+  return null;
+}
+
+/* ---------- rendering ---------- */
+
+/** Prototype-style YAML highlighting over plain text. */
+function highlight(text) {
+  return text.split("\n").map(function (line) {
+    if (/^\s*#/.test(line)) return '<span class="cm">' + esc(line) + "</span>";
+    var m = line.match(/^(\s*(?:-\s+)?)([\w.$\/"'\-]+):(\s*)(.*)$/);
+    if (m) {
+      var val = m[4];
+      var h = esc(m[1]) + '<span class="kk">' + esc(m[2]) + "</span>:" + m[3];
+      if (val) {
+        var cls = /\{\{/.test(val) ? "tm" : "st";
+        h += '<span class="' + cls + '">' + esc(val) + "</span>";
+      }
+      return h;
+    }
+    if (/\{\{/.test(line)) return '<span class="tm">' + esc(line) + "</span>";
+    return esc(line);
+  }).join("\n");
+}
+
+function currentText() {
+  if (tab === "bp") {
+    var doc = store.state.doc;
+    return doc ? toYaml(doc) : "";
+  }
+  if (tab.indexOf("pc:") === 0) {
+    var fam = tab.slice(3);
+    var g = store.state.lastGenerate;
+    var pcs = (g && g.outputs || []).filter(function (o) {
+      return new RegExp("providerconfigs[/\\\\]" + fam + "\\.yaml$").test(o.path);
+    });
+    return pcs.length ? pcs[0].body : "";
+  }
+  if (tab === "runtime") {
+    var g = store.state.lastGenerate;
+    var rts = (g && g.outputs || []).filter(function (o) {
+      return /[\\/]runtime[\\/]/.test(o.path);
+    });
+    return rts.length ? rts[0].body : "";
+  }
+  if (tab.indexOf("tpl:") === 0) {
+    var file = tab.slice(4);
+    var g = store.state.lastGenerate;
+    var tpls = (g && g.outputs || []).filter(function (o) {
+      return o.path.endsWith("/" + file) || o.path.endsWith("\\" + file);
+    });
+    return tpls.length ? tpls[0].body : "";
+  }
+  if (tab === "pkg") {
+    if (pkgCache) return pkgCache;
+    api.getPackageYAML().then(function (text) {
+      pkgCache = text;
+      if (tab === "pkg") render();
+    }).catch(function (e) { pkgCache = "# package unavailable: " + (e && e.message || e); if (tab === "pkg") render(); });
+    return "# building package\u2026";
+  }
+  if (tab === "rbac") {
+    if (rbacCache) return rbacCache;
+    api.getRBAC().then(function (r) {
+      rbacCache = (r.rules || []).map(function (rule) {
+        return "- apiGroups: [" + rule.apiGroups.join(", ") + "]\n" +
+          "  resources: [" + rule.resources.join(", ") + "]\n" +
+          "  verbs: [" + rule.verbs.join(", ") + "]\n" +
+          "  # scope: " + rule.scope;
+      }).join("\n");
+      if (tab === "rbac") render();
+    }).catch(function (e) { rbacCache = "# rbac unavailable: " + (e && e.message || e); if (tab === "rbac") render(); });
+    return "# loading rbac\u2026";
+  }
+  var out = matchOutput(tab);
+  return out ? out.body : "";
+}
+
+function pickerNote() {
+  // annotate the family scaffold with the client-side kind picker state
+  var fam = tab.slice(3);
+  var hidden = {};
+  try { hidden = JSON.parse(localStorage.getItem("cf-hidden-kinds")) || {}; } catch (_) { /* none */ }
+  var doc = store.state.doc;
+  var lines = [];
+  (doc && doc.spec && doc.spec.sources || []).forEach(function (src) {
+    var ref = src.provider || "";
+    var m = /provider-([a-z0-9]+)-/.exec(ref);
+    var srcFam = m ? m[1] : ref.split("/").pop().replace(/^provider-/, "").split(":")[0];
+    if (srcFam !== fam) return;
+    var n = (hidden[ref] || []).length;
+    var name = ref.split("/").pop();
+    lines.push(name + (n ? " \u2014 " + n + " kind" + (n > 1 ? "s" : "") + " hidden in the palette" : " \u2014 all kinds enabled"));
+  });
+  return lines.join(" \u00b7 ");
+}
+
+function render() {
+  var text = currentText();
+  var note = document.getElementById("pc-note");
+  if (tab.indexOf("pc:") === 0) {
+    if (!note) {
+      note = document.createElement("div");
+      note.id = "pc-note";
+      note.className = "dg";
+      note.style.cssText = "padding:4px 12px;border-bottom:1px solid var(--rule)";
+      el.code.parentNode.insertBefore(note, el.code);
+    }
+    note.hidden = false;
+    note.textContent = pickerNote();
+  } else if (note) {
+    note.hidden = true;
+  }
+  el.code.innerHTML = highlight(text);
+  var lines = text ? text.split("\n").filter(function (l, i, a) {
+    return !(i === a.length - 1 && l === "");
+  }).length : 0;
+  el.meta.textContent = lines + " lines · deterministic";
+  updateBreadcrumb();
+  if (el.treeRoot) {
+    [].forEach.call(el.treeRoot.querySelectorAll(".tree-item"), function (ti) {
+      ti.classList.toggle("active", ti.getAttribute("data-t") === tab);
+    });
+  }
+}
+
+/* ---------- environment diagnostics & next steps ---------- */
+
+function diagnoseError(errMsg) {
+  if (!errMsg) return { isEnv: false, tip: "" };
+  var str = String(errMsg).toLowerCase();
+  if (str.indexOf("docker") !== -1 || str.indexOf("daemon") !== -1 || str.indexOf("docker.sock") !== -1) {
+    return {
+      isEnv: true,
+      tip: "Make sure Docker Desktop or dockerd is running and accessible."
+    };
+  }
+  if (str.indexOf("crossplane") !== -1 && (str.indexOf("not found") !== -1 || str.indexOf("executable file") !== -1 || str.indexOf("no such file") !== -1 || str.indexOf("absent") !== -1)) {
+    return {
+      isEnv: true,
+      tip: "Install Crossplane CLI: curl -sL https://raw.githubusercontent.com/crossplane/crossplane/master/install.sh | sh"
+    };
+  }
+  if (str.indexOf("connection refused") !== -1 || str.indexOf("dial tcp") !== -1) {
+    return {
+      isEnv: true,
+      tip: "Check local environment and network connectivity."
+    };
+  }
+  return { isEnv: false, tip: "" };
+}
+
+function formatErrorMessage(errMsg) {
+  if (!errMsg) return "";
+  var diag = diagnoseError(errMsg);
+  if (diag.isEnv && diag.tip) {
+    return errMsg + "\n\n💡 Environment Fix Tip: " + diag.tip;
+  }
+  return errMsg;
+}
+
+function updateNextSteps(result) {
+  var banner = document.getElementById("next-steps-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "next-steps-banner";
+    banner.className = "next-steps-banner";
+    banner.style.cssText = "padding:6px 12px;background:rgba(16,185,129,0.08);border-bottom:1px solid rgba(16,185,129,0.2);font-family:var(--mono);font-size:11px;color:var(--ok);display:flex;align-items:center;gap:6px;flex-shrink:0";
+    var vp = document.getElementById("code-viewport") || el.code;
+    if (vp && vp.parentNode) {
+      vp.parentNode.insertBefore(banner, vp);
+    } else if (root) {
+      root.appendChild(banner);
+    }
+  }
+  if (result && result.outputs && result.outputs.length > 0) {
+    var outPath = "out";
+    var first = result.outputs[0].path || "";
+    var m = /^(.*?)(?:[\\/]compositions[\\/]|[\\/]xrds[\\/]|[\\/]templates[\\/]|[\\/]runtime[\\/]|[\\/]providerconfigs[\\/]|functions\.yaml|package\.yaml)/.exec(first);
+    if (m && m[1]) {
+      outPath = m[1].replace(/[\\/]$/, "") || "out";
+    } else if (first.indexOf("/") !== -1 || first.indexOf("\\") !== -1) {
+      var parts = first.split(/[\/\\]/);
+      parts.pop();
+      outPath = parts.join("/") || "out";
+    }
+    banner.hidden = false;
+    banner.style.display = "flex";
+    banner.innerHTML = '<span style="color:var(--ok)">✓</span> ' +
+      'Output written to <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">' + esc(outPath) + '</code> ' +
+      '\u00b7 Apply: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">kubectl apply -f ' + esc(outPath) + '</code> ' +
+      '\u00b7 Package: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">cf package</code>';
+  } else {
+    banner.hidden = true;
+    banner.style.display = "none";
+  }
+}
+
+/* ---------- render-failure bar (separate from the raw-count warnbar,
+   which is re-rendered on every doc change) ---------- */
+function showWarn(message) {
+  var bar = document.getElementById("render-warn");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "render-warn";
+    bar.className = "warnbar";
+    var vp = document.getElementById("code-viewport") || el.code;
+    if (vp && vp.parentNode) vp.parentNode.insertBefore(bar, vp);
+    else if (root) root.appendChild(bar);
+  }
+  if (message) {
+    bar.textContent = formatErrorMessage(message);
+    bar.hidden = false;
+  } else {
+    bar.textContent = "";
+    bar.hidden = true;
+  }
+}
+
+/* ---------- raw-template warnbar (prototype's exact copy) ---------- */
+
+function countRaws(doc) {
+  var n = 0;
+  var resources = doc && doc.spec && doc.spec.resources || [];
+  resources.forEach(function (r) {
+    var fields = r.fields || {};
+    Object.keys(fields).forEach(function (k) {
+      var f = fields[k];
+      if (f && typeof f.raw === "string" && f.raw !== "") n++;
+    });
+  });
+  return n;
+}
+
+function drawWarn(doc) {
+  var raws = countRaws(doc);
+  if (raws) {
+    el.warn.hidden = false;
+    el.warn.innerHTML = "<span>▲</span><span>" + raws + " field" + (raws > 1 ? "s" : "") +
+      ' use a raw template — the canvas can show them but not validate them. <code>missingkey=error</code> still guards them.</span>';
+  } else {
+    el.warn.hidden = true;
+  }
+}
+
+/* ---------- topbar ---------- */
+
+function drawTopbar(doc) {
+  var name = doc && doc.metadata && doc.metadata.name || "blueprint";
+  el.crumb.innerHTML = "blueprints/<b>" + esc(name) + ".cf.yaml</b>";
+  // the wordmark shows the BUILD version (the doc's schema version was
+  // read as "I'm on an old app" — it lives with the blueprint name now)
+  var av = doc && doc.apiVersion || "";
+  var schemaV = av.indexOf("/") >= 0 ? av.split("/").pop() : av;
+  el.crumb.innerHTML += schemaV ? ' <span class="dg">' + esc(schemaV) + "</span>" : "";
+  if (!el.ver.dataset.build) {
+    el.ver.dataset.build = "1";
+    api.getVersion().then(function (r) {
+      el.ver.textContent = r.version;
+      el.ver.title = "compositionfactory build " + r.version;
+      if (el.engineSel && Array.isArray(r.engines) && r.engines.length > 0) {
+        var curDocEngine = (store.state.doc && store.state.doc.spec && store.state.doc.spec.emit && store.state.doc.spec.emit.engine) || "go-templating";
+        el.engineSel.innerHTML = r.engines.map(function (eng) {
+          return '<option value="' + esc(eng) + '">' + esc(eng) + '</option>';
+        }).join("");
+        el.engineSel.value = curDocEngine;
+      }
+    }).catch(function () {
+      el.ver.textContent = "";
+      if (el.engineSel && el.engineSel.options.length === 0) {
+        el.engineSel.innerHTML = '<option value="go-templating">go-templating</option><option value="kcl">kcl</option><option value="python">python</option>';
       }
     });
-    if (hasRuntime) {
-      runtimeAndPcs.unshift({ key: "runtime", name: "runtime.yaml", icon: "⚙️", path: "runtime/runtime.yaml" });
-    }
-    if (runtimeAndPcs.length > 0) {
-      categories.push({
-        id: "runtime",
-        title: "Runtime & Providers",
-        items: runtimeAndPcs
-      });
-    }
-
-    var totalFiles = 0;
-    categories.forEach(function (c) { totalFiles += c.items.length; });
-    if (el.treeCount) el.treeCount.textContent = totalFiles + " file" + (totalFiles === 1 ? "" : "s");
-
-    var h = "";
-    categories.forEach(function (cat) {
-      var isCollapsed = !!collapsedGroups[cat.id];
-      h += '<div class="tree-group" data-gid="' + esc(cat.id) + '"' + (isCollapsed ? ' data-collapsed=""' : '') + '>';
-      h += '  <div class="tree-group-title"><span class="tg-arrow">▼</span><span>' + esc(cat.title) + '</span></div>';
-      h += '  <div class="tree-group-items">';
-      cat.items.forEach(function (it) {
-        var isActive = (tab === it.key);
-        h += '    <div class="tree-item' + (isActive ? ' active' : '') + '" data-t="' + esc(it.key) + '" data-path="' + esc(it.path) + '" data-icon="' + esc(it.icon) + '">';
-        h += '      <span class="tree-item-icon">' + esc(it.icon) + '</span>';
-        h += '      <span class="tree-item-name">' + esc(it.name) + '</span>';
-        h += '    </div>';
-      });
-      h += '  </div>';
-      h += '</div>';
-    });
-    el.treeRoot.innerHTML = h;
   }
+  var bp = el.tabs.querySelector('[data-t="bp"]');
+  if (bp) bp.textContent = bpTabLabel(doc);
+}
 
-  function updateBreadcrumb() {
-    if (!el.ebPath) return;
-    var activeItem = el.treeRoot && el.treeRoot.querySelector('.tree-item[data-t="' + tab + '"]');
-    if (activeItem) {
-      if (el.ebIcon) el.ebIcon.textContent = activeItem.getAttribute("data-icon") || "📄";
-      el.ebPath.textContent = activeItem.getAttribute("data-path") || activeItem.textContent.trim();
-    } else {
-      if (el.ebIcon) el.ebIcon.textContent = "📄";
-      el.ebPath.textContent = tab;
+function chipOk(n) {
+  el.valid.textContent = "ok · " + n + " file" + (n === 1 ? "" : "s");
+  el.valid.title = "";
+  el.valid.style.color = "";
+}
+
+function chipErr(message) {
+  el.valid.textContent = "error";
+  el.valid.title = formatErrorMessage(message); // server's message, verbatim + fix tips
+  el.valid.style.color = "var(--err)";
+}
+
+/* ---------- theme: system → light → dark → system ---------- */
+
+function applyTheme(mode) {
+  var r = document.documentElement;
+  if (mode === "light" || mode === "dark") r.setAttribute("data-theme", mode);
+  else r.removeAttribute("data-theme");
+  el.themeBtn.title = "Theme: " + mode;
+  try { localStorage.setItem("cf-theme", mode); } catch (_) { /* private mode */ }
+}
+
+function initTheme() {
+  var savedTheme = null;
+  try { savedTheme = localStorage.getItem("cf-theme"); } catch (_) { /* ignore */ }
+  if (savedTheme === "light" || savedTheme === "dark") applyTheme(savedTheme);
+  else el.themeBtn.title = "Theme: system";
+}
+
+/* ---------- generate cycle ---------- */
+
+function generateNow() {
+  if (genTimer) { clearTimeout(genTimer); genTimer = null; }
+  store.generate(false);
+}
+
+function scheduleGenerate() {
+  if (genTimer) clearTimeout(genTimer);
+  genTimer = setTimeout(function () { genTimer = null; store.generate(false); }, DEBOUNCE_MS);
+}
+
+/* ---------- selection → scroll the output to that resource ---------- */
+
+function anchorLine(text, name) {
+  var lines = text.split("\n");
+  var marks = [
+    'setResourceNameAnnotation "' + name + '"',
+    "- name: " + name,
+    '"krm.kcl.dev/composition-resource-name" = "' + name + '"',
+    '"krm.kcl.dev/composition-resource-name": "' + name + '"',
+    'krm.kcl.dev/composition-resource-name: ' + name
+  ];
+  for (var m = 0; m < marks.length; m++) {
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf(marks[m]) !== -1) return i;
     }
   }
+  return -1;
+}
 
-  function buildTabs() {
-    var bpLabel = bpTabLabel(store.state.doc);
-    var h =
-      '<button data-t="comp" aria-pressed="' + (tab === "comp") + '">composition.yaml</button>' +
-      '<button data-t="xrd" aria-pressed="' + (tab === "xrd") + '">definition.yaml</button>' +
-      '<button data-t="fns" aria-pressed="' + (tab === "fns") + '">functions.yaml</button>' +
-      '<button data-t="bp" aria-pressed="' + (tab === "bp") + '">' + esc(bpLabel) + '</button>';
-    h += '<button data-t="pkg" aria-pressed="' + (tab === "pkg") + '">package.yaml</button>';
+/* ---------- blueprint tab editor (yaml back through the import gate) ---------- */
 
-    var g = store.state.lastGenerate;
-    var outputs = (g && g.outputs || []);
-    var hasRuntime = false;
-    var tplOutputs = [];
-    outputs.forEach(function (o) {
-      if (/[\\/]runtime[\\/]/.test(o.path)) hasRuntime = true;
-      var tm = /[\\/]templates[\\/][^\\/]+[\\/]([^\\/]+)$/.exec(o.path);
-      if (tm) tplOutputs.push({ file: tm[1], path: o.path });
+function hideEditor() {
+  if (editor) editor.hidden = true;
+  if (editBar) editBar.hidden = true;
+  if (el.code) el.code.hidden = false;
+}
+
+function initBlueprintEditor() {
+  editBtn = document.createElement("button");
+  editBtn.id = "code-edit";
+  editBtn.className = "btn";
+  editBtn.textContent = "edit";
+  editBtn.title = "Edit the blueprint YAML in place — applied through the same parse+validate gate as an import (one undo step)";
+  editBtn.hidden = true;
+  el.meta.parentNode.insertBefore(editBtn, el.meta);
+
+  editor = document.createElement("textarea");
+  editor.id = "code-editor";
+  editor.spellcheck = false;
+  editor.hidden = true;
+  editor.style.cssText = "flex:1;min-height:0;width:100%;box-sizing:border-box;resize:none;border:0;outline:none;" +
+    "background:transparent;color:inherit;font:inherit;padding:10px 12px;";
+  el.code.parentNode.insertBefore(editor, el.code.nextSibling);
+
+  editBar = document.createElement("div");
+  editBar.id = "code-editbar";
+  editBar.hidden = true;
+  editBar.style.cssText = "display:flex;gap:8px;padding:6px 12px;border-top:1px solid var(--rule)";
+  editBar.innerHTML = '<button class="btn" id="code-apply">Apply</button>' +
+    '<button class="btn" id="code-cancel">Cancel</button>' +
+    '<span class="dg" style="align-self:center">applied through the same gate as an import — invalid YAML never lands</span>';
+  editor.parentNode.insertBefore(editBar, editor.nextSibling);
+
+  editBtn.addEventListener("click", function () {
+    editor.value = currentText();
+    // the pre owns the drawer's free space via CSS; the textarea inherits its box
+    editor.style.height = Math.max(80, el.code.clientHeight - 36) + "px";
+    el.code.hidden = true;
+    editor.hidden = false;
+    editBar.hidden = false;
+    editor.focus();
+  });
+
+  editBar.addEventListener("click", function (e) {
+    if (e.target.id === "code-cancel") { hideEditor(); return; }
+    if (e.target.id !== "code-apply") return;
+    store.importBlueprint(editor.value).then(function (doc) {
+      if (doc) hideEditor(); // a rejected edit stays open so it can be fixed
     });
-    tplOutputs.sort(function (a, b) { return a.file < b.file ? -1 : 1; });
-    tplOutputs.forEach(function (to) {
-      var key = "tpl:" + to.file;
-      h += '<button data-t="' + key + '" aria-pressed="' + (tab === key) + '">templates/' + esc(to.file) + '</button>';
-    });
-    if (hasRuntime) {
-      h += '<button data-t="runtime" aria-pressed="' + (tab === "runtime") + '">runtime.yaml</button>';
-    }
+  });
 
-    // one tab per generated providerconfig family (outputs carry the bodies)
-    outputs.forEach(function (o) {
-      var m = /providerconfigs[\/\\]([^\/\\]+)\.yaml$/.exec(o.path);
-      if (!m) return;
-      var key = "pc:" + m[1];
-      h += '<button data-t="' + key + '" aria-pressed="' + (tab === key) + '">providerconfigs/' + m[1] + ".yaml</button>";
-    });
-    h += '<button data-t="rbac" aria-pressed="' + (tab === "rbac") + '">rbac</button>';
-    el.tabs.innerHTML = h;
+  onTabSelected = function (t) {
+    editBtn.hidden = t !== "bp";
+    hideEditor();
+  };
+}
 
-    buildTree();
-  }
+/* ---------------- event handlers & subscriptions ---------------- */
 
-  var onTabSelected = null;
-
-  function selectTab(newTab) {
-    tab = newTab;
-    [].forEach.call(el.tabs.children, function (c) {
-      c.setAttribute("aria-pressed", String(c.getAttribute("data-t") === tab));
-    });
-    if (el.treeRoot) {
-      [].forEach.call(el.treeRoot.querySelectorAll(".tree-item"), function (ti) {
-        ti.classList.toggle("active", ti.getAttribute("data-t") === tab);
-      });
-    }
-    if (typeof onTabSelected === "function") onTabSelected(tab);
-    render();
-  }
-
+function bindOutputEvents() {
   if (el.treeRoot) {
     el.treeRoot.addEventListener("click", function (e) {
       var gt = e.target.closest(".tree-group-title");
@@ -248,18 +659,18 @@ export function init(rootEl, deps) {
 
   if (el.treeToggleBtn) {
     el.treeToggleBtn.addEventListener("click", function () {
-      if (rootEl.hasAttribute("data-tree-collapsed")) {
-        rootEl.removeAttribute("data-tree-collapsed");
+      if (root.hasAttribute("data-tree-collapsed")) {
+        root.removeAttribute("data-tree-collapsed");
         try { localStorage.setItem("cf-tree-collapsed", "0"); } catch (_) {}
       } else {
-        rootEl.setAttribute("data-tree-collapsed", "");
+        root.setAttribute("data-tree-collapsed", "");
         try { localStorage.setItem("cf-tree-collapsed", "1"); } catch (_) {}
       }
     });
   }
   try {
     if (localStorage.getItem("cf-tree-collapsed") === "1") {
-      rootEl.setAttribute("data-tree-collapsed", "");
+      root.setAttribute("data-tree-collapsed", "");
     }
   } catch (_) {}
 
@@ -283,341 +694,12 @@ export function init(rootEl, deps) {
     }
   });
 
-  function bpTabLabel(doc) {
-    var name = doc && doc.metadata && doc.metadata.name || "blueprint";
-    return name + ".cf.yaml";
-  }
-
   el.tabs.addEventListener("click", function (e) {
     var b = e.target.closest("button");
     if (!b || !el.tabs.contains(b)) return;
     selectTab(b.getAttribute("data-t"));
+    if (onTabSelected) onTabSelected(tab);
   });
-
-  /* ---------- output matching ---------- */
-
-  function matchOutput(which) {
-    var g = store.state.lastGenerate;
-    var outputs = g && g.outputs || [];
-    if (which === "fns") {
-      for (var k = 0; k < outputs.length; k++) {
-        if (/functions\.yaml$/.test(outputs[k].path)) return outputs[k];
-      }
-      return null;
-    }
-    var dirRe = which === "comp" ? /[\\/]compositions[\\/]/ : /[\\/]xrds[\\/]/;
-    var kindRe = which === "comp"
-      ? /^kind:\s*Composition\s*$/m
-      : /^kind:\s*CompositeResourceDefinition\s*$/m;
-    for (var i = 0; i < outputs.length; i++) {
-      if (dirRe.test(outputs[i].path)) return outputs[i];
-    }
-    for (var j = 0; j < outputs.length; j++) {
-      if (kindRe.test(outputs[j].body || "")) return outputs[j];
-    }
-    return null;
-  }
-
-  /* ---------- rendering ---------- */
-
-  /** Prototype-style YAML highlighting over plain text. */
-  function highlight(text) {
-    return text.split("\n").map(function (line) {
-      if (/^\s*#/.test(line)) return '<span class="cm">' + esc(line) + "</span>";
-      var m = line.match(/^(\s*(?:-\s+)?)([\w.$\/"'\-]+):(\s*)(.*)$/);
-      if (m) {
-        var val = m[4];
-        var h = esc(m[1]) + '<span class="kk">' + esc(m[2]) + "</span>:" + m[3];
-        if (val) {
-          var cls = /\{\{/.test(val) ? "tm" : "st";
-          h += '<span class="' + cls + '">' + esc(val) + "</span>";
-        }
-        return h;
-      }
-      if (/\{\{/.test(line)) return '<span class="tm">' + esc(line) + "</span>";
-      return esc(line);
-    }).join("\n");
-  }
-
-  var rbacCache = null; // invalidated on every doc emit
-  var pkgCache = null;  // same lifecycle: the package renders the live doc
-
-  function currentText() {
-    if (tab === "bp") {
-      var doc = store.state.doc;
-      return doc ? toYaml(doc) : "";
-    }
-    if (tab.indexOf("pc:") === 0) {
-      var fam = tab.slice(3);
-      var g = store.state.lastGenerate;
-      var pcs = (g && g.outputs || []).filter(function (o) {
-        return new RegExp("providerconfigs[/\\\\]" + fam + "\\.yaml$").test(o.path);
-      });
-      return pcs.length ? pcs[0].body : "";
-    }
-    if (tab === "runtime") {
-      var g = store.state.lastGenerate;
-      var rts = (g && g.outputs || []).filter(function (o) {
-        return /[\\/]runtime[\\/]/.test(o.path);
-      });
-      return rts.length ? rts[0].body : "";
-    }
-    if (tab.indexOf("tpl:") === 0) {
-      var file = tab.slice(4);
-      var g = store.state.lastGenerate;
-      var tpls = (g && g.outputs || []).filter(function (o) {
-        return o.path.endsWith("/" + file) || o.path.endsWith("\\" + file);
-      });
-      return tpls.length ? tpls[0].body : "";
-    }
-    if (tab === "pkg") {
-      if (pkgCache) return pkgCache;
-      api.getPackageYAML().then(function (text) {
-        pkgCache = text;
-        if (tab === "pkg") render();
-      }).catch(function (e) { pkgCache = "# package unavailable: " + (e && e.message || e); if (tab === "pkg") render(); });
-      return "# building package\u2026";
-    }
-    if (tab === "rbac") {
-      if (rbacCache) return rbacCache;
-      api.getRBAC().then(function (r) {
-        rbacCache = (r.rules || []).map(function (rule) {
-          return "- apiGroups: [" + rule.apiGroups.join(", ") + "]\n" +
-            "  resources: [" + rule.resources.join(", ") + "]\n" +
-            "  verbs: [" + rule.verbs.join(", ") + "]\n" +
-            "  # scope: " + rule.scope;
-        }).join("\n");
-        if (tab === "rbac") render();
-      }).catch(function (e) { rbacCache = "# rbac unavailable: " + (e && e.message || e); if (tab === "rbac") render(); });
-      return "# loading rbac\u2026";
-    }
-    var out = matchOutput(tab);
-    return out ? out.body : "";
-  }
-
-  function pickerNote() {
-    // annotate the family scaffold with the client-side kind picker state
-    var fam = tab.slice(3);
-    var hidden = {};
-    try { hidden = JSON.parse(localStorage.getItem("cf-hidden-kinds")) || {}; } catch (_) { /* none */ }
-    var doc = store.state.doc;
-    var lines = [];
-    (doc && doc.spec && doc.spec.sources || []).forEach(function (src) {
-      var ref = src.provider || "";
-      var m = /provider-([a-z0-9]+)-/.exec(ref);
-      var srcFam = m ? m[1] : ref.split("/").pop().replace(/^provider-/, "").split(":")[0];
-      if (srcFam !== fam) return;
-      var n = (hidden[ref] || []).length;
-      var name = ref.split("/").pop();
-      lines.push(name + (n ? " \u2014 " + n + " kind" + (n > 1 ? "s" : "") + " hidden in the palette" : " \u2014 all kinds enabled"));
-    });
-    return lines.join(" \u00b7 ");
-  }
-
-  function render() {
-    var text = currentText();
-    var note = document.getElementById("pc-note");
-    if (tab.indexOf("pc:") === 0) {
-      if (!note) {
-        note = document.createElement("div");
-        note.id = "pc-note";
-        note.className = "dg";
-        note.style.cssText = "padding:4px 12px;border-bottom:1px solid var(--rule)";
-        el.code.parentNode.insertBefore(note, el.code);
-      }
-      note.hidden = false;
-      note.textContent = pickerNote();
-    } else if (note) {
-      note.hidden = true;
-    }
-    el.code.innerHTML = highlight(text);
-    var lines = text ? text.split("\n").filter(function (l, i, a) {
-      return !(i === a.length - 1 && l === "");
-    }).length : 0;
-    el.meta.textContent = lines + " lines · deterministic";
-    updateBreadcrumb();
-    if (el.treeRoot) {
-      [].forEach.call(el.treeRoot.querySelectorAll(".tree-item"), function (ti) {
-        ti.classList.toggle("active", ti.getAttribute("data-t") === tab);
-      });
-    }
-  }
-
-  /* ---------- environment diagnostics & next steps ---------- */
-
-  function diagnoseError(errMsg) {
-    if (!errMsg) return { isEnv: false, tip: "" };
-    var str = String(errMsg).toLowerCase();
-    if (str.indexOf("docker") !== -1 || str.indexOf("daemon") !== -1 || str.indexOf("docker.sock") !== -1) {
-      return {
-        isEnv: true,
-        tip: "Make sure Docker Desktop or dockerd is running and accessible."
-      };
-    }
-    if (str.indexOf("crossplane") !== -1 && (str.indexOf("not found") !== -1 || str.indexOf("executable file") !== -1 || str.indexOf("no such file") !== -1 || str.indexOf("absent") !== -1)) {
-      return {
-        isEnv: true,
-        tip: "Install Crossplane CLI: curl -sL https://raw.githubusercontent.com/crossplane/crossplane/master/install.sh | sh"
-      };
-    }
-    if (str.indexOf("connection refused") !== -1 || str.indexOf("dial tcp") !== -1) {
-      return {
-        isEnv: true,
-        tip: "Check local environment and network connectivity."
-      };
-    }
-    return { isEnv: false, tip: "" };
-  }
-
-  function formatErrorMessage(errMsg) {
-    if (!errMsg) return "";
-    var diag = diagnoseError(errMsg);
-    if (diag.isEnv && diag.tip) {
-      return errMsg + "\n\n💡 Environment Fix Tip: " + diag.tip;
-    }
-    return errMsg;
-  }
-
-  function updateNextSteps(result) {
-    var banner = document.getElementById("next-steps-banner");
-    if (!banner) {
-      banner = document.createElement("div");
-      banner.id = "next-steps-banner";
-      banner.className = "next-steps-banner";
-      banner.style.cssText = "padding:6px 12px;background:rgba(16,185,129,0.08);border-bottom:1px solid rgba(16,185,129,0.2);font-family:var(--mono);font-size:11px;color:var(--ok);display:flex;align-items:center;gap:6px;flex-shrink:0";
-      var vp = document.getElementById("code-viewport") || el.code;
-      if (vp && vp.parentNode) {
-        vp.parentNode.insertBefore(banner, vp);
-      } else if (rootEl) {
-        rootEl.appendChild(banner);
-      }
-    }
-    if (result && result.outputs && result.outputs.length > 0) {
-      var outPath = "out";
-      var first = result.outputs[0].path || "";
-      var m = /^(.*?)(?:[\\/]compositions[\\/]|[\\/]xrds[\\/]|[\\/]templates[\\/]|[\\/]runtime[\\/]|[\\/]providerconfigs[\\/]|functions\.yaml|package\.yaml)/.exec(first);
-      if (m && m[1]) {
-        outPath = m[1].replace(/[\\/]$/, "") || "out";
-      } else if (first.indexOf("/") !== -1 || first.indexOf("\\") !== -1) {
-        var parts = first.split(/[\/\\]/);
-        parts.pop();
-        outPath = parts.join("/") || "out";
-      }
-      banner.hidden = false;
-      banner.style.display = "flex";
-      banner.innerHTML = '<span style="color:var(--ok)">✓</span> ' +
-        'Output written to <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">' + esc(outPath) + '</code> ' +
-        '\u00b7 Apply: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">kubectl apply -f ' + esc(outPath) + '</code> ' +
-        '\u00b7 Package: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">cf package</code>';
-    } else {
-      banner.hidden = true;
-      banner.style.display = "none";
-    }
-  }
-
-  /* ---------- render-failure bar (separate from the raw-count warnbar,
-     which is re-rendered on every doc change) ---------- */
-  function showWarn(message) {
-    var bar = document.getElementById("render-warn");
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = "render-warn";
-      bar.className = "warnbar";
-      var vp = document.getElementById("code-viewport") || el.code;
-      if (vp && vp.parentNode) vp.parentNode.insertBefore(bar, vp);
-      else if (rootEl) rootEl.appendChild(bar);
-    }
-    if (message) {
-      bar.textContent = formatErrorMessage(message);
-      bar.hidden = false;
-    } else {
-      bar.textContent = "";
-      bar.hidden = true;
-    }
-  }
-
-  /* ---------- raw-template warnbar (prototype's exact copy) ---------- */
-
-  function countRaws(doc) {
-    var n = 0;
-    var resources = doc && doc.spec && doc.spec.resources || [];
-    resources.forEach(function (r) {
-      var fields = r.fields || {};
-      Object.keys(fields).forEach(function (k) {
-        var f = fields[k];
-        if (f && typeof f.raw === "string" && f.raw !== "") n++;
-      });
-    });
-    return n;
-  }
-
-  function drawWarn(doc) {
-    var raws = countRaws(doc);
-    if (raws) {
-      el.warn.hidden = false;
-      el.warn.innerHTML = "<span>▲</span><span>" + raws + " field" + (raws > 1 ? "s" : "") +
-        ' use a raw template — the canvas can show them but not validate them. <code>missingkey=error</code> still guards them.</span>';
-    } else {
-      el.warn.hidden = true;
-    }
-  }
-
-  /* ---------- topbar ---------- */
-
-  function drawTopbar(doc) {
-    var name = doc && doc.metadata && doc.metadata.name || "blueprint";
-    el.crumb.innerHTML = "blueprints/<b>" + esc(name) + ".cf.yaml</b>";
-    // the wordmark shows the BUILD version (the doc's schema version was
-    // read as "I'm on an old app" — it lives with the blueprint name now)
-    var av = doc && doc.apiVersion || "";
-    var schemaV = av.indexOf("/") >= 0 ? av.split("/").pop() : av;
-    el.crumb.innerHTML += schemaV ? ' <span class="dg">' + esc(schemaV) + "</span>" : "";
-    if (!el.ver.dataset.build) {
-      el.ver.dataset.build = "1";
-      api.getVersion().then(function (r) {
-        el.ver.textContent = r.version;
-        el.ver.title = "compositionfactory build " + r.version;
-        if (el.engineSel && Array.isArray(r.engines) && r.engines.length > 0) {
-          var curDocEngine = (store.state.doc && store.state.doc.spec && store.state.doc.spec.emit && store.state.doc.spec.emit.engine) || "go-templating";
-          el.engineSel.innerHTML = r.engines.map(function (eng) {
-            return '<option value="' + esc(eng) + '">' + esc(eng) + '</option>';
-          }).join("");
-          el.engineSel.value = curDocEngine;
-        }
-      }).catch(function () {
-        el.ver.textContent = "";
-        if (el.engineSel && el.engineSel.options.length === 0) {
-          el.engineSel.innerHTML = '<option value="go-templating">go-templating</option><option value="kcl">kcl</option><option value="python">python</option>';
-        }
-      });
-    }
-    var bp = el.tabs.querySelector('[data-t="bp"]');
-    if (bp) bp.textContent = bpTabLabel(doc);
-  }
-
-  function chipOk(n) {
-    el.valid.textContent = "ok · " + n + " file" + (n === 1 ? "" : "s");
-    el.valid.title = "";
-    el.valid.style.color = "";
-  }
-
-  function chipErr(message) {
-    el.valid.textContent = "error";
-    el.valid.title = formatErrorMessage(message); // server's message, verbatim + fix tips
-    el.valid.style.color = "var(--err)";
-  }
-
-  /* ---------- theme: system → light → dark → system ---------- */
-
-  var THEME_CYCLE = ["system", "light", "dark"];
-
-  function applyTheme(mode) {
-    var r = document.documentElement;
-    if (mode === "light" || mode === "dark") r.setAttribute("data-theme", mode);
-    else r.removeAttribute("data-theme");
-    el.themeBtn.title = "Theme: " + mode;
-    try { localStorage.setItem("cf-theme", mode); } catch (_) { /* private mode */ }
-  }
 
   el.themeBtn.addEventListener("click", function () {
     var cur = document.documentElement.getAttribute("data-theme") || "system";
@@ -625,32 +707,16 @@ export function init(rootEl, deps) {
     applyTheme(next);
   });
 
-  var savedTheme = null;
-  try { savedTheme = localStorage.getItem("cf-theme"); } catch (_) { /* ignore */ }
-  if (savedTheme === "light" || savedTheme === "dark") applyTheme(savedTheme);
-  else el.themeBtn.title = "Theme: system";
-
-  /* ---------- generate cycle ---------- */
-
-  function generateNow() {
-    if (genTimer) { clearTimeout(genTimer); genTimer = null; }
-    store.generate(false);
-  }
-
-  function scheduleGenerate() {
-    if (genTimer) clearTimeout(genTimer);
-    genTimer = setTimeout(function () { genTimer = null; store.generate(false); }, DEBOUNCE_MS);
-  }
-
   el.generateBtn.addEventListener("click", generateNow);
   el.generateBtn.disabled = false;   // wired: markup ships them disabled so an
   el.validateBtn.disabled = false;   // early click can't hit a dead button
+
   if (el.valid) {
     el.valid.style.cursor = "pointer";
     el.valid.addEventListener("click", function () {
-      if (rootEl.hasAttribute("data-collapsed")) {
-        rootEl.removeAttribute("data-collapsed");
-        rootEl.style.height = "250px";
+      if (root.hasAttribute("data-collapsed")) {
+        root.removeAttribute("data-collapsed");
+        root.style.height = "250px";
       }
       var warnBar = document.getElementById("render-warn");
       if (warnBar && !warnBar.hidden) {
@@ -728,7 +794,9 @@ export function init(rootEl, deps) {
       }).then(function () { generateNow(); });
     });
   }
+}
 
+function bindOutputStoreSubscriptions() {
   store.subscribe("doc", function (doc) {
     drawTopbar(doc);
     drawWarn(doc);
@@ -763,25 +831,6 @@ export function init(rootEl, deps) {
     }
   });
 
-  /* ---------- selection → scroll the output to that resource ---------- */
-
-  function anchorLine(text, name) {
-    var lines = text.split("\n");
-    var marks = [
-      'setResourceNameAnnotation "' + name + '"',
-      "- name: " + name,
-      '"krm.kcl.dev/composition-resource-name" = "' + name + '"',
-      '"krm.kcl.dev/composition-resource-name": "' + name + '"',
-      'krm.kcl.dev/composition-resource-name: ' + name
-    ];
-    for (var m = 0; m < marks.length; m++) {
-      for (var i = 0; i < lines.length; i++) {
-        if (lines[i].indexOf(marks[m]) !== -1) return i;
-      }
-    }
-    return -1;
-  }
-
   store.subscribe("selection", function (name) {
     if (!name || (tab !== "comp" && tab !== "bp")) return;
     var idx = anchorLine(currentText(), name);
@@ -789,70 +838,49 @@ export function init(rootEl, deps) {
     var lh = parseFloat(getComputedStyle(el.code).lineHeight) || 16;
     el.code.scrollTo({ top: Math.max(0, idx * lh - 40), behavior: "smooth" });
   });
+}
 
-  /* ---------- blueprint tab editor (yaml back through the import gate) ---------- */
+/* ---------------- entry point ---------------- */
 
-  var editBtn = document.createElement("button");
-  editBtn.id = "code-edit";
-  editBtn.className = "btn";
-  editBtn.textContent = "edit";
-  editBtn.title = "Edit the blueprint YAML in place — applied through the same parse+validate gate as an import (one undo step)";
-  editBtn.hidden = true;
-  el.meta.parentNode.insertBefore(editBtn, el.meta);
+export function init(rootEl, deps) {
+  if (booted) return;
+  booted = true;
 
-  var editor = document.createElement("textarea");
-  editor.id = "code-editor";
-  editor.spellcheck = false;
-  editor.hidden = true;
-  editor.style.cssText = "flex:1;min-height:0;width:100%;box-sizing:border-box;resize:none;border:0;outline:none;" +
-    "background:transparent;color:inherit;font:inherit;padding:10px 12px;";
-  el.code.parentNode.insertBefore(editor, el.code.nextSibling);
+  store = deps.store;
+  api = deps.api;
+  root = rootEl;
 
-  var editBar = document.createElement("div");
-  editBar.id = "code-editbar";
-  editBar.hidden = true;
-  editBar.style.cssText = "display:flex;gap:8px;padding:6px 12px;border-top:1px solid var(--rule)";
-  editBar.innerHTML = '<button class="btn" id="code-apply">Apply</button>' +
-    '<button class="btn" id="code-cancel">Cancel</button>' +
-    '<span class="dg" style="align-self:center">applied through the same gate as an import — invalid YAML never lands</span>';
-  editor.parentNode.insertBefore(editBar, editor.nextSibling);
-
-  function hideEditor() {
-    editor.hidden = true;
-    editBar.hidden = true;
-    el.code.hidden = false;
-  }
-
-  editBtn.addEventListener("click", function () {
-    editor.value = currentText();
-    // the pre owns the drawer's free space via CSS; the textarea inherits its box
-    editor.style.height = Math.max(80, el.code.clientHeight - 36) + "px";
-    el.code.hidden = true;
-    editor.hidden = false;
-    editBar.hidden = false;
-    editor.focus();
-  });
-  editBar.addEventListener("click", function (e) {
-    if (e.target.id === "code-cancel") { hideEditor(); return; }
-    if (e.target.id !== "code-apply") return;
-    store.importBlueprint(editor.value).then(function (doc) {
-      if (doc) hideEditor(); // a rejected edit stays open so it can be fixed
-    });
-  });
-  onTabSelected = function (t) {
-    editBtn.hidden = t !== "bp";
-    hideEditor();
+  el = {
+    root: rootEl,
+    tabs: rootEl.querySelector("#tabs") || document.getElementById("tabs"),
+    meta: rootEl.querySelector("#meta") || document.getElementById("meta"),
+    warn: rootEl.querySelector("#warn") || document.getElementById("warn"),
+    code: rootEl.querySelector("#code") || document.getElementById("code"),
+    crumb: document.getElementById("crumb"),
+    ver: document.getElementById("ver"),
+    valid: document.getElementById("valid"),
+    themeBtn: document.getElementById("themeBtn"),
+    validateBtn: document.getElementById("validateBtn"),
+    generateBtn: document.getElementById("generateBtn"),
+    engineSel: document.getElementById("engineSel"),
+    tplSource: document.getElementById("tplSource"),
+    treeToggleBtn: document.getElementById("treeToggleBtn"),
+    treeRoot: document.getElementById("tree-root"),
+    treeCount: document.getElementById("tree-files-count"),
+    ebIcon: document.getElementById("eb-icon"),
+    ebPath: document.getElementById("eb-path"),
+    copyBtn: document.getElementById("code-copy-btn"),
   };
-  el.tabs.addEventListener("click", function () {
-    if (onTabSelected) onTabSelected(tab);
-  });
+
+  initBlueprintEditor();
+  initTheme();
+  bindOutputEvents();
+  bindOutputStoreSubscriptions();
 
   /* ---------- splitter (canvas ↕ output) ---------- */
-
   initSplitter(rootEl);
 
   /* ---------- first paint ---------- */
-
   buildTabs();
   if (store.state.doc) {
     drawTopbar(store.state.doc);
