@@ -136,21 +136,23 @@ if [ "$SVC_FOUND" = false ]; then
   exit 1
 fi
 
-echo "==> Testing Round-Trip Gate: Reading live Composition ${COMP_NAME} from API server..."
-LIVE_COMP="${OUT_DIR}/live-composition.yaml"
-kubectl get composition "${COMP_NAME}" -o yaml > "${LIVE_COMP}"
+echo "==> Testing Round-Trip Gate: Reading live XRD and Composition from API server..."
+LIVE_TREE="${OUT_DIR}/live-tree"
+mkdir -p "${LIVE_TREE}/apis"
+kubectl get xrd "${XRD_NAME}" -o yaml > "${LIVE_TREE}/apis/definition.yaml"
+kubectl get composition "${COMP_NAME}" -o yaml > "${LIVE_TREE}/composition.yaml"
 
 ROUNDTRIP_BP="${OUT_DIR}/roundtrip.cf.yaml"
-echo "==> Importing live server-side Composition with cf import..."
-./bin/cf import "${LIVE_COMP}" -o "${ROUNDTRIP_BP}" || [ $? -eq 2 ]
+echo "==> Importing live server-side Configuration tree with cf import..."
+./bin/cf import "${LIVE_TREE}" -o "${ROUNDTRIP_BP}" || [ $? -eq 2 ]
 
 ROUNDTRIP_OUT="${OUT_DIR}/roundtrip-gen"
 echo "==> Regenerating Crossplane artifacts from adopted blueprint..."
 ./bin/cf gen "${ROUNDTRIP_BP}" --out "${ROUNDTRIP_OUT}" --group-suffix="${WORKSPACE_GROUP_SUFFIX}"
 
-echo "==> Verifying regenerated Composition is non-empty and valid..."
-if [ ! -s "${ROUNDTRIP_OUT}/compositions/composition.yaml" ]; then
-  echo "ERROR: Round-trip generated composition.yaml is empty or missing" >&2
+echo "==> Verifying regenerated artifacts are non-empty and valid..."
+if [ ! -s "${ROUNDTRIP_OUT}/compositions/xworkloads.workloads.sparky.ee.${WORKSPACE_GROUP_SUFFIX}.yaml" ] && [ ! -s "${ROUNDTRIP_OUT}/compositions/composition.yaml" ]; then
+  echo "ERROR: Round-trip generated composition is empty or missing" >&2
   exit 1
 fi
 

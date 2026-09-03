@@ -975,3 +975,67 @@ spec:
 		t.Errorf("expected input to contain tagAll: true, got:\n%s", post.Input)
 	}
 }
+
+func TestAdoptNativeKubernetesResources(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-native-workload
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: render-resources
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: my-svc
+            spec:
+              selector:
+                app: workload
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: my-config
+            data:
+              PORT: "8080"
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	svc := bp.ResourceNamed("my-svc")
+	if svc == nil {
+		t.Fatal("resource my-svc not found")
+	}
+	if svc.Provider != blueprint.NativeProvider {
+		t.Errorf("svc provider = %q, want %q", svc.Provider, blueprint.NativeProvider)
+	}
+	if fld, ok := svc.Fields["spec.selector.app"]; !ok || fld.Value != "workload" {
+		t.Errorf("svc spec.selector.app = %+v, want Value: workload", fld)
+	}
+
+	cm := bp.ResourceNamed("my-config")
+	if cm == nil {
+		t.Fatal("resource my-config not found")
+	}
+	if cm.Provider != blueprint.NativeProvider {
+		t.Errorf("cm provider = %q, want %q", cm.Provider, blueprint.NativeProvider)
+	}
+	if fld, ok := cm.Fields["data.PORT"]; !ok || fld.Value != "8080" {
+		t.Errorf("cm data.PORT = %+v, want Value: 8080", fld)
+	}
+}

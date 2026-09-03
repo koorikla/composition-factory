@@ -921,26 +921,60 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 		}
 	}
 
+	// Extract other top-level fields (e.g. data in ConfigMap, automountServiceAccountToken in ServiceAccount)
+	for k, v := range m {
+		if k == "apiVersion" || k == "kind" || k == "metadata" || k == "spec" || k == "status" {
+			continue
+		}
+		if mapVal, ok := v.(map[string]any); ok {
+			extractFields(k, mapVal, res.Fields, placeholders, res.Name, report, nameMapping)
+		} else {
+			rawStr := unmaskString(fmt.Sprint(v), placeholders)
+			if err := checkScalarClean(rawStr); err != nil {
+				report.Record(fmt.Sprintf("resource.%s.fields.%s", res.Name, k), "contains newlines or control characters")
+				continue
+			}
+			res.Fields[k] = blueprint.Field{Value: rawStr}
+		}
+	}
+
 	// Extract spec fields
 	if spec, ok := m["spec"].(map[string]any); ok {
-		var targetProps map[string]any
 		if forProvider, ok := spec["forProvider"].(map[string]any); ok {
-			targetProps = forProvider
+			extractFields("", forProvider, res.Fields, placeholders, res.Name, report, nameMapping)
 		} else {
-			targetProps = spec
+			extractFields("spec", spec, res.Fields, placeholders, res.Name, report, nameMapping)
 		}
-
-		extractFields("", targetProps, res.Fields, placeholders, res.Name, report, nameMapping)
 	}
 
 	return res
+}
+
+func isMapFieldPrefix(prefix, nextKey string) bool {
+	if prefix == "data" || prefix == "stringData" || prefix == "binaryData" || prefix == "tags" {
+		return true
+	}
+	if prefix == "spec.selector" {
+		if nextKey == "matchLabels" || nextKey == "matchExpressions" {
+			return false
+		}
+		return true
+	}
+	if strings.HasSuffix(prefix, "Labels") || strings.HasSuffix(prefix, "labels") || strings.HasSuffix(prefix, "annotations") || strings.HasSuffix(prefix, "tags") || strings.HasSuffix(prefix, "matchLabels") || strings.HasSuffix(prefix, "nodeSelector") {
+		return true
+	}
+	return false
 }
 
 func extractFields(prefix string, obj map[string]any, out map[string]blueprint.Field, placeholders []string, resName string, report *LossReport, nameMapping map[string]string) {
 	for k, v := range obj {
 		path := k
 		if prefix != "" {
-			path = prefix + "." + k
+			if isMapFieldPrefix(prefix, k) {
+				path = fmt.Sprintf("%s[%s]", prefix, k)
+			} else {
+				path = prefix + "." + k
+			}
 		}
 		switch val := v.(type) {
 		case map[string]any:
