@@ -17,59 +17,22 @@ One exception to the open-only rule: v5 keeps a short "Non-findings" list of
 things that look like bugs and are not. It is there to stop them being
 re-raised, which is a context saving, not a cost.
 
-## Backlog v3 — manifests as source of truth (analysis 2026-09-02)
+## Backlog v3 — Manifest Import & Live Edit Compatibility (DSL retained)
 
-Memo: docs/research/2026-09-02-manifests-as-source-of-truth.md. Phase 0 ran and returned GO
-(2026-09-02) — the spike and its goldens are in docs/backlog-archive.md. Phases 1–3 are no
-longer blocked on the decision, only on Kaur saying start. Automation drivers: do not start
-Phase 1 from this list.
+Decision: Retain DSL `.cf.yaml` as a first-class canonical intermediate representation while building seamless Crossplane manifest import, bidirectional adoption, and live-editing compatibility.
 
-### Phase 1 — cf-dialect round-trip (Phase 0 returned GO; awaiting Kaur's start)
+### Phase 1 — Manifest Import & Dialect Round-Trip
 
-- [ ] Simplify cf's own emitted template so a human can edit it in place: replace the ten-clause
-      status-wire guard chain with a `define "cf.observed"` helper (or `dig`) that stays
-      `missingkey=error`-safe; prove by render on the IRSA and foreach-status fixtures. The
-      reader must accept both the old and the new chain for one release (migration), then only
-      the new. Keep byte-determinism goldens.
-- [ ] Specified structure = Configuration source tree: crossplane.yaml (sources), apis/<xr>/
-      definition.yaml + composition.yaml, .cf/layout.yaml, .cf.lock. `cf package` and
-      `crossplane xpkg build` consume it unchanged.
-- [ ] `internal/manifest` for real: model, parse, patch (splice), lint (unguarded optional
-      dereference; XRD default vs template default drift; scope vs `.m.` group mismatch).
-      Schema validation of field paths against CRDs runs on the parsed placeholders — unchanged
-      differentiator.
-- [ ] Wire expression grammar limited to what cf emits: `$spec.x` chains, cf's guard chains,
-      `(index $.observed.resources "r").resource.status.…` → param/status wires; anything else
-      inside a cf-shaped field → raw wire (shown, text-editable, not typed).
-- [ ] Engine edits as splices: set literal, wire param, unwire, add guarded optional field, add /
-      remove / rename resource document, when, forEach (cf canonical `range`), annotations,
-      envelope. Each with a golden proving only the intended bytes change.
-- [ ] `cf gen` becomes the one-release migration tool (blueprint → manifest tree); `cf validate`
-      and `cf lint` become first-class CLI verbs; `cf adopt`/`import` are subsumed by "open".
+- [ ] Simplify cf's emitted status-wire templates: replace the 11-clause status-wire guard chain with a `define "cf.observed"` helper (or `dig`) that stays `missingkey=error`-safe; prove by render on the IRSA and foreach-status fixtures. Accept both the old and new chain during migration. Keep byte-determinism goldens.
+- [ ] Direct Configuration source tree import: `cf import` / `cf adopt` accepts a full Configuration tree (`crossplane.yaml`, `apis/<xr>/definition.yaml`, `composition.yaml`), extracting XR definitions, resource templates, and parameters into the live workspace.
+- [ ] `internal/manifest` parsing and splice editing: model, parse, and live-patch raw YAML manifests preserving comments, formatting, and unmanaged blocks.
+- [ ] Schema validation of field paths against CRDs runs on parsed placeholders and live-edited manifest trees.
 
-### Phase 2 — canvas and API over the manifest model (blocked on Phase 1)
+### Phase 2 — Canvas Live-Edit & Bi-directional Manifest Sync
 
-- [ ] API/MCP: document routes become manifest routes (GET/PUT xrd, composition, layout) plus the
-      same semantic edit routes as today implemented as splices; blueprint JSON disappears from
-      the wire. MCP tools keep their names where the semantics survive.
-- [ ] Canvas store `doc` = {xrd, composition model, layout}; regions read the model, not
-      `spec.resources`. Opaque spans render as locked regions on a card (text-editable in the
-      inspector), whole opaque documents as locked cards. Provider sources come from
-      crossplane.yaml dependsOn + apiVersion lookup.
-- [ ] `kubectl` export scrub on open with a visible "removed N server-side fields" note; first-save
-      canonicalisation note for XRDs.
-- [ ] Playwright: the 33 blueprint-shape specs migrate to manifest fixtures; add round-trip specs
-      (open foreign composition → edit one field → file diff is one hunk).
-- [ ] Examples become manifest trees; the startup chooser loads them; the Guide, dsl.md, cli.md,
-      mcp.md and README describe manifests, not the DSL.
-
-### Phase 3 — remove the DSL (blocked on Phase 2 shipping)
-
-- [ ] Delete internal/blueprint, adopt, import, the embedded-blueprint annotation in
-      package.yaml, the blueprint examples format; KCL/Python become export-only from the model
-      or are dropped (go-templating only for now, per Kaur).
-- [ ] Spec addendum: retire §7 (the DSL), restate §2's round-trip non-goal as "understanding is
-      partial, preservation is total", update §11/§12.
+- [ ] Canvas & API live editing: allow toggling between editing `.cf.yaml` DSL and direct manifest views (`composition.yaml`, `definition.yaml`) with real-time bidirectional synchronization.
+- [ ] Opaque block preservation: foreign compositions with custom pipeline steps, unknown functions, or extra annotations render as structured/locked cards on canvas and are preserved verbatim across round trips.
+- [ ] `kubectl` export scrub on open with a visible "removed N server-side fields" note.
 
 ## Backlog v4 — dogfooding five real compositions on v0.7.0 (2026-09-02)
 
