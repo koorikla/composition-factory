@@ -1,5 +1,14 @@
-# Backlog archive — completed items
-
+- [x] The three emitters walk the same tree three times. Lift the common traversal,
+      validation, kind resolution, conventions merge, and field/annotation planning
+      into a shared `planSingleResource` in `internal/emit/plan.go`, used identically across
+      `composition.go`, `python.go`, and `kcl.go`.
+      — completed 2026-09-03
+- [x] `catalogue.Kinds` and `catalogue.PackagesForKind` surfaced in `cf catalogue --kind <kind>`
+      and package table outputs to discover which package serves which CRD kind.
+      — completed 2026-09-03
+- [x] `internal/cluster` test coverage brought from 55% to 78.5% with comprehensive error path
+      and kubeconfig TLS/context testing.
+      — completed 2026-09-03
 - [x] `make test-race` exists and passes but no CI lane invokes it. Add it to
       lane A or a nightly — the API server has a shared index and memoised
       schema trees, which is exactly what the race detector is for.

@@ -12,6 +12,7 @@ import (
 type CatalogueCmd struct {
 	Q    string `arg:"" optional:"" help:"Search query for provider name, description, or served kinds."`
 	Type string `help:"Filter by package type: provider or function." default:""`
+	Kind string `help:"Filter by specific served CRD kind (e.g. DatabaseInstance, Bucket, Topic)." default:""`
 }
 
 func (c *CatalogueCmd) Run(out io.Writer) error {
@@ -20,10 +21,19 @@ func (c *CatalogueCmd) Run(out io.Writer) error {
 		return err
 	}
 
-	results := catalogue.Search(entries, c.Q, c.Type)
+	query := c.Q
+	if c.Kind != "" {
+		if query != "" {
+			query = query + " " + c.Kind
+		} else {
+			query = c.Kind
+		}
+	}
+
+	results := catalogue.Search(entries, query, c.Type)
 	if len(results) == 0 {
-		if c.Q != "" {
-			fmt.Fprintf(out, "No packages found matching %q.\n", c.Q)
+		if query != "" {
+			fmt.Fprintf(out, "No packages found matching %q.\n", query)
 		} else {
 			fmt.Fprintln(out, "No packages found in catalogue.")
 		}
@@ -31,17 +41,26 @@ func (c *CatalogueCmd) Run(out io.Writer) error {
 	}
 
 	w := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tLATEST REF\tDESCRIPTION")
+	fmt.Fprintln(w, "NAME\tLATEST REF\tSERVED KINDS\tDESCRIPTION")
 	for _, p := range results {
 		ref := p.Ref
 		if ref == "" {
 			ref = "(no stable release)"
 		}
 		desc := strings.ReplaceAll(p.Description, "\n", " ")
-		if len(desc) > 80 {
-			desc = desc[:77] + "..."
+		if len(desc) > 60 {
+			desc = desc[:57] + "..."
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", p.Name, ref, desc)
+		kinds := catalogue.Kinds(p.Name)
+		kindsStr := "-"
+		if len(kinds) > 0 {
+			if len(kinds) > 3 {
+				kindsStr = strings.Join(kinds[:3], ", ") + fmt.Sprintf(" (+%d)", len(kinds)-3)
+			} else {
+				kindsStr = strings.Join(kinds, ", ")
+			}
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", p.Name, ref, kindsStr, desc)
 	}
 	return w.Flush()
 }

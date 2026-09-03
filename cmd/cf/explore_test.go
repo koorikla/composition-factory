@@ -192,4 +192,15 @@ func TestCatalogueCommand(t *testing.T) {
 	if strings.Contains(outStr, "provider-aws-rds") {
 		t.Errorf("expected no providers in type=function listing, got:\n%s", outStr)
 	}
+
+	// 5. Filter by --kind=DatabaseInstance
+	cmdKind := &CatalogueCmd{Kind: "DatabaseInstance"}
+	out.Reset()
+	if err := cmdKind.Run(&out); err != nil {
+		t.Fatalf("CatalogueCmd.Run with Kind=DatabaseInstance: %v", err)
+	}
+	outStr = out.String()
+	if !strings.Contains(outStr, "provider-gcp-sql") {
+		t.Errorf("expected provider-gcp-sql for --kind=DatabaseInstance, got:\n%s", outStr)
+	}
 }

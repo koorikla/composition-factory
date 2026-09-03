@@ -179,37 +179,18 @@ func writeTemplatePreamble(d *Doc, ti int, b *blueprint.Blueprint) {
 }
 
 func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) error {
-	crd, err := resolveKind(crds, r, wantNamespaced)
+	pres, err := planSingleResource(r, b, crds, wantNamespaced)
 	if err != nil {
 		return err
 	}
-	apiVersion, err := crd.APIVersion()
-	if err != nil {
-		return fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
-	}
-	if err := checkFieldPaths(r, crd); err != nil {
-		return err
-	}
-	// Envelope paths are checked against the resolved variant's ACTUAL
-	// envelope schema (see envelope.go) — the namespaced .m. and
-	// cluster-scoped envelopes differ structurally, so this cannot be a
-	// hard-coded list.
-	envNodes, err := checkEnvelopePaths(r, crd)
-	if err != nil {
-		return err
-	}
-	if err := checkStatusRefs(r, b, crds, wantNamespaced); err != nil {
-		return err
-	}
-	// Annotations are planned up front, like fields, so a bad entry errors
-	// before a single line of this resource's document is written. The
-	// plan is written into the shared metadata.annotations block below —
-	// BEFORE the native/managed fork, because annotations exist on both
-	// families identically (see annotations.go).
-	annPlan, err := planAnnotations(r, b, crds, wantNamespaced)
-	if err != nil {
-		return err
-	}
+	crd := pres.CRD
+	apiVersion := pres.APIVersion
+	annPlan := pres.AnnPlan
+	metaPlan := pres.MetaPlan
+	bodyPlan := pres.BodyPlan
+	envPlan := pres.EnvPlan
+	_ = envPlan
+
 	// forEach wraps the resource's WHOLE document in a range over the
 	// loop count, so every line below — separator, envelope,
 	// providerConfigRef — repeats per iteration; fields render exactly
@@ -245,21 +226,6 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 		}
 		d.Line(ti, "{{- if %s }}", cond)
 	}
-	// The loop bound comes in two forms. params.<name> dereferences the
-	// composite's spec bare (safe: Validate pins it required-or-default).
-	// resources.<name>.status.<path> is OBSERVED state — it does not
-	// exist until the source resource has been observed reporting that
-	// leaf (first reconcile, a fresh XR, `crossplane composition render`
-	// with no --observed-resources) — so the WHOLE range wraps in the
-	// same hasKey/kindIs guard chain a status wire uses, and an
-	// unobserved source fans out to ZERO instances. That semantic is
-	// load-bearing, not an edge case: NOTHING of the looped resource
-	// exists until the cluster says how many, and Crossplane creates the
-	// instances on a later reconcile once the count is observed —
-	// exactly how a status wire's field materialises late, lifted from
-	// one field to a whole document set. The alternative (hard-failing
-	// like the params form) would make every fresh XR unrenderable,
-	// because no XRD gate can make observed state unconditional.
 	looped := r.ForEach != ""
 	loopGuarded := false
 	if looped {
@@ -278,39 +244,6 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 	d.Line(ti, "---")
 	d.Line(ti, "apiVersion: %s", apiVersion)
 	d.Line(ti, "kind: %s", crd.Kind)
-
-	// Conventions fill in matching fields the blueprint does NOT set
-	// explicitly; an explicit field always wins — that IS the override
-	// mechanism. The merge happens on a copy, never on r.Fields itself.
-	// Native resources are exempt by design: their top-level leaves are
-	// structural (Secret.type, ConfigMap.data), never convention targets.
-	fields := r.Fields
-	if !crd.Native {
-		var cerr error
-		fields, cerr = conventionFields(r, b, crd)
-		if cerr != nil {
-			return cerr
-		}
-	}
-	rc := r
-	rc.Fields = fields
-	plan, err := planFields(rc, b, crds, wantNamespaced)
-	if err != nil {
-		return err
-	}
-
-	var metaPlan, bodyPlan []forProviderField
-	if crd.Native {
-		for _, fld := range plan {
-			if strings.HasPrefix(fld.path, "metadata.") {
-				metaPlan = append(metaPlan, fld)
-			} else {
-				bodyPlan = append(bodyPlan, fld)
-			}
-		}
-	} else {
-		bodyPlan = plan
-	}
 
 	d.Line(ti, "metadata:")
 	if crd.Native {
@@ -376,7 +309,7 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 		// leaf at an arbitrary nesting depth breaks. Enforced here too
 		// because Composition is exported.
 		for _, fld := range bodyPlan {
-			if f, ok := rc.Fields[fld.path]; ok && f.Template != "" {
+			if f, ok := r.Fields[fld.path]; ok && f.Template != "" {
 				return fmt.Errorf("resource %q field %q: template: fields are not supported on "+
 					"native Kubernetes kind %q in v1 -- the template call's output re-indents to the "+
 					"fixed forProvider column, which a native field at an arbitrary nesting depth "+
@@ -411,7 +344,7 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 		// v2 namespaced shape -- which is why blueprint.Validate refuses
 		// scope: Cluster outright rather than letting a cluster-scoped
 		// blueprint through this function.
-		if err := writeForProviderTree(d, ti, ti+2, r.Name, plan); err != nil {
+		if err := writeForProviderTree(d, ti, ti+2, r.Name, bodyPlan); err != nil {
 			return err
 		}
 		// The rest of the spec envelope: blueprint-authored entries merged
@@ -423,10 +356,6 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 		// checkEnvelopePaths rejects a blueprint that asks for it. An
 		// envelope-free resource renders byte-identically to before this
 		// grammar existed: just the providerConfigRef block.
-		envPlan, err := planEnvelope(r, b, envNodes)
-		if err != nil {
-			return err
-		}
 		writeEnvelope(d, ti, envPlan, wantNamespaced)
 	}
 	if looped {

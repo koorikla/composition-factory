@@ -60,53 +60,15 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 	sb.WriteString("    xr_meta = oxr.get(\"metadata\", {})\n\n")
 
 	for _, r := range b.Spec.Resources {
-		crd, err := resolveKind(crds, r, wantNamespaced)
+		pres, err := planSingleResource(r, b, crds, wantNamespaced)
 		if err != nil {
 			return "", err
 		}
-
-		apiVersion, err := crd.APIVersion()
-		if err != nil {
-			return "", fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
-		}
-
-		if err := checkFieldPaths(r, crd); err != nil {
-			return "", err
-		}
-
-		envNodes, err := checkEnvelopePaths(r, crd)
-		if err != nil {
-			return "", err
-		}
-
-		if err := checkStatusRefs(r, b, crds, wantNamespaced); err != nil {
-			return "", err
-		}
-
-		annPlan, err := planAnnotations(r, b, crds, wantNamespaced)
-		if err != nil {
-			return "", err
-		}
-
-		fields := r.Fields
-		if !crd.Native {
-			var cerr error
-			fields, cerr = conventionFields(r, b, crd)
-			if cerr != nil {
-				return "", cerr
-			}
-		}
-		rc := r
-		rc.Fields = fields
-		plan, err := planFields(rc, b, crds, wantNamespaced)
-		if err != nil {
-			return "", err
-		}
-
-		envPlan, err := planEnvelope(r, b, envNodes)
-		if err != nil {
-			return "", err
-		}
+		crd := pres.CRD
+		apiVersion := pres.APIVersion
+		annPlan := pres.AnnPlan
+		plan := pres.Plan
+		envPlan := pres.EnvPlan
 
 		indent := "    "
 		if r.When != "" {

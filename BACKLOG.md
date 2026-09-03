@@ -192,18 +192,6 @@ its own goldens, so an emitter that is wrong in the same way twice passes.
       worktree-agent-a247d77332728f705 (1). The ~/.gemini/antigravity/…
       worktrees belong to a live parallel session — leave those alone.
 
-### Dead code introduced with the discovery CLI (found 2026-09-03)
-
-- [ ] `catalogue.Kinds` and `catalogue.PackagesForKind`
-      (catalogue/kinds.go:230,240) are exported, covered by
-      TestKindsAndPackagesForKind, and called by nothing in production —
-      `deadcode ./cmd/...` went from four unreachable functions to six, and
-      these are the two new ones. The maps behind them are live (`Matches`
-      uses them to power catalogue.Search), so these are accessors written
-      for a caller that never arrived. Either surface them (`cf catalogue`
-      showing which kinds a package serves, or a `--kind` lookup) or
-      unexport them and drop the test.
-
 ### Non-findings, recorded so they are not re-raised
 
 - [x] `deploy/k8s/deployment.yaml` passes `--i-know-this-is-unauthenticated`
