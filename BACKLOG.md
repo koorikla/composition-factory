@@ -40,7 +40,6 @@ not an exception for the importer to special-case.
 ## Track 1 — Manifest Import & Adoption Compatibility
 
 - [ ] **Opaque Block & Custom Function Pipeline Preservation**: When importing complex foreign compositions containing unknown custom functions or non-standard pipeline steps, preserve them as declared custom steps in `spec.pipeline` / `spec.resources` so they round-trip cleanly without loss.
-- [ ] **`kubectl` Export Scrubbing**: Automatically scrub runtime status, managed fields, UIDs, and cluster-assigned metadata when pasting or importing raw cluster dumps (`kubectl get composition -o yaml`), reporting how many server-side fields were dropped rather than dropping them silently.
 - [ ] **Round-trip gate in Lane C** (the acceptance bar for this whole track):
       extend `make test-cluster` to apply each emitted example, read it back
       with `kubectl get -o yaml`, import that through `cf import`, regenerate,
@@ -49,12 +48,6 @@ not an exception for the importer to special-case.
       the IRSA and RDS examples behind the provider-credential gate. Every
       difference the assert finds is either a scrub rule the importer is
       missing or an emitter bug — record which, per field.
-
----
-
-## Track 2 — Canvas Live-Edit & Authoring Experience
-
-- [ ] **Canvas Region Modularization**: Extract inner helpers and sub-views from oversized `init` closures in `palette.js` and `output.js` into isolated, testable JavaScript modules.
 
 ---
 

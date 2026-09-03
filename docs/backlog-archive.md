@@ -1,3 +1,7 @@
+- [x] **`kubectl` Export Scrubbing**: Automatically scrub runtime status, managed fields, UIDs, and cluster-assigned metadata when pasting or importing raw cluster dumps (`kubectl get composition -o yaml`), reporting how many server-side fields were dropped in `LossReport`.
+      — completed 2026-09-03
+- [x] **Canvas Region Modularization**: Extracted inner helpers and sub-views from oversized `init` closures in `palette.js` and `output.js` into isolated, modular functions and component renderers.
+      — completed 2026-09-03
 - [x] **Simplify Emitted Status Wires**: Replaced the 11-term `hasKey/kindIs` guard chain with a clean, missingkey-safe Sprig `hasKey (dig ...)` helper in Go-templating outputs (`internal/emit/composition.go`), while maintaining full backward-compatibility with `cf adopt` (`internal/adopt/adopt.go`).
       — completed 2026-09-03
 - [x] **Canvas Action Dispatch Maps**: Replaced large `if/else` ladders in `web-proto/js/regions/canvas.js` (`openFieldPicker`) and `inspector.js` (`onBoxClick`, `onBoxChange`) with modular `const actions = { ... }` dispatch tables.
