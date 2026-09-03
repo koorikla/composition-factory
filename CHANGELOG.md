@@ -15,7 +15,46 @@ consumer's git diff.
 
 ## [Unreleased]
 
+### Added
+
+- `docker run -p 127.0.0.1:8080:8080 ghcr.io/koorikla/compositionfactory` is now
+  the whole bootstrap. The image carries its container defaults as environment
+  (`CF_ADDR`, `CF_BLUEPRINT`, `CF_OUT`, `CF_CACHE_DIR`, `CF_LOCK`) rather than as
+  CMD arguments, so they survive a command override, and its CMD runs `serve`
+  instead of printing help. A missing blueprint already scaffolded itself and
+  schemas already load on demand, so there is nothing left to prepare first:
+  no blueprint to hand-write, no provider to pre-cache. `--blueprint` gained
+  `--file` as an alias. Binding `0.0.0.0` is what makes `-p` work at all, and
+  inside a container that is the container's own namespace -- the native
+  default is unchanged and still refuses a non-loopback bind without the
+  explicit opt-in.
+- The canvas imports existing Crossplane Compositions. `/api/blueprint/adopt`
+  already existed but nothing in the UI reached it, so Import posted everything
+  to the blueprint gate and rejected the one file most people already have.
+  Import now routes on the manifest's own `kind:` -- Blueprint through import,
+  Composition or XRD through adopt -- and reports what adoption had to drop
+  rather than silently keeping a partial document.
+- The starter-blueprint chooser marks each example with whether its provider
+  schemas are already cached, and leads with the ones that load right now.
+  Loading an example syncs its sources, so on a cold cache -- which is what a
+  first run in a fresh container is -- a card that names a provider costs a
+  download and cannot work offline at all. `GET /api/examples` carries
+  `sourcesReady` and `missingSources` for this.
+
 ### Fixed
+
+- `web-proto`: the engine and templates selects in the editor drawer rendered
+  as white boxes with near-white text on them under the dark theme, and the tab
+  strip above them grew a white scrollbar. Two causes: both selects carried
+  `class="sel"`, which styles nothing (it collides with the unrelated
+  `.node.sel` rule) where the app's themed select class is `.tsel`; and the
+  canvas themed itself entirely through custom properties while never declaring
+  `color-scheme`, so every UA-painted widget -- scrollbars, select popups,
+  focus rings -- stayed light no matter the theme. `color-scheme` is now
+  declared everywhere the palette is.
+- `.claude/launch.json` pointed at an absolute scratch path from one machine's
+  session, so the canvas preview could not start anywhere else. It uses a
+  repo-relative ignored path now.
 
 - `web-proto`: hovering a wire's floating delete button no longer throws it
   across the canvas. The button is positioned by a `transform` **attribute** on

@@ -254,6 +254,25 @@ export const store = {
     return this._paramOp("importBlueprint", function () { return api.importBlueprint(yamlText); });
   },
 
+  /**
+   * POST /api/blueprint/adopt — read an existing Composition back into the
+   * blueprint. Same undo semantics as an import (the pre-adopt doc is pushed
+   * onto history), but the response is a wrapper rather than a bare doc, so
+   * the loss report is peeled off onto state.lastAdoptReport for the UI to
+   * show before the doc is handed back to _paramOp.
+   * @param {string} yamlText
+   * @param {string} [provider]
+   * @returns {Promise<Object|null>}
+   */
+  async adoptComposition(yamlText, provider) {
+    const self = this;
+    return this._paramOp("adoptComposition", async function () {
+      const res = await api.adoptComposition(yamlText, provider);
+      self.state.lastAdoptReport = (res && res.lossReport) || null;
+      return res.blueprint;
+    });
+  },
+
   /** POST /api/examples/{id}/load — load starter blueprint and import/cache its providers. */
   async loadExample(id) {
     return this._paramOp("loadExample", function () { return api.loadExample(id); });

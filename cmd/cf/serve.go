@@ -42,17 +42,24 @@ const shutdownTimeout = 10 * time.Second
 // because the server is unreachable off-host: Addr defaults to loopback, and
 // check refuses to bind anywhere else unless the operator explicitly opts in
 // via --i-know-this-is-unauthenticated.
+//
+// Every flag below also reads an env var (CF_ADDR, CF_BLUEPRINT, ...). That is
+// how the container image carries its own defaults: as environment rather than
+// as CMD arguments, they survive a command override, so both `docker run
+// <image>` and `docker run <image> serve --file mine.cf.yaml` get them. The
+// native defaults here are unchanged -- an env var is only read when the flag
+// is absent.
 type ServeCmd struct {
-	Addr                       string `help:"Address to listen on. Must be loopback unless --i-know-this-is-unauthenticated is set." default:"127.0.0.1:8080"`
-	Blueprint                  string `help:"Path to the blueprint file to serve. Missing file: a blank blueprint is scaffolded there, so the canvas starts empty and schemas load only once sources are added." default:"doc.cf.yaml"`
-	Out                        string `short:"o" help:"Output directory that POST /api/generate writes into." default:"."`
-	CacheDir                   string `help:"Schema cache directory." default:"${cachedir}"`
-	Lock                       string `help:"Lockfile path that POST /api/providers pins newly added providers into." default:".cf.lock"`
+	Addr                       string `help:"Address to listen on. Must be loopback unless --i-know-this-is-unauthenticated is set." default:"127.0.0.1:8080" env:"CF_ADDR"`
+	Blueprint                  string `help:"Path to the blueprint file to serve (alias: --file). Missing file: a blank blueprint is scaffolded there, so the canvas starts empty and schemas load only once sources are added." default:"doc.cf.yaml" aliases:"file" env:"CF_BLUEPRINT"`
+	Out                        string `short:"o" help:"Output directory that POST /api/generate writes into." default:"." env:"CF_OUT"`
+	CacheDir                   string `help:"Schema cache directory." default:"${cachedir}" env:"CF_CACHE_DIR"`
+	Lock                       string `help:"Lockfile path that POST /api/providers pins newly added providers into." default:".cf.lock" env:"CF_LOCK"`
 	Cluster                    bool   `help:"Discover CRDs from the live Kubernetes cluster on startup."`
 	Kubeconfig                 string `help:"Path to kubeconfig file." default:""`
 	KubeContext                string `name:"context" help:"Kubernetes context name to use." default:""`
 	NoUI                       bool   `help:"Serve only the API: do not serve the embedded canvas GUI at /."`
-	IKnowThisIsUnauthenticated bool   `help:"Allow binding a non-loopback address. This server has no authentication and writes files to disk on your behalf -- only set this if you understand and accept that a non-loopback bind exposes both to your network."`
+	IKnowThisIsUnauthenticated bool   `help:"Allow binding a non-loopback address. This server has no authentication and writes files to disk on your behalf -- only set this if you understand and accept that a non-loopback bind exposes both to your network." env:"CF_I_KNOW_THIS_IS_UNAUTHENTICATED"`
 
 	// ready, when non-nil, receives the actual listening address (host:port)
 	// once the listener is open and before this blocks serving requests --

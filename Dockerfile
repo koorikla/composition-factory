@@ -36,5 +36,17 @@ USER cf
 
 EXPOSE 8080
 
+# Container defaults, as environment rather than as CMD arguments, so they
+# survive a CMD override: `docker run <image>` and
+# `docker run <image> serve --file mine.cf.yaml` both get them.
+#
+# Binding 0.0.0.0 is what makes `-p` work at all; inside the container that is
+# the container's own network namespace, so what is actually exposed is
+# whatever the operator publishes. Publish it to loopback --
+# `-p 127.0.0.1:8080:8080` -- and the reachability is exactly the same as the
+# native default the unauthenticated-bind guard exists to protect.
+ENV CF_ADDR=0.0.0.0:8080
+ENV CF_I_KNOW_THIS_IS_UNAUTHENTICATED=1
+
 ENTRYPOINT ["cf"]
-CMD ["serve", "--help"]
+CMD ["serve"]

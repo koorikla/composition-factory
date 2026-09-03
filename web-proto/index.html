@@ -25,7 +25,7 @@
     <button class="btn" id="undoBtn" disabled title="Undo (⌘Z / Ctrl+Z)">↩</button>
     <button class="btn" id="redoBtn" disabled title="Redo (⇧⌘Z / Shift+Ctrl+Z)">↪</button>
     <button class="btn" id="packageBtn" title="Download this blueprint as a Crossplane Configuration package (.xpkg)">Package</button>
-    <button class="btn" id="importBtn" title="Import a blueprint .yaml (replaces the current document; undoable)">Import</button>
+    <button class="btn" id="importBtn" title="Import a blueprint .yaml, or adopt an existing Crossplane Composition (replaces the current document; undoable)">Import</button>
     <input type="file" id="importFile" accept=".yaml,.yml" hidden>
     <button class="btn" id="examplesBtn" title="Choose a starter blueprint (IRSA, RDS, K8s App...)">Examples</button>
     <button class="btn" id="themeBtn">Theme</button>
@@ -94,11 +94,11 @@
       <span class="sp"></span>
       <div class="tpl-source-wrap" style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;flex-shrink:0">
         <label for="engineSel" style="font-size:10px;color:var(--faint)">engine:</label>
-        <select id="engineSel" class="sel" style="padding:1px 4px;font-size:11px;height:20px"></select>
+        <select id="engineSel" class="tsel" style="padding:1px 4px;font-size:11px;height:20px"></select>
       </div>
       <div class="tpl-source-wrap" style="display:inline-flex;align-items:center;gap:4px;margin-right:8px;flex-shrink:0">
         <label for="tplSource" style="font-size:10px;color:var(--faint)">templates:</label>
-        <select id="tplSource" class="sel" style="padding:1px 4px;font-size:11px;height:20px">
+        <select id="tplSource" class="tsel" style="padding:1px 4px;font-size:11px;height:20px">
           <option value="Inline">Inline</option>
           <option value="FileSystem">FileSystem</option>
         </select>

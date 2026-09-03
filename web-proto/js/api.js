@@ -285,6 +285,21 @@ export function importBlueprint(yamlText) {
   return request("POST", "/api/blueprint/import", yamlText, { contentType: "application/yaml" });
 }
 
+/**
+ * POST /api/blueprint/adopt — an existing Crossplane Composition (optionally
+ * with its XRD in the same stream) read back into a blueprint. Adoption is
+ * lossy by nature, so the response carries a lossReport alongside the
+ * blueprint; persist:true writes the result through the same gate an import
+ * goes through. 400s carry the parse error verbatim.
+ * @param {string} yamlText
+ * @param {string} [provider] Default provider ref when not inferrable.
+ * @returns {Promise<{blueprint:Object, lossReport?:{drops:{path:string,reason:string}[]}, persisted:boolean}>}
+ */
+export function adoptComposition(yamlText, provider) {
+  return request("POST", "/api/blueprint/adopt",
+    { manifest: yamlText, persist: true, provider: provider || "" });
+}
+
 /** GET /api/package?format=yaml — the package.yaml document stream as text. */
 export function getPackageYAML() {
   return request("GET", "/api/package?format=yaml", undefined, { responseType: "text" });

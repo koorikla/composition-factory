@@ -50,6 +50,38 @@ test('Examples modal displays (replaces current blueprint · undoable) note unde
   await page.keyboard.press('Escape');
 });
 
+// Loading an example syncs its provider schemas, so a card whose providers are
+// not cached costs a download and cannot work offline at all. The chooser opens
+// itself on a blank first run — a cold cache — so every card has to say up front
+// whether it is loadable right now.
+test('every example card says whether it loads now or downloads providers', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#examplesBtn').click();
+  await expect(page.locator('#examplesOverlay')).toBeVisible();
+
+  const cards = page.locator('.example-card');
+  await expect(cards.first()).toBeVisible({ timeout: 10000 });
+  const n = await cards.count();
+  expect(n).toBeGreaterThan(0);
+
+  for (let i = 0; i < n; i++) {
+    const card = cards.nth(i);
+    const id = await card.getAttribute('data-id');
+    // exactly one readiness badge, whichever way it went
+    const badges = card.locator('.example-ready, .example-fetch');
+    await expect(badges, 'readiness badge on ' + id).toHaveCount(1);
+    // and it explains itself on hover rather than being a bare dot
+    await expect(badges.first()).toHaveAttribute('title', /.+/);
+  }
+
+  // whatever is ready sorts ahead of whatever needs downloading
+  const order = await cards.evaluateAll((els) =>
+    els.map((e) => !!e.querySelector('.example-ready')));
+  expect(order).toEqual([...order].sort((a, b) => (b ? 1 : 0) - (a ? 1 : 0)));
+
+  await page.keyboard.press('Escape');
+});
+
 test('Clickable validate chip expands output drawer and displays diagnostics', async ({ page }) => {
   await page.goto('/');
   const validChip = page.locator('#valid');

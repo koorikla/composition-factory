@@ -64,66 +64,99 @@ One engine, `internal/emit`, powers all interfaces: the **`cf gen` CLI**, the **
 
 ## Quickstart (Docker)
 
-Run immediately from GitHub Container Registry — no Go toolchain or repository clone required:
-
-**1. Create a blueprint in your current directory:**
+One command. No clone, no Go toolchain, and no blueprint to hand-write first:
 
 ```sh
-cat <<'EOF' > xqueue.cf.yaml
-apiVersion: factory.crossplane.io/v1alpha1
-kind: Blueprint
-metadata:
-  name: xqueue
-spec:
-  sources:
-    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
-  xrd:
-    group: platform.sparky.ee
-    kind: XQueue
-    plural: xqueues
-    version: v1alpha1
-    scope: Namespaced
-    parameters:
-      location:       {type: string, required: true, enum: [EU, US]}
-      providerName:   {type: string, required: true}
-      maxMessageSize: {type: integer, default: "2048"}
-  resources:
-    - name: main-queue
-      kind: Queue
-      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
-      fields:
-        region:         {value: "eu-north-1"}
-        maxMessageSize: {from: params.maxMessageSize}
-EOF
+docker run --rm -p 127.0.0.1:8080:8080 ghcr.io/koorikla/compositionfactory:latest
 ```
 
-**2. Cache provider CRD schemas:**
+Open <http://localhost:8080>. The canvas comes up on a blank blueprint — add a
+provider under **SOURCES**, drag kinds onto the canvas, and wire them together.
+Schemas are fetched on demand as you add sources, so there is nothing to cache
+up front.
+
+> **Why `-p 127.0.0.1:8080:8080` and not `-p 8080:8080`?** The server has no
+> authentication and writes files on your behalf, so it is meant to be reachable
+> only from your own machine. Publishing to `127.0.0.1` keeps it that way. Plain
+> `-p 8080:8080` publishes on every interface and puts it on your network.
+
+### Keep your work
+
+The blueprint above lives inside the container and disappears with it. Mount a
+directory to keep the blueprint, and a named volume so fetched provider schemas
+survive restarts:
+
+```sh
+docker run --rm -p 127.0.0.1:8080:8080 \
+  -v "$(pwd)":/workspace \
+  -v cf-cache:/home/cf/.cache/compositionfactory \
+  ghcr.io/koorikla/compositionfactory:latest
+```
+
+Your blueprint is written to `doc.cf.yaml` in the current directory. To use a
+different file — new or existing — pass `--file`:
+
+```sh
+docker run --rm -p 127.0.0.1:8080:8080 \
+  -v "$(pwd)":/workspace \
+  -v cf-cache:/home/cf/.cache/compositionfactory \
+  ghcr.io/koorikla/compositionfactory:latest serve --file xqueue.cf.yaml
+```
+
+### Generate production YAML
+
+```sh
+docker run --rm \
+  -v "$(pwd)":/workspace \
+  -v cf-cache:/home/cf/.cache/compositionfactory \
+  ghcr.io/koorikla/compositionfactory:latest gen doc.cf.yaml -o out
+```
+
+You can also hit **Generate** in the canvas, which writes the same bytes.
+
+### Import an existing Composition
+
+Already have a Crossplane Composition? Hit **Import** on the canvas and pick it —
+cf reads the manifest's own `kind:`, so a Composition is adopted into a blueprint
+and a blueprint is imported as-is, with no separate button to choose between.
+Adoption is lossy by nature, so anything that has no blueprint equivalent is
+named on screen rather than silently dropped.
+
+The same thing from the CLI:
+
+```sh
+docker run --rm -v "$(pwd)":/workspace \
+  ghcr.io/koorikla/compositionfactory:latest adopt composition.yaml -o doc.cf.yaml
+```
+
+### Configuration
+
+Every `cf serve` flag has an environment variable, which is how the image sets
+its own defaults — so they survive when you override the command:
+
+| Variable | Flag | Image default |
+| --- | --- | --- |
+| `CF_ADDR` | `--addr` | `0.0.0.0:8080` |
+| `CF_BLUEPRINT` | `--blueprint` / `--file` | `doc.cf.yaml` |
+| `CF_OUT` | `--out` | `.` |
+| `CF_CACHE_DIR` | `--cache-dir` | `/home/cf/.cache/compositionfactory` |
+| `CF_LOCK` | `--lock` | `.cf.lock` |
+
+The image binds `0.0.0.0` because that is what makes `-p` work at all; inside
+the container that is the container's own network namespace, so what is actually
+reachable is whatever you publish. Running `cf serve` natively still defaults to
+`127.0.0.1` and still refuses a non-loopback bind unless you opt in explicitly.
+
+### Pre-caching schemas (optional)
+
+Sources are fetched on demand, but you can warm the cache ahead of time — useful
+for an air-gapped run or to pin a provider in CI:
 
 ```sh
 docker run --rm \
   -v "$(pwd)":/workspace \
   -v cf-cache:/home/cf/.cache/compositionfactory \
   ghcr.io/koorikla/compositionfactory:latest provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
-```
-
-**3. Open the visual canvas:**
-
-```sh
-docker run --rm -p 8080:8080 \
-  -v "$(pwd)":/workspace \
-  -v cf-cache:/home/cf/.cache/compositionfactory \
-  ghcr.io/koorikla/compositionfactory:latest serve --blueprint xqueue.cf.yaml --addr 0.0.0.0:8080 --i-know-this-is-unauthenticated
-```
-
-Open <http://localhost:8080> in your browser to interactively design and wire your composition.
-
-**4. Generate production YAML:**
-
-```sh
-docker run --rm \
-  -v "$(pwd)":/workspace \
-  -v cf-cache:/home/cf/.cache/compositionfactory \
-  ghcr.io/koorikla/compositionfactory:latest gen xqueue.cf.yaml -o out
 ```
 
 ---

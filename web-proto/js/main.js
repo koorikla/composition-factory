@@ -401,6 +401,78 @@ store.loadDoc();
   btn.addEventListener("click", function () { file.click(); });
   store.subscribe("error", function (e) {
     if (!e || e.source !== "importBlueprint") return;
+    notice("import failed: " + e.message, true);
+  });
+  store.subscribe("error", function (e) {
+    if (!e || e.source !== "adoptComposition") return;
+    notice("adopt failed: " + e.message, true);
+  });
+
+  file.addEventListener("change", function () {
+    var f = file.files && file.files[0];
+    file.value = "";
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var text = String(reader.result);
+      // One Import button, two source formats: cf's own blueprint goes through
+      // the import gate unchanged, and a real Crossplane Composition is adopted
+      // into one. Routing on the manifest's own `kind:` means the user does not
+      // have to know which of cf's two front doors their file belongs to.
+      var op = isCompositionManifest(text)
+        ? store.adoptComposition(text)
+        : store.importBlueprint(text);
+      op.then(function (doc) {
+        if (!doc) return; // failures surface through the store's error topic
+        store.select(null);
+        reportAdoptLoss();
+      });
+    };
+    reader.readAsText(f);
+  });
+
+  /**
+   * True when the YAML stream is a Crossplane Composition to be adopted rather
+   * than something the import gate can take losslessly. Scans every document's
+   * `kind:`, so a multi-document stream routes on what it contains, not on
+   * whichever document happens to come first.
+   *
+   * Two things outrank the Composition in a stream, because for both of them
+   * import recovers the original blueprint exactly and adopt would only
+   * approximate it: cf's own Blueprint, and a Configuration package that
+   * carries the embedded blueprint annotation `cf package` writes. A
+   * third-party Configuration has no such annotation, so its Composition is
+   * still adopted — which is the whole point of the feature.
+   */
+  function isCompositionManifest(text) {
+    var s = String(text);
+    if (s.indexOf("factory.crossplane.io/blueprint") !== -1) return false;
+    var kinds = [];
+    s.split(/^---[ \t]*$/m).forEach(function (doc) {
+      var m = /^kind:[ \t]*["']?([A-Za-z0-9_.-]+)/m.exec(doc);
+      if (m) kinds.push(m[1]);
+    });
+    if (kinds.indexOf("Blueprint") !== -1) return false;
+    return kinds.indexOf("Composition") !== -1 ||
+      kinds.indexOf("CompositeResourceDefinition") !== -1;
+  }
+
+  /**
+   * Adoption cannot carry everything a hand-written Composition expresses, and
+   * silently keeping a partial import is the one outcome that would waste the
+   * user's time. Say what was dropped, and where.
+   */
+  function reportAdoptLoss() {
+    var r = store.state.lastAdoptReport;
+    store.state.lastAdoptReport = null;
+    if (!r || !r.drops || !r.drops.length) return;
+    var head = "adopted with " + r.drops.length + " dropped item" +
+      (r.drops.length === 1 ? "" : "s") + ": ";
+    notice(head + r.drops.map(function (d) { return d.path + " (" + d.reason + ")"; }).join("; "), false);
+  }
+
+  /** Shared warn bar under the topbar; isError picks the alert role. */
+  function notice(text, isError) {
     var bar = document.getElementById("import-warn");
     if (!bar) {
       bar = document.createElement("div");
@@ -411,22 +483,9 @@ store.loadDoc();
       host.parentNode.insertBefore(bar, host.nextSibling);
     }
     bar.hidden = false;
-    bar.textContent = "import failed: " + e.message;
-    setTimeout(function () { bar.hidden = true; }, 8000);
-  });
-  file.addEventListener("change", function () {
-    var f = file.files && file.files[0];
-    file.value = "";
-    if (!f) return;
-    var reader = new FileReader();
-    reader.onload = function () {
-      store.importBlueprint(String(reader.result)).then(function (doc) {
-        if (doc) store.select(null);
-        // failures surface through the store's error topic (verbatim 400)
-      });
-    };
-    reader.readAsText(f);
-  });
+    bar.textContent = text;
+    setTimeout(function () { bar.hidden = true; }, isError ? 8000 : 12000);
+  }
 })();
 
 
@@ -469,6 +528,20 @@ store.loadDoc();
         return '<span class="example-tag">' + esc(t) + '</span>';
       }).join("");
       var resLabel = ex.resourceCount ? (ex.resourceCount + " resources") : "";
+      // Loading an example syncs its provider schemas, so a card whose
+      // providers are not cached costs a download and cannot work offline.
+      // Say so on the card rather than letting the user find out from a
+      // failed load — this chooser opens itself on a blank first run.
+      var n = (ex.missingSources || []).length;
+      var readyHtml = ex.sourcesReady
+        ? '<span class="example-tag example-ready" title="' +
+            ((ex.sources || []).length
+              ? "Provider schemas are cached — loads offline"
+              : "No providers needed — native Kubernetes kinds only") +
+            '">\u25cf ready</span>'
+        : '<span class="example-tag example-fetch" title="' +
+            esc("Downloads on load: " + (ex.missingSources || []).join(", ")) +
+            '">\u2193 ' + n + ' provider' + (n === 1 ? "" : "s") + '</span>';
 
       html += '<div class="example-card" data-id="' + esc(ex.id) + '">' +
         '<div class="example-card-h">' +
@@ -479,6 +552,7 @@ store.loadDoc();
         '</div>' +
         '<div class="example-desc">' + esc(ex.description) + '</div>' +
         '<div class="example-tags">' +
+        readyHtml +
         (resLabel ? '<span class="example-tag" style="background:var(--wire-xrd-soft);color:var(--wire-xrd)">' + esc(resLabel) + '</span>' : '') +
         tagsHtml +
         '</div>' +
