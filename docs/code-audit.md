@@ -17,6 +17,131 @@ while ignoring `provider:`. Read that backlog alongside this. The grades below
 are grades for the codebase as an artifact, not a claim that it generates
 correct YAML; where the two disagree, the dogfooding wins, because it checked.
 
+## Re-verified — 2026-09-04, at 0d3e914
+
+Tree clean and level with `origin/main`. Every command in the Method section was
+re-run, so the numbers below are directly comparable to the two passes under
+them. This pass added one thing the previous two did not do: it **rendered the
+same blueprint through all three engines and diffed the composed output**. That
+is where the only serious finding came from, and it is the same class the scope
+caveat warned about — static analysis cannot see it, and neither can a golden
+test that pins each emitter against its own output.
+
+### Closed
+
+- **The Lane C round-trip gate now asserts the round trip.** The previous pass's
+  strongest finding — `scripts/cluster/test-cluster.sh` applied, read back,
+  re-imported and then checked only for a non-empty file — is fixed
+  (`35f91e9`, `19a99c9`, `27e6510`, `0d3e914`). Verified independently at the
+  CLI on a mixed native + provider blueprint: `cf gen` → `cf adopt` → `cf gen`
+  reproduces the original bytes exactly, with the `# Source:` comment as the
+  sole difference (which the gate ignores by design).
+- **Workspace hygiene is fully recoverable for the first time.** All five
+  non-`main` branches are now `0` commits ahead of `main`
+  (`git rev-list --count main..<branch>`) — the previous pass had five carrying
+  unmerged work. Two stale worktrees remain on disk
+  (`~/compositionfactory-engine`, `~/compositionfactory-parity`), both on fully
+  merged branches, so both are safe to remove. Working copy is down to 166 MB
+  from 178 MB.
+- **`cf catalogue --kind` and the `deadcode` regression stay closed.** Five hits
+  now, up from four, and the new one — `emit.PreviewExpression`
+  (`internal/emit/preview.go:42`) — is a fifth test seam of the same kind: a
+  context-free wrapper whose production callers all go to
+  `PreviewExpressionContext`. No dead production code.
+
+### Movement
+
+| Measure | ee61f82 | 47949a3 | **0d3e914** |
+|---|---|---|---|
+| Go test functions | 724 | 815 | **891** |
+| Playwright behaviors | 150 | 164 | **180** |
+| Production Go LOC | 16 458 | 19 888 | **23 262** |
+| Test Go LOC (unit) | 25 398 | 29 415 | **32 615** |
+| `internal/cache` coverage | 64.9 % | 64.9 % | **46.7 %** |
+| `internal/adopt` coverage | 85.9 % | 78.6 % | **76.5 %** |
+| `internal/emit` coverage | 87.7 % | 83.3 % | **81.0 %** |
+| `deadcode` hits | 4 | 4 | **5** (all test seams) |
+| Branches ahead of `main` | — | 5 | **0** |
+| Working copy | 731 MB | 178 MB | **166 MB** |
+
+`gofmt`, `go vet`, staticcheck, the race detector and `npm audit --omit=dev` are
+all clean.
+
+Measured on the committed tree at `0d3e914`. A concurrent session was editing
+the working copy during this pass — including `internal/cache/store.go` and a
+new `internal/cache/sources_test.go` — so the cache coverage figure is the one
+most likely to have moved by the time this is read. Both findings below were
+re-verified against that dirty tree after the fact and still reproduce.
+
+**Coverage is the one number moving the wrong way, in the three packages doing
+the most work.** `internal/cache` has now fallen 18 points across this pass
+alone and is the lowest in the tree by a wide margin; `adopt` and `emit` have
+each drifted down for a third consecutive pass. None of this is alarming in
+absolute terms, but the trend is consistent and it is concentrated in exactly
+the packages the round-trip rule depends on.
+
+### New
+
+- **The three engines do not compose the same resources — `metadata.name` is
+  missing from native kinds under KCL and Python.** Filed as **CF-045 (P0)**.
+  The go-templating emitter writes `name: {{ $xr }}-<resource>`
+  (`internal/emit/composition.go:301`); the KCL and Python emitters write a
+  `metadata` block carrying only the composition-resource-name annotation
+  (`internal/emit/kcl.go:72-79`, `internal/emit/python.go:73`), so Crossplane
+  falls back to `generateName: <xr>-` and the object gets a random name. Both
+  emitters nonetheless resolve `from: resources.<n>.metadata.name` to the
+  *deterministic* name, so they emit a reference to a name that will never
+  exist. `crossplane composition render` exits 0. This is the defect archived as
+  completed on 2026-09-03 — with the real-cluster failure
+  `serviceaccount "web" not found` recorded against it — fixed in one engine of
+  three. It is the third time the archive records KCL and Python diverging from
+  go-templating on a correctness fix: CF-004 (dotted paths flattened into literal
+  keys, "the v0.8.0 fix never propagated to the other two engines") and the
+  earlier item where both emitters dropped every field, envelope and annotation
+  guard. The pattern, not the instance, is what needs a gate.
+- **Generated bytes depend on how the blueprint was named on the command line.**
+  Filed as **CF-046 (P1)**. `blueprintSource` (`internal/emit/yaml.go:76-81`)
+  returns `b.SourcePath()` verbatim, which `internal/blueprint/load.go:346` sets
+  from the caller's argument, so `cf gen testdata/x.cf.yaml` and
+  `cf gen $PWD/testdata/x.cf.yaml` produce different files from identical
+  inputs, and `cf gen --check` exits 2 on an unchanged tree. `internal/emit/rbac.go:89`
+  already does the deterministic thing and uses `b.Metadata.Name`.
+- **`docs/mcp.md` claims a "full authoring surface" the MCP server does not
+  have.** Filed as **CF-047 (P2)**. A live `tools/list` returns 15 tools: full
+  parameter CRUD and no resource CRUD at all, against four resource routes on
+  the HTTP API. An agent can only add a composed resource by rewriting the whole
+  document with `replace_blueprint`.
+- **Nothing statically analyses `web-proto/`.** Filed as **CF-048 (P3)**. Just
+  under 8 000 lines of ES modules ship with no linter, formatter or type check;
+  the Playwright suite is the only gate, and `tests/helpers.js` exists because
+  an uncaught page error once shipped green through it. The Scorecard's
+  "Correctness tooling: A" is a grade on the Go half of the tree only.
+- **Two hygiene notes, reported rather than filed.** `tests/` has two specs
+  numbered 66 (`slice66-canvas-engine-touch-polish`,
+  `slice66-canvas-ux-visibility`), which breaks the one-number-one-behavior
+  convention both testing skills tell agents to extend; and `rbac.yaml`'s
+  provenance header omits the `# Regenerate with: cf gen` line every other
+  generated file carries. Neither costs a user anything today.
+
+### What this pass confirmed is working
+
+Named because three of the four findings above are about surfaces, not the
+engine, and that ordering is the real result.
+
+- **The headline validation claim holds, in both directions.** A typo'd field
+  path fails loudly with the nearest match and a reason, for native and provider
+  kinds alike, exits 1, and writes nothing:
+  `field "spec.replicaz" is not in the native Deployment schema; did you mean "spec.replicas"?`
+- **The RBAC trap is handled correctly and loudly.** Composing a `Job` emits
+  `rbac.yaml` with the exact aggregation label, all seven verbs, only the
+  non-pre-granted kinds, and a stderr warning naming the file to apply.
+  Composing only `Deployment`/`Service` correctly emits nothing.
+- **`options: ["missingkey=error"]` is emitted as a sibling of `inline`**, which
+  is the form that works rather than the form the function's own README shows.
+- **The local round trip is byte-exact** on a blueprint mixing a provider
+  managed resource with native kinds, through the Configuration-directory form
+  of `cf adopt`.
+
 ## Re-verified — 2026-09-03, at 8b58a1d, 31bd674 and 47949a3
 
 47 commits and two releases (v0.8.0, v0.9.0) after the audited tree. Every gate
