@@ -1024,8 +1024,8 @@ spec:
 	if svc.Provider != blueprint.NativeProvider {
 		t.Errorf("svc provider = %q, want %q", svc.Provider, blueprint.NativeProvider)
 	}
-	if fld, ok := svc.Fields["spec.selector.app"]; !ok || fld.Value != "workload" {
-		t.Errorf("svc spec.selector.app = %+v, want Value: workload", fld)
+	if fld, ok := svc.Fields["spec.selector[app]"]; !ok || fld.Value != "workload" {
+		t.Errorf("svc spec.selector[app] = %+v, want Value: workload", fld)
 	}
 
 	cm := bp.ResourceNamed("my-config")
@@ -1035,7 +1035,7 @@ spec:
 	if cm.Provider != blueprint.NativeProvider {
 		t.Errorf("cm provider = %q, want %q", cm.Provider, blueprint.NativeProvider)
 	}
-	if fld, ok := cm.Fields["data.PORT"]; !ok || fld.Value != "8080" {
-		t.Errorf("cm data.PORT = %+v, want Value: 8080", fld)
+	if fld, ok := cm.Fields["data[PORT]"]; !ok || fld.Value != "8080" {
+		t.Errorf("cm data[PORT] = %+v, want Value: 8080", fld)
 	}
 }

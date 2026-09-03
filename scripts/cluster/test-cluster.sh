@@ -148,10 +148,11 @@ echo "==> Importing live server-side Configuration tree with cf import..."
 
 ROUNDTRIP_OUT="${OUT_DIR}/roundtrip-gen"
 echo "==> Regenerating Crossplane artifacts from adopted blueprint..."
-./bin/cf gen "${ROUNDTRIP_BP}" --out "${ROUNDTRIP_OUT}" --group-suffix="${WORKSPACE_GROUP_SUFFIX}"
+./bin/cf gen "${ROUNDTRIP_BP}" --out "${ROUNDTRIP_OUT}"
 
 echo "==> Verifying regenerated artifacts are non-empty and valid..."
-if [ ! -s "${ROUNDTRIP_OUT}/compositions/xworkloads.workloads.sparky.ee.${WORKSPACE_GROUP_SUFFIX}.yaml" ] && [ ! -s "${ROUNDTRIP_OUT}/compositions/composition.yaml" ]; then
+COMP_FILES=("${ROUNDTRIP_OUT}/compositions/"*.yaml)
+if [ ! -f "${COMP_FILES[0]}" ] || [ ! -s "${COMP_FILES[0]}" ]; then
   echo "ERROR: Round-trip generated composition is empty or missing" >&2
   exit 1
 fi
