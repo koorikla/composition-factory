@@ -76,6 +76,19 @@ func (r *LossReport) ScrubCount() int {
 	return count
 }
 
+// HasTrueLoss returns true if any non-scrubbed functional fields were dropped.
+func (r *LossReport) HasTrueLoss() bool {
+	if r == nil {
+		return false
+	}
+	for _, d := range r.Drops {
+		if !strings.Contains(d.Reason, "scrubbed") {
+			return true
+		}
+	}
+	return false
+}
+
 // FormatAdoptedYAML marshals bp to clean YAML (omitting empty strings and null slices)
 // and prepends "# adopt: dropped ..." comments if lossy.
 func FormatAdoptedYAML(bp *blueprint.Blueprint, report *LossReport) ([]byte, error) {
@@ -319,6 +332,9 @@ func parseXRDDoc(xrdDoc map[string]any, bp *blueprint.Blueprint, report *LossRep
 			bp.Spec.XRD.Plural = p
 		}
 	}
+	if scope, ok := spec["scope"].(string); ok && bp.Spec.XRD.Scope == "" {
+		bp.Spec.XRD.Scope = scope
+	}
 
 	// Check unsupported XRD fields
 	if _, ok := spec["claimNames"]; ok {
@@ -512,13 +528,15 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 }
 
 var (
-	reDefine         = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
-	reParamVar       = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
-	reObservedStatus = regexp.MustCompile(`\{\{-?\s*\(index\s+(?:\$\.?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)\.resource\.status(?:\.atProvider)?\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
-	reMustacheExpr   = regexp.MustCompile(`\{\{.*?\}\}`)
-	paramNameRE      = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
-	dnsInvalidRE     = regexp.MustCompile(`[^a-z0-9-]+`)
-	yamlKeywords     = map[string]bool{
+	reDefine             = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
+	reParamVar           = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*\(index\s+(?:\$\.?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)\.resource\.status(?:\.atProvider)?\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
+	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+"([^"]+)"`)
+	reExprPrefix         = regexp.MustCompile(`^(__CF_EXPR_\d+__|cf-expr-\d+|__cf_expr_\d+__)-`)
+	paramNameRE          = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
+	dnsInvalidRE         = regexp.MustCompile(`[^a-z0-9-]+`)
+	yamlKeywords         = map[string]bool{
 		"true": true, "false": true, "yes": true, "no": true,
 		"on": true, "off": true, "null": true, "y": true, "n": true,
 	}
@@ -869,6 +887,23 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 	name := ""
 	if meta != nil {
 		name, _ = meta["name"].(string)
+		if anns, ok := meta["annotations"].(map[string]any); ok {
+			for k, v := range anns {
+				unmaskedK := unmaskString(fmt.Sprint(k), placeholders)
+				unmaskedV := unmaskString(fmt.Sprint(v), placeholders)
+				if m := reSetResourceNameAnn.FindStringSubmatch(unmaskedK); len(m) >= 2 {
+					name = m[1]
+					break
+				}
+				if m := reSetResourceNameAnn.FindStringSubmatch(unmaskedV); len(m) >= 2 {
+					name = m[1]
+					break
+				}
+			}
+		}
+	}
+	if name != "" {
+		name = reExprPrefix.ReplaceAllString(name, "")
 	}
 	if name == "" {
 		name = strings.ToLower(kind)
@@ -895,7 +930,11 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 	if meta != nil {
 		if anns, ok := meta["annotations"].(map[string]any); ok {
 			for k, v := range anns {
+				rawK := unmaskString(fmt.Sprint(k), placeholders)
 				rawStr := unmaskString(fmt.Sprint(v), placeholders)
+				if strings.Contains(rawK, "setResourceNameAnnotation") || strings.Contains(rawStr, "setResourceNameAnnotation") {
+					continue
+				}
 				if err := checkScalarClean(rawStr); err != nil {
 					report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, k), "contains newlines or control characters")
 					continue

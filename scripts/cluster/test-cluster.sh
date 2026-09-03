@@ -144,18 +144,35 @@ kubectl get composition "${COMP_NAME}" -o yaml > "${LIVE_TREE}/composition.yaml"
 
 ROUNDTRIP_BP="${OUT_DIR}/roundtrip.cf.yaml"
 echo "==> Importing live server-side Configuration tree with cf import..."
-./bin/cf import "${LIVE_TREE}" -o "${ROUNDTRIP_BP}" || [ $? -eq 2 ]
+./bin/cf import "${LIVE_TREE}" -o "${ROUNDTRIP_BP}"
 
 ROUNDTRIP_OUT="${OUT_DIR}/roundtrip-gen"
 echo "==> Regenerating Crossplane artifacts from adopted blueprint..."
 ./bin/cf gen "${ROUNDTRIP_BP}" --out "${ROUNDTRIP_OUT}"
 
-echo "==> Verifying regenerated artifacts are non-empty and valid..."
-COMP_FILES=("${ROUNDTRIP_OUT}/compositions/"*.yaml)
-if [ ! -f "${COMP_FILES[0]}" ] || [ ! -s "${COMP_FILES[0]}" ]; then
-  echo "ERROR: Round-trip generated composition is empty or missing" >&2
+echo "==> Verifying regenerated Composition against original emitted composition..."
+COMP_ORIG=("${OUT_DIR}/compositions/"*.yaml)
+COMP_RT=("${ROUNDTRIP_OUT}/compositions/"*.yaml)
+if [ ! -f "${COMP_RT[0]}" ]; then
+  echo "ERROR: Round-trip generated composition is missing" >&2
   exit 1
 fi
+diff -u "${COMP_ORIG[0]}" "${COMP_RT[0]}" || {
+  echo "ERROR: Round-trip regenerated composition differs from original emission" >&2
+  exit 1
+}
+
+echo "==> Verifying regenerated XRD against original emitted XRD..."
+XRD_ORIG=("${OUT_DIR}/xrds/"*.yaml)
+XRD_RT=("${ROUNDTRIP_OUT}/xrds/"*.yaml)
+if [ ! -f "${XRD_RT[0]}" ]; then
+  echo "ERROR: Round-trip generated XRD is missing" >&2
+  exit 1
+fi
+diff -u "${XRD_ORIG[0]}" "${XRD_RT[0]}" || {
+  echo "ERROR: Round-trip regenerated XRD differs from original emission" >&2
+  exit 1
+}
 
 echo "==> Teardown: deleting XR..."
 kubectl delete -f "${XR_MANIFEST}" --timeout=60s || true

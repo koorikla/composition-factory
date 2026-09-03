@@ -1,10 +1,15 @@
 package adopt
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/emit"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
 func TestAdoptTree(t *testing.T) {
@@ -292,5 +297,156 @@ func TestAdoptTreeErrors(t *testing.T) {
 	_, _, err = AdoptTree(emptyDir, Options{})
 	if err == nil || !strings.Contains(err.Error(), "no Composition document found") {
 		t.Errorf("expected 'no Composition document found' error, got %v", err)
+	}
+}
+
+func TestRoundTripEmittedCompositionAndXRD(t *testing.T) {
+	// 1. Construct a canonical Blueprint with a native Kubernetes resource
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata: blueprint.Metadata{
+			Name: "xapps.workloads.example.org",
+		},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "workloads.example.org",
+				Version: "v1alpha1",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {
+						Type:        "string",
+						Description: "ProviderConfig name",
+						Required:    true,
+					},
+					"port": {
+						Type:        "string",
+						Description: "Service port",
+						Default:     "8080",
+					},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "app-config",
+					Kind:     "ConfigMap",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"data[PORT]": {
+							From: "params.port",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// 2. Emit initial Crossplane artifacts
+	crds, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds failed: %v", err)
+	}
+	origOutputs, err := emit.Generate(bp, crds, "")
+	if err != nil {
+		t.Fatalf("emit.Generate failed: %v", err)
+	}
+
+	var origComp, origXRD []byte
+	for _, o := range origOutputs {
+		if strings.Contains(o.Path, "compositions") {
+			origComp = o.Body
+		} else if strings.Contains(o.Path, "xrds") {
+			origXRD = o.Body
+		}
+	}
+	if len(origComp) == 0 || len(origXRD) == 0 {
+		t.Fatalf("failed to find emitted composition or XRD in outputs: %+v", origOutputs)
+	}
+
+	// 3. Simulate live Kubernetes API server responses with server-injected metadata and status
+	liveXRD := string(origXRD) + "\n" + `  status:
+    conditions:
+      - lastTransitionTime: "2026-09-03T12:00:00Z"
+        reason: Established
+        status: "True"
+        type: Established
+    controllers:
+      compositeResourceType:
+        apiVersion: workloads.example.org/v1alpha1
+        kind: XApp
+`
+	liveComp := strings.Replace(
+		string(origComp),
+		"metadata:\n  name: xapps.workloads.example.org",
+		`metadata:
+  name: xapps.workloads.example.org
+  uid: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  resourceVersion: "123456"
+  generation: 1
+  creationTimestamp: "2026-09-03T12:00:00Z"
+  managedFields:
+    - manager: crossplane
+      operation: Update
+      time: "2026-09-03T12:00:00Z"
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: '{"apiVersion":"apiextensions.crossplane.io/v1"}'`,
+		1,
+	)
+	liveComp += "\n" + `status:
+  conditions:
+    - lastTransitionTime: "2026-09-03T12:00:00Z"
+      reason: Available
+      status: "True"
+      type: Ready
+`
+
+	// 4. Save to simulated Configuration tree directory
+	tmpDir := t.TempDir()
+	apisDir := filepath.Join(tmpDir, "apis", "xapp")
+	if err := os.MkdirAll(apisDir, 0755); err != nil {
+		t.Fatalf("mkdir apis: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(apisDir, "definition.yaml"), []byte(liveXRD), 0644); err != nil {
+		t.Fatalf("write definition: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "composition.yaml"), []byte(liveComp), 0644); err != nil {
+		t.Fatalf("write composition: %v", err)
+	}
+
+	// 5. Adopt tree
+	adoptedBP, report, err := AdoptTree(tmpDir, Options{})
+	if err != nil {
+		t.Fatalf("AdoptTree failed: %v", err)
+	}
+	if report.HasTrueLoss() {
+		t.Errorf("expected no true functional loss, got drops: %+v", report.Drops)
+	}
+	if report.ScrubCount() == 0 {
+		t.Errorf("expected scrubbed server-side fields, got 0")
+	}
+
+	// 6. Regenerate from adopted blueprint
+	rtOutputs, err := emit.Generate(adoptedBP, crds, "")
+	if err != nil {
+		t.Fatalf("emit.Generate from adopted blueprint failed: %v", err)
+	}
+
+	var rtComp, rtXRD []byte
+	for _, o := range rtOutputs {
+		if strings.Contains(o.Path, "compositions") {
+			rtComp = o.Body
+		} else if strings.Contains(o.Path, "xrds") {
+			rtXRD = o.Body
+		}
+	}
+
+	// 7. Verify byte-for-byte fidelity
+	if !bytes.Equal(origComp, rtComp) {
+		t.Errorf("Round-trip composition mismatch:\n--- ORIGINAL ---\n%s\n--- REGENERATED ---\n%s", string(origComp), string(rtComp))
+	}
+	if !bytes.Equal(origXRD, rtXRD) {
+		t.Errorf("Round-trip XRD mismatch:\n--- ORIGINAL ---\n%s\n--- REGENERATED ---\n%s", string(origXRD), string(rtXRD))
 	}
 }

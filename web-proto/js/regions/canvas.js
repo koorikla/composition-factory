@@ -1097,6 +1097,188 @@ async function resolveKindMetaAsync(resource) {
   }
 }
 
+function isFieldPickerTypeMatch(srcType, targetType) {
+  if (!srcType || !targetType) return true;
+  if (srcType === targetType) return true;
+  if ((srcType === "integer" || srcType === "number") && (targetType === "integer" || targetType === "number")) return true;
+  if ((srcType === "map" || srcType === "object") && (targetType === "map" || targetType === "object")) return true;
+  return false;
+}
+
+function renderFieldPickerItems(listEl, items, selectedIndex, srcPath) {
+  if (!items.length) {
+    listEl.innerHTML = '<div class="empty">No matching fields found.</div>';
+    return;
+  }
+  let h = "";
+  let lastCat = null;
+  items.forEach(function (item, idx) {
+    if (item.category !== lastCat) {
+      lastCat = item.category;
+      h += '<div class="wire-picker-cat">' + esc(lastCat) + '</div>';
+    }
+    const mismatchBadge = item.typeMismatch
+      ? '<span class="wire-picker-mismatch" title="Type mismatch: $' + esc(srcPath) + ' is ' + esc(item.srcType) + ', but field expects ' + esc(item.targetType) + '">mismatch: ' + esc(item.srcType) + ' \u2260 ' + esc(item.targetType) + '</span>'
+      : '';
+    h += '<div class="wire-picker-item' + (idx === selectedIndex ? ' active' : '') + (item.suggested ? ' match' : '') + '" data-idx="' + idx + '">' +
+      '<span style="font-family:var(--mono);color:' + (item.color || 'inherit') + '">' + esc(item.label || item.path) + '</span>' +
+      '<span class="dg">' + esc(item.type || "") + '</span>' +
+      (item.required ? '<span class="rq">req</span>' : '') +
+      mismatchBadge +
+      (item.description ? '<span class="desc" title="' + esc(item.description) + '">' + esc(item.description) + '</span>' : '') +
+      '</div>';
+  });
+  listEl.innerHTML = h;
+}
+
+function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
+  const q = (filter || "").toLowerCase().trim();
+  const items = [];
+  const srcTerm = (ctx.srcPath || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const srcType = ctx.srcType || "string";
+  const res = ctx.resource || {};
+
+  // 1. Spec / forProvider fields
+  (specFields || []).forEach(function (f) {
+    const p = f.path;
+    const pLower = p.toLowerCase();
+    const desc = f.description || "";
+    const descLower = desc.toLowerCase();
+    const pNorm = pLower.replace(/[^a-z0-9]/g, "");
+    if (q && pLower.indexOf(q) === -1 && descLower.indexOf(q) === -1) {
+      return;
+    }
+    const targetType = f.type || "string";
+    const typeMatch = isFieldPickerTypeMatch(srcType, targetType);
+    const isReq = !!(f.requiredChain || f.required);
+    const isMatch = srcTerm && (pNorm.indexOf(srcTerm) >= 0 || srcTerm.indexOf(pNorm) >= 0);
+    let score = 20;
+    if (isReq) score += 40;
+    if (isMatch && typeMatch) score += 100;
+    else if (isMatch) score += 30;
+    if (!typeMatch) score -= 30;
+    if (q) {
+      if (pLower === q) score += 60;
+      else if (pLower.startsWith(q)) score += 40;
+      else if (pLower.indexOf(q) >= 0) score += 20;
+    }
+    items.push({
+      type: targetType,
+      path: p,
+      label: p,
+      category: isMatch && typeMatch && !q ? "Suggested Matches" : "Spec Fields",
+      required: isReq,
+      suggested: isMatch && typeMatch,
+      typeMismatch: !typeMatch,
+      srcType: srcType,
+      targetType: targetType,
+      description: desc,
+      applyType: "field",
+      score: score,
+    });
+  });
+
+  // 2. Envelope fields
+  (envelopeFields || []).forEach(function (ef) {
+    const p = ef.path;
+    const pLower = p.toLowerCase();
+    const desc = ef.description || "";
+    if (q && pLower.indexOf(q) === -1 && desc.toLowerCase().indexOf(q) === -1) {
+      return;
+    }
+    const isReq = !!(ef.requiredChain || ef.required);
+    let score = 10;
+    if (isReq) score += 30;
+    if (q) {
+      if (pLower === q) score += 50;
+      else if (pLower.startsWith(q)) score += 30;
+      else if (pLower.indexOf(q) >= 0) score += 15;
+    }
+    items.push({
+      type: ef.type || "string",
+      path: p,
+      label: "envelope." + p,
+      category: "Envelope",
+      required: isReq,
+      suggested: false,
+      description: desc,
+      applyType: "envelope",
+      color: "var(--wire-ref)",
+      score: score,
+    });
+  });
+
+  // 3. Known annotations (if relevant)
+  const isK8sOrIAM = (res.provider && (res.provider.indexOf("aws") >= 0 || res.provider.indexOf("k8s") >= 0)) ||
+    res.kind === "ServiceAccount" || res.kind === "Role";
+  if (isK8sOrIAM) {
+    const knownAnns = [
+      { key: "eks.amazonaws.com/role-arn", desc: "EKS IAM Role ARN to assume" },
+      { key: "crossplane.io/external-name", desc: "Cloud resource name override" },
+    ];
+    knownAnns.forEach(function (ann) {
+      const kLower = ann.key.toLowerCase();
+      const dLower = ann.desc.toLowerCase();
+      if (!q || kLower.indexOf(q) >= 0 || dLower.indexOf(q) >= 0) {
+        const isMatch = srcTerm.indexOf("arn") >= 0 || srcTerm.indexOf("role") >= 0;
+        let score = 5;
+        if (isMatch) score += 80;
+        if (q && kLower.indexOf(q) >= 0) score += 25;
+        items.push({
+          type: "string",
+          path: ann.key,
+          label: "annotations." + ann.key,
+          category: isMatch && !q ? "Suggested Matches" : "Annotations",
+          required: false,
+          suggested: isMatch,
+          description: ann.desc,
+          applyType: "ann",
+          color: "var(--wire-status)",
+          score: score,
+        });
+      }
+    });
+  }
+
+  // 4. Custom query option if typed (always lower score than real schema fields)
+  if (q) {
+    if (!items.some(function (it) { return it.path === q && it.applyType === "ann"; })) {
+      items.push({
+        type: "string",
+        path: q,
+        label: "annotations." + q,
+        category: "Custom",
+        required: false,
+        suggested: false,
+        description: "Set as custom annotation",
+        applyType: "ann",
+        color: "var(--wire-status)",
+        score: -10,
+      });
+    }
+    if (!items.some(function (it) { return it.path === q && it.applyType === "field"; })) {
+      items.push({
+        type: "string",
+        path: q,
+        label: q,
+        category: "Custom",
+        required: false,
+        suggested: false,
+        description: "Set as custom field path",
+        applyType: "field",
+        score: -20,
+      });
+    }
+  }
+
+  items.sort(function (a, b) {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.label.localeCompare(b.label);
+  });
+
+  return items;
+}
+
 function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
   closeWirePicker();
   pickerJustOpened = true;
@@ -1134,200 +1316,26 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
   let selectedIndex = 0;
   let currentItems = [];
 
-  function renderItems(items) {
-    currentItems = items;
-    selectedIndex = Math.min(selectedIndex, Math.max(0, items.length - 1));
-    if (!items.length) {
-      listEl.innerHTML = '<div class="empty">No matching fields found.</div>';
-      return;
-    }
-    let h = "";
-    let lastCat = null;
-    items.forEach(function (item, idx) {
-      if (item.category !== lastCat) {
-        lastCat = item.category;
-        h += '<div class="wire-picker-cat">' + esc(lastCat) + '</div>';
-      }
-      const mismatchBadge = item.typeMismatch
-        ? '<span class="wire-picker-mismatch" title="Type mismatch: $' + esc(srcPath) + ' is ' + esc(item.srcType) + ', but field expects ' + esc(item.targetType) + '">mismatch: ' + esc(item.srcType) + ' ≠ ' + esc(item.targetType) + '</span>'
-        : '';
-      h += '<div class="wire-picker-item' + (idx === selectedIndex ? ' active' : '') + (item.suggested ? ' match' : '') + '" data-idx="' + idx + '">' +
-        '<span style="font-family:var(--mono);color:' + (item.color || 'inherit') + '">' + esc(item.label || item.path) + '</span>' +
-        '<span class="dg">' + esc(item.type || "") + '</span>' +
-        (item.required ? '<span class="rq">req</span>' : '') +
-        mismatchBadge +
-        (item.description ? '<span class="desc" title="' + esc(item.description) + '">' + esc(item.description) + '</span>' : '') +
-        '</div>';
-    });
-    listEl.innerHTML = h;
+  let srcType = "string";
+  if (srcOwner === XR_ID) {
+    const pObj = (d.spec.xrd && d.spec.xrd.parameters && d.spec.xrd.parameters[srcPath]) || {};
+    srcType = pObj.type || "string";
   }
 
-  function buildCandidateItems(specFields, envelopeFields, filter) {
-    const q = (filter || "").toLowerCase().trim();
-    const items = [];
-    const srcTerm = srcPath.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-    let srcType = "string";
-    if (srcOwner === XR_ID) {
-      const pObj = (d.spec.xrd && d.spec.xrd.parameters && d.spec.xrd.parameters[srcPath]) || {};
-      srcType = pObj.type || "string";
-    }
-
-    function isTypeMatch(targetType) {
-      if (!srcType || !targetType) return true;
-      if (srcType === targetType) return true;
-      if ((srcType === "integer" || srcType === "number") && (targetType === "integer" || targetType === "number")) return true;
-      if ((srcType === "map" || srcType === "object") && (targetType === "map" || targetType === "object")) return true;
-      return false;
-    }
-
-    // 1. Spec / forProvider fields
-    (specFields || []).forEach(function (f) {
-      const p = f.path;
-      const pLower = p.toLowerCase();
-      const desc = f.description || "";
-      const descLower = desc.toLowerCase();
-      const pNorm = pLower.replace(/[^a-z0-9]/g, "");
-      if (q && pLower.indexOf(q) === -1 && descLower.indexOf(q) === -1) {
-        return;
-      }
-      const targetType = f.type || "string";
-      const typeMatch = isTypeMatch(targetType);
-      const isReq = !!(f.requiredChain || f.required);
-      const isMatch = srcTerm && (pNorm.indexOf(srcTerm) >= 0 || srcTerm.indexOf(pNorm) >= 0);
-      let score = 20;
-      if (isReq) score += 40;
-      if (isMatch && typeMatch) score += 100;
-      else if (isMatch) score += 30;
-      if (!typeMatch) score -= 30;
-      if (q) {
-        if (pLower === q) score += 60;
-        else if (pLower.startsWith(q)) score += 40;
-        else if (pLower.indexOf(q) >= 0) score += 20;
-      }
-      items.push({
-        type: targetType,
-        path: p,
-        label: p,
-        category: isMatch && typeMatch && !q ? "Suggested Matches" : "Spec Fields",
-        required: isReq,
-        suggested: isMatch && typeMatch,
-        typeMismatch: !typeMatch,
-        srcType: srcType,
-        targetType: targetType,
-        description: desc,
-        applyType: "field",
-        score: score,
-      });
-    });
-
-    // 2. Envelope fields
-    (envelopeFields || []).forEach(function (ef) {
-      const p = ef.path;
-      const pLower = p.toLowerCase();
-      const desc = ef.description || "";
-      if (q && pLower.indexOf(q) === -1 && desc.toLowerCase().indexOf(q) === -1) {
-        return;
-      }
-      const isReq = !!(ef.requiredChain || ef.required);
-      let score = 10;
-      if (isReq) score += 30;
-      if (q) {
-        if (pLower === q) score += 50;
-        else if (pLower.startsWith(q)) score += 30;
-        else if (pLower.indexOf(q) >= 0) score += 15;
-      }
-      items.push({
-        type: ef.type || "string",
-        path: p,
-        label: "envelope." + p,
-        category: "Envelope",
-        required: isReq,
-        suggested: false,
-        description: desc,
-        applyType: "envelope",
-        color: "var(--wire-ref)",
-        score: score,
-      });
-    });
-
-    // 3. Known annotations (if relevant)
-    const isK8sOrIAM = (res.provider && (res.provider.indexOf("aws") >= 0 || res.provider.indexOf("k8s") >= 0)) ||
-      res.kind === "ServiceAccount" || res.kind === "Role";
-    if (isK8sOrIAM) {
-      const knownAnns = [
-        { key: "eks.amazonaws.com/role-arn", desc: "EKS IAM Role ARN to assume" },
-        { key: "crossplane.io/external-name", desc: "Cloud resource name override" },
-      ];
-      knownAnns.forEach(function (ann) {
-        const kLower = ann.key.toLowerCase();
-        const dLower = ann.desc.toLowerCase();
-        if (!q || kLower.indexOf(q) >= 0 || dLower.indexOf(q) >= 0) {
-          const isMatch = srcTerm.indexOf("arn") >= 0 || srcTerm.indexOf("role") >= 0;
-          let score = 5;
-          if (isMatch) score += 80;
-          if (q && kLower.indexOf(q) >= 0) score += 25;
-          items.push({
-            type: "string",
-            path: ann.key,
-            label: "annotations." + ann.key,
-            category: isMatch && !q ? "Suggested Matches" : "Annotations",
-            required: false,
-            suggested: isMatch,
-            description: ann.desc,
-            applyType: "ann",
-            color: "var(--wire-status)",
-            score: score,
-          });
-        }
-      });
-    }
-
-    // 4. Custom query option if typed (always lower score than real schema fields)
-    if (q) {
-      if (!items.some(function (it) { return it.path === q && it.applyType === "ann"; })) {
-        items.push({
-          type: "string",
-          path: q,
-          label: "annotations." + q,
-          category: "Custom",
-          required: false,
-          suggested: false,
-          description: "Set as custom annotation",
-          applyType: "ann",
-          color: "var(--wire-status)",
-          score: -10,
-        });
-      }
-      if (!items.some(function (it) { return it.path === q && it.applyType === "field"; })) {
-        items.push({
-          type: "string",
-          path: q,
-          label: q,
-          category: "Custom",
-          required: false,
-          suggested: false,
-          description: "Set as custom field path",
-          applyType: "field",
-          score: -20,
-        });
-      }
-    }
-
-    items.sort(function (a, b) {
-      if (b.score !== a.score) return b.score - a.score;
-      return a.label.localeCompare(b.label);
-    });
-
-    return items;
-  }
+  const pickerContext = {
+    srcOwner: srcOwner,
+    srcPath: srcPath,
+    srcType: srcType,
+    resource: res,
+  };
 
   let cachedSpecFields = [];
   let cachedEnvelopeFields = [];
 
   function updateList(q) {
-    const items = buildCandidateItems(cachedSpecFields, cachedEnvelopeFields, q);
-    renderItems(items);
+    currentItems = buildFieldPickerCandidates(cachedSpecFields, cachedEnvelopeFields, q, pickerContext);
+    selectedIndex = Math.min(selectedIndex, Math.max(0, currentItems.length - 1));
+    renderFieldPickerItems(listEl, currentItems, selectedIndex, srcPath);
   }
 
   function selectItem(item) {
@@ -1348,9 +1356,18 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
     action();
   }
 
+  function updateActiveItem() {
+    listEl.querySelectorAll(".wire-picker-item").forEach(function (el, idx) {
+      const isSel = idx === selectedIndex;
+      el.classList.toggle("active", isSel);
+      if (isSel) {
+        el.scrollIntoView({ block: "nearest" });
+      }
+    });
+  }
+
   resolveKindMetaAsync(res).then(function (meta) {
     if (!meta) {
-      // Fallback: check if the resource already has any fields
       cachedSpecFields = Object.keys(res.fields || {}).map(function (k) {
         return { path: k, type: "string" };
       });
@@ -1368,16 +1385,6 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
       listEl.innerHTML = '<div class="empty">Failed to load fields: ' + esc(err && err.message || err) + '</div>';
     });
   });
-
-  function updateActiveItem() {
-    listEl.querySelectorAll(".wire-picker-item").forEach(function (el, idx) {
-      const isSel = idx === selectedIndex;
-      el.classList.toggle("active", isSel);
-      if (isSel) {
-        el.scrollIntoView({ block: "nearest" });
-      }
-    });
-  }
 
   if (searchInput) {
     searchInput.addEventListener("input", function () {

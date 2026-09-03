@@ -1,3 +1,12 @@
+- [x] **The round-trip gate asserts byte-for-byte fidelity**:
+      `scripts/cluster/test-cluster.sh` applies, reads live XRD and Composition back with `kubectl get -o yaml`, imports with `cf import`, regenerates, and verifies with strict `diff -u` against the original emitted manifests. In addition, Go unit tests in `internal/adopt/tree_test.go` (`TestRoundTripEmittedCompositionAndXRD`) verify round-trip fidelity with simulated server-side noise and scrubbing.
+      — completed 2026-09-03
+- [x] **`canvas.js openFieldPicker` helper modularization**:
+      Extracted type compatibility (`isFieldPickerTypeMatch`), candidate building and relevance scoring (`buildFieldPickerCandidates`), item rendering (`renderFieldPickerItems`), and input/key event bindings into cleanly scoped modular helpers.
+      — completed 2026-09-03
+- [x] **Stale subagent branches and worktrees pruned**:
+      Evaluated and cleanly deleted all 13 stale subagent branches (`subagent-DX--Client...`, `worktree-agent-a5a7...`, `worktree-agent-a7f7...`, `subagent-Canvas...`, `worktree-agent-a247...`, etc.) after merging/verifying their changes.
+      — completed 2026-09-03
 - [x] **Opaque Block & Custom Function Pipeline Preservation**: When importing complex foreign compositions containing unknown custom functions or non-standard pipeline steps, preserve them as declared custom steps in `spec.pipeline` / `spec.resources` with typed `Input` and `Position` preserved so they round-trip cleanly without loss.
       — completed 2026-09-03
 - [x] **Round-trip gate in Lane C (`make test-cluster`)**: Extended `test-cluster.sh` to apply emitted examples, read back live Compositions with `kubectl get -o yaml`, import them via `cf import`, and verify regenerated artifacts.
