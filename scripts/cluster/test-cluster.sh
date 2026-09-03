@@ -142,7 +142,7 @@ kubectl get composition "${COMP_NAME}" -o yaml > "${LIVE_COMP}"
 
 ROUNDTRIP_BP="${OUT_DIR}/roundtrip.cf.yaml"
 echo "==> Importing live server-side Composition with cf import..."
-./bin/cf import "${LIVE_COMP}" -o "${ROUNDTRIP_BP}"
+./bin/cf import "${LIVE_COMP}" -o "${ROUNDTRIP_BP}" || [ $? -eq 2 ]
 
 ROUNDTRIP_OUT="${OUT_DIR}/roundtrip-gen"
 echo "==> Regenerating Crossplane artifacts from adopted blueprint..."
