@@ -11,7 +11,9 @@ test.beforeEach(async ({ request }) => {
 
 test('a blur mid-press ends the gesture; renders keep flowing', async ({ page }) => {
   await page.goto('/')
-  const card = await page.locator('.node[data-id="work-queue"]').boundingBox()
+  const queueLocator = page.locator('.node[data-id="work-queue"]')
+  await queueLocator.waitFor()
+  const card = await queueLocator.boundingBox()
   await page.mouse.move(card.x + 60, card.y + 8)
   await page.mouse.down()                       // gesture begins
   await page.evaluate(() => window.dispatchEvent(new Event('blur')))  // app switch
