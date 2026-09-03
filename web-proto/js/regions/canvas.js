@@ -743,18 +743,21 @@ function openCtxMenu(x, y, resName) {
       const d = doc();
       const res = d && (d.spec.resources || []).find(function (r) { return r.name === resName; });
       if (!res) return;
-      if (it.act === "duplicate") duplicateResource(res);
-      else if (it.act === "delete") removeResource(resName);
-      else if (it.act === "rename") {
-        const to = window.prompt('Rename "' + resName + '" to:', resName);
-        if (!to || to === resName) return;
-        S.renameResource(resName, to).then(function (ok) {
-          if (!ok) return;
-          const p = S.getPosition(resName);
-          if (p) S.setPosition(to, p);
-          S.select(to);
-        });
-      }
+      const actions = {
+        duplicate: function () { duplicateResource(res); },
+        delete: function () { removeResource(resName); },
+        rename: function () {
+          const to = window.prompt('Rename "' + resName + '" to:', resName);
+          if (!to || to === resName) return;
+          S.renameResource(resName, to).then(function (ok) {
+            if (!ok) return;
+            const p = S.getPosition(resName);
+            if (p) S.setPosition(to, p);
+            S.select(to);
+          });
+        },
+      };
+      if (actions[it.act]) actions[it.act]();
     });
     m.appendChild(b);
   });
@@ -978,8 +981,12 @@ function onCanvasClick(e) {
     const d = doc();
     const res = d && (d.spec.resources || []).find(function (x) { return x.name === rn; });
     if (!res) return;
-    if (act.getAttribute("data-act") === "delete") removeResource(rn);
-    else duplicateResource(res);
+    const actions = {
+      delete: function () { removeResource(rn); },
+      duplicate: function () { duplicateResource(res); },
+    };
+    const actionName = act.getAttribute("data-act");
+    if (actions[actionName]) actions[actionName]();
     return;
   }
   if (e.target.closest("[data-addxr]")) {
@@ -1332,13 +1339,13 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
         S.updateParameter(srcPath, Object.assign({}, pObj, { type: item.targetType }));
       }
     }
-    if (item.applyType === "ann") {
-      applyWire(srcOwner, srcPath, targetRes, "annotations." + item.path);
-    } else if (item.applyType === "envelope") {
-      applyWire(srcOwner, srcPath, targetRes, "envelope." + item.path);
-    } else {
-      applyWire(srcOwner, srcPath, targetRes, item.path);
-    }
+    const applyActions = {
+      ann: function () { applyWire(srcOwner, srcPath, targetRes, "annotations." + item.path); },
+      envelope: function () { applyWire(srcOwner, srcPath, targetRes, "envelope." + item.path); },
+      field: function () { applyWire(srcOwner, srcPath, targetRes, item.path); },
+    };
+    const action = applyActions[item.applyType] || applyActions.field;
+    action();
   }
 
   resolveKindMetaAsync(res).then(function (meta) {
@@ -1377,24 +1384,30 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
       selectedIndex = 0;
       updateList(searchInput.value);
     });
-    searchInput.addEventListener("keydown", function (e) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
+    const keyActions = {
+      ArrowDown: function () {
         if (currentItems.length > 0) {
           selectedIndex = (selectedIndex + 1) % currentItems.length;
           updateActiveItem();
         }
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
+      },
+      ArrowUp: function () {
         if (currentItems.length > 0) {
           selectedIndex = (selectedIndex - 1 + currentItems.length) % currentItems.length;
           updateActiveItem();
         }
-      } else if (e.key === "Enter") {
-        e.preventDefault();
+      },
+      Enter: function () {
         selectItem(currentItems[selectedIndex]);
-      } else if (e.key === "Escape") {
+      },
+      Escape: function () {
         closeWirePicker();
+      },
+    };
+    searchInput.addEventListener("keydown", function (e) {
+      if (keyActions[e.key]) {
+        e.preventDefault();
+        keyActions[e.key]();
       }
     });
   }
