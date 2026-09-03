@@ -61,36 +61,6 @@ not an exception for the importer to special-case.
 
 ---
 
-## Track 3 — Correctness and cleanup (re-checked 2026-09-03 @ 31bd674)
-
-Three items the roadmap rewrite dropped that are still true in the code. The
-audit's other findings are genuinely closed: the shared `planSingleResource`
-landed, `internal/cluster` coverage went 55.0% → 78.5%, and the worktree prune
-took the working copy from 807 MB to 313 MB.
-
-- [ ] **`cf catalogue --kind` does not filter by kind.** It concatenates the
-      value into the free-text query and calls `Search`, so `--kind Bucket`
-      returns `provider-bitbucket-server` — which serves no kinds at all and
-      matched on its name — and its output is byte-identical to
-      `cf catalogue Bucket`. `catalogue.PackagesForKind` is the exact-match
-      lookup this flag wants and is still unreachable from any binary
-      (`deadcode ./cmd/...`). Wire the flag to it, and pin the repro above.
-- [ ] **The engine-refusal preamble is duplicated byte-for-byte.** The first 26
-      lines of `kclTemplateBody` and `pythonTemplateBody` (refuse conventions,
-      `template:` fields, and `raw:` containing `{{`) diff to zero lines.
-      `planSingleResource` took the planning half; this is the rest. Extract
-      `refuseGoTemplateOnlyFeatures(b) error`. Small and mechanical.
-- [ ] **`web/` is 158 MB of the 313 MB working copy** — the retired React
-      canvas, out of git since 2026-09-02, still on disk. Five branches also
-      still carry unmerged commits and need a call each:
-      `subagent-DX--Client---Test-Suite-Polish-Engineer-self-37c2a470` (12
-      ahead), `worktree-agent-a5a7710927acd2ff7` (12),
-      `worktree-agent-a7f7485202bdacadb` (4),
-      `subagent-Canvas---UX-Authoring-Engineer-self-84d324ac` (1),
-      `worktree-agent-a247d77332728f705` (1).
-
----
-
 ## Non-findings (Recorded so they are not re-raised)
 
 - [x] `deploy/k8s/deployment.yaml` passes `--i-know-this-is-unauthenticated` with `--addr 0.0.0.0:8080`. Safe because the Service is ClusterIP.

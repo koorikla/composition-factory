@@ -21,19 +21,31 @@ func (c *CatalogueCmd) Run(out io.Writer) error {
 		return err
 	}
 
-	query := c.Q
+	var results []catalogue.Provider
 	if c.Kind != "" {
-		if query != "" {
-			query = query + " " + c.Kind
-		} else {
-			query = c.Kind
+		pkgs := catalogue.PackagesForKind(c.Kind)
+		if len(pkgs) == 0 {
+			fmt.Fprintf(out, "No packages found serving kind %q.\n", c.Kind)
+			return nil
 		}
+		pkgSet := make(map[string]bool, len(pkgs))
+		for _, p := range pkgs {
+			pkgSet[p] = true
+		}
+		var kindFiltered []catalogue.Provider
+		for _, e := range entries {
+			if pkgSet[e.Name] {
+				kindFiltered = append(kindFiltered, e)
+			}
+		}
+		results = catalogue.Search(kindFiltered, c.Q, c.Type)
+	} else {
+		results = catalogue.Search(entries, c.Q, c.Type)
 	}
 
-	results := catalogue.Search(entries, query, c.Type)
 	if len(results) == 0 {
-		if query != "" {
-			fmt.Fprintf(out, "No packages found matching %q.\n", query)
+		if c.Q != "" {
+			fmt.Fprintf(out, "No packages found matching %q.\n", c.Q)
 		} else {
 			fmt.Fprintln(out, "No packages found in catalogue.")
 		}

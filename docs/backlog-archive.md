@@ -1,5 +1,11 @@
-- [x] Workspace Worktree Hygiene: pruned 10 merged worktrees and deleted 10 merged
-      local branches.
+- [x] `cf catalogue --kind` exact match filtering: wired `catalogue.PackagesForKind` to
+      strictly filter packages serving the requested CRD kind.
+      — completed 2026-09-03
+- [x] Engine-refusal preamble deduplication: extracted `refuseGoTemplateOnlyFeatures` in
+      `internal/emit/plan.go`, unifying non-Go engine rejection of conventions, template fields,
+      and Go template syntax across KCL and Python.
+      — completed 2026-09-03
+- [x] Workspace Worktree & Disk Hygiene: pruned merged worktrees and branches, removed retired `web/` directory.
       — completed 2026-09-03
 - [x] Drag-to-wire type warning action "change parameter type" converts XRD parameter
       type to matching target field type upon user confirmation (`canvas.js:1330`).
@@ -7,12 +13,10 @@
 - [x] Unify inspector "env:" and canvas "envelope." target namespaces across wiring handlers.
       — completed 2026-09-03
 - [x] The three emitters walk the same tree three times. Lift the common traversal,
-      validation, kind resolution, conventions merge, and field/annotation planning
-      into a shared `planSingleResource` in `internal/emit/plan.go`, used identically across
-      `composition.go`, `python.go`, and `kcl.go`.
-      — completed 2026-09-03 (planning half only: writeResourceTemplate 294→194,
-      kclTemplateBody 186→147, pythonTemplateBody 176→137. The engine-refusal
-      preamble is still duplicated byte-for-byte; carried forward as an open item.)
+      validation, kind resolution, conventions merge, field/annotation planning, and engine-refusal
+      preamble into `internal/emit/plan.go` (`planSingleResource` and `refuseGoTemplateOnlyFeatures`),
+      used identically across `composition.go`, `python.go`, and `kcl.go`.
+      — completed 2026-09-03
 - [x] `catalogue.Kinds` surfaced in the `cf catalogue` package table so a reader can
       see which kinds a package serves.
       — completed 2026-09-03 (only half: `--kind` was added but routes to the free-text

@@ -203,4 +203,18 @@ func TestCatalogueCommand(t *testing.T) {
 	if !strings.Contains(outStr, "provider-gcp-sql") {
 		t.Errorf("expected provider-gcp-sql for --kind=DatabaseInstance, got:\n%s", outStr)
 	}
+
+	// 6. Filter by --kind=Bucket must match s3/gcp-storage and NOT bitbucket-server
+	cmdBucketKind := &CatalogueCmd{Kind: "Bucket"}
+	out.Reset()
+	if err := cmdBucketKind.Run(&out); err != nil {
+		t.Fatalf("CatalogueCmd.Run with Kind=Bucket: %v", err)
+	}
+	outStr = out.String()
+	if !strings.Contains(outStr, "provider-aws-s3") || !strings.Contains(outStr, "provider-gcp-storage") {
+		t.Errorf("expected provider-aws-s3 and provider-gcp-storage for --kind=Bucket, got:\n%s", outStr)
+	}
+	if strings.Contains(outStr, "provider-bitbucket-server") {
+		t.Errorf("expected provider-bitbucket-server to be excluded for --kind=Bucket, got:\n%s", outStr)
+	}
 }

@@ -12,31 +12,8 @@ import (
 
 // pythonTemplateBody generates idiomatic Python code for function-python (python.fn.crossplane.io/v1beta1 Script).
 func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) {
-	if len(b.Spec.Conventions) > 0 {
-		return "", fmt.Errorf("spec.conventions: engine %q does not support template: conventions", b.Engine())
-	}
-	for _, r := range b.Spec.Resources {
-		for k, f := range r.Fields {
-			if f.Template != "" {
-				return "", fmt.Errorf("resource %q field %q: engine %q does not support template: fields", r.Name, k, b.Engine())
-			}
-			if f.Raw != "" && strings.Contains(f.Raw, "{{") {
-				return "", fmt.Errorf("resource %q field %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)", r.Name, k, f.Raw, b.Engine())
-			}
-		}
-		for k, a := range r.Annotations {
-			if a.Template != "" {
-				return "", fmt.Errorf("resource %q annotation %q: engine %q does not support template: fields", r.Name, k, b.Engine())
-			}
-			if a.Raw != "" && strings.Contains(a.Raw, "{{") {
-				return "", fmt.Errorf("resource %q annotation %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)", r.Name, k, a.Raw, b.Engine())
-			}
-		}
-		for k, ef := range r.Envelope {
-			if ef.Raw != "" && strings.Contains(ef.Raw, "{{") {
-				return "", fmt.Errorf("resource %q envelope %q: raw %q contains Go-template syntax \"{{\" which is only supported with the go-templating engine (current engine is %q)", r.Name, k, ef.Raw, b.Engine())
-			}
-		}
+	if err := refuseGoTemplateOnlyFeatures(b); err != nil {
+		return "", err
 	}
 
 	x := b.Spec.XRD
