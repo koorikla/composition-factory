@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -288,11 +287,6 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	// 5. Deduplicate and collect provider sources
 	collectSources(bp, opts.DefaultProviderRef)
 
-	// Sort resources by name for deterministic ordering
-	sort.Slice(bp.Spec.Resources, func(i, j int) bool {
-		return bp.Spec.Resources[i].Name < bp.Spec.Resources[j].Name
-	})
-
 	if err := bp.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("validate adopted blueprint: %w", err)
 	}
@@ -530,8 +524,14 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 var (
 	reDefine             = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
 	reParamVar           = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
-	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*\(index\s+(?:\$\.?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)\.resource\.status(?:\.atProvider)?\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*\(index\s+(?:\$\.?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reXRResourceRef      = regexp.MustCompile(`\{\{-?\s*\$xr\s*-?\}\}-([a-zA-Z0-9-]+)`)
+	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+\$spec\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
+	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+eq\s+\$spec\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
+	reWhenIfNe           = regexp.MustCompile(`\{\{-?\s*if\s+ne\s+\$spec\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
+	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+\$spec\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
+	reDocSeparator       = regexp.MustCompile(`(?m)^\s*---\s*$`)
 	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+"([^"]+)"`)
 	reExprPrefix         = regexp.MustCompile(`^(__CF_EXPR_\d+__|cf-expr-\d+|__cf_expr_\d+__)-`)
 	paramNameRE          = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
@@ -692,53 +692,82 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, defaultProvider s
 		}
 	}
 
-	// 3. Filter standalone control flow lines (preludes, guards, end statements)
-	// so YAML parsing doesn't unmarshal block-level control statements into values.
-	lines := strings.Split(cleanTmpl, "\n")
-	var filteredLines []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		// Check if line is purely a Go-template control action
-		if strings.HasPrefix(trimmed, "{{") && strings.HasSuffix(trimmed, "}}") {
-			inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "{{"), "}}"))
-			inner = strings.TrimPrefix(inner, "-")
-			inner = strings.TrimSuffix(inner, "-")
-			inner = strings.TrimSpace(inner)
-			if strings.HasPrefix(inner, "$") && strings.Contains(inner, ":=") {
-				// Prelude variable assignment (e.g. $spec := ...)
-				continue
-			}
-			if strings.HasPrefix(inner, "if ") || strings.HasPrefix(inner, "else") ||
-				strings.HasPrefix(inner, "end") || strings.HasPrefix(inner, "range ") {
-				// Standalone control-flow line
-				continue
-			}
-		}
-		filteredLines = append(filteredLines, line)
-	}
-	cleanYAMLTemplate := strings.Join(filteredLines, "\n")
-
-	// 4. Mask remaining inline template expressions to make YAML strictly parseable
-	var placeholderTable []string
-	maskedTmpl := reMustacheExpr.ReplaceAllStringFunc(cleanYAMLTemplate, func(match string) string {
-		idx := len(placeholderTable)
-		placeholderTable = append(placeholderTable, match)
-		return fmt.Sprintf(`__CF_EXPR_%d__`, idx)
-	})
-
-	// 5. Parse YAML documents embedded in masked template
-	docs, err := splitYAML([]byte(maskedTmpl))
-	if err != nil {
-		return fmt.Errorf("split masked template yaml: %w", err)
-	}
-	docs = unwrapListDocs(docs)
-	for _, doc := range docs {
-		ScrubDocument(doc, "", report)
-		res := resourceFromMap(doc, defaultProvider, placeholderTable, report, nameMapping)
-		if res == nil {
+	// 3. Process documents per chunk to capture when / forEach guards and resources
+	chunks := reDocSeparator.Split(cleanTmpl, -1)
+	var nextWhen, nextForEach string
+	for _, chunk := range chunks {
+		trimmedChunk := strings.TrimSpace(chunk)
+		if trimmedChunk == "" {
 			continue
 		}
-		bp.Spec.Resources = append(bp.Spec.Resources, *res)
+
+		when := nextWhen
+		forEach := nextForEach
+		nextWhen = ""
+		nextForEach = ""
+
+		if m := reWhenIfEq.FindStringSubmatch(chunk); len(m) >= 3 {
+			nextWhen = fmt.Sprintf("params.%s == %s", m[1], m[2])
+		} else if m := reWhenIfNe.FindStringSubmatch(chunk); len(m) >= 3 {
+			nextWhen = fmt.Sprintf("params.%s != %s", m[1], m[2])
+		} else if m := reWhenIfSimple.FindStringSubmatch(chunk); len(m) >= 2 {
+			nextWhen = fmt.Sprintf("params.%s", m[1])
+		}
+
+		if m := reForEachLoop.FindStringSubmatch(chunk); len(m) >= 2 {
+			nextForEach = fmt.Sprintf("params.%s", m[1])
+		}
+
+		lines := strings.Split(chunk, "\n")
+		var filteredLines []string
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "{{") && strings.HasSuffix(trimmed, "}}") {
+				inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "{{"), "}}"))
+				inner = strings.TrimPrefix(inner, "-")
+				inner = strings.TrimSuffix(inner, "-")
+				inner = strings.TrimSpace(inner)
+				if strings.HasPrefix(inner, "$") && strings.Contains(inner, ":=") {
+					continue
+				}
+				if strings.HasPrefix(inner, "if ") || strings.HasPrefix(inner, "else") ||
+					strings.HasPrefix(inner, "end") || strings.HasPrefix(inner, "range ") {
+					continue
+				}
+			}
+			filteredLines = append(filteredLines, line)
+		}
+		cleanYAML := strings.Join(filteredLines, "\n")
+		if strings.TrimSpace(cleanYAML) == "" {
+			continue
+		}
+
+		var placeholderTable []string
+		maskedYAML := reMustacheExpr.ReplaceAllStringFunc(cleanYAML, func(match string) string {
+			idx := len(placeholderTable)
+			placeholderTable = append(placeholderTable, match)
+			return fmt.Sprintf(`__CF_EXPR_%d__`, idx)
+		})
+
+		docs, err := splitYAML([]byte(maskedYAML))
+		if err != nil {
+			continue
+		}
+		docs = unwrapListDocs(docs)
+		for _, doc := range docs {
+			ScrubDocument(doc, "", report)
+			res := resourceFromMap(doc, defaultProvider, placeholderTable, report, nameMapping)
+			if res == nil {
+				continue
+			}
+			if when != "" {
+				res.When = when
+			}
+			if forEach != "" {
+				res.ForEach = forEach
+			}
+			bp.Spec.Resources = append(bp.Spec.Resources, *res)
+		}
 	}
 
 	return nil
@@ -945,14 +974,28 @@ func resourceFromMap(m map[string]any, defaultProvider string, placeholders []st
 					} else {
 						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, k), "invalid parameter reference")
 					}
-				} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 3 {
+				} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 4 {
 					srcRes := m[1]
 					if nameMapping != nil && nameMapping[srcRes] != "" {
 						srcRes = nameMapping[srcRes]
 					} else {
 						srcRes = normalizeDNSLabel(srcRes)
 					}
-					res.Annotations[k] = blueprint.Field{From: "resources." + srcRes + ".status." + m[2]}
+					targetKind := m[2]
+					targetField := m[3]
+					if strings.HasPrefix(targetKind, "status") {
+						res.Annotations[k] = blueprint.Field{From: "resources." + srcRes + ".status." + targetField}
+					} else {
+						res.Annotations[k] = blueprint.Field{From: "resources." + srcRes + ".metadata." + targetField}
+					}
+				} else if m := reXRResourceRef.FindStringSubmatch(rawStr); len(m) >= 2 {
+					srcRes := m[1]
+					if nameMapping != nil && nameMapping[srcRes] != "" {
+						srcRes = nameMapping[srcRes]
+					} else {
+						srcRes = normalizeDNSLabel(srcRes)
+					}
+					res.Annotations[k] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
 				} else {
 					res.Annotations[k] = blueprint.Field{Value: rawStr}
 				}
@@ -1031,21 +1074,89 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 				} else {
 					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid parameter reference")
 				}
-			} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 3 {
+			} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 4 {
 				srcRes := m[1]
 				if nameMapping != nil && nameMapping[srcRes] != "" {
 					srcRes = nameMapping[srcRes]
 				} else {
 					srcRes = normalizeDNSLabel(srcRes)
 				}
-				out[path] = blueprint.Field{From: "resources." + srcRes + ".status." + m[2]}
+				targetKind := m[2]
+				targetField := m[3]
+				if strings.HasPrefix(targetKind, "status") {
+					out[path] = blueprint.Field{From: "resources." + srcRes + ".status." + targetField}
+				} else {
+					out[path] = blueprint.Field{From: "resources." + srcRes + ".metadata." + targetField}
+				}
+			} else if m := reXRResourceRef.FindStringSubmatch(rawStr); len(m) >= 2 {
+				srcRes := m[1]
+				if nameMapping != nil && nameMapping[srcRes] != "" {
+					srcRes = nameMapping[srcRes]
+				} else {
+					srcRes = normalizeDNSLabel(srcRes)
+				}
+				out[path] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
 			} else if strings.Contains(rawStr, "{{") {
 				out[path] = blueprint.Field{Raw: rawStr}
 			} else {
 				out[path] = blueprint.Field{Value: rawStr}
 			}
 		case []any:
-			report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "array field values cannot be represented as scalar fields")
+			for elemIdx, item := range val {
+				elemPath := fmt.Sprintf("%s[%d]", path, elemIdx)
+				switch elemVal := item.(type) {
+				case map[string]any:
+					extractFields(elemPath, elemVal, out, placeholders, resName, report, nameMapping)
+				case string:
+					rawStr := unmaskString(elemVal, placeholders)
+					if err := checkScalarClean(rawStr); err != nil {
+						report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath),
+							"multi-line scalar contains newlines, which is not supported in blueprint values")
+						continue
+					}
+					if m := reParamVar.FindStringSubmatch(rawStr); len(m) >= 2 {
+						if isValidParamIdentifier(m[1]) {
+							out[elemPath] = blueprint.Field{From: "params." + m[1]}
+						} else {
+							report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid parameter reference")
+						}
+					} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 4 {
+						srcRes := m[1]
+						if nameMapping != nil && nameMapping[srcRes] != "" {
+							srcRes = nameMapping[srcRes]
+						} else {
+							srcRes = normalizeDNSLabel(srcRes)
+						}
+						targetKind := m[2]
+						targetField := m[3]
+						if strings.HasPrefix(targetKind, "status") {
+							out[elemPath] = blueprint.Field{From: "resources." + srcRes + ".status." + targetField}
+						} else {
+							out[elemPath] = blueprint.Field{From: "resources." + srcRes + ".metadata." + targetField}
+						}
+					} else if m := reXRResourceRef.FindStringSubmatch(rawStr); len(m) >= 2 {
+						srcRes := m[1]
+						if nameMapping != nil && nameMapping[srcRes] != "" {
+							srcRes = nameMapping[srcRes]
+						} else {
+							srcRes = normalizeDNSLabel(srcRes)
+						}
+						out[elemPath] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
+					} else if strings.Contains(rawStr, "{{") {
+						out[elemPath] = blueprint.Field{Raw: rawStr}
+					} else {
+						out[elemPath] = blueprint.Field{Value: rawStr}
+					}
+				default:
+					rawStr := unmaskString(fmt.Sprint(elemVal), placeholders)
+					if err := checkScalarClean(rawStr); err != nil {
+						report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath),
+							"contains newlines or control characters")
+						continue
+					}
+					out[elemPath] = blueprint.Field{Value: rawStr}
+				}
+			}
 		default:
 			rawStr := unmaskString(fmt.Sprint(val), placeholders)
 			if err := checkScalarClean(rawStr); err != nil {

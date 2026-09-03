@@ -57,8 +57,8 @@ spec:
       provider: k8s
       fields:
         spec.replicas: {from: params.replicas}
-        spec.selector.matchLabels: {raw: "{app: workload}"}
-        spec.template.metadata.labels: {raw: "{app: workload}"}
+        spec.selector.matchLabels[app]: {value: workload}
+        spec.template.metadata.labels[app]: {value: workload}
         spec.template.spec.serviceAccountName: {from: resources.sa.metadata.name}
         spec.template.spec.containers[0].name: {value: app}
         spec.template.spec.containers[0].image: {from: params.image}
@@ -69,6 +69,6 @@ spec:
       provider: k8s
       when: params.enableService
       fields:
-        spec.selector: {raw: "{app: workload}"}
+        spec.selector[app]: {value: workload}
         spec.ports[0].port: {value: 80}
         spec.ports[0].targetPort: {from: params.port}

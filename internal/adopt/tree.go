@@ -233,11 +233,6 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	rewriteStatusReferences(bp, nameMapping)
 	collectSources(bp, defaultProvider)
 
-	// Sort resources by name for deterministic ordering
-	sort.Slice(bp.Spec.Resources, func(i, j int) bool {
-		return bp.Spec.Resources[i].Name < bp.Spec.Resources[j].Name
-	})
-
 	if err := bp.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("validate adopted blueprint: %w", err)
 	}

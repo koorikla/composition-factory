@@ -78,7 +78,7 @@ func (c *AdoptCmd) run(out io.Writer) (int, error) {
 		if err := os.WriteFile(c.Out, outBytes, 0644); err != nil {
 			return 1, fmt.Errorf("write blueprint: %w", err)
 		}
-		if report != nil && report.IsLossy() {
+		if report != nil && report.HasTrueLoss() {
 			fmt.Fprint(out, report.String())
 		}
 		fmt.Fprintf(out, "Adopted blueprint written to %s\n", c.Out)
@@ -88,7 +88,7 @@ func (c *AdoptCmd) run(out io.Writer) (int, error) {
 		}
 	}
 
-	if report != nil && report.IsLossy() {
+	if report != nil && report.HasTrueLoss() {
 		return 2, nil
 	}
 	return 0, nil
