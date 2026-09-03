@@ -47,6 +47,7 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 
 	sort.Strings(yamlFiles)
 
+	report := &LossReport{}
 	var configDocs []map[string]any
 	var xrdDocs []map[string]any
 	var compDocs []map[string]any
@@ -60,6 +61,8 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 		if err != nil {
 			return nil, nil, fmt.Errorf("parse yaml %s: %w", file, err)
 		}
+		docs = unwrapListDocs(docs)
+		ScrubDocuments(docs, report)
 		for _, doc := range docs {
 			kind, _ := doc["kind"].(string)
 			switch kind {
@@ -76,8 +79,6 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	if len(compDocs) == 0 {
 		return nil, nil, fmt.Errorf("no Composition document found in tree %s", dirPath)
 	}
-
-	report := &LossReport{}
 	bp := &blueprint.Blueprint{
 		APIVersion: blueprint.APIVersion,
 		Kind:       blueprint.Kind,
