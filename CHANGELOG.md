@@ -15,7 +15,14 @@ consumer's git diff.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-03
+
 ### Added
+
+- `cf catalogue --kind <kind>`: filter packages by specific served CRD kinds with served kinds summary table.
+- Acceptance testing across alternative engines (`kcl`, `python`) using real container runners in `TestAcceptanceAlternativeEnginesRender`.
+- Self-adoption support in `cf adopt`: adopts compositions containing `{{- $spec := ... -}}` preludes and `{{- if hasKey ... }}` block guards with unquoted placeholder masking.
+- Comprehensive unit test coverage for `internal/cluster` (error paths, disconnected status, kubeconfig TLS auth, and context resolution).
 
 - `docker run -p 127.0.0.1:8080:8080 ghcr.io/koorikla/compositionfactory` is now
   the whole bootstrap. The image carries its container defaults as environment
@@ -43,14 +50,14 @@ consumer's git diff.
 
 ### Changed
 
+- Consolidated resource planning across Go-templating, KCL, and Python emitters into `planSingleResource` (`internal/emit/plan.go`), unifying schema validation, kind resolution, and field/annotation planning.
 - `docs/code-audit.md` re-verified against `main` at 8b58a1d, 39 commits after
   the audited tree. Closed: `(*Blueprint).Validate` is split into seven named
   validators, `make test-race` runs in CI lane A, and the kind-cluster lane the
   audit called its strongest recommendation now runs on every push. Still open
-  and all grown since: the three-way emitter triplication, both oversized
-  canvas `init` closures, and the worktree sprawl. Newly recorded:
-  `catalogue.Kinds` and `catalogue.PackagesForKind` are exported, tested and
-  called by nothing in production.
+  and all grown since: both oversized canvas `init` closures and the worktree
+  sprawl. Closed: emitter planning triplication consolidated, catalogue kinds/packages
+  surfaced in `cf catalogue --kind`.
 
 ### Fixed
 
