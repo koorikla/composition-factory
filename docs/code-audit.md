@@ -17,7 +17,7 @@ while ignoring `provider:`. Read that backlog alongside this. The grades below
 are grades for the codebase as an artifact, not a claim that it generates
 correct YAML; where the two disagree, the dogfooding wins, because it checked.
 
-## Re-verified — 2026-09-03, `main` at 8b58a1d, then again at 31bd674
+## Re-verified — 2026-09-03, at 8b58a1d, 31bd674 and 47949a3
 
 47 commits and two releases (v0.8.0, v0.9.0) after the audited tree. Every gate
 in the Method section was re-run and every finding re-measured with the same
@@ -46,13 +46,13 @@ The second pass is folded in: where a finding moved twice, both steps are shown.
 
 ### Movement on the rest
 
-| Finding | audit (ee61f82) | 8b58a1d | 31bd674 |
-|---|---|---|---|
-| 2. Emitter traversal | 279 / 165 / 164 | 294 / 186 / 176 | **194 / 147 / 137** |
-| 3. JS `init` closures | 882 / 830 | 906 / 835 | 906 / 835 |
-| 3. JS dispatch ladders | 317 / 316 / 295 | unchanged | unchanged |
-| 4. `internal/cluster` coverage | 55.0 % | 55.0 % | **78.5 %** |
-| 5. Working copy | 731 MB, 20 branches | 807 MB, 27 branches | **313 MB, 15 branches** |
+| Finding | audit (ee61f82) | 8b58a1d | 31bd674 | 47949a3 |
+|---|---|---|---|---|
+| 2. Emitter traversal | 279 / 165 / 164 | 294 / 186 / 176 | **194 / 147 / 137** | **124 / 114** bodies, shared refusal |
+| 3. JS `init` closures | 882 / 830 | 906 / 835 | 906 / 835 | **22 / 47** |
+| 3. JS dispatch ladders | 317 / 316 / 295 | unchanged | unchanged | **322 / 16 / 183** |
+| 4. `internal/cluster` coverage | 55.0 % | 55.0 % | **78.5 %** | 78.5 % |
+| 5. Working copy | 731 MB, 20 branches | 807 MB, 27 branches | 313 MB, 15 branches | **178 MB**, `web/` gone |
 
 Findings 2, 4 and 5 turned around in the second pass. A shared
 `planSingleResource` (`internal/emit/plan.go`) now does the validation, kind
@@ -60,15 +60,18 @@ resolution, conventions merge and field planning for all three emitters, which
 is the lift the finding asked for; `internal/cluster` gained error-path and
 kubeconfig tests; the merged worktrees were pruned.
 
-Two remainders, both verified in code rather than inferred:
+By the third pass every original finding is closed or nearly so.
+`refuseGoTemplateOnlyFeatures` deduplicated the engine preamble, `web/` came off
+disk, and the two 800-line `init` closures became 22 and 47 lines. Two
+remainders, both verified in code rather than inferred:
 
-- **The engine-refusal preamble is still duplicated byte-for-byte.** The first
-  26 lines of `kclTemplateBody` and `pythonTemplateBody` diff to zero lines.
-  `planSingleResource` took the planning half; this is the rest.
-- **`web/` is 158 MB of the remaining 313 MB** — the retired React canvas, out
-  of git, still on disk — and five branches still carry unmerged commits.
-
-Finding 3 has not moved at all, and it is now the whole of Track 2.
+- **`canvas.js openFieldPicker` is unchanged at 322 lines**, though it was
+  archived as converted. The original finding also mischaracterised it: it is
+  not an action ladder but a builder doing search, type compatibility, relevance
+  scoring, category grouping and rendering in one function across 43 branch
+  points. It needs those extracted, not a dispatch table. The two genuine
+  ladders in `inspector.js` were converted — `onBoxClick` 316 → 16.
+- **Five branches still carry unmerged commits**, against 10 merged anchors.
 
 ### New
 
@@ -81,13 +84,21 @@ Finding 3 has not moved at all, and it is now the whole of Track 2.
   `catalogue.Kinds` was wired into the `cf catalogue` package table.
   `catalogue.PackagesForKind` (`catalogue/kinds.go:240`) is still exported,
   still tested, still called by nothing.
-- **`cf catalogue --kind` does not filter by kind** — found while checking the
-  above, and the two are the same defect. The flag concatenates its value into
-  the free-text query and calls `Search`, so it matches names and descriptions:
-  `cf catalogue --kind Bucket` returns `provider-bitbucket-server`, which
-  serves no kinds at all and matched on "Bitbucket", and its output is
-  byte-identical to `cf catalogue Bucket`. `PackagesForKind` is the exact-match
-  lookup the flag wants, sitting unused two functions away.
+- **`cf catalogue --kind` did not filter by kind** — found while checking the
+  above; the two were the same defect. Fixed at 47949a3: the flag is wired to
+  `PackagesForKind`, `--kind Bucket` no longer returns `provider-bitbucket-server`,
+  and its output now differs from the free-text search. `deadcode` is back to
+  four hits, all test seams — the pre-audit baseline.
+- **The Lane C round-trip gate does not assert the round trip.**
+  `scripts/cluster/test-cluster.sh:138-158` applies, reads the XRD and
+  Composition back with `kubectl get -o yaml`, imports and regenerates — then
+  checks only that the regenerated composition file is non-empty, and swallows a
+  lossy import with `|| [ $? -eq 2 ]` without inspecting what was dropped. It
+  would pass with one resource where the original had five. Nothing in the Go
+  suite compares regenerated against original composition bytes either. The
+  scaffolding is right and the assertion is a placeholder — which matters more
+  than any structural finding in this document, because this gate is what the
+  round-trip rule is enforced by.
 
 ### Scale, for context
 

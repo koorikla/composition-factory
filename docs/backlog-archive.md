@@ -8,8 +8,8 @@
       — completed 2026-09-03
 - [x] **Simplify Emitted Status Wires**: Replaced the 11-term `hasKey/kindIs` guard chain with a clean, missingkey-safe Sprig `hasKey (dig ...)` helper in Go-templating outputs (`internal/emit/composition.go`), while maintaining full backward-compatibility with `cf adopt` (`internal/adopt/adopt.go`).
       — completed 2026-09-03
-- [x] **Canvas Action Dispatch Maps**: Replaced large `if/else` ladders in `web-proto/js/regions/canvas.js` (`openFieldPicker`) and `inspector.js` (`onBoxClick`, `onBoxChange`) with modular `const actions = { ... }` dispatch tables.
-      — completed 2026-09-03
+- [x] **Canvas Action Dispatch Maps**: Replaced large `if/else` ladders in `inspector.js` (`onBoxClick` 316 -> 16 lines, `onBoxChange` 295 -> 183) with modular `const actions = { ... }` dispatch tables.
+      — completed 2026-09-03 (`canvas.js` `openFieldPicker` was listed here too but is unchanged at 322 lines; it is a builder rather than an action ladder, so it needs extraction rather than a table. Carried forward as an open item.)
 - [x] **Direct Configuration Source Tree Import**: Extend `cf import` and `cf adopt` to read full Configuration repositories (`crossplane.yaml`, `apis/<xr>/definition.yaml`, `composition.yaml`), extracting XR schemas, resource templates, and parameters into a canonical `.cf.yaml` blueprint in one step.
       — completed 2026-09-03
 - [x] `cf catalogue --kind` exact match filtering: wired `catalogue.PackagesForKind` to

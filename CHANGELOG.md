@@ -50,6 +50,18 @@ consumer's git diff.
 
 ### Changed
 
+- Third audit re-check, at 47949a3. Closed and verified by re-running the
+  repros: `cf catalogue --kind` filters exactly and `catalogue.PackagesForKind`
+  is live (`deadcode` back to four hits, all test seams); the engine-refusal
+  preamble is shared as `refuseGoTemplateOnlyFeatures`; `palette.js` and
+  `output.js` `init` are 22 and 47 lines, down from 906 and 835; `onBoxClick`
+  316 → 16; `web/` is off disk, working copy 313 MB → 178 MB.
+- Recorded that the Lane C round-trip gate does not yet assert the round trip:
+  it applies, reads back with `kubectl get -o yaml`, imports and regenerates,
+  then checks only that the regenerated composition is non-empty and swallows a
+  lossy import without inspecting the loss. The scaffolding is right; the
+  assertion is a placeholder.
+
 - Consolidated resource planning across Go-templating, KCL, and Python emitters into `planSingleResource` (`internal/emit/plan.go`), unifying schema validation, kind resolution, and field/annotation planning.
 - `docs/code-audit.md` re-verified twice on 2026-09-03, at 8b58a1d and again at
   31bd674. Closed across the two passes: `(*Blueprint).Validate` split into

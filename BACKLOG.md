@@ -37,9 +37,46 @@ not an exception for the importer to special-case.
 
 ---
 
-## Status: All Active Backlog Items Completed
+## Open — re-checked 2026-09-03 @ 47949a3
 
-All items across Tracks 1, 2, and 3 have been completed, verified with automated tests, and archived in [docs/backlog-archive.md](docs/backlog-archive.md).
+Most of Tracks 1–3 is genuinely done and archived: `cf catalogue --kind` now
+filters exactly (`--kind Bucket` no longer returns `provider-bitbucket-server`),
+`refuseGoTemplateOnlyFeatures` deduplicates the engine preamble, `palette.js`
+and `output.js` `init` went 906/835 lines to 22/47, `onBoxClick` 316 → 16,
+`onBoxChange` 295 → 183, `web/` is off disk (working copy 313 MB → 178 MB),
+`internal/adopt` coverage 78.6% → 84.4%, and `deadcode` is back to four hits,
+all test seams. Three things do not hold up.
+
+- [ ] **The round-trip gate does not assert the round trip.**
+      `scripts/cluster/test-cluster.sh:138-158` does the hard part — applies,
+      reads the XRD and Composition back with `kubectl get -o yaml`, imports,
+      regenerates — and then checks only that the regenerated composition file
+      is non-empty (`[ ! -s "${COMP_FILES[0]}" ]`). It would pass with one
+      resource where the original had five. It also swallows a lossy import
+      with `|| [ $? -eq 2 ]` without inspecting what was dropped. The principle
+      above asks for the original bytes back: diff the regenerated composition
+      and XRD against the ones `cf gen` produced before the apply, and fail on
+      any difference that is not a named, expected server-side field. No Go
+      test covers this either — nothing compares regenerated against original
+      composition bytes anywhere in the suite.
+- [ ] **`canvas.js openFieldPicker` is still 322 lines** (was 317 at the
+      audit). Archived as converted to dispatch tables; it was not — and the
+      original finding mischaracterised it. It is not an action ladder but a
+      builder doing five jobs in one function: search input handling, type
+      compatibility, relevance scoring, category grouping, and DOM rendering,
+      across 43 branch points. Extract those four helpers; a `const actions`
+      table is the wrong shape for it. The two genuine ladders in
+      `inspector.js` were converted and are done.
+- [ ] **Five branches still carry unmerged commits** and need a call each:
+      `subagent-DX--Client---Test-Suite-Polish-Engineer-self-37c2a470` (12
+      ahead), `worktree-agent-a5a7710927acd2ff7` (12),
+      `worktree-agent-a7f7485202bdacadb` (4),
+      `subagent-Canvas---UX-Authoring-Engineer-self-84d324ac` (1),
+      `worktree-agent-a247d77332728f705` (1). Merge, cherry-pick or delete —
+      10 of the 15 local branches are already merged anchors.
+
+Minor, carried without a task: `internal/cache` (64.9%) and `internal/xpkg`
+(72.6%) coverage have not moved across any pass.
 
 ---
 
