@@ -205,18 +205,6 @@ Report and re-runnable repros:
 
 
 
-### P2
-
-- [ ] **CF-081 — Nothing renders one blueprint through every engine and compares composed
-      output, so the class behind CF-004, CF-045 and CF-080 stays unguarded.**
-      `TestAcceptanceAlternativeEnginesRender` (`acceptance_test.go:1482`) loops over
-      `{"kcl","python"}` only — it never renders the go-templating variant of the same
-      blueprint, and asserts four `strings.Contains` rather than comparing resources. The
-      unit test shipped with CF-045's fix asserts KCL *source* substrings, which pins that
-      instance and not the class. The first blueprint put through a real cross-engine
-      comparison produced CF-080. The fix must diff composed resources across all three
-      engines, naming the fields it is allowed to ignore.
-
 ---
 
 ## Non-findings (Recorded so they are not re-raised)
