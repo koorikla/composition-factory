@@ -1,9 +1,11 @@
 package adopt
 
 import (
-	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 )
 
 func TestAdoptGoTemplatingComposition(t *testing.T) {
@@ -1037,5 +1039,229 @@ spec:
 	}
 	if fld, ok := cm.Fields["data[PORT]"]; !ok || fld.Value != "8080" {
 		t.Errorf("cm data[PORT] = %+v, want Value: 8080", fld)
+	}
+}
+
+func TestAdoptComposedResourceMetadataPreservation(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: metalosses.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: MetaLoss
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          {{- $xr := .observed.composite.resource.metadata.name -}}
+          ---
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: {{ $xr }}-sa
+            annotations:
+              {{ setResourceNameAnnotation "sa" }}
+              iam.example.com/role: {{ $spec.roleArn }}
+            labels:
+              app: {{ $spec.appName | quote }}
+              tier: backend
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: {{ $xr }}-cm
+            annotations:
+              {{ setResourceNameAnnotation "cm" }}
+            labels:
+              app: {{ $spec.appName | quote }}
+            namespace: custom-ns
+          data:
+            app: {{ $spec.appName | quote }}
+  - step: auto-ready
+    functionRef:
+      name: function-auto-ready
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.IsLossy() {
+		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	}
+
+	sa := bp.ResourceNamed("sa")
+	if sa == nil {
+		t.Fatal("resource sa not found")
+	}
+	if fld, ok := sa.Fields["metadata.labels[app]"]; !ok || fld.From != "params.appName" {
+		t.Errorf("sa metadata.labels[app] = %+v, want From: params.appName", fld)
+	}
+	if fld, ok := sa.Fields["metadata.labels[tier]"]; !ok || fld.Value != "backend" {
+		t.Errorf("sa metadata.labels[tier] = %+v, want Value: backend", fld)
+	}
+	if ann, ok := sa.Annotations["iam.example.com/role"]; !ok || ann.From != "params.roleArn" {
+		t.Errorf("sa annotation iam.example.com/role = %+v, want From: params.roleArn", ann)
+	}
+
+	cm := bp.ResourceNamed("cm")
+	if cm == nil {
+		t.Fatal("resource cm not found")
+	}
+	if fld, ok := cm.Fields["metadata.labels[app]"]; !ok || fld.From != "params.appName" {
+		t.Errorf("cm metadata.labels[app] = %+v, want From: params.appName", fld)
+	}
+	if fld, ok := cm.Fields["metadata.namespace"]; !ok || fld.Value != "custom-ns" {
+		t.Errorf("cm metadata.namespace = %+v, want Value: custom-ns", fld)
+	}
+	if fld, ok := cm.Fields["data[app]"]; !ok || fld.From != "params.appName" {
+		t.Errorf("cm data[app] = %+v, want From: params.appName", fld)
+	}
+}
+
+func TestAdoptClassicCompositionMetadataPatches(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: classic-comp.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResource
+  resources:
+  - name: my-sa
+    base:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        labels:
+          environment: dev
+    patches:
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.appName
+      toFieldPath: metadata.labels.app
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.roleArn
+      toFieldPath: metadata.annotations.iamRole
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.IsLossy() {
+		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	}
+
+	sa := bp.ResourceNamed("my-sa")
+	if sa == nil {
+		t.Fatal("resource my-sa not found")
+	}
+	if fld, ok := sa.Fields["metadata.labels[environment]"]; !ok || fld.Value != "dev" {
+		t.Errorf("my-sa metadata.labels[environment] = %+v, want Value: dev", fld)
+	}
+	if fld, ok := sa.Fields["metadata.labels[app]"]; !ok || fld.From != "params.appName" {
+		t.Errorf("my-sa metadata.labels[app] = %+v, want From: params.appName", fld)
+	}
+	if ann, ok := sa.Annotations["iamRole"]; !ok || ann.From != "params.roleArn" {
+		t.Errorf("my-sa annotation iamRole = %+v, want From: params.roleArn", ann)
+	}
+}
+
+func TestAdoptPluralInferenceWithoutXRD(t *testing.T) {
+	tests := []struct {
+		name       string
+		compName   string
+		kind       string
+		group      string
+		ctrPlural  string
+		wantPlural string
+	}{
+		{
+			name:       "deduce plural from composition metadata name and group (CF-075 MetaLoss)",
+			compName:   "metalosses.platform.example.org",
+			kind:       "MetaLoss",
+			group:      "platform.example.org",
+			wantPlural: "metalosses",
+		},
+		{
+			name:       "deduce plural from compositeTypeRef plural override",
+			compName:   "custom.platform.example.org",
+			kind:       "CustomKind",
+			group:      "platform.example.org",
+			ctrPlural:  "myplurals",
+			wantPlural: "myplurals",
+		},
+		{
+			name:       "fallback to inferPlural for kinds ending in s",
+			compName:   "unrelated-name",
+			kind:       "MetaLoss",
+			group:      "example.org",
+			wantPlural: "metalosses",
+		},
+		{
+			name:       "fallback to inferPlural for kinds ending in x",
+			compName:   "unrelated-name",
+			kind:       "XBox",
+			group:      "example.org",
+			wantPlural: "xboxes",
+		},
+		{
+			name:       "fallback to inferPlural for kinds ending in y with consonant",
+			compName:   "unrelated-name",
+			kind:       "XPolicy",
+			group:      "example.org",
+			wantPlural: "xpolicies",
+		},
+		{
+			name:       "fallback to inferPlural for standard kind",
+			compName:   "unrelated-name",
+			kind:       "XBucket",
+			group:      "example.org",
+			wantPlural: "xbuckets",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pluralLine := ""
+			if tt.ctrPlural != "" {
+				pluralLine = fmt.Sprintf("    plural: %s\n", tt.ctrPlural)
+			}
+			manifest := fmt.Sprintf(`
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: %s
+spec:
+  compositeTypeRef:
+    apiVersion: %s/v1alpha1
+    kind: %s
+%s  resources:
+  - name: dummy
+    base:
+      apiVersion: v1
+      kind: ConfigMap
+`, tt.compName, tt.group, tt.kind, pluralLine)
+
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if bp.Spec.XRD.Plural != tt.wantPlural {
+				t.Errorf("XRD.Plural = %q, want %q", bp.Spec.XRD.Plural, tt.wantPlural)
+			}
+		})
 	}
 }

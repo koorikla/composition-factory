@@ -1,3 +1,17 @@
+- [x] **CF-073 — `cf adopt` silently drops every `metadata.*` field a resource declares, so
+      regeneration strips labels off live objects. [V]** `internal/adopt/adopt.go:1361` reads
+      only `metadata.annotations`; `adopt.go:1429-1431` `continue`s on `"metadata"` without
+      calling `report.Record`, so it is not even in the loss report. Repro:
+      `repros/cf-001-adopt-metadata-loss/meta.cf.yaml`, then `cf gen` → `cf adopt` → `cf gen`;
+      the adopted blueprint says `fields: {}` and the `labels:` block is gone, exit 0.
+      Verified in-cluster: a live ServiceAccount lost `app: shop` 20 s after applying the
+      regenerated Composition.
+      — completed 2026-09-09
+- [x] **CF-075 — `cf adopt` of a Composition without its XRD invents the plural by appending
+      `s`. [V]** `internal/adopt/adopt.go:310-312` sets `Plural = strings.ToLower(Kind)+"s"`
+      though the real plural was already read at `adopt.go:258-260`. Kind `MetaLoss` →
+      `metalosss`, exit 0, no warning; applying the pair creates a second CRD.
+      — completed 2026-09-09
 - [x] **CF-085 — The canvas replaces every card element when web fonts finish loading,
       so a click or drag in flight lands on a detached node. [V]** `render()` rebuilds the
       whole canvas (`web-proto/js/regions/canvas.js:447`, `canvasEl.innerHTML = h`) and the
