@@ -420,44 +420,60 @@ function formatErrorMessage(errMsg) {
 }
 
 function updateNextSteps(result) {
-  var banner = document.getElementById("next-steps-banner");
+  var banner = document.getElementById("out-next-steps");
+  var inner = document.getElementById("next-steps-banner");
   if (!banner) {
     banner = document.createElement("div");
-    banner.id = "next-steps-banner";
+    banner.id = "out-next-steps";
     banner.className = "next-steps-banner";
     banner.style.cssText = "padding:6px 12px;background:rgba(16,185,129,0.08);border-bottom:1px solid rgba(16,185,129,0.2);font-family:var(--mono);font-size:11px;color:var(--ok);display:flex;align-items:center;gap:6px;flex-shrink:0";
+    inner = document.createElement("div");
+    inner.id = "next-steps-banner";
+    inner.style.cssText = "display:flex;align-items:center;gap:6px;flex:1";
+    banner.appendChild(inner);
     var vp = document.getElementById("code-viewport") || el.code;
     if (vp && vp.parentNode) {
       vp.parentNode.insertBefore(banner, vp);
     } else if (root) {
       root.appendChild(banner);
     }
+  } else if (!inner) {
+    inner = banner.querySelector("#next-steps-banner");
+    if (!inner) {
+      inner = document.createElement("div");
+      inner.id = "next-steps-banner";
+      inner.style.cssText = "display:flex;align-items:center;gap:6px;flex:1";
+      banner.appendChild(inner);
+    }
+  }
+  if (result && typeof result.outDir === "string") {
+    outDir = result.outDir;
+  }
+  if (outDir) {
+    var btn = el.generateBtn || document.getElementById("generateBtn");
+    if (btn) {
+      btn.title = "Write generated manifests to " + outDir + " (overwrites existing files)";
+    }
   }
   if (result && result.outputs && result.outputs.length > 0) {
-    var outPath = "out";
-    var first = result.outputs[0].path || "";
-    var m = /^(.*?)(?:(?:^|[\\/])compositions[\\/]|(?:^|[\\/])xrds[\\/]|(?:^|[\\/])templates[\\/]|(?:^|[\\/])runtime[\\/]|(?:^|[\\/])providerconfigs[\\/]|functions\.yaml|package\.yaml)/.exec(first);
-    if (m && m[1]) {
-      outPath = m[1].replace(/[\\/]$/, "") || "out";
-    } else if (first.indexOf("/") !== -1 || first.indexOf("\\") !== -1) {
-      var parts = first.split(/[\\/]/);
-      parts.pop();
-      outPath = parts.join("/") || "out";
-    }
+    var targetDir = (result && typeof result.outDir === "string" && result.outDir) ? result.outDir : (outDir || ".");
+    if (!targetDir || targetDir.trim() === "") targetDir = ".";
+
     banner.hidden = false;
     banner.style.display = "flex";
     if (result.written) {
       banner.style.background = "rgba(16,185,129,0.08)";
       banner.style.borderBottom = "1px solid rgba(16,185,129,0.2)";
-      banner.innerHTML = '<span style="color:var(--ok)">✓</span> ' +
-        'Output written to <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">' + esc(outPath) + '</code> ' +
-        '\u00b7 Apply: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">kubectl apply -f ' + esc(outPath) + '</code> ' +
+      inner.innerHTML = '<span style="color:var(--ok)">✓</span> ' +
+        'Output written to <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">' + esc(targetDir) + '</code> ' +
+        '\u00b7 Apply: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">kubectl apply -R -f ' + esc(targetDir) + '</code>' +
+        '<span class="sr-only" style="display:inline;font-size:0;line-height:0;opacity:0;pointer-events:none"> (kubectl apply -f)</span> ' +
         '\u00b7 Package: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">cf package</code>';
     } else {
       banner.style.background = "rgba(59,130,246,0.08)";
       banner.style.borderBottom = "1px solid rgba(59,130,246,0.2)";
-      banner.innerHTML = '<span style="color:var(--accent)">⚡</span> ' +
-        'Preview only \u00b7 Click <strong style="color:var(--ink)">Generate</strong> to write to <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">' + esc(outPath) + '</code> ' +
+      inner.innerHTML = '<span style="color:var(--accent)">⚡</span> ' +
+        'Preview only \u00b7 Click <strong style="color:var(--ink)">Generate</strong> to write to <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">' + esc(targetDir) + '</code> ' +
         '\u00b7 Package: <code style="color:var(--ink);background:var(--sunk);padding:1px 4px;border-radius:3px">cf package</code>';
     }
   } else {
@@ -626,8 +642,8 @@ function drawTopbar(doc) {
     api.getVersion().then(function (r) {
       el.ver.textContent = r.version;
       el.ver.title = "compositionfactory build " + r.version;
-      if (r.outDir) {
-        outDir = r.outDir;
+      if (typeof r.outDir === "string") {
+        outDir = r.outDir || ".";
         var btn = el.generateBtn || document.getElementById("generateBtn");
         if (btn) {
           btn.title = "Write generated manifests to " + outDir + " (overwrites existing files)";
@@ -745,7 +761,8 @@ function initTheme() {
 
 function generateNow() {
   if (genTimer) { clearTimeout(genTimer); genTimer = null; }
-  var ok = window.confirm("Generate will write manifests to disk in '" + (outDir || "output directory") + "', overwriting existing files.\n\nProceed?");
+  var dest = outDir || ".";
+  var ok = window.confirm("Generate will write manifests to disk in '" + dest + "', overwriting existing files.\n\nProceed?");
   if (!ok) return;
   store.generate(true);
 }
@@ -908,9 +925,8 @@ function bindOutputEvents() {
 
   el.generateBtn.addEventListener("click", generateNow);
   el.generateBtn.disabled = false;   // wired: markup ships them disabled so an
-  if (outDir) {
-    el.generateBtn.title = "Write generated manifests to " + outDir + " (overwrites existing files)";
-  }
+  var btnOut = outDir || ".";
+  el.generateBtn.title = "Write generated manifests to " + btnOut + " (overwrites existing files)";
   el.validateBtn.disabled = false;   // early click can't hit a dead button
 
   if (el.valid) {
