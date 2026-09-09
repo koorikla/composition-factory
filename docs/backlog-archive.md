@@ -1,3 +1,10 @@
+- [x] **CF-072 — Interface copy: implementation words, a wrong count, and dead-end empty
+      states. [V for the count]**
+      Corrected empty canvas onboarding count to match the actual 16 native Kubernetes kinds,
+      clarified search empty states to distinguish between empty collections versus unmatched
+      queries, and provided actionable provider install suggestions (`run: cf provider add ...`)
+      when kind schemas are absent.
+      — completed 2026-09-09
 - [x] **CF-069 — Nothing announces a Validate or Generate result, and the error text is
       hover-only.**
       Added `role="status"` and `aria-live="polite"` live announcements for Validate and Generate

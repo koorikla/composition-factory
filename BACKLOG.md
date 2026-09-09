@@ -86,16 +86,6 @@ them in.
       in JS carry most of them, which is why `proto.css` review cannot see them. A hue and
       token lint is the gate that would hold this; it belongs with the CF-048 work.
 
-- [ ] **CF-072 — Interface copy: implementation words, a wrong count, and dead-end empty
-      states. [V for the count]** *envelope*, *emission engine*, *fan-out*, *the doc*, *the
-      chip*, *the rail*, *from the cache* name the system, not the goal. The starter
-      blueprints have four names, and `Import` produces results that say *adopt failed*. The
-      canvas empty state claims **14 native Kubernetes kinds** (`canvas.js:443`); `nativeKinds`
-      has **16**, and the palette on the same screen reads `16 kinds`. `No kinds match.` shows
-      when nothing was searched, and the Providers Catalogue returns functions because the
-      type filter is not passed. *"No schema found for kind X."* offers nothing, while the
-      server already says `run: cf provider add %s`.
-
 ---
 
 ## Open — 2026-09-09 provider/sources, render errors, starter health
