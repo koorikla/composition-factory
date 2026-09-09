@@ -2054,12 +2054,30 @@ var paramFieldUpdaters = {
   }
 };
 
+function inferPlural(kind) {
+  var lower = (kind || "").toLowerCase();
+  if (!lower) return "";
+  if (lower.endsWith("s") || lower.endsWith("x") || lower.endsWith("z") || lower.endsWith("ch") || lower.endsWith("sh")) {
+    return lower + "es";
+  }
+  if (lower.endsWith("y") && lower.length > 1) {
+    var c = lower.charAt(lower.length - 2);
+    if ("aeiou".indexOf(c) === -1) {
+      return lower.slice(0, -1) + "ies";
+    }
+  }
+  return lower + "s";
+}
+
 var xrdFieldUpdaters = {
   xk: function (t) {
     var kv = t.value.trim();
     if (!kv) { render(); return; }
     op(function () {
-      return store.replaceDoc(function (d) { d.spec.xrd.kind = kv; });
+      return store.replaceDoc(function (d) {
+        d.spec.xrd.kind = kv;
+        d.spec.xrd.plural = inferPlural(kv);
+      });
     }).then(function (r) { if (r === null) render(); });
   },
   xs: function (t) {
