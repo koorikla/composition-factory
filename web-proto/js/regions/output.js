@@ -445,7 +445,33 @@ function updateNextSteps(result) {
 
 /* ---------- render-failure bar (separate from the raw-count warnbar,
    which is re-rendered on every doc change) ---------- */
+function isDrawerCollapsed() {
+  if (!root) return false;
+  if (root.hasAttribute("data-collapsed")) return true;
+  if (root.classList.contains("collapsed") || root.classList.contains("minimized")) return true;
+  var h = parseInt(root.style.height, 10);
+  if (!isNaN(h) && h <= 48) return true;
+  if (root.offsetHeight > 0 && root.offsetHeight <= 48) return true;
+  return false;
+}
+
+function expandDrawer(h) {
+  if (!root) return;
+  root.removeAttribute("data-collapsed");
+  root.classList.remove("collapsed");
+  root.classList.remove("minimized");
+  var curH = parseInt(root.style.height, 10);
+  if (isNaN(curH) || curH <= 48 || root.style.height === "auto") {
+    root.style.height = (h || 250) + "px";
+  }
+  var minBtn = document.getElementById("drawer-min-btn");
+  if (minBtn) minBtn.textContent = "▾";
+}
+
 function showWarn(message) {
+  var formatted = formatErrorMessage(message);
+
+  // In-drawer warnbar (#render-warn)
   var bar = document.getElementById("render-warn");
   if (!bar) {
     bar = document.createElement("div");
@@ -455,12 +481,84 @@ function showWarn(message) {
     if (vp && vp.parentNode) vp.parentNode.insertBefore(bar, vp);
     else if (root) root.appendChild(bar);
   }
-  if (message) {
-    bar.textContent = formatErrorMessage(message);
+  if (formatted) {
+    bar.textContent = formatted;
     bar.hidden = false;
   } else {
     bar.textContent = "";
     bar.hidden = true;
+  }
+
+  // Top banner below topbar (#render-warn-banner) visible even when output drawer is collapsed
+  var banner = document.getElementById("render-warn-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "render-warn-banner";
+    banner.className = "render-warn-banner warnbar";
+    banner.setAttribute("role", "alert");
+    var topbar = document.getElementById("region-topbar");
+    if (topbar && topbar.parentNode) {
+      topbar.parentNode.insertBefore(banner, topbar.nextSibling);
+    } else {
+      document.body.appendChild(banner);
+    }
+  }
+
+  var textSpan = banner.querySelector(".render-warn-text") || banner.querySelector("#render-warn-text");
+  var openBtn = banner.querySelector("#render-warn-open-btn");
+  var dismissBtn = banner.querySelector("#render-warn-dismiss");
+
+  if (!textSpan || !openBtn || !dismissBtn) {
+    banner.innerHTML = "";
+    var icon = document.createElement("span");
+    icon.className = "render-warn-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = "⚠️";
+    banner.appendChild(icon);
+
+    textSpan = document.createElement("span");
+    textSpan.className = "render-warn-text";
+    textSpan.id = "render-warn-text";
+    banner.appendChild(textSpan);
+
+    openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "btn sm";
+    openBtn.id = "render-warn-open-btn";
+    openBtn.style.padding = "1px 8px";
+    openBtn.style.marginLeft = "auto";
+    openBtn.style.flexShrink = "0";
+    openBtn.textContent = "Open in Drawer";
+    banner.appendChild(openBtn);
+
+    dismissBtn = document.createElement("button");
+    dismissBtn.type = "button";
+    dismissBtn.className = "del modal-close warnbar-dismiss";
+    dismissBtn.id = "render-warn-dismiss";
+    dismissBtn.setAttribute("aria-label", "Dismiss");
+    dismissBtn.setAttribute("title", "Dismiss");
+    dismissBtn.textContent = "\u00d7";
+    dismissBtn.style.flexShrink = "0";
+    banner.appendChild(dismissBtn);
+  }
+
+  openBtn.onclick = function () {
+    expandDrawer(250);
+    if (bar && !bar.hidden) {
+      bar.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  };
+
+  dismissBtn.onclick = function () {
+    banner.hidden = true;
+  };
+
+  if (formatted) {
+    textSpan.textContent = formatted;
+    banner.hidden = false;
+  } else {
+    textSpan.textContent = "";
+    banner.hidden = true;
   }
 }
 
@@ -723,13 +821,19 @@ function bindOutputEvents() {
   if (el.valid) {
     el.valid.style.cursor = "pointer";
     el.valid.addEventListener("click", function () {
-      if (root.hasAttribute("data-collapsed")) {
-        root.removeAttribute("data-collapsed");
-        root.style.height = "250px";
+      if (isDrawerCollapsed()) {
+        expandDrawer(250);
       }
       var warnBar = document.getElementById("render-warn");
       if (warnBar && !warnBar.hidden) {
         warnBar.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+      var banner = document.getElementById("render-warn-banner");
+      if (banner) {
+        var txt = banner.querySelector(".render-warn-text");
+        if (txt && txt.textContent) {
+          banner.hidden = false;
+        }
       }
     });
   }
@@ -949,11 +1053,13 @@ function initSplitter(rootEl) {
   function collapse() {
     lastExpanded = rootEl.offsetHeight || lastExpanded;
     rootEl.setAttribute("data-collapsed", "");
+    rootEl.classList.add("collapsed");
     rootEl.style.height = "auto"; // header (+ splitter) only
   }
 
   function expand(h) {
     rootEl.removeAttribute("data-collapsed");
+    rootEl.classList.remove("collapsed");
     setHeight(h || lastExpanded);
   }
 
