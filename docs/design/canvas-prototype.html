@@ -218,12 +218,12 @@ svg.wires .dim{opacity:.18}
 .empty{padding:24px 16px;text-align:center;color:var(--faint);font-size:12px;line-height:1.5}
 
 /* drawer */
-.drawer{border-top:1px solid var(--rule);background:var(--surface);display:flex;flex-direction:column;min-height:0}
-.drawer-h{display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--rule)}
+.drawer{border-top:1px solid var(--rule);background:var(--surface);display:flex;flex-direction:column;min-height:0;height:200px}
+.drawer-h{display:flex;align-items:center;gap:8px;padding:4px 10px;border-bottom:1px solid var(--rule)}
 .tabs{display:flex;gap:2px}
-.tabs button{padding:3px 9px;border-radius:4px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.tabs button{padding:2px 7px;border-radius:4px;font-family:var(--mono);font-size:11px;color:var(--muted)}
 .tabs button[aria-pressed="true"]{background:var(--sunk);color:var(--ink)}
-.code{overflow:auto;padding:10px 12px;margin:0;font-family:var(--mono);font-size:11px;
+.code{overflow:auto;padding:6px 10px;margin:0;font-family:var(--mono);font-size:11px;
   line-height:1.55;color:var(--ink-2);background:var(--sunk);flex:1;min-height:0;white-space:pre;tab-size:2}
 .code .kk{color:var(--wire-xrd)} .code .st{color:var(--ok)}
 .code .tm{color:var(--warn)} .code .cm{color:var(--faint);font-style:italic}
@@ -240,6 +240,19 @@ svg.wires .dim{opacity:.18}
 .note .cap{color:var(--muted);font-size:12px}
 @media (max-width:1150px){.cols{grid-template-columns:186px 1fr 280px}.node{width:184px}}
 @media (max-width:900px){.cols{grid-template-columns:1fr}.pane.l,.pane.r{display:none}.app{height:600px}}
+@media (max-height: 720px) {
+  .drawer {
+    height: 200px;
+  }
+  .drawer-h {
+    padding: 3px 8px;
+    gap: 6px;
+  }
+  .code {
+    padding: 6px 8px;
+  }
+}
+
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 /* fan-out node: a visible card stack */
@@ -328,7 +341,7 @@ svg.wires .dim{opacity:.18}
     </div>
   </div>
 
-  <div class="drawer" style="height:212px">
+  <div class="drawer" style="height:200px">
     <div class="drawer-h">
       <span class="lbl">Generated</span>
       <div class="tabs" id="tabs">

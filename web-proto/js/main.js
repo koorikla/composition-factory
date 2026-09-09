@@ -284,7 +284,7 @@ store.subscribe("error", function (err) {
       drawer.style.right = "";
       drawer.style.bottom = "";
       drawer.style.width = "";
-      drawer.style.height = "212px";
+      drawer.style.height = "200px";
     }
   }
 
@@ -323,8 +323,18 @@ store.subscribe("error", function (err) {
       } else {
         // when docked, minimize collapses/expands height
         var h = drawer.style.height;
-        if (h === "38px") drawer.style.height = "212px";
-        else drawer.style.height = "38px";
+        var isCollapsed = h === "38px" || drawer.hasAttribute("data-collapsed") || drawer.classList.contains("collapsed");
+        if (isCollapsed) {
+          drawer.removeAttribute("data-collapsed");
+          drawer.classList.remove("collapsed");
+          drawer.style.height = "200px";
+          if (minDrawerBtn) minDrawerBtn.textContent = "▾";
+        } else {
+          drawer.setAttribute("data-collapsed", "");
+          drawer.classList.add("collapsed");
+          drawer.style.height = "38px";
+          if (minDrawerBtn) minDrawerBtn.textContent = "▴";
+        }
       }
     });
     drawer.addEventListener("mouseup", function () {

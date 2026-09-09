@@ -480,7 +480,7 @@ function expandDrawer(h) {
   root.classList.remove("minimized");
   var curH = parseInt(root.style.height, 10);
   if (isNaN(curH) || curH <= 48 || root.style.height === "auto") {
-    root.style.height = (h || 250) + "px";
+    root.style.height = (h || 200) + "px";
   }
   var minBtn = document.getElementById("drawer-min-btn");
   if (minBtn) minBtn.textContent = "▾";
@@ -561,7 +561,7 @@ function showWarn(message) {
   }
 
   openBtn.onclick = function () {
-    expandDrawer(250);
+    expandDrawer(200);
     if (bar && !bar.hidden) {
       bar.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
@@ -912,7 +912,7 @@ function bindOutputEvents() {
     el.valid.style.cursor = "pointer";
     function triggerValidAction() {
       if (isDrawerCollapsed()) {
-        expandDrawer(250);
+        expandDrawer(200);
       }
       var warnBar = document.getElementById("render-warn");
       if (warnBar && !warnBar.hidden) {
@@ -1114,7 +1114,7 @@ function initSplitter(rootEl) {
   split.title = "Drag to resize · double-click to collapse";
   rootEl.insertBefore(split, rootEl.firstChild);
 
-  var lastExpanded = rootEl.offsetHeight || 212;
+  var lastExpanded = rootEl.offsetHeight || 200;
   var drag = null;
   var expandedByDown = false; // pointerdown on a collapsed drawer expands it;
                               // the dblclick that follows must not re-collapse
@@ -1139,12 +1139,16 @@ function initSplitter(rootEl) {
     rootEl.setAttribute("data-collapsed", "");
     rootEl.classList.add("collapsed");
     rootEl.style.height = "auto"; // header (+ splitter) only
+    var minBtn = document.getElementById("drawer-min-btn");
+    if (minBtn) minBtn.textContent = "▴";
   }
 
   function expand(h) {
     rootEl.removeAttribute("data-collapsed");
     rootEl.classList.remove("collapsed");
     setHeight(h || lastExpanded);
+    var minBtn = document.getElementById("drawer-min-btn");
+    if (minBtn) minBtn.textContent = "▾";
   }
 
   split.addEventListener("pointerdown", function (e) {
