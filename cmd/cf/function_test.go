@@ -115,3 +115,42 @@ spec:
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
+
+func TestFunctionAddNoInputCRDsSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".cf.lock")
+	noInputFetch := func(ref string) (*xpkg.Package, error) {
+		return &xpkg.Package{
+			Ref:    ref,
+			Digest: "sha256:autoreadyfeed",
+			Docs: [][]byte{[]byte(`
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-auto-ready
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1
+`)},
+		}, nil
+	}
+	cmd := &FunctionAddCmd{
+		Ref:      "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1",
+		CacheDir: filepath.Join(dir, "cache"),
+		Lock:     lockPath,
+		fetch:    noInputFetch,
+	}
+	var out bytes.Buffer
+	if err := cmd.Run(&out); err != nil {
+		t.Fatalf("expected Run to succeed for function with no input schemas, got: %v", err)
+	}
+	if !strings.Contains(out.String(), "0 function input schemas of 0 CRDs") {
+		t.Errorf("output = %q, want '0 function input schemas of 0 CRDs'", out.String())
+	}
+	l, err := cache.ReadLock(lockPath)
+	if err != nil {
+		t.Fatalf("ReadLock: %v", err)
+	}
+	if len(l.Functions) != 1 || l.Functions[0].Digest != "sha256:autoreadyfeed" {
+		t.Errorf("lock functions = %+v, want sha256:autoreadyfeed", l.Functions)
+	}
+}
