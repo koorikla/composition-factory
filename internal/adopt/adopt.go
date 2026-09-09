@@ -291,6 +291,9 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 				bp.Spec.XRD.Version = av
 			}
 		}
+		if p, ok := ctr["plural"].(string); ok && p != "" {
+			bp.Spec.XRD.Plural = p
+		}
 	}
 
 	// 3. If XRD document is present, parse parameters & metadata
@@ -308,7 +311,21 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		bp.Spec.XRD.Version = "v1alpha1"
 	}
 	if bp.Spec.XRD.Plural == "" {
-		bp.Spec.XRD.Plural = strings.ToLower(bp.Spec.XRD.Kind) + "s"
+		if bp.Spec.XRD.Group != "" && strings.HasSuffix(bp.Metadata.Name, "."+bp.Spec.XRD.Group) {
+			candidate := strings.TrimSuffix(bp.Metadata.Name, "."+bp.Spec.XRD.Group)
+			if pluralRE.MatchString(candidate) && !yamlKeywords[strings.ToLower(candidate)] {
+				bp.Spec.XRD.Plural = candidate
+			}
+		}
+		if bp.Spec.XRD.Plural == "" && strings.Contains(bp.Metadata.Name, ".") {
+			candidate := bp.Metadata.Name[:strings.Index(bp.Metadata.Name, ".")]
+			if pluralRE.MatchString(candidate) && !yamlKeywords[strings.ToLower(candidate)] {
+				bp.Spec.XRD.Plural = candidate
+			}
+		}
+	}
+	if bp.Spec.XRD.Plural == "" {
+		bp.Spec.XRD.Plural = inferPlural(bp.Spec.XRD.Kind)
 	}
 	if bp.Spec.XRD.Scope == "" {
 		bp.Spec.XRD.Scope = "Namespaced"
@@ -633,8 +650,9 @@ var (
 	reDocSeparator       = regexp.MustCompile(`(?m)^\s*---\s*$`)
 	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+(?:\(printf\s+"([^"]+)"|"([^"]+)")`)
 	rePrintfFormat       = regexp.MustCompile(`printf\s+"([^"]+)"`)
-	reXRNameSuffix       = regexp.MustCompile(`\{\{-?\s*\$xr\s*-?\}\}-([a-zA-Z0-9_-]+)`)
+	reXRNameSuffix       = regexp.MustCompile(`\{\{-?\s*(?:\$xr|\.observed\.composite\.resource\.metadata\.name)\s*-?\}\}-([a-zA-Z0-9_-]+)`)
 	paramNameRE          = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
+	pluralRE             = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 	dnsInvalidRE         = regexp.MustCompile(`[^a-z0-9-]+`)
 	yamlKeywords         = map[string]bool{
 		"true": true, "false": true, "yes": true, "no": true,
@@ -835,6 +853,36 @@ func extractResourceName(m map[string]any, kind string, placeholders []string) s
 		}
 	}
 	return strings.ToLower(kind)
+}
+
+func inferPlural(kind string) string {
+	lower := strings.ToLower(kind)
+	if lower == "" {
+		return ""
+	}
+	if strings.HasSuffix(lower, "s") || strings.HasSuffix(lower, "x") || strings.HasSuffix(lower, "z") ||
+		strings.HasSuffix(lower, "ch") || strings.HasSuffix(lower, "sh") {
+		return lower + "es"
+	}
+	if strings.HasSuffix(lower, "y") && len(lower) > 1 {
+		lastConsonant := lower[len(lower)-2]
+		if lastConsonant != 'a' && lastConsonant != 'e' && lastConsonant != 'i' && lastConsonant != 'o' && lastConsonant != 'u' {
+			return lower[:len(lower)-1] + "ies"
+		}
+	}
+	return lower + "s"
+}
+
+func isDefaultMetadataName(rawName, resName, normName string) bool {
+	rawName = strings.TrimSpace(rawName)
+	if rawName == "" || rawName == resName || rawName == normName {
+		return true
+	}
+	clean := extractCleanName(rawName)
+	if clean == resName || clean == normName {
+		return true
+	}
+	return false
 }
 
 func extractCleanName(raw string) string {
@@ -1242,6 +1290,41 @@ func parseClassicComposition(resources []any, bp *blueprint.Blueprint, opts Opti
 							report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
 								fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
 						}
+					} else if strings.HasPrefix(toPath, "metadata.annotations.") || strings.HasPrefix(toPath, "metadata.annotations[") {
+						annKey := strings.TrimPrefix(toPath, "metadata.annotations.")
+						if strings.HasPrefix(toPath, "metadata.annotations[") {
+							annKey = strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.annotations["), "]")
+						}
+						if isParamPatch && paramName != "" && annKey != "" && isValidParamIdentifier(paramName) {
+							if res.Annotations == nil {
+								res.Annotations = make(map[string]blueprint.Field)
+							}
+							res.Annotations[annKey] = blueprint.Field{
+								From: "params." + paramName,
+							}
+							ensureParamDeclared(bp, paramName)
+						} else {
+							report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
+								fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+						}
+					} else if strings.HasPrefix(toPath, "metadata.") {
+						targetField := toPath
+						if strings.HasPrefix(toPath, "metadata.labels.") {
+							labelKey := strings.TrimPrefix(toPath, "metadata.labels.")
+							targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
+						}
+						if isParamPatch && paramName != "" && isValidParamIdentifier(paramName) {
+							if res.Fields == nil {
+								res.Fields = make(map[string]blueprint.Field)
+							}
+							res.Fields[targetField] = blueprint.Field{
+								From: "params." + paramName,
+							}
+							ensureParamDeclared(bp, paramName)
+						} else {
+							report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
+								fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+						}
 					} else {
 						report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
 							fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
@@ -1422,6 +1505,24 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 					res.Annotations[k] = blueprint.Field{Value: rawStr}
 				}
 			}
+		}
+
+		// Extract user-declared metadata fields (e.g. labels, namespace, custom name) into res.Fields
+		otherMeta := make(map[string]any)
+		for k, v := range meta {
+			if k == "annotations" {
+				continue
+			}
+			if k == "name" {
+				rawName := unmaskString(fmt.Sprint(v), placeholders)
+				if isDefaultMetadataName(rawName, res.Name, normName) {
+					continue
+				}
+			}
+			otherMeta[k] = v
+		}
+		if len(otherMeta) > 0 {
+			extractFields("metadata", otherMeta, res.Fields, placeholders, res.Name, report, nameMapping, bp)
 		}
 	}
 

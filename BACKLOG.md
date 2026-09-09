@@ -251,15 +251,6 @@ Report and re-runnable repros:
 
 ### P0
 
-- [ ] **CF-073 — `cf adopt` silently drops every `metadata.*` field a resource declares, so
-      regeneration strips labels off live objects. [V]** `internal/adopt/adopt.go:1361` reads
-      only `metadata.annotations`; `adopt.go:1429-1431` `continue`s on `"metadata"` without
-      calling `report.Record`, so it is not even in the loss report. Repro:
-      `repros/cf-001-adopt-metadata-loss/meta.cf.yaml`, then `cf gen` → `cf adopt` → `cf gen`;
-      the adopted blueprint says `fields: {}` and the `labels:` block is gone, exit 0.
-      Verified in-cluster: a live ServiceAccount lost `app: shop` 20 s after applying the
-      regenerated Composition.
-
 - [ ] **CF-074 — A status wire into `fields:` is interpolated unquoted, so a string status
       value that looks like a bool or number changes type and the API server rejects the
       resource. [V]** The same wire is `| quote`d into an annotation and emitted bare into a
@@ -272,11 +263,6 @@ Report and re-runnable repros:
       `--validate` cannot catch it — it renders without observed resources.
 
 ### P1
-
-- [ ] **CF-075 — `cf adopt` of a Composition without its XRD invents the plural by appending
-      `s`. [V]** `internal/adopt/adopt.go:310-312` sets `Plural = strings.ToLower(Kind)+"s"`
-      though the real plural was already read at `adopt.go:258-260`. Kind `MetaLoss` →
-      `metalosss`, exit 0, no warning; applying the pair creates a second CRD.
 
 - [ ] **CF-080 — The `k8s-workload` starter composes a ConfigMap the API server rejects under
       `--engine kcl` and `python`. [V]** `data[PORT]: {from: params.port}`
