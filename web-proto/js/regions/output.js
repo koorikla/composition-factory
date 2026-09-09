@@ -51,6 +51,7 @@ var onTabSelected = null;
 var editBtn = null;
 var editor = null;
 var editBar = null;
+var outDir = "";
 
 /* ---------- tree explorer + tabs (built live) ---------- */
 
@@ -603,6 +604,13 @@ function drawTopbar(doc) {
     api.getVersion().then(function (r) {
       el.ver.textContent = r.version;
       el.ver.title = "compositionfactory build " + r.version;
+      if (r.outDir) {
+        outDir = r.outDir;
+        var btn = el.generateBtn || document.getElementById("generateBtn");
+        if (btn) {
+          btn.title = "Write generated manifests to " + outDir + " (overwrites existing files)";
+        }
+      }
       if (el.engineSel && Array.isArray(r.engines) && r.engines.length > 0) {
         var curDocEngine = (store.state.doc && store.state.doc.spec && store.state.doc.spec.emit && store.state.doc.spec.emit.engine) || "go-templating";
         el.engineSel.innerHTML = r.engines.map(function (eng) {
@@ -655,6 +663,8 @@ function initTheme() {
 
 function generateNow() {
   if (genTimer) { clearTimeout(genTimer); genTimer = null; }
+  var ok = window.confirm("Generate will write manifests to disk in '" + (outDir || "output directory") + "', overwriting existing files.\n\nProceed?");
+  if (!ok) return;
   store.generate(true);
 }
 
@@ -816,6 +826,9 @@ function bindOutputEvents() {
 
   el.generateBtn.addEventListener("click", generateNow);
   el.generateBtn.disabled = false;   // wired: markup ships them disabled so an
+  if (outDir) {
+    el.generateBtn.title = "Write generated manifests to " + outDir + " (overwrites existing files)";
+  }
   el.validateBtn.disabled = false;   // early click can't hit a dead button
 
   if (el.valid) {
@@ -884,7 +897,7 @@ function bindOutputEvents() {
             }
           }
         }
-      }).then(function () { generateNow(); });
+      }).then(function () { store.generate(false); });
     });
   }
 
@@ -904,7 +917,7 @@ function bindOutputEvents() {
             }
           }
         }
-      }).then(function () { generateNow(); });
+      }).then(function () { store.generate(false); });
     });
   }
 }

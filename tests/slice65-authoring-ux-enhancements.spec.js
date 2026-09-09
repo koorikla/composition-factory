@@ -102,6 +102,7 @@ test('Clickable validate chip expands output drawer and displays diagnostics', a
 });
 
 test('Post-Generate shows next-step guidance line with output path, apply and package commands', async ({ page }) => {
+  page.on('dialog', d => d.accept());
   await page.goto('/');
   // Expand output drawer to view code viewport
   const drawer = page.locator('#region-output');
