@@ -107,7 +107,7 @@ type Spec struct {
 	//	pipeline:
 	//	  - name: auto-ready
 	//	    functionRef: function-auto-ready
-	//	    package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready
+	//	    package: xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0
 	//
 	// omitempty keeps a blueprint that never declared the key from gaining a
 	// literal `pipeline: null` when the API server persists it back; an empty

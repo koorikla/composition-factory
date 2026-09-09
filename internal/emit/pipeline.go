@@ -18,7 +18,7 @@ import (
 //
 // A blueprint that declares ANY pipeline step replaces this default in full
 // (see blueprint.Spec.Pipeline): the common case then declares auto-ready
-// explicitly, typically from xpkg.crossplane.io/crossplane-contrib.
+// explicitly, typically from xpkg.upbound.io/crossplane-contrib.
 var defaultPipeline = []blueprint.PipelineStep{{
 	Name:        "auto-ready",
 	FunctionRef: "function-auto-ready",

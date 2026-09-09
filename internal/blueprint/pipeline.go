@@ -117,7 +117,7 @@ func (b *Blueprint) validatePipeline() error {
 		}
 		if !providerRefRE.MatchString(s.Package) {
 			return fmt.Errorf("%s.package: %q is not a valid package reference "+
-				"(e.g. xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1, "+
+				"(e.g. xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0, "+
 				"or ...@sha256:<digest>)", at, s.Package)
 		}
 		// One Function per distinct functionRef in functions.yaml means one

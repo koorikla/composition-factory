@@ -258,18 +258,6 @@ Report and re-runnable repros:
       comparison produced CF-080. The fix must diff composed resources across all three
       engines, naming the fields it is allowed to ignore.
 
-### P3
-
-- [ ] **CF-078 — The auto-ready package documented in `docs/dsl.md` and `docs/cli.md` is
-      neither the registry nor the version `cf gen` emits. [V]** Docs say
-      `xpkg.crossplane.io/…/function-auto-ready:v0.5.1` (`dsl.md:352`, `:49`, `:361`, `:378`,
-      `cli.md:269`); generated `functions.yaml` says `xpkg.upbound.io/…:v0.5.0`.
-
-- [ ] **CF-079 — `docs/cli.md` names the wrong trigger for `rbac.yaml` and picks the two
-      kinds it is never emitted for. [V]** `cli.md:137`, `:156`, `:159` say it appears "when
-      native Kubernetes kinds like Deployment or Service are composed"; both are pre-granted,
-      so composing only those correctly emits nothing. The generator is right.
-
 ---
 
 ## Non-findings (Recorded so they are not re-raised)
