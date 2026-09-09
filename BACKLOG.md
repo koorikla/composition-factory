@@ -67,22 +67,6 @@ them in.
 
 ### P1
 
-- [ ] **CF-055 — An optional parameter wired into a required provider field renders invalid,
-      and the error blames the field. [V]** Wire `$region` (optional) to a Bucket's required
-      `spec.forProvider.region` and Validate fails with `line 47: … missing required field
-      "spec.forProvider.region"` while the canvas shows the wire drawn, the Inspector shows
-      `+ params.region`, and the port's required marker is satisfied. The cause is the
-      emitter's `hasKey` guard for optionals; the cure is the `req` checkbox on a different
-      object in a different panel. The fix must flag the mismatch at bind time, on the object
-      that can be changed.
-
-
-- [ ] **CF-057 — Generate overwrites files on disk and nothing says so beforehand.** The
-      tooltip (`index.html:33`) says "Regenerate … now"; the handler writes every path in
-      `srv.OutDir` with `os.WriteFile`, no confirmation, no backup, including over another
-      blueprint's output. The word "write" appears only afterwards, in a banner, and only if
-      the drawer is open. The fix must name the destination and the overwrite before the act.
-
 - [ ] **CF-059 — Raw Go errors and HTTP statuses reach the user verbatim.** `api.js:49`
       surfaces `network error: Failed to fetch`; `api.js:60` falls back to a bare
       `502 Bad Gateway`; `inspector.js:305` shows the literal `operation failed`. Server
@@ -90,14 +74,6 @@ them in.
       after the user renamed a card. The pattern to copy is already here — `diagnoseError`
       (`output.js:368-399`) keeps the server text and appends the fix.
 
-- [ ] **CF-060 — The dark theme's `--faint` was never re-derived; 30 AA failures, including
-      the Generate button at 2.69:1. [V]** Every ink token inverts between themes except
-      `--faint` (45.1% → 45.7% lightness), which lands at 3.64:1 on `--surface` across
-      sixteen selectors; `#fff` is hardcoded against accents that were lightened for dark, so
-      `.btn.pri` is 2.69:1 and `.fan` is 2.16:1 at 9 px. Measured: 17 AA text failures light,
-      30 dark, 10 UI-boundary failures each. Values are inherited unchanged from
-      `docs/design/canvas-prototype.html` — **zero token drift** — so the prototype must be
-      fixed with `proto.css` or the drift reopens.
 
 
 ### P2

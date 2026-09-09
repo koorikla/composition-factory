@@ -1,3 +1,23 @@
+- [x] **CF-055 — An optional parameter wired into a required provider field renders invalid,
+      and the error blames the field. [V]**
+      Flagged when an optional parameter is bound or wired to a required provider field.
+      The field picker on card drop highlights optional-to-required bindings with a warning badge
+      and prompts to promote the parameter to required; the inspector highlights optional-to-required
+      wiring; and the canvas port indicates the warning on the card.
+      — completed 2026-09-09
+- [x] **CF-057 — Generate overwrites files on disk and nothing says so beforehand.**
+      Updated the Generate button tooltip to dynamically name the output directory and warn
+      that files will be overwritten. Require explicit user confirmation dialog before writing
+      manifests to disk on manual Generate clicks.
+      — completed 2026-09-09
+- [x] **CF-060 — The dark theme's `--faint` was never re-derived; 30 AA failures, including
+      the Generate button at 2.69:1. [V]**
+      Re-derived the dark theme `--faint` token from `#6A747F` to `#8E99A8`, achieving >= 4.5:1
+      WCAG AA contrast on `--surface`, `--surface-2`, and `--ground`. Fixed `.btn.pri` and `.fan`
+      text color in dark mode to `var(--ground)` (`#0C1015`) for high contrast against lightened
+      accents. Synchronized changes with `docs/design/canvas-prototype.html` to maintain zero token
+      drift, with automated contrast assertions added in e2e tests.
+      — completed 2026-09-09
 - [x] **CF-062 — The guide and tour name affordances that do not exist.**
       Harmonized affordance names between the visual canvas UI, interactive tour, and guide
       documentation: unified the output drawer label to `Generated` (`web-proto/index.html`),
