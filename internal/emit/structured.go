@@ -37,6 +37,7 @@ type structuredRHS struct {
 	guard      string   // Go-template guard expression
 	rawExpr    string   // Go-template dereference expression without {{ }}
 	targetType string   // "string", "integer", "number", "boolean", "array", "map"
+	sourceType string   // Source type of param/status/env leaf: "string", "integer", "number", "boolean"
 }
 
 func isByteTarget(node *schema.Node, r blueprint.Resource, p string, isMap bool) bool {
@@ -194,7 +195,7 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 				return s, rhs, "", nil
 			}
 
-			g, expr, err := statusWire(ref, r, fmt.Sprintf("field %q", p), b, crds, wantNamespaced)
+			g, expr, leafType, err := statusWire(ref, r, fmt.Sprintf("field %q", p), b, crds, wantNamespaced)
 			if err != nil {
 				return s, "", "", err
 			}
@@ -205,11 +206,18 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 			s.guard = g
 			s.rawExpr = expr
 			s.targetType = targetType
+			s.sourceType = leafType
 			if isMap {
 				s.targetType = "string"
 			}
+			intIntoIntOrString := isIntOrStringNode(node) && leafType == "integer"
+			if intIntoIntOrString {
+				s.targetType = "integer"
+			}
 			if isByte {
 				rhs = fmt.Sprintf("{{ %s | b64enc | quote }}", expr)
+			} else if (s.targetType == "string" || isMap) && !intIntoIntOrString {
+				rhs = fmt.Sprintf("{{ %s | quote }}", expr)
 			} else {
 				rhs = "{{ " + expr + " }}"
 			}
@@ -236,6 +244,7 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 			s.param = ref.Env
 			s.paramSegs = []string{ref.Env}
 			s.targetType = targetType
+			s.sourceType = envDecl.Type
 			if isMap {
 				s.targetType = "string"
 			}
@@ -319,6 +328,7 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 			s.guard = g
 			s.rawExpr = fmt.Sprintf("$spec.%s", refName)
 			s.targetType = targetType
+			s.sourceType = wireDecl.Type
 			if isMap {
 				s.targetType = "string"
 			}

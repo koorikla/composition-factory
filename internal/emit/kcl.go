@@ -82,7 +82,8 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 			if metaName != nil {
 				rhs := kclStructuredRHS(metaName.structured, metaName.rhs)
 				if metaName.structured.kind == rhsStatus {
-					sb.WriteString(fmt.Sprintf("%sif %s:\n", metaInner, rhs))
+					raw := kclRawStatusAccess(metaName.structured)
+					sb.WriteString(fmt.Sprintf("%sif %s:\n", metaInner, raw))
 					sb.WriteString(fmt.Sprintf("%s    name = %s\n", metaInner, rhs))
 				} else {
 					sb.WriteString(fmt.Sprintf("%sname = %s\n", metaInner, rhs))
@@ -105,7 +106,8 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 		for _, ann := range annPlan {
 			rhs := kclStructuredRHS(ann.structured, ann.rhs)
 			if ann.structured.kind == rhsStatus {
-				sb.WriteString(fmt.Sprintf("%sif %s:\n", annInner, rhs))
+				raw := kclRawStatusAccess(ann.structured)
+				sb.WriteString(fmt.Sprintf("%sif %s:\n", annInner, raw))
 				sb.WriteString(fmt.Sprintf("%s    %q = %s\n", annInner, ann.path, rhs))
 			} else {
 				sb.WriteString(fmt.Sprintf("%s%q = %s\n", annInner, ann.path, rhs))
@@ -202,7 +204,8 @@ func writeKCLNode(sb *strings.Builder, indent string, n *nativeNode) {
 	if n.leaf != nil {
 		rhs := kclStructuredRHS(n.leaf.structured, n.leaf.rhs)
 		if n.leaf.structured.kind == rhsStatus {
-			sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, rhs))
+			raw := kclRawStatusAccess(n.leaf.structured)
+			sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, raw))
 			sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.seg), rhs))
 		} else {
 			sb.WriteString(fmt.Sprintf("%s%s = %s\n", indent, quoteKCLKey(n.seg), rhs))
@@ -232,6 +235,10 @@ func quoteKCLKey(k string) string {
 	return k
 }
 
+func kclRawStatusAccess(s structuredRHS) string {
+	return fmt.Sprintf("ocds?[%q]?.Resource?.status?.%s", s.resource, strings.ReplaceAll(s.statusPath, ".", "?."))
+}
+
 func kclStructuredRHS(s structuredRHS, fallbackRHS string) string {
 	switch s.kind {
 	case rhsLiteral:
@@ -241,12 +248,22 @@ func kclStructuredRHS(s structuredRHS, fallbackRHS string) string {
 	case rhsTemplate:
 		return fmt.Sprintf("\"${_xr}-%s\"", s.value)
 	case rhsParam:
+		var expr string
 		if len(s.paramSegs) > 0 {
-			return "_spec?." + strings.Join(s.paramSegs, "?.")
+			expr = "_spec?." + strings.Join(s.paramSegs, "?.")
+		} else {
+			expr = translateParamAccessToKCL(s.param)
 		}
-		return translateParamAccessToKCL(s.param)
+		if s.targetType == "string" && s.sourceType != "" && s.sourceType != "string" {
+			return fmt.Sprintf("str(%s)", expr)
+		}
+		return expr
 	case rhsStatus:
-		return fmt.Sprintf("ocds?[%q]?.Resource?.status?.%s", s.resource, strings.ReplaceAll(s.statusPath, ".", "?."))
+		raw := kclRawStatusAccess(s)
+		if s.targetType == "string" {
+			return fmt.Sprintf("str(%s)", raw)
+		}
+		return raw
 	case rhsMetadata:
 		return fmt.Sprintf("\"${_xr}-%s\"", s.resource)
 	default:
@@ -397,7 +414,8 @@ func writeKCLEnvelopeNodes(sb *strings.Builder, indent string, nodes []*envTreeN
 		} else if n.field != nil {
 			rhs := kclStructuredRHS(n.field.structured, n.field.rhs)
 			if n.field.structured.kind == rhsStatus {
-				sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, rhs))
+				raw := kclRawStatusAccess(n.field.structured)
+				sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, raw))
 				sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.name), rhs))
 			} else {
 				sb.WriteString(fmt.Sprintf("%s%s = %s\n", indent, quoteKCLKey(n.name), rhs))

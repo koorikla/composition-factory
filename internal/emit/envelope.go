@@ -290,6 +290,7 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 				paramSegs:  segs,
 				rawExpr:    deref,
 				targetType: n.Type,
+				sourceType: wireDecl.Type,
 			}
 			switch {
 			case member != "":
@@ -338,10 +339,12 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 			path: []string{"providerConfigRef", "name"},
 			rhs:  "{{ $spec.providerName }}",
 			structured: structuredRHS{
-				kind:      rhsParam,
-				param:     "providerName",
-				paramSegs: []string{"providerName"},
-				rawExpr:   "$spec.providerName",
+				kind:       rhsParam,
+				param:      "providerName",
+				paramSegs:  []string{"providerName"},
+				rawExpr:    "$spec.providerName",
+				targetType: "string",
+				sourceType: "string",
 			},
 		})
 	}

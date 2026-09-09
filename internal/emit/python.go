@@ -207,22 +207,29 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 	case rhsTemplate:
 		return fmt.Sprintf("f\"{xr_name}-%s\"", s.value)
 	case rhsParam:
+		var expr string
 		if len(s.paramSegs) > 0 {
 			if len(s.paramSegs) == 1 {
-				return fmt.Sprintf("spec.get(%q)", s.paramSegs[0])
-			}
-			var sb strings.Builder
-			sb.WriteString("spec")
-			for i, p := range s.paramSegs {
-				if i == len(s.paramSegs)-1 {
-					sb.WriteString(fmt.Sprintf(".get(%q)", p))
-				} else {
-					sb.WriteString(fmt.Sprintf(".get(%q, {})", p))
+				expr = fmt.Sprintf("spec.get(%q)", s.paramSegs[0])
+			} else {
+				var sb strings.Builder
+				sb.WriteString("spec")
+				for i, p := range s.paramSegs {
+					if i == len(s.paramSegs)-1 {
+						sb.WriteString(fmt.Sprintf(".get(%q)", p))
+					} else {
+						sb.WriteString(fmt.Sprintf(".get(%q, {})", p))
+					}
 				}
+				expr = sb.String()
 			}
-			return sb.String()
+		} else {
+			expr = translateParamAccessToPython(s.param)
 		}
-		return translateParamAccessToPython(s.param)
+		if s.targetType == "string" && s.sourceType != "" && s.sourceType != "string" {
+			return fmt.Sprintf("str(%s)", expr)
+		}
+		return expr
 	case rhsStatus:
 		parts := strings.Split(s.statusPath, ".")
 		var sb strings.Builder
@@ -237,11 +244,19 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 				sb.WriteString(fmt.Sprintf(".get(%q, {})", p))
 			}
 		}
-		return sb.String()
+		expr := sb.String()
+		if s.targetType == "string" {
+			return fmt.Sprintf("str(%s)", expr)
+		}
+		return expr
 	case rhsMetadata:
 		return fmt.Sprintf("f\"{xr_name}-%s\"", s.resource)
 	case rhsEnv:
-		return fmt.Sprintf("env.get(%q)", s.param)
+		expr := fmt.Sprintf("env.get(%q)", s.param)
+		if s.targetType == "string" && s.sourceType != "" && s.sourceType != "string" {
+			return fmt.Sprintf("str(%s)", expr)
+		}
+		return expr
 	default:
 		return pythonRHS(fallbackRHS, s.targetType)
 	}

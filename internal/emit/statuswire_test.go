@@ -80,6 +80,7 @@ spec:
                   region: {type: string}
                   policy: {type: string}
                   queueUrl: {type: string}
+                  maxMessageSize: {type: integer}
 `), []byte(`
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -372,10 +373,15 @@ func TestStatusWireFromCRDWithoutStatusSchemaIsRejected(t *testing.T) {
 }
 
 // An integer status leaf is a legal wire source — the scalar rule admits
-// every scalar type, not just strings.
+// every scalar type, not just strings. When wired into a string target field,
+// it renders quoted as a string; when wired into an integer target field, it
+// renders as a bare scalar.
 func TestStatusWireIntegerLeafIsAccepted(t *testing.T) {
 	b := wireBlueprint()
 	b.Spec.Resources[1].Fields["policy"] = blueprint.Field{
+		From: "resources.main-queue.status.atProvider.maxMessageSize",
+	}
+	b.Spec.Resources[1].Fields["maxMessageSize"] = blueprint.Field{
 		From: "resources.main-queue.status.atProvider.maxMessageSize",
 	}
 	got, err := Composition(b, wireCRDs(t))
@@ -392,7 +398,10 @@ func TestStatusWireIntegerLeafIsAccepted(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	fp := policyForProvider(t, rendered)
-	if fp["policy"] != float64(2048) {
-		t.Errorf("policy = %v (%T), want the observed integer 2048", fp["policy"], fp["policy"])
+	if fp["policy"] != "2048" {
+		t.Errorf("policy = %v (%T), want the observed integer quoted as string \"2048\"", fp["policy"], fp["policy"])
+	}
+	if fp["maxMessageSize"] != float64(2048) {
+		t.Errorf("maxMessageSize = %v (%T), want the observed integer 2048", fp["maxMessageSize"], fp["maxMessageSize"])
 	}
 }
