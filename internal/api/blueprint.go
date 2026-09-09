@@ -881,18 +881,10 @@ func writeBlueprintFile(path string, b *blueprint.Blueprint) error {
 // a different design from the one the brief directs, and it is deliberately
 // out of scope here rather than half-attempted.
 //
-// One consequence worth noting: neither blueprint.Parameter nor
-// blueprint.Field carries `omitempty` json tags, so every field this struct
-// has — not just the ones a given parameter or resource field actually
-// uses — is written out explicitly (e.g. every parameter gains an explicit
-// `enum: null`, `default: ""`, `description: ""` even when unset, and every
-// Field gains `raw: ""`/`value: ""` alongside whichever of from/value/raw is
-// actually set). The file grows more verbose than the hand-written fixtures
-// in this package's own tests as a result. That is an accepted, visible
-// trade-off of marshaling the tagged struct as directed, not a bug in this
-// function — closing it would mean adding omitempty to blueprint's types,
-// which is outside this task's file scope (internal/blueprint is not in
-// Task 6's touch list).
+// blueprint types carry omitempty tags on optional fields (Parameter.Enum,
+// Default, Description; Field.From, Value, Raw, Template; Resource.Provider,
+// ForEach, When; Spec.Templates, Conventions), so empty/nil fields are omitted
+// from the serialized output rather than writing zero-value noise.
 func marshalBlueprint(b *blueprint.Blueprint) ([]byte, error) {
 	out, err := yaml.Marshal(b)
 	if err != nil {

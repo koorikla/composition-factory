@@ -83,7 +83,7 @@ type Spec struct {
 	// (the field path being set). Dereferences of optional .spec keys inside
 	// a body are the author's contract: guard them with hasKey, exactly as
 	// the generator does.
-	Templates map[string]string `json:"templates"`
+	Templates map[string]string `json:"templates,omitempty"`
 	// Conventions apply a template to every matching field a resource does
 	// NOT set explicitly. Match is a case-sensitive suffix of a top-level
 	// forProvider field name (e.g. "tags" matches tags; "Name" matches
@@ -95,7 +95,7 @@ type Spec struct {
 	// template...), where a silently defaulted field would change workload
 	// semantics — so Validate refuses the combination outright rather than
 	// guessing (see load.go).
-	Conventions []Convention `json:"conventions"`
+	Conventions []Convention `json:"conventions,omitempty"`
 	Resources   []Resource   `json:"resources"`
 	// Pipeline, when non-empty, fully declares the Composition pipeline steps
 	// that surround the built-in go-templating step. When absent (or empty),
@@ -239,9 +239,9 @@ type XRD struct {
 type Parameter struct {
 	Type        string               `json:"type"`
 	Required    bool                 `json:"required"`
-	Enum        []string             `json:"enum"`
-	Default     string               `json:"default"`
-	Description string               `json:"description"`
+	Enum        []string             `json:"enum,omitempty"`
+	Default     string               `json:"default,omitempty"`
+	Description string               `json:"description,omitempty"`
 	Properties  map[string]Parameter `json:"properties,omitempty"`
 }
 
@@ -379,9 +379,9 @@ type PipelineStep struct {
 type Resource struct {
 	Name     string           `json:"name"`
 	Kind     string           `json:"kind"`
-	Provider string           `json:"provider"`
-	ForEach  string           `json:"forEach"`
-	When     string           `json:"when"`
+	Provider string           `json:"provider,omitempty"`
+	ForEach  string           `json:"forEach,omitempty"`
+	When     string           `json:"when,omitempty"`
 	Fields   map[string]Field `json:"fields"`
 	// Envelope sets paths on the resource's Crossplane-native spec envelope —
 	// the kind's spec.properties minus forProvider/initProvider, exactly what
@@ -575,10 +575,10 @@ func ParseWhen(expr string) (source, param, op, literal string, err error) {
 // the referenced kind's CRD status schema (checked in internal/emit, which
 // holds the CRDs).
 type Field struct {
-	From     string `json:"from"`
-	Value    string `json:"value"`
-	Raw      string `json:"raw"`
-	Template string `json:"template"`
+	From     string `json:"from,omitempty"`
+	Value    string `json:"value,omitempty"`
+	Raw      string `json:"raw,omitempty"`
+	Template string `json:"template,omitempty"`
 }
 
 // UnmarshalJSON permits scalar values (booleans, numbers, strings) for Value, From, Raw, Template.

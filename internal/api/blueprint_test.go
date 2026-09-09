@@ -18,6 +18,7 @@ import (
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/schema"
+	"sigs.k8s.io/yaml"
 )
 
 func do(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -1796,4 +1797,137 @@ func TestCF100WriteRollbackReportsIndexRebuildError(t *testing.T) {
 			t.Errorf("expected error message to contain 'index restore failed', got: %s", rec.Body)
 		}
 	})
+}
+
+func TestCF094MarshalBlueprintOmitsEmptyFields(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata: blueprint.Metadata{
+			Name: "test-omit-empty",
+		},
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{
+				{Provider: "xpkg.upbound.io/upbound/provider-aws-s3:v0.40.0"},
+			},
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Kind:    "Bucket",
+				Plural:  "buckets",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {
+						Type:     "string",
+						Required: true,
+					},
+					"region": {
+						Type:     "string",
+						Required: true,
+					},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "bucket",
+					Kind: "Bucket",
+					Fields: map[string]blueprint.Field{
+						"acl": {
+							Value: "private",
+						},
+						"region": {
+							From: "params.region",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := marshalBlueprint(bp)
+	if err != nil {
+		t.Fatalf("marshalBlueprint: %v", err)
+	}
+
+	yamlStr := string(data)
+
+	// In the rendered YAML, none of the zero-value noise lines should appear.
+	disallowedLines := []string{
+		"conventions: null",
+		"templates: null",
+		"enum: null",
+		`default: ""`,
+		`description: ""`,
+		`forEach: ""`,
+		`when: ""`,
+		`provider: ""`,
+		`raw: ""`,
+		`template: ""`,
+		`from: ""`,
+		`value: ""`,
+	}
+	for _, noise := range disallowedLines {
+		if strings.Contains(yamlStr, noise) {
+			t.Errorf("marshaled blueprint YAML contains zero-value noise %q:\n%s", noise, yamlStr)
+		}
+	}
+
+	// Verify against decoded map structure that empty/nil fields are completely omitted as keys.
+	var rawMap map[string]any
+	if err := yaml.Unmarshal(data, &rawMap); err != nil {
+		t.Fatalf("failed to unmarshal into map: %v", err)
+	}
+	spec := rawMap["spec"].(map[string]any)
+	if _, ok := spec["templates"]; ok {
+		t.Errorf("expected spec.templates to be omitted, but key was present")
+	}
+	if _, ok := spec["conventions"]; ok {
+		t.Errorf("expected spec.conventions to be omitted, but key was present")
+	}
+
+	xrd := spec["xrd"].(map[string]any)
+	params := xrd["parameters"].(map[string]any)
+	regionParam := params["region"].(map[string]any)
+	for _, omittedKey := range []string{"enum", "default", "description"} {
+		if _, ok := regionParam[omittedKey]; ok {
+			t.Errorf("expected parameter field %q to be omitted, but key was present", omittedKey)
+		}
+	}
+
+	resources := spec["resources"].([]any)
+	res0 := resources[0].(map[string]any)
+	for _, omittedKey := range []string{"provider", "forEach", "when"} {
+		if _, ok := res0[omittedKey]; ok {
+			t.Errorf("expected resource field %q to be omitted, but key was present", omittedKey)
+		}
+	}
+
+	fields := res0["fields"].(map[string]any)
+	aclField := fields["acl"].(map[string]any)
+	for _, omittedKey := range []string{"from", "raw", "template"} {
+		if _, ok := aclField[omittedKey]; ok {
+			t.Errorf("expected field acl.%s to be omitted, but key was present", omittedKey)
+		}
+	}
+	if aclField["value"] != "private" {
+		t.Errorf("acl.value = %v, want private", aclField["value"])
+	}
+
+	regionField := fields["region"].(map[string]any)
+	for _, omittedKey := range []string{"value", "raw", "template"} {
+		if _, ok := regionField[omittedKey]; ok {
+			t.Errorf("expected field region.%s to be omitted, but key was present", omittedKey)
+		}
+	}
+	if regionField["from"] != "params.region" {
+		t.Errorf("region.from = %v, want params.region", regionField["from"])
+	}
+
+	var reloaded blueprint.Blueprint
+	if err := yaml.Unmarshal(data, &reloaded); err != nil {
+		t.Fatalf("marshaled YAML failed to unmarshal: %v", err)
+	}
+	if err := reloaded.Validate(); err != nil {
+		t.Fatalf("marshaled YAML failed to validate: %v", err)
+	}
 }
