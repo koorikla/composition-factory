@@ -49,7 +49,7 @@ const STEPS = [
   {
     target: "#insp",
     title: "Objects, maps and annotations",
-    body: "Select a card and the inspector shows its fields — Required / Set / All. Map fields take per-key entries (tags[team]); annotations take wires too, e.g. an IAM role ARN into a ServiceAccount annotation. V/W/R toggles switch a field between literal value, wire and raw template.",
+    body: "Select a card and the inspector shows its fields — Required / Set / All. Map fields take per-key entries (tags[team]); annotations take wires too, e.g. an IAM role ARN into a ServiceAccount annotation. Val / Wire / Raw toggles switch a field between literal value, wire and raw template.",
   },
   {
     target: "#insp",
@@ -73,7 +73,7 @@ const STEPS = [
   },
   {
     target: "#tabs",
-    title: "The output drawer",
+    title: "The Generated drawer",
     body: "Every generated file has a tab; the blueprint tab is editable in place (same validation gate as an import), and package.yaml shows the whole Configuration package — downloadable as an .xpkg with the Package button.",
   },
   {

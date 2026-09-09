@@ -99,12 +99,6 @@ them in.
       `docs/design/canvas-prototype.html` — **zero token drift** — so the prototype must be
       fixed with `proto.css` or the drift reopens.
 
-- [ ] **CF-062 — The guide and tour name affordances that do not exist.** The output drawer
-      has four names: `YAML` (`index.html:24`), `Editor` (`index.html:92`), *the output
-      drawer* (`tour.js:76`), and *the **Generated** drawer* (`docs/guide.md:13`), which
-      matches nothing on screen. `docs/guide.md:34` says Reset View "centers the active
-      blueprint"; `canvas.js:668` sets `x=0; y=0; k=1`. `tour.js:52` calls the mode buttons
-      `V/W/R`; they are labelled `Val`, `Wire`, `Raw`. The fix must make every noun findable.
 
 ### P2
 

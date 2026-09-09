@@ -1,3 +1,10 @@
+- [x] **CF-062 — The guide and tour name affordances that do not exist.**
+      Harmonized affordance names between the visual canvas UI, interactive tour, and guide
+      documentation: unified the output drawer label to `Generated` (`web-proto/index.html`),
+      updated `tour.js` to reference `Val / Wire / Raw toggles` matching inspector mode buttons
+      and `The Generated drawer`, and updated `docs/guide.md` to accurately describe Reset View
+      (`⌂`) as resetting zoom to 100% and returning the canvas origin to (0, 0).
+      — completed 2026-09-09
 - [x] **CF-081 — Nothing renders one blueprint through every engine and compares composed
       output, so the class behind CF-004, CF-045 and CF-080 stays unguarded.**
       `TestAcceptanceAlternativeEnginesRender` (`acceptance_test.go`) now renders the same

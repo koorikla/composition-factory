@@ -31,7 +31,7 @@ Welcome to Composition Factory — the visual canvas and schema-aware generator 
 - **Delete**: `Delete` / `Backspace` on a selected card removes the resource (prompts confirmation if active wires would drop).
 - **Zoom**: Mouse wheel zooms centered at the cursor; `+` and `-` controls in the bottom-right bar.
 - **Pan**: `Shift + Scroll` or click-and-drag the empty canvas ground.
-- **Reset View**: `⌂` button resets zoom to 100% and centers the active blueprint.
+- **Reset View**: `⌂` button resets zoom to 100% and returns the canvas origin to (0, 0).
 - **Undo / Redo**: `⌘Z` / `Ctrl+Z` to undo; `⇧⌘Z` / `Shift+Ctrl+Z` to redo.
 
 ---
