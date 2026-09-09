@@ -1,3 +1,9 @@
+- [x] **CF-068 — Wire hit targets are a 2.25 px stroke and parameter dots are 7×7 px. [V]**
+      Rendered invisible wide stroke `.wire-hit` paths (14px wide) along each wire before the drawn
+      stroke, enabling easy wire selection and right-click context menu even when clicking slightly
+      off the center stroke. Added pseudo-element hit areas expanding port and parameter dot target
+      size to 18x18px without altering their visual 7x7 dot dimensions.
+      — completed 2026-09-09
 - [x] **CF-070 — `--shared` and `--warn` are the same hex, so a shared binding and a warning
       are the same colour. [V]**
       Separated `--warn` and `--shared` semantic design tokens across light and dark themes

@@ -74,13 +74,6 @@ them in.
       same 4.46:1 pair breaks the raw-expression editor and the selected artifact-tree row.
       The fix must choose the light accents against `--sunk`, not against white.
 
-- [ ] **CF-068 — Wire hit targets are a 2.25 px stroke and parameter dots are 7×7 px. [V]**
-      Measured live: the XR parameter dots are 7×7 CSS px stacked 21 px apart, so WCAG 2.2
-      SC 2.5.8's spacing exception does not apply either. Both `onCwClick` (`canvas.js:798`)
-      and `onContextMenu` (`canvas.js:957`) look for a `.wire-hit` element that `drawWires`
-      never emits and no template contains. The fix must give the wire a hit area independent
-      of its drawn stroke.
-
 - [ ] **CF-069 — Nothing announces a Validate or Generate result, and the error text is
       hover-only.** A repo-wide grep for `aria-live` returns nothing; the state chip is a
       `<span>` mutated with `textContent` (`index.html:21`) whose full error lives only in a
