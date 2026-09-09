@@ -71,9 +71,9 @@
   --ground:#E2E8F0; --surface:#FFFFFF; --surface-2:#F4F7FA; --sunk:#D8E0EA;
   --ink:#0B0F14; --ink-2:#2F3945; --muted:#54606F; --faint:#67727F;
   --rule:#BCC7D6; --rule-2:#9AA8BA;
-  --wire-xrd:#1560C8; --wire-status:#0A776B; --wire-ref:#A54524; --shared:#826E00;
+  --wire-xrd:#1358B7; --wire-status:#0A776B; --wire-ref:#A54524; --shared:#685800;
   --wire-xrd-soft:#DAE7F8; --wire-status-soft:#D3EDE9; --wire-ref-soft:#F8E4DB; --shared-soft:#F4ECCE;
-  --ok:#0D6D4B; --warn:#B45309; --err:#B12A32;
+  --ok:#0D6D4B; --warn:#92400E; --err:#B12A32;
   --shadow:0 1px 2px rgba(11,15,20,.10),0 4px 14px rgba(11,15,20,.09);
   --shadow-lg:0 2px 6px rgba(11,15,20,.13),0 18px 40px rgba(11,15,20,.18);
   --grid:#C3CEDD;
@@ -509,8 +509,8 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 
 .code{overflow:auto;padding:10px 12px;margin:0;font-family:var(--mono);font-size:11px;
   line-height:1.55;color:var(--ink-2);background:var(--sunk);flex:1;min-height:0;min-width:0;white-space:pre;tab-size:2}
-.code .kk{color:var(--wire-xrd)} .code .st{color:var(--ok)}
-.code .tm{color:var(--warn)} .code .cm{color:var(--faint);font-style:italic}
+.code .k,.code .kk{color:var(--wire-xrd)} .code .st{color:var(--ok)}
+.code .tm{color:var(--warn)} .code .co,.code .cm{color:var(--muted);font-style:italic}
 .code .sh{color:var(--shared)}
 .warnbar{display:flex;align-items:center;gap:7px;padding:5px 12px;font-size:11px;
   background:var(--wire-ref-soft);color:var(--warn);border-bottom:1px solid var(--rule)}

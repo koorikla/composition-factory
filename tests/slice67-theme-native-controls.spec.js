@@ -176,3 +176,33 @@ test('token definitions in proto.css and canvas-prototype.html remain in sync', 
   expect(protoTokens).toEqual(canvasTokens)
 })
 
+test('light theme code syntax colors meet WCAG AA contrast against sunk background', async ({ page }) => {
+  await bootWithTheme(page, 'light')
+
+  const { sunk, codeBg, syntaxColors } = await page.evaluate(() => {
+    const code = document.querySelector('.code') || document.getElementById('code') || document.body
+    const sunk = getComputedStyle(document.documentElement).getPropertyValue('--sunk').trim()
+    const codeBg = getComputedStyle(code).backgroundColor
+
+    // Five syntax colors: template (.tm), shared (.sh), comment (.co/.cm), key (.k/.kk), string (.st)
+    const classes = ['tm', 'sh', 'co', 'cm', 'k', 'kk', 'st']
+    const colors = {}
+    for (const cls of classes) {
+      const span = document.createElement('span')
+      span.className = cls
+      code.appendChild(span)
+      colors[cls] = getComputedStyle(span).color
+      span.remove()
+    }
+    return { sunk, codeBg, syntaxColors: colors }
+  })
+
+  // All five syntax colors in light theme must achieve >= 4.5:1 contrast against --sunk (#D8E0EA)
+  for (const [cls, color] of Object.entries(syntaxColors)) {
+    const crSunk = contrastRatio(color, sunk)
+    const crCodeBg = contrastRatio(color, codeBg)
+    expect(crSunk, `.code .${cls} contrast against --sunk (${color} on ${sunk})`).toBeGreaterThanOrEqual(4.5)
+    expect(crCodeBg, `.code .${cls} contrast against code background (${color} on ${codeBg})`).toBeGreaterThanOrEqual(4.5)
+  }
+})
+
