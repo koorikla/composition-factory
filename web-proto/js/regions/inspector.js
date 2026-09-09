@@ -19,7 +19,28 @@
 import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
-import { fanOut } from "../wires.js";
+import { fanOut, parseFrom } from "../wires.js";
+
+function isParamRequired(params, pName) {
+  if (!params || !pName) return false;
+  const parts = pName.split(".");
+  let cur = params[parts[0]];
+  if (!cur) return false;
+  if (parts.length === 1) {
+    return !!(cur.required || cur.requiredChain);
+  }
+  for (let i = 1; i < parts.length; i++) {
+    if (!cur.properties || !cur.properties[parts[i]]) return false;
+    cur = cur.properties[parts[i]];
+  }
+  return !!(cur.required || cur.requiredChain);
+}
+
+function isOptParamWire(fromVal, params) {
+  const parsed = parseFrom(fromVal);
+  if (!parsed || parsed.kind !== "param") return false;
+  return !isParamRequired(params, parsed.param);
+}
 
 var PARAM_TYPES = ["string", "integer", "number", "boolean", "object"];
 
@@ -337,7 +358,7 @@ function modeButtons(path, pressed, isEnv) {
   }).join("") + "</span>";
 }
 
-function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap, isEnv) {
+function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap, isEnv, isRequired, currentFrom) {
   var names = [];
   function collectMemberRefs(prefix, props) {
     Object.keys(props || {}).sort().forEach(function (mn) {
@@ -358,15 +379,19 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
     if (compatible(p.type, fieldType)) names.push(n);
   });
   var wireAttr = isEnv ? 'data-env-wire="' : 'data-wire="';
+  var reqAttr = isRequired ? ' data-fld-req="true"' : "";
   var npKey = isEnv ? ("env:" + path) : path;
   var h = '<div class="bound"><span style="color:var(--faint)">&#8592;</span>' +
-    '<select class="tsel" ' + wireAttr + esc(path) + '" style="flex:1">' +
+    '<select class="tsel" ' + wireAttr + esc(path) + '"' + reqAttr + ' style="flex:1">' +
     '<option value="">wire to&#8230;</option>';
 
   if (names.length > 0) {
     h += '<optgroup label="XRD Parameters">';
     names.forEach(function (n) {
-      h += '<option value="params.' + esc(n) + '">params.' + esc(n) + "</option>";
+      var isOpt = !isParamRequired(params, n);
+      var optNote = isOpt && isRequired ? " (optional \u2192 req)" : "";
+      var isSel = currentFrom === ("params." + n);
+      h += '<option value="params.' + esc(n) + '"' + (isSel ? " selected" : "") + '>params.' + esc(n) + esc(optNote) + "</option>";
     });
     h += '</optgroup>';
   }
@@ -400,6 +425,9 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
   }
 
   h += '<option value="__new__">+ new XRD parameter&#8230;</option></select></div>';
+  if (isRequired && currentFrom && isOptParamWire(currentFrom, params)) {
+    h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
+  }
   if (pendingNewParam === npKey) {
     h += '<div class="frow" style="margin-top:4px;margin-bottom:0">' +
       '<input class="tin" data-npname="' + esc(npKey) + '" placeholder="parameterName" aria-label="New parameter name">' +
@@ -577,8 +605,11 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
         h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
           '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
           '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
+        if (f.required && isOptParamWire(entry.from, params)) {
+          h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
+        }
       } else {
-        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false);
+        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false, !!f.required, entry && entry.from);
       }
     } else if (m === "r") {
       h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", false, res, params, otherResources, otherStatusMap);
@@ -615,7 +646,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
               '<span class="src" style="color:' + wireCol + '">' + esc(meEntry.from || "") + "</span>" +
               '<span class="x" role="button" tabindex="0" data-unwire="' + esc(me.fullPath) + '" title="Remove wire">&#215;</span></div>';
           } else {
-            h += wireSelectHtml(me.fullPath, "string", params, otherResources, otherStatusMap, false);
+            h += wireSelectHtml(me.fullPath, "string", params, otherResources, otherStatusMap, false, false, meEntry && meEntry.from);
           }
         } else if (meM === "r") {
           h += rawEditorHtml(me.fullPath, (meDm === "r" && meEntry) ? meEntry.raw : "", false, res, params, otherResources, otherStatusMap);
@@ -643,8 +674,11 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
         h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
           '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
           '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
+        if (f.required && isOptParamWire(entry.from, params)) {
+          h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
+        }
       } else {
-        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false);
+        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false, !!f.required, entry && entry.from);
       }
     } else if (m === "r") {
       h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", false, res, params, otherResources, otherStatusMap);
@@ -682,8 +716,11 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
       h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
         '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
         '<span class="x" role="button" tabindex="0" data-env-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
+      if (showReq && isOptParamWire(entry.from, params)) {
+        h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
+      }
     } else {
-      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, true);
+      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, true, !!showReq, entry && entry.from);
     }
   } else if (m === "r") {
     h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", true, res, params, otherResources, otherStatusMap);
@@ -2102,6 +2139,16 @@ function onBoxChange(e) {
     if (v === "__new__") { pendingNewParam = path; render(); return; }
     if (!v) return;
     const fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
+    if (t.getAttribute("data-fld-req") === "true" && isOptParamWire(fromVal, paramsOf(doc))) {
+      const parentCard = t.closest(".bound");
+      const existingWarn = parentCard && parentCard.parentElement && parentCard.parentElement.querySelector(".wire-warn");
+      if (!existingWarn && parentCard) {
+        const warnDiv = document.createElement("div");
+        warnDiv.style.marginTop = "2px";
+        warnDiv.innerHTML = '<span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span>';
+        parentCard.after(warnDiv);
+      }
+    }
     setField(path, { from: fromVal, value: "", raw: "" })
       .then(function (r) { if (r !== null) { delete uiMode[path]; pendingNewParam = null; } });
     return;
@@ -2113,6 +2160,16 @@ function onBoxChange(e) {
     if (v === "__new__") { pendingNewParam = "env:" + path; render(); return; }
     if (!v) return;
     const fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
+    if (t.getAttribute("data-fld-req") === "true" && isOptParamWire(fromVal, paramsOf(doc))) {
+      const parentCard = t.closest(".bound");
+      const existingWarn = parentCard && parentCard.parentElement && parentCard.parentElement.querySelector(".wire-warn");
+      if (!existingWarn && parentCard) {
+        const warnDiv = document.createElement("div");
+        warnDiv.style.marginTop = "2px";
+        warnDiv.innerHTML = '<span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span>';
+        parentCard.after(warnDiv);
+      }
+    }
     setEnvelopeField(path, { from: fromVal, value: "", raw: "" })
       .then(function (r) { if (r !== null) { delete uiMode["env:" + path]; pendingNewParam = null; } });
     return;
