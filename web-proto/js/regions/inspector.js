@@ -1799,7 +1799,7 @@ var boxClickActions = [
           d.spec.pipeline.push({
             name: "auto-ready",
             functionRef: "function-auto-ready",
-            package: "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1",
+            package: "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0",
             position: "after"
           });
         });
@@ -1815,7 +1815,7 @@ var boxClickActions = [
         "auto-ready": {
           name: "auto-ready",
           functionRef: "function-auto-ready",
-          package: "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1",
+          package: "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0",
           position: "after"
         },
         "environment-configs": {

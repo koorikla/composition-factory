@@ -134,7 +134,7 @@ out/
 ├── functions.yaml
 ├── providerconfigs/
 │   └── <provider-family>.yaml
-└── rbac.yaml (emitted when native Kubernetes kinds are composed)
+└── rbac.yaml (emitted when composed native Kubernetes kinds require cluster RBAC permissions not pre-granted to Crossplane)
 ```
 
 Output directory structure (FileSystem mode with `templateSource: FileSystem`):
@@ -153,10 +153,10 @@ out/
 │       └── <resource>.yaml
 ├── runtime/
 │   └── <plural>.<group>.yaml
-└── rbac.yaml (emitted when native Kubernetes kinds are composed)
+└── rbac.yaml (emitted when composed native Kubernetes kinds require cluster RBAC permissions not pre-granted to Crossplane)
 ```
 
-*(Note: When native Kubernetes kinds like Deployment or Service are composed, `rbac.yaml` contains the aggregated ClusterRole required by Crossplane to manage them).*
+*(Note: When composed native Kubernetes kinds require cluster RBAC permissions that are not pre-granted to Crossplane (e.g., `HorizontalPodAutoscaler` or custom native kinds), `rbac.yaml` contains the aggregated ClusterRole required by Crossplane to manage them. Pre-granted kinds like `Deployment` or `Service` do not trigger RBAC emission).*
 
 #### Drift Detection & CI Check (`--check`)
 Validates that generated files in the output directory match the blueprint without modifying disk:
@@ -266,7 +266,7 @@ cf function add <function-package-ref> [flags]
 
 Example:
 ```sh
-cf function add xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1
+cf function add xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0
 ```
 
 - Schema validation checks `spec.pipeline[].input` against the cached Input CRD.

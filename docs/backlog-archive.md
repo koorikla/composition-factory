@@ -1,3 +1,13 @@
+- [x] **CF-078 — The auto-ready package documented in `docs/dsl.md` and `docs/cli.md` is
+      neither the registry nor the version `cf gen` emits. [V]** Docs say
+      `xpkg.crossplane.io/…/function-auto-ready:v0.5.1` (`dsl.md:352`, `:49`, `:361`, `:378`,
+      `cli.md:269`); generated `functions.yaml` says `xpkg.upbound.io/…:v0.5.0`.
+      — completed 2026-09-09
+- [x] **CF-079 — `docs/cli.md` names the wrong trigger for `rbac.yaml` and picks the two
+      kinds it is never emitted for. [V]** `cli.md:137`, `:156`, `:159` say it appears "when
+      native Kubernetes kinds like Deployment or Service are composed"; both are pre-granted,
+      so composing only those correctly emits nothing. The generator is right.
+      — completed 2026-09-09
 - [x] **CF-076 — Every `x-kubernetes-int-or-string` field is typed `string`, so `--validate`
       rejects the integer form and the form it demands is the one Kubernetes refuses. [V]**
       `internal/schema/k8s/k8s.go:210-215` collapses IntOrString/Quantity to `string` on the

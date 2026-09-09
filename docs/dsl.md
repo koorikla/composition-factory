@@ -46,7 +46,7 @@ spec:
   pipeline: # optional custom composition pipeline steps (bare list)
     - name: auto-ready
       functionRef: function-auto-ready
-      package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1
+      package: xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0
       position: after # "before" or "after" templating step (default: "after")
     - name: custom-step
       functionRef: function-custom
@@ -349,7 +349,7 @@ conventions:
 The composition pipeline executes functions sequentially. By default (when `spec.pipeline` is omitted), the generator automatically emits:
 1. `function-environment-configs` (if `spec.environment` is non-empty).
 2. The templating function (`function-go-templating`, `function-kcl`, or `function-python`).
-3. `function-auto-ready` (`xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1`).
+3. `function-auto-ready` (`xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0`).
 
 When `spec.pipeline` is explicitly declared as a list, it completely controls the pipeline steps around the templating step:
 
@@ -358,7 +358,7 @@ spec:
   pipeline:
     - name: auto-ready
       functionRef: function-auto-ready
-      package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1
+      package: xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0
       position: after # "before" or "after" (default: "after")
 
     - name: custom-step
@@ -375,7 +375,7 @@ spec:
 ### Pipeline Step Properties:
 - **`name`**: Step name string (required, unique DNS label; cannot be `render-resources`).
 - **`functionRef`**: Function name string (required, DNS label, e.g. `function-auto-ready`).
-- **`package`**: OCI package reference (required, e.g. `xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1`).
+- **`package`**: OCI package reference (required, e.g. `xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0`).
 - **`input`**: Raw YAML mapping string for the function's typed Input CRD (must contain non-empty `apiVersion` and `kind`).
 - **`position`**: Relative position to the templating step: `"before"` or `"after"` (default: `"after"`).
 

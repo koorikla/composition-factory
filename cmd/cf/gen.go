@@ -216,7 +216,7 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 
 	for _, o := range outputs {
 		if filepath.Base(o.Path) == "rbac.yaml" {
-			fmt.Fprintf(out, "warning: composed native Kubernetes kinds require cluster RBAC permissions; apply %s to your cluster\n", o.Path)
+			fmt.Fprintf(out, "warning: composed native Kubernetes kinds require cluster RBAC permissions not pre-granted to Crossplane; apply %s to your cluster\n", o.Path)
 		}
 	}
 	return 0, nil
