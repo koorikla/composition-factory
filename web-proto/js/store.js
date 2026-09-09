@@ -275,7 +275,23 @@ export const store = {
 
   /** POST /api/examples/{id}/load — load starter blueprint and import/cache its providers. */
   async loadExample(id) {
-    return this._paramOp("loadExample", function () { return api.loadExample(id); });
+    const self = this;
+    return enqueue(async function () {
+      try {
+        const prev = clone(self.state.doc);
+        const doc = await api.loadExample(id);
+        if (!doc) {
+          throw new Error("server returned no blueprint");
+        }
+        self._recordHistory(prev);
+        self.state.doc = doc;
+        self.emit("doc", doc);
+        return doc;
+      } catch (e) {
+        self.emit("error", { status: e.status, message: e.message, source: "loadExample" });
+        throw e;
+      }
+    });
   },
 
   /** POST /api/blueprint/resources/{name}/rename — same contract as the parameter ops. */

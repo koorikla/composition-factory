@@ -1,3 +1,108 @@
+- [x] **CF-048 — Nothing statically analyses `web-proto/`.** Just under 8 000 lines of ES
+      modules across 12 files ship with no linter, formatter or type check — no eslint,
+      prettier or biome config exists, and `package.json` carries only Playwright and the
+      GIF-recorder dependencies. The Playwright suite is the only gate on a third of the
+      shipped code, and `guardPageErrors` in `tests/helpers.js` exists precisely because an
+      uncaught page error once shipped green through it. The fix must put a gate in CI that
+      fails on the classes a browser suite cannot see; it does not need to be a large one.
+      — completed 2026-09-04
+- [x] **CF-058 — Adding a provider gives no progress and freezes every other action.** The
+      manual path (`palette.js:758-772`) only sets `disabled = true`, while the catalogue
+      path shows `Adding…`; meanwhile `handleAddProvider` holds `srv.mu` across the whole OCI
+      fetch (`internal/api/providers.go:137-157`) and generate, blueprint PUT, kinds, package
+      and render all take it. Slow is expected; silent is the finding. The fix must name the
+      operation and say that editing is paused.
+      — completed 2026-09-04
+- [x] **CF-061 — IBM Plex is loaded only from Google's CDN, in an app built to run offline.**
+      `index.html:7-9` is the sole source; there is no `@font-face` and no vendored file,
+      while `web-proto/embed.go` embeds the frontend precisely so `cf serve` needs no network
+      and `docs/mcp.md:58` promises offline operation. The fallback is not graceful: `--cond`
+      falls back to normal-width faces and the four palette tabs clip
+      (`proto.css:88-89`, `overflow:hidden`). The fix must vendor the three families.
+      — completed 2026-09-04
+- [x] **CF-056 — "+ Add parameter" ships a parameter literally named `newParam`. [V]** The
+      button creates it immediately with that name and leaves `document.activeElement` on
+      `<body>`. `newParam` is valid, so it emits into the XRD unchallenged. The palette's
+      Shared tab has a real form for the same action. The fix must make the two entry points
+      agree and must not let a placeholder name reach the XRD unnoticed.
+      — completed 2026-09-04
+- [x] **CF-051 — Adoption's dropped-items report auto-hides after 12 s and is stored
+      nowhere.** `reportAdoptLoss` (`main.js:494-501`) hands the list to `notice()`, which
+      ends `setTimeout(… , 12000)`. It is the only place the user learns that parts of an
+      imported Composition did not survive. Alt-tab and the canvas looks complete and is not
+      — the Round-Trip Rule failing where it is least visible. The fix must persist the loss
+      list until dismissed and make it re-openable.
+      — completed 2026-09-04
+- [x] **CF-052 — A failed "Load Blueprint" closes the modal, which reads as success.**
+      `main.js:667-669` calls `closeModal()` in the `.then`, and `store.loadExample` resolves
+      `null` on failure (`store.js:326-338`) rather than rejecting, so the `.catch` at
+      `main.js:670` is unreachable dead code. The only failure signal is a 6-second toast
+      carrying a raw Go string. The fix must keep the modal open and attach the reason to the
+      card that was clicked.
+      — completed 2026-09-04
+- [x] **CF-047 — `docs/mcp.md` promises the "full authoring surface"; the MCP server has no
+      resource tools at all.** A live `tools/list` returns 15: `add_parameter`,
+      `update_parameter`, `rename_parameter` and `delete_parameter`, but nothing matching
+      the four resource routes `internal/api/server.go:187-190` exposes over HTTP. An agent
+      can add a composed resource only by rewriting the entire document through
+      `replace_blueprint`, which discards the per-field schema validation and the
+      nearest-match errors that are the product's headline feature. Either the tools exist
+      or the sentence does; the fix must close the gap in one direction and say which.
+      — completed 2026-09-04
+- [x] **CF-049 — The Package button saves the server's 400 JSON as the user's `.xpkg`. [V]**
+      `web-proto/js/main.js:521-533` clicks an `<a href="/api/package" download>` with no
+      `fetch` and no status check. On `templateSource: FileSystem` the endpoint returns 400
+      `application/json` with no `Content-Disposition`, so the browser saves the error body
+      under a URL-derived name. The user has a file they believe is their package. The fix
+      must check the response before offering the save, and surface the message.
+      — completed 2026-09-04
+- [x] **CF-053 — The status chip reads `ok · N files` for a preview that wrote nothing.**
+      `chipOk` (`output.js:528-532`) renders identically for the debounced
+      `store.generate(false)` preview and for `store.generate(true)`, which writes to disk.
+      The only differentiator is a banner that `output.js:919` hides when the drawer is
+      collapsed. Observed live: chip green, `out/` empty. The fix must distinguish rendered
+      in memory from written to disk, in the chip itself.
+      — completed 2026-09-04
+- [x] **CF-054 — Renaming a parameter does not commit on Enter; the field and the document
+      disagree with nothing marking which is real. [V, reproduced ×2]** Type a name, press
+      Enter: the Inspector shows the new name, the canvas card and `spec.xrd.parameters` keep
+      the old one, and focus stays in the input. Only blur commits. A user who presses Enter
+      then Generate ships `newParam`. The fix must commit on Enter, or mark the edit pending.
+      — completed 2026-09-04
+- [x] **CF-045 — The KCL and Python emitters compose native Kubernetes objects with no
+      `metadata.name`, then emit sibling references to the name they did not set. [V]**
+      `internal/emit/composition.go:301` writes `name: {{ $xr }}-<resource>` for native
+      kinds; `internal/emit/kcl.go:72-79` and `internal/emit/python.go:73` write a
+      `metadata` block holding only the composition-resource-name annotation, so Crossplane
+      falls back to `generateName: <xr>-` and the API server assigns a random name — while
+      the same template still resolves `from: resources.sa.metadata.name` to the
+      deterministic `${_xr}-sa`. Repro: a blueprint with a `ServiceAccount` named `sa` and a
+      `Deployment` binding `spec.template.spec.serviceAccountName` to
+      `resources.sa.metadata.name`; `cf gen --engine kcl` (or `python`) then
+      `crossplane composition render` yields `generateName: demo-sa-` on the ServiceAccount
+      and `serviceAccountName: demo-sa-sa` on the Deployment, and exits 0. On a cluster the
+      Deployment never becomes ready: `serviceaccount "demo-sa-sa" not found`. This is the
+      defect archived as completed on 2026-09-03, fixed in one engine of three — the third
+      archived instance of KCL and Python diverging from go-templating on a correctness fix
+      (see CF-004). The fix must
+      make all three engines emit the same deterministic name for a native kind, and must be
+      guarded by a test that renders the *same* blueprint through every engine and compares
+      composed output — the existing per-emitter goldens cannot see this class of drift.
+      — completed 2026-09-04
+- [x] **CF-046 — Generated bytes depend on how the blueprint was named on the command line,
+      so `cf gen --check` reports drift on an unchanged tree. [V]**
+      `blueprintSource` (`internal/emit/yaml.go:76-81`) returns `b.SourcePath()` verbatim,
+      set from the caller's argument at `internal/blueprint/load.go:346`, and it is written
+      into every generated file as `# Source: <path>`. Repro: `cf gen testdata/xwebapp.cf.yaml
+      -o out` then `cf gen "$PWD/testdata/xwebapp.cf.yaml" -o out --check` exits `2` with
+      `drift:` on all three files. Two developers with identical trees therefore commit
+      different bytes, a GitOps diff flip-flops between them, and an absolute local path
+      (`/Users/<name>/...`) is published into a shared repository — by default on the MCP
+      door, whose own docs recommend absolute paths. The fix must make the provenance a
+      function of blueprint content only; `internal/emit/rbac.go:89` already does this, and
+      the same pass should give `rbac.yaml` the `# Regenerate with: cf gen` line every other
+      generated file carries.
+      — completed 2026-09-04
 - [x] **CF-010 — The canvas output drawer feedback distinguishes preview vs disk write**:
       `store.generate(true)` passes write flag properly, and the output drawer explicitly states when artifacts are previews vs written to disk.
       — completed 2026-09-03

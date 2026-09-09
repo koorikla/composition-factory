@@ -72,6 +72,25 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 		// Metadata
 		sb.WriteString(fmt.Sprintf("%s\"metadata\": {\n", inner))
 		metaInner := inner + "    "
+		if crd.Native {
+			var metaName *forProviderField
+			for i := range pres.MetaPlan {
+				if pres.MetaPlan[i].path == "metadata.name" || pres.MetaPlan[i].path == "name" {
+					metaName = &pres.MetaPlan[i]
+					break
+				}
+			}
+			if metaName != nil {
+				rhs := pythonStructuredRHS(metaName.structured, metaName.rhs)
+				sb.WriteString(fmt.Sprintf("%s\"name\": %s,\n", metaInner, rhs))
+			} else {
+				if r.ForEach != "" {
+					sb.WriteString(fmt.Sprintf("%s\"name\": f\"{xr_name}-%s-{_i}\",\n", metaInner, r.Name))
+				} else {
+					sb.WriteString(fmt.Sprintf("%s\"name\": f\"{xr_name}-%s\",\n", metaInner, r.Name))
+				}
+			}
+		}
 		if len(annPlan) > 0 {
 			sb.WriteString(fmt.Sprintf("%s\"annotations\": _present({\n", metaInner))
 			annInner := metaInner + "    "

@@ -60,6 +60,9 @@ func TestRBACEmissionForNonPreGranted(t *testing.T) {
 		t.Fatal("RBAC returned nil, want ClusterRole YAML for non-pre-granted kinds")
 	}
 	out := string(rbacBytes)
+	if !strings.Contains(out, "# Regenerate with: cf gen") || !strings.Contains(out, "# Source: k8s-ingress-hpa") {
+		t.Errorf("RBAC output missing standard header:\n%s", out)
+	}
 	if !strings.Contains(out, "kind: ClusterRole") {
 		t.Errorf("RBAC output missing kind: ClusterRole:\n%s", out)
 	}

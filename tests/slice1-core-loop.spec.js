@@ -91,7 +91,7 @@ test('dropping a palette kind persists a new resource in the doc', async ({ page
 test('a value edit PUTs the doc and the output regenerates with real YAML', async ({ page, request }) => {
   await page.goto('/')
   // initial generate: topbar chip + composition tab render live engine output
-  await expect(page.locator('#valid')).toHaveText(/ok · \d+ files/)
+  await expect(page.locator('#valid')).toHaveText(/(preview|written|ok) · \d+ files/)
   await expect(page.locator('#code')).toContainText('kind: Composition')
   await expect(page.locator('#code')).not.toContainText('maxMessageSize')
   await page.click('.node[data-id="work-queue"] .node-h')

@@ -247,7 +247,7 @@ function matchOutput(which) {
 function highlight(text) {
   return text.split("\n").map(function (line) {
     if (/^\s*#/.test(line)) return '<span class="cm">' + esc(line) + "</span>";
-    var m = line.match(/^(\s*(?:-\s+)?)([\w.$\/"'\-]+):(\s*)(.*)$/);
+    var m = line.match(/^(\s*(?:-\s+)?)([\w.$/"'-]+):(\s*)(.*)$/);
     if (m) {
       var val = m[4];
       var h = esc(m[1]) + '<span class="kk">' + esc(m[2]) + "</span>:" + m[3];
@@ -267,16 +267,15 @@ function currentText() {
     var doc = store.state.doc;
     return doc ? toYaml(doc) : "";
   }
+  var g = store.state.lastGenerate;
   if (tab.indexOf("pc:") === 0) {
     var fam = tab.slice(3);
-    var g = store.state.lastGenerate;
     var pcs = (g && g.outputs || []).filter(function (o) {
       return new RegExp("providerconfigs[/\\\\]" + fam + "\\.yaml$").test(o.path);
     });
     return pcs.length ? pcs[0].body : "";
   }
   if (tab === "runtime") {
-    var g = store.state.lastGenerate;
     var rts = (g && g.outputs || []).filter(function (o) {
       return /(?:^|[\\/])runtime[\\/]/.test(o.path);
     });
@@ -284,7 +283,6 @@ function currentText() {
   }
   if (tab.indexOf("tpl:") === 0) {
     var file = tab.slice(4);
-    var g = store.state.lastGenerate;
     var tpls = (g && g.outputs || []).filter(function (o) {
       return o.path.endsWith("/" + file) || o.path.endsWith("\\" + file) || o.path === file;
     });
@@ -419,7 +417,7 @@ function updateNextSteps(result) {
     if (m && m[1]) {
       outPath = m[1].replace(/[\\/]$/, "") || "out";
     } else if (first.indexOf("/") !== -1 || first.indexOf("\\") !== -1) {
-      var parts = first.split(/[\/\\]/);
+      var parts = first.split(/[\\/]/);
       parts.pop();
       outPath = parts.join("/") || "out";
     }
@@ -525,8 +523,9 @@ function drawTopbar(doc) {
   if (bp) bp.textContent = bpTabLabel(doc);
 }
 
-function chipOk(n) {
-  el.valid.textContent = "ok · " + n + " file" + (n === 1 ? "" : "s");
+function chipOk(n, written) {
+  var prefix = written ? "written" : "preview";
+  el.valid.textContent = prefix + " · " + n + " file" + (n === 1 ? "" : "s");
   el.valid.title = "";
   el.valid.style.color = "";
 }
@@ -829,7 +828,7 @@ function bindOutputStoreSubscriptions() {
   store.subscribe("doc", function () { rbacCache = null; pkgCache = null; });
   store.subscribe("generate", function (result) {
     showWarn("");
-    chipOk(result && result.outputs ? result.outputs.length : 0);
+    chipOk(result && result.outputs ? result.outputs.length : 0, result && result.written);
     buildTabs(); // providerconfig families can appear/vanish with sources
     updateNextSteps(result);
     if (tab !== "bp") render();
@@ -998,7 +997,7 @@ function initSplitter(rootEl) {
  * multi-line strings as block literals, insertion order preserved.
  * ==================================================================== */
 
-var PLAIN_KEY = /^[A-Za-z0-9_][A-Za-z0-9_.\-]*$/;
+var PLAIN_KEY = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 var NEEDS_QUOTE = /^$|^[\s>|&*!%@`"'#{}[\],]|[:#]\s|:$|\s$|^\s|^(true|false|null|yes|no|on|off|~)$|^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/i;
 
 function yamlKey(k) {

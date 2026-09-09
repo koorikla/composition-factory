@@ -72,6 +72,10 @@ column names the route each tool bridges to.
 | `update_parameter` | `PUT /api/blueprint/parameters/{name}` | Replace a parameter's declaration in full; omitting a key that currently holds a value is refused rather than silently discarding it. |
 | `rename_parameter` | `POST /api/blueprint/parameters/{name}/rename` | Rename a parameter and rewrite every `from: params.<name>` reference. |
 | `delete_parameter` | `DELETE /api/blueprint/parameters/{name}` | Delete a parameter; refused while resource fields still reference it. |
+| `add_resource` | `POST /api/blueprint/resources` | Declare a new composed resource; duplicates refused. |
+| `update_resource` | `PUT /api/blueprint/resources/{name}` | Replace a composed resource's declaration in full. |
+| `rename_resource` | `POST /api/blueprint/resources/{name}/rename` | Rename a composed resource and atomically rewrite status references. |
+| `delete_resource` | `DELETE /api/blueprint/resources/{name}` | Delete a composed resource; refused while other resources wire from its status or metadata. |
 | `add_provider` | `POST /api/providers` | Fetch a provider package (network), cache its schemas, pin its digest, index its kinds. |
 | `list_providers` | `GET /api/providers` | The providers being served, with digest and kind count. |
 | `add_function` | `POST /api/functions` | Fetch a function package (network), cache its input schemas, pin its digest. |
@@ -80,7 +84,7 @@ column names the route each tool bridges to.
 | `adopt_composition` | `POST /api/blueprint/adopt` | Import an existing Crossplane Composition (and optional XRD) YAML manifest into a structured Blueprint; `persist: true` saves to the workspace blueprint file. |
 | `preview_expression` | `POST /api/preview-expression` | Evaluate a Go template expression against synthetic context (`$spec`, `$xr`, `$xrMeta`, `$observed`, `$env`, `$i`, `$resource`). |
 
-The 15 MCP tools above bridge the core Crossplane authoring, schema query, expression preview, generation, validation, provider and function ingestion, and adoption workflows.
+The 19 MCP tools above bridge the core Crossplane authoring, schema query, expression preview, generation, validation, provider and function ingestion, and adoption workflows.
 
 ### Complete HTTP API Route Inventory (`cf serve`)
 

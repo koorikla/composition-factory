@@ -74,10 +74,10 @@ func header(d *Doc, source string) {
 }
 
 func blueprintSource(b *blueprint.Blueprint) string {
-	if b.SourcePath() != "" {
-		return b.SourcePath()
+	if b.Metadata.Name != "" {
+		return b.Metadata.Name
 	}
-	return "blueprints/" + b.Metadata.Name + ".cf.yaml"
+	return "blueprint"
 }
 
 func formatEnvDefault(k blueprint.EnvironmentKey) string {

@@ -382,7 +382,6 @@ function applyDependencyLayout(onlyUnplaced) {
     return el ? el.offsetHeight : 160;
   }
   let x = X0 + width(XR_ID) + GX; // layer 1 starts right of the XR card
-  const xrEl = canvasEl.querySelector('.node[data-id="' + XR_ID + '"]');
   if (!S.getPosition(XR_ID) || !onlyUnplaced) S.setPosition(XR_ID, { x: X0, y: Y0 });
   Object.keys(byLayer).map(Number).sort(function (a, b) { return a - b; }).forEach(function (L) {
     let y = Y0;
@@ -638,10 +637,8 @@ function onPanDown(e) {
   if (e.button !== 0) return;
   if (e.target.closest(".node") || e.target.closest("button") || e.target.closest("svg path")) return;
   const sx = e.clientX, sy = e.clientY, ox = view.x, oy = view.y;
-  let moved = false;
   const abortDrag = startDrag(e, function mv(ev) {
     if (!ev.buttons) { abortDrag(); return; } // release happened while unfocused
-    moved = true;
     view.x = ox + ev.clientX - sx;
     view.y = oy + ev.clientY - sy;
     applyView();
@@ -827,13 +824,6 @@ function uniqueResourceName(d, kind) {
   let i = 2;
   while (names[base + "-" + i]) i++;
   return base + "-" + i;
-}
-
-function uniqueParamName(d) {
-  const params = d.spec.xrd && d.spec.xrd.parameters || {};
-  let i = 1, n = "newField";
-  while (params[n]) { i++; n = "newField" + i; }
-  return n;
 }
 
 /* ---------- duplicate / remove (slice 4) ---------- */
@@ -1588,22 +1578,23 @@ function onPointerDown(e) {
   const sx = e.clientX, sy = e.clientY;
   let lx = start.x, ly = start.y;
 
-  function mv(ev) {
-    if (!ev.buttons) { up(); return; } // release happened while unfocused
-    lx = Math.max(4, start.x + (ev.clientX - sx) / view.k);
-    ly = Math.max(4, start.y + (ev.clientY - sy) / view.k);
-    el.style.left = lx + "px";
-    el.style.top = ly + "px";
-    scheduleWires();
-  }
-  const abortDrag = startDrag(e, mv, function up() {
+  function onUp() {
     S.setPosition(name, { x: lx, y: ly }); // client-side only, recorded on release
     if (Math.abs(lx - start.x) > 3 || Math.abs(ly - start.y) > 3) {
       autoPlaced.delete(name);             // a real drag: the user owns it now
     }
     drawWires();
     gestureEnd();
-  });
+  }
+  function mv(ev) {
+    if (!ev.buttons) { onUp(); return; } // release happened while unfocused
+    lx = Math.max(4, start.x + (ev.clientX - sx) / view.k);
+    ly = Math.max(4, start.y + (ev.clientY - sy) / view.k);
+    el.style.left = lx + "px";
+    el.style.top = ly + "px";
+    scheduleWires();
+  }
+  const abortDrag = startDrag(e, mv, onUp);
   gestureBegin(abortDrag);
   e.preventDefault();
 }

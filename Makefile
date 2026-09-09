@@ -11,10 +11,10 @@ build:
 
 # Lane A: no Docker, no cluster. Must pass anywhere.
 test:
-	go test ./... -short -count=1
+	go test $$(go list ./... | grep -v /node_modules/) -short -count=1
 
 test-race:
-	go test ./... -short -race -count=1
+	go test $$(go list ./... | grep -v /node_modules/) -short -race -count=1
 
 # Lane B: needs a Docker daemon and the crossplane CLI on PATH.
 test-docker:
@@ -52,7 +52,8 @@ undeploy:
 lint:
 	@unformatted="$$(gofmt -l $$(git ls-files '*.go'))"; \
 		if [ -n "$$unformatted" ]; then echo "$$unformatted" >&2; exit 1; fi
-	go vet ./...
+	go vet $$(go list ./... | grep -v /node_modules/)
+	npm run lint:js
 
 # Deeper analysis than vet: staticcheck's default check set, configured in
 # staticcheck.conf. Pinned and `go run` so it needs no separate install and

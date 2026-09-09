@@ -607,3 +607,50 @@ func TestAddProviderDeclaresSourceInBlueprintIdempotently(t *testing.T) {
 		t.Errorf("blueprint sources %+v does not declare added provider %s", b.Spec.Sources, addedProviderRef)
 	}
 }
+
+// TestAddProviderDoesNotBlockReadsDuringFetch verifies that srv.mu is not held
+// while FetchAndSave pulls packages over the network. While a slow fetch is
+// in flight, concurrent reads (GET /api/kinds, GET /api/blueprint) must respond
+// immediately without blocking.
+func TestAddProviderDoesNotBlockReadsDuringFetch(t *testing.T) {
+	fetchStarted := make(chan struct{})
+	fetchProceed := make(chan struct{})
+
+	h, _ := testProviderServer(t, func(ref string) (*xpkg.Package, error) {
+		close(fetchStarted)
+		<-fetchProceed
+		return &xpkg.Package{Ref: ref, Digest: "sha256:added", Docs: [][]byte{
+			managedCRDDoc("sns.aws.m.upbound.io", "Topic", "topics"),
+		}}, nil
+	})
+
+	postDone := make(chan int)
+	go func() {
+		rec := do(t, h, "POST", "/api/providers", `{"ref":"`+addedProviderRef+`"}`)
+		postDone <- rec.Code
+	}()
+
+	// Wait until fetch is in progress
+	<-fetchStarted
+
+	// Verify reads complete immediately without waiting for fetch
+	var kinds struct{ Kinds []index.Kind }
+	if code := getJSON(t, h, "/api/kinds", &kinds); code != 200 {
+		t.Errorf("GET /api/kinds during fetch: status = %d, want 200", code)
+	}
+
+	var bp struct {
+		APIVersion string `json:"apiVersion"`
+		Kind       string `json:"kind"`
+	}
+	if code := getJSON(t, h, "/api/blueprint", &bp); code != 200 {
+		t.Errorf("GET /api/blueprint during fetch: status = %d, want 200", code)
+	}
+
+	// Release fetch and ensure POST completes
+	close(fetchProceed)
+	code := <-postDone
+	if code != http.StatusOK {
+		t.Fatalf("POST /api/providers status = %d, want 200", code)
+	}
+}

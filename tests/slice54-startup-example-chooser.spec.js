@@ -86,3 +86,30 @@ test('guide tab offers starter blueprints that load into the canvas', async ({ p
   const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
   expect(doc.metadata.name).toBe('xpostgres')
 })
+
+test('failed example load keeps modal open and displays error on the card (CF-052)', async ({ page }) => {
+  await page.goto('/')
+  await page.click('#examplesBtn')
+  await expect(page.locator('#examplesOverlay')).toBeVisible()
+
+  // Intercept the load endpoint to return an error
+  await page.route('**/api/examples/irsa/load', route => {
+    route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'cannot fetch provider schema: connection refused' })
+    })
+  })
+
+  const irsaCard = page.locator('.example-card[data-id="irsa"]')
+  await irsaCard.locator('button[data-load-id="irsa"]').click()
+
+  // Modal must stay open (not close reading as success)
+  await expect(page.locator('#examplesOverlay')).toBeVisible()
+
+  // Card must display the error message and error class
+  const cardErr = irsaCard.locator('.example-card-error')
+  await expect(cardErr).toBeVisible()
+  await expect(cardErr).toContainText('cannot fetch provider schema: connection refused')
+  await expect(irsaCard).toHaveClass(/has-error/)
+})

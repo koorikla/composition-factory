@@ -242,9 +242,9 @@ func TestListToolsAdvertisesTheFullOperationSet(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 	want := []string{
-		"add_function", "add_parameter", "add_provider", "adopt_composition", "delete_parameter", "generate",
+		"add_function", "add_parameter", "add_provider", "add_resource", "adopt_composition", "delete_parameter", "delete_resource", "generate",
 		"get_blueprint", "get_kind_fields", "list_kinds", "list_providers", "preview_expression",
-		"rename_parameter", "render_check", "replace_blueprint", "update_parameter",
+		"rename_parameter", "rename_resource", "render_check", "replace_blueprint", "update_parameter", "update_resource",
 	}
 	var got []string
 	for _, tool := range res.Tools {
@@ -520,6 +520,242 @@ func TestDeleteParameterStillReferencedMatchesHTTP(t *testing.T) {
 
 	if _, ok := s.reload(t).Spec.XRD.Parameters["maxMessageSize"]; !ok {
 		t.Error("a refused delete still removed the parameter from disk")
+	}
+}
+
+// --- add_resource ---
+
+func TestAddResource(t *testing.T) {
+	s := newStack(t)
+	s.toolOK(t, "add_resource", map[string]any{
+		"name": "audit-queue",
+		"resource": map[string]any{
+			"kind":     "Queue",
+			"provider": testProviderRef,
+			"fields": map[string]any{
+				"region": map[string]any{"value": "eu-west-1"},
+			},
+		},
+	})
+	res := s.reload(t).ResourceNamed("audit-queue")
+	if res == nil {
+		t.Fatal("added resource did not persist to disk")
+	}
+	if res.Kind != "Queue" || res.Provider != testProviderRef {
+		t.Errorf("persisted resource = %+v, want Queue from %s", res, testProviderRef)
+	}
+	if res.Fields["region"].Value != "eu-west-1" {
+		t.Errorf("persisted field region = %+v, want value eu-west-1", res.Fields["region"])
+	}
+}
+
+func TestAddResourceDuplicateMatchesHTTP(t *testing.T) {
+	s := newStack(t)
+	s.assertToolErrorMatchesHTTP(t,
+		"add_resource", map[string]any{
+			"name": "main-queue",
+			"resource": map[string]any{
+				"kind":     "Queue",
+				"provider": testProviderRef,
+			},
+		},
+		http.MethodPost, "/api/blueprint/resources",
+		`{"name":"main-queue","kind":"Queue","provider":"`+testProviderRef+`"}`)
+}
+
+func TestAddResourceUnknownFieldMatchesHTTP(t *testing.T) {
+	s := newStack(t)
+	s.assertToolErrorMatchesHTTP(t,
+		"add_resource", map[string]any{
+			"name": "audit-queue",
+			"resource": map[string]any{
+				"kind":     "Queue",
+				"provider": testProviderRef,
+				"bogus":    123,
+			},
+		},
+		http.MethodPost, "/api/blueprint/resources",
+		`{"name":"audit-queue","kind":"Queue","provider":"`+testProviderRef+`","bogus":123}`)
+}
+
+func TestAddResourceSchemaValidation(t *testing.T) {
+	s := newStack(t)
+	// Missing resource object
+	text, isErr := s.callTool(t, "add_resource", map[string]any{"name": "audit-queue"})
+	if !isErr {
+		t.Fatalf("add_resource with missing resource succeeded (%s), want a schema validation error", text)
+	}
+	// Missing name
+	text, isErr = s.callTool(t, "add_resource", map[string]any{
+		"resource": map[string]any{"kind": "Queue"},
+	})
+	if !isErr {
+		t.Fatalf("add_resource with missing name succeeded (%s), want a schema validation error", text)
+	}
+}
+
+// --- update_resource ---
+
+func TestUpdateResource(t *testing.T) {
+	s := newStack(t)
+	s.toolOK(t, "update_resource", map[string]any{
+		"name": "main-queue",
+		"resource": map[string]any{
+			"kind":     "Queue",
+			"provider": testProviderRef,
+			"fields": map[string]any{
+				"region": map[string]any{"value": "eu-north-1"},
+			},
+		},
+	})
+	res := s.reload(t).ResourceNamed("main-queue")
+	if res == nil {
+		t.Fatal("updated resource not found on disk")
+	}
+	if res.Fields["region"].Value != "eu-north-1" {
+		t.Errorf("fields[region].Value = %q after update, want eu-north-1", res.Fields["region"].Value)
+	}
+}
+
+func TestUpdateResourceUnknownNameMatchesHTTP(t *testing.T) {
+	s := newStack(t)
+	s.assertToolErrorMatchesHTTP(t,
+		"update_resource", map[string]any{
+			"name": "nonexistent",
+			"resource": map[string]any{
+				"kind":     "Queue",
+				"provider": testProviderRef,
+			},
+		},
+		http.MethodPut, "/api/blueprint/resources/nonexistent",
+		`{"kind":"Queue","provider":"`+testProviderRef+`"}`)
+}
+
+func TestUpdateResourceNameMismatchMatchesHTTP(t *testing.T) {
+	s := newStack(t)
+	s.assertToolErrorMatchesHTTP(t,
+		"update_resource", map[string]any{
+			"name": "main-queue",
+			"resource": map[string]any{
+				"name":     "other-name",
+				"kind":     "Queue",
+				"provider": testProviderRef,
+			},
+		},
+		http.MethodPut, "/api/blueprint/resources/main-queue",
+		`{"name":"other-name","kind":"Queue","provider":"`+testProviderRef+`"}`)
+}
+
+func TestUpdateResourceSchemaValidation(t *testing.T) {
+	s := newStack(t)
+	text, isErr := s.callTool(t, "update_resource", map[string]any{"name": "main-queue"})
+	if !isErr {
+		t.Fatalf("update_resource with missing resource succeeded (%s), want schema validation error", text)
+	}
+}
+
+// --- rename_resource ---
+
+func TestRenameResource(t *testing.T) {
+	s := newStack(t)
+	s.toolOK(t, "rename_resource", map[string]any{
+		"name": "main-queue",
+		"to":   "primary-queue",
+	})
+
+	b := s.reload(t)
+	if b.ResourceNamed("primary-queue") == nil {
+		t.Fatal("renamed resource primary-queue not found on disk")
+	}
+	if b.ResourceNamed("main-queue") != nil {
+		t.Fatal("old resource name main-queue still declared on disk")
+	}
+}
+
+func TestRenameResourceUnknownMatchesHTTP(t *testing.T) {
+	s := newStack(t)
+	s.assertToolErrorMatchesHTTP(t,
+		"rename_resource", map[string]any{"name": "nonexistent", "to": "other"},
+		http.MethodPost, "/api/blueprint/resources/nonexistent/rename",
+		`{"to":"other"}`)
+}
+
+func TestRenameResourceCollisionMatchesHTTP(t *testing.T) {
+	s := newStack(t)
+	// Add a second resource first
+	s.toolOK(t, "add_resource", map[string]any{
+		"name": "audit-queue",
+		"resource": map[string]any{
+			"kind":     "Queue",
+			"provider": testProviderRef,
+		},
+	})
+	s.assertToolErrorMatchesHTTP(t,
+		"rename_resource", map[string]any{"name": "audit-queue", "to": "main-queue"},
+		http.MethodPost, "/api/blueprint/resources/audit-queue/rename",
+		`{"to":"main-queue"}`)
+}
+
+func TestRenameResourceSchemaValidation(t *testing.T) {
+	s := newStack(t)
+	text, isErr := s.callTool(t, "rename_resource", map[string]any{"name": "main-queue"})
+	if !isErr {
+		t.Fatalf("rename_resource with missing 'to' succeeded (%s), want schema validation error", text)
+	}
+}
+
+// --- delete_resource ---
+
+func TestDeleteResource(t *testing.T) {
+	s := newStack(t)
+	// Add a disposable resource
+	s.toolOK(t, "add_resource", map[string]any{
+		"name": "audit-queue",
+		"resource": map[string]any{
+			"kind":     "Queue",
+			"provider": testProviderRef,
+		},
+	})
+	if s.reload(t).ResourceNamed("audit-queue") == nil {
+		t.Fatal("pre-condition: audit-queue was not added")
+	}
+	s.toolOK(t, "delete_resource", map[string]any{"name": "audit-queue"})
+	if s.reload(t).ResourceNamed("audit-queue") != nil {
+		t.Fatal("deleted resource is still declared on disk")
+	}
+}
+
+func TestDeleteResourceUnknownMatchesHTTP(t *testing.T) {
+	s := newStack(t)
+	s.assertToolErrorMatchesHTTP(t,
+		"delete_resource", map[string]any{"name": "nonexistent"},
+		http.MethodDelete, "/api/blueprint/resources/nonexistent", "")
+}
+
+func TestDeleteResourceReferencedMatchesHTTP(t *testing.T) {
+	s := newStack(t)
+	// Add second resource referencing main-queue's status
+	s.toolOK(t, "add_resource", map[string]any{
+		"name": "audit-queue",
+		"resource": map[string]any{
+			"kind":     "Queue",
+			"provider": testProviderRef,
+			"fields": map[string]any{
+				"region": map[string]any{"from": "resources.main-queue.status.atProvider.url"},
+			},
+		},
+	})
+	// Now attempt to delete main-queue; should fail with conflict parity
+	s.assertToolErrorMatchesHTTP(t,
+		"delete_resource", map[string]any{"name": "main-queue"},
+		http.MethodDelete, "/api/blueprint/resources/main-queue", "")
+}
+
+func TestDeleteResourceSchemaValidation(t *testing.T) {
+	s := newStack(t)
+	text, isErr := s.callTool(t, "delete_resource", map[string]any{})
+	if !isErr {
+		t.Fatalf("delete_resource with missing 'name' succeeded (%s), want schema validation error", text)
 	}
 }
 

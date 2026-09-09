@@ -34,6 +34,7 @@ var warnMsg = null;              // verbatim server error to show, or null
 var uiMode = {};                 // path -> "v"|"w"|"r" local mode override (selected resource only)
 var pendingNewParam = null;      // field path currently showing the inline new-parameter form
 var pendingNewMapEntry = null;   // map field path currently showing the inline add-key form
+var pendingFocusParam = null;    // parameter name to focus and select in XRD inspector after render
 var renderToken = 0;
 
 var kindsPromise = null;         // cached GET /api/kinds
@@ -571,8 +572,8 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
   if (isMap) {
     if (m === "w") {
       if (dm === "w" && !uiMode[f.path] && entry) {
-        var wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
-        var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
+        const wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
+        const bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
         h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
           '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
           '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
@@ -637,8 +638,8 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
   } else {
     if (m === "w") {
       if (dm === "w" && !uiMode[f.path] && entry) {
-        var wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
-        var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
+        const wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
+        const bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
         h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
           '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
           '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
@@ -698,7 +699,7 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
   return h + "</div>";
 }
 
-function workloadPresetHtml(res, doc, allParams, otherResources) {
+function workloadPresetHtml(res, doc, _allParams, _otherResources) {
   if (!res || res.provider !== "k8s") return "";
   var kind = res.kind;
   if (kind !== "Deployment" && kind !== "StatefulSet" && kind !== "DaemonSet" && kind !== "Job" && kind !== "Service") {
@@ -709,7 +710,6 @@ function workloadPresetHtml(res, doc, allParams, otherResources) {
   if (kind === "Deployment" || kind === "StatefulSet" || kind === "DaemonSet") {
     var replicasF = fields["spec.replicas"];
     var replicasVal = replicasF ? (replicasF.value || (replicasF.raw || "")) : "1";
-    var replicasWired = replicasF && replicasF.from ? "params." + replicasF.from : "";
     var imgF = fields["spec.template.spec.containers[0].image"];
     var imgVal = imgF ? (imgF.value || (imgF.from ? "← " + imgF.from : (imgF.raw || ""))) : "";
     var nameF = fields["spec.template.spec.containers[0].name"];
@@ -732,14 +732,14 @@ function workloadPresetHtml(res, doc, allParams, otherResources) {
       return "";
     }
 
-    var selAppF = fields["spec.selector.matchLabels"] || fields["spec.selector.matchLabels.app"] || fields["spec.selector.matchLabels[app]"];
-    var tmplAppF = fields["spec.template.metadata.labels"] || fields["spec.template.metadata.labels.app"] || fields["spec.template.metadata.labels[app]"];
-    var selAppVal = extractApp(selAppF);
-    var tmplAppVal = extractApp(tmplAppF);
-    var appLabel = selAppVal || tmplAppVal || res.name;
-    var isSynced = selAppVal && tmplAppVal && selAppVal === tmplAppVal;
+    const selAppF = fields["spec.selector.matchLabels"] || fields["spec.selector.matchLabels.app"] || fields["spec.selector.matchLabels[app]"];
+    const tmplAppF = fields["spec.template.metadata.labels"] || fields["spec.template.metadata.labels.app"] || fields["spec.template.metadata.labels[app]"];
+    const selAppVal = extractApp(selAppF);
+    const tmplAppVal = extractApp(tmplAppF);
+    const appLabel = selAppVal || tmplAppVal || res.name;
+    const isSynced = selAppVal && tmplAppVal && selAppVal === tmplAppVal;
 
-    var h = '<div class="insp-sec workload-card" style="margin:10px 0;padding:10px 12px;border:1px solid var(--wire-xrd);background:var(--surface-2);border-radius:6px">' +
+    const h = '<div class="insp-sec workload-card" style="margin:10px 0;padding:10px 12px;border:1px solid var(--wire-xrd);background:var(--surface-2);border-radius:6px">' +
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
       '<span style="font-size:11px;font-weight:600;color:var(--wire-xrd);text-transform:uppercase;letter-spacing:0.5px">Workload Selectors &amp; Pod Spec</span>' +
       (isSynced ? '<span class="chip-ok" style="font-size:10px">Selectors Aligned</span>' : '<span style="color:var(--warn);font-size:10px;font-weight:600">Sync Required</span>') +
@@ -770,8 +770,8 @@ function workloadPresetHtml(res, doc, allParams, otherResources) {
   }
 
   if (kind === "Service") {
-    var selAppF = fields["spec.selector"] || fields["spec.selector.app"] || fields["spec.selector[app]"];
-    var selAppVal = "";
+    const selAppF = fields["spec.selector"] || fields["spec.selector.app"] || fields["spec.selector[app]"];
+    let selAppVal = "";
     if (selAppF) {
       if (selAppF.value) selAppVal = selAppF.value;
       else if (selAppF.raw) {
@@ -785,18 +785,18 @@ function workloadPresetHtml(res, doc, allParams, otherResources) {
         }
       }
     }
-    var portF = fields["spec.ports[0].port"];
-    var portVal = portF ? (portF.value || portF.raw || "") : "80";
-    var tgtPortF = fields["spec.ports[0].targetPort"];
-    var tgtPortVal = tgtPortF ? (tgtPortF.value || tgtPortF.raw || "") : "80";
-    var svcTypeF = fields["spec.type"];
-    var svcTypeVal = svcTypeF ? (svcTypeF.value || "") : "ClusterIP";
+    const portF = fields["spec.ports[0].port"];
+    const portVal = portF ? (portF.value || portF.raw || "") : "80";
+    const tgtPortF = fields["spec.ports[0].targetPort"];
+    const tgtPortVal = tgtPortF ? (tgtPortF.value || tgtPortF.raw || "") : "80";
+    const svcTypeF = fields["spec.type"];
+    const svcTypeVal = svcTypeF ? (svcTypeF.value || "") : "ClusterIP";
 
-    var candidateWorkloads = (doc.spec && doc.spec.resources || []).filter(function (r) {
+    const candidateWorkloads = (doc.spec && doc.spec.resources || []).filter(function (r) {
       return r.name !== res.name && (r.kind === "Deployment" || r.kind === "StatefulSet" || r.kind === "DaemonSet");
     });
 
-    var h = '<div class="insp-sec service-card" style="margin:10px 0;padding:10px 12px;border:1px solid var(--wire-status);background:var(--surface-2);border-radius:6px">' +
+    let h = '<div class="insp-sec service-card" style="margin:10px 0;padding:10px 12px;border:1px solid var(--wire-status);background:var(--surface-2);border-radius:6px">' +
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
       '<span style="font-size:11px;font-weight:600;color:var(--wire-status);text-transform:uppercase;letter-spacing:0.5px">Service Selectors &amp; Ports</span>' +
       (selAppVal ? '<span class="chip-ok" style="font-size:10px">Target: ' + esc(selAppVal) + '</span>' : '<span style="color:var(--warn);font-size:10px;font-weight:600">Unset Selector</span>') +
@@ -1261,6 +1261,14 @@ async function renderXRD() {
   var __snap = snapshotFocusedEdit();
   box.innerHTML = h;
   restoreFocusedEdit(__snap);
+  if (pendingFocusParam) {
+    var pInp = box.querySelector('input[data-pn="' + CSS.escape(pendingFocusParam) + '"]');
+    if (pInp) {
+      pInp.focus();
+      if (pInp.select) pInp.select();
+      pendingFocusParam = null;
+    }
+  }
 }
 
 /* ---------------- render dispatch ---------------- */
@@ -1601,7 +1609,7 @@ var boxClickActions = [
   {
     selector: "button[data-m]",
     needsDoc: true,
-    run: function (mb, doc) {
+    run: function (mb, _doc) {
       var isEnv = mb.hasAttribute("data-env");
       var path = mb.getAttribute("data-path");
       var m = mb.getAttribute("data-m");
@@ -1765,7 +1773,20 @@ var boxClickActions = [
       var params = paramsOf(doc);
       var base = "newParam", nm = base, i = 2;
       while (params[nm]) { nm = base + i; i++; }
-      op(function () { return store.addParameter(nm, { type: "string", required: false }); });
+      pendingFocusParam = nm;
+      op(function () { return store.addParameter(nm, { type: "string", required: false }); })
+        .then(function (res) {
+          if (res === null) {
+            pendingFocusParam = null;
+            return;
+          }
+          var inp = box.querySelector('input[data-pn="' + CSS.escape(nm) + '"]');
+          if (inp) {
+            inp.focus();
+            if (inp.select) inp.select();
+            pendingFocusParam = null;
+          }
+        });
     }
   },
   {
@@ -2076,22 +2097,22 @@ function onBoxChange(e) {
   }
 
   if (t.hasAttribute("data-wire")) {
-    var path = t.getAttribute("data-wire");
-    var v = t.value;
+    const path = t.getAttribute("data-wire");
+    const v = t.value;
     if (v === "__new__") { pendingNewParam = path; render(); return; }
     if (!v) return;
-    var fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
+    const fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
     setField(path, { from: fromVal, value: "", raw: "" })
       .then(function (r) { if (r !== null) { delete uiMode[path]; pendingNewParam = null; } });
     return;
   }
 
   if (t.hasAttribute("data-env-wire")) {
-    var path = t.getAttribute("data-env-wire");
-    var v = t.value;
+    const path = t.getAttribute("data-env-wire");
+    const v = t.value;
     if (v === "__new__") { pendingNewParam = "env:" + path; render(); return; }
     if (!v) return;
-    var fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
+    const fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
     setEnvelopeField(path, { from: fromVal, value: "", raw: "" })
       .then(function (r) { if (r !== null) { delete uiMode["env:" + path]; pendingNewParam = null; } });
     return;
@@ -2249,7 +2270,9 @@ export function init(rootEl, deps) {
   box.addEventListener("change", onBoxChange);
   box.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT")) {
+      e.preventDefault();
       e.target.blur();
+      e.target.dispatchEvent(new Event("change", { bubbles: true }));
     }
   });
   box.addEventListener("input", function (e) {
@@ -2284,6 +2307,7 @@ export function init(rootEl, deps) {
     uiMode = {};
     pendingNewParam = null;
     pendingNewMapEntry = null;
+    pendingFocusParam = null;
     warnMsg = null;
     render();
   });

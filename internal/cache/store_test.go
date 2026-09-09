@@ -1,7 +1,11 @@
 package cache
 
 import (
+	"context"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -275,8 +279,21 @@ func TestStoreList(t *testing.T) {
 		t.Fatalf("List on empty cache returned %v, want empty", refs)
 	}
 
+	// Missing root dir returns nil, nil
+	missingStore := New(filepath.Join(t.TempDir(), "nonexistent"))
+	if missingRefs, err := missingStore.List(); err != nil || len(missingRefs) != 0 {
+		t.Fatalf("List on nonexistent root: got (%v, %v), want (nil, nil)", missingRefs, err)
+	}
+
 	_ = s.SaveCRDs("example.org/b:v1", "sha256:1", nil)
 	_ = s.SaveCRDs("example.org/a:v1", "sha256:2", nil)
+
+	// Add a non-directory, an empty directory, and a directory with invalid JSON
+	_ = os.WriteFile(filepath.Join(s.Root, "ignored.txt"), []byte("hi"), 0o644)
+	_ = os.MkdirAll(filepath.Join(s.Root, "empty-dir"), 0o755)
+	corruptDir := filepath.Join(s.Root, "corrupt-dir")
+	_ = os.MkdirAll(corruptDir, 0o755)
+	_ = os.WriteFile(filepath.Join(corruptDir, "crds.json"), []byte("{bad json"), 0o644)
 
 	refs, err = s.List()
 	if err != nil {
@@ -297,11 +314,13 @@ func TestLockFunctionsSupport(t *testing.T) {
 
 	l.Set("xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0", "sha256:prov123")
 	l.Set("xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0", "sha256:fn123")
+	// Test updating existing function entry
+	l.Set("xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0", "sha256:fn123-updated")
 
 	if len(l.Providers) != 1 || l.Providers[0].Ref != "xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0" {
 		t.Errorf("Providers: %v", l.Providers)
 	}
-	if len(l.Functions) != 1 || l.Functions[0].Ref != "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0" {
+	if len(l.Functions) != 1 || l.Functions[0].Digest != "sha256:fn123-updated" {
 		t.Errorf("Functions: %v", l.Functions)
 	}
 
@@ -323,5 +342,238 @@ func TestLockFunctionsSupport(t *testing.T) {
 	}
 	if len(readBack.Functions) != 0 {
 		t.Errorf("Functions after remove: %v", readBack.Functions)
+	}
+}
+
+func TestLockFindFunction(t *testing.T) {
+	var nilLock *Lock
+	if _, ok := nilLock.FindFunction("anything"); ok {
+		t.Fatal("expected nil Lock to return false")
+	}
+
+	l := &Lock{
+		Functions: []LockEntry{
+			{Ref: "xpkg.crossplane.io/crossplane-contrib/function-patch-and-transform:v0.1.4", Digest: "sha256:pt123"},
+			{Ref: "xpkg.upbound.io/crossplane-contrib/function-kcl:v0.11.2", Digest: "sha256:kcl123"},
+		},
+	}
+
+	// Exact ref match
+	entry, ok := l.FindFunction("xpkg.crossplane.io/crossplane-contrib/function-patch-and-transform:v0.1.4")
+	if !ok || entry.Digest != "sha256:pt123" {
+		t.Errorf("exact ref match failed: got (%+v, %v)", entry, ok)
+	}
+
+	// Function name stripped like "function-patch-and-transform"
+	entry, ok = l.FindFunction("function-patch-and-transform")
+	if !ok || entry.Digest != "sha256:pt123" {
+		t.Errorf("function-patch-and-transform match failed: got (%+v, %v)", entry, ok)
+	}
+	// Also test stripped to base name
+	entry, ok = l.FindFunction("patch-and-transform")
+	if !ok || entry.Digest != "sha256:pt123" {
+		t.Errorf("patch-and-transform match failed: got (%+v, %v)", entry, ok)
+	}
+
+	// Prefix normalization like "fn-"
+	entry, ok = l.FindFunction("fn-patch-and-transform")
+	if !ok || entry.Digest != "sha256:pt123" {
+		t.Errorf("fn- prefix match failed: got (%+v, %v)", entry, ok)
+	}
+	entry, ok = l.FindFunction("fn-kcl")
+	if !ok || entry.Digest != "sha256:kcl123" {
+		t.Errorf("fn-kcl match failed: got (%+v, %v)", entry, ok)
+	}
+
+	// Not found case
+	if _, ok := l.FindFunction("function-nonexistent"); ok {
+		t.Error("expected function-nonexistent to return false")
+	}
+	if _, ok := l.FindFunction(""); ok {
+		t.Error("expected empty string to return false")
+	}
+}
+
+func TestLockFindProvider(t *testing.T) {
+	var nilLock *Lock
+	if _, ok := nilLock.FindProvider("anything"); ok {
+		t.Fatal("expected nil Lock to return false")
+	}
+
+	l := &Lock{
+		Providers: []LockEntry{
+			{Ref: "xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0", Digest: "sha256:sqs123"},
+			{Ref: "xpkg.upbound.io/upbound/provider-aws-s3@sha256:s3digest", Digest: "sha256:s3digest"},
+		},
+	}
+
+	// Exact match
+	entry, ok := l.FindProvider("xpkg.upbound.io/upbound/provider-aws-sqs:v2.7.0")
+	if !ok || entry.Digest != "sha256:sqs123" {
+		t.Errorf("exact match failed: got (%+v, %v)", entry, ok)
+	}
+
+	// Tagged version / without tag (prefix with :)
+	entry, ok = l.FindProvider("xpkg.upbound.io/upbound/provider-aws-sqs")
+	if !ok || entry.Digest != "sha256:sqs123" {
+		t.Errorf("provider prefix match failed: got (%+v, %v)", entry, ok)
+	}
+
+	// Digest prefix (prefix with @)
+	entry, ok = l.FindProvider("xpkg.upbound.io/upbound/provider-aws-s3")
+	if !ok || entry.Digest != "sha256:s3digest" {
+		t.Errorf("provider @ digest match failed: got (%+v, %v)", entry, ok)
+	}
+
+	// Bare segment match
+	entry, ok = l.FindProvider("provider-aws-sqs")
+	if !ok || entry.Digest != "sha256:sqs123" {
+		t.Errorf("provider bare segment match failed: got (%+v, %v)", entry, ok)
+	}
+
+	// Not found case
+	if _, ok := l.FindProvider("provider-azure"); ok {
+		t.Error("expected provider-azure to return false")
+	}
+	if _, ok := l.FindProvider(""); ok {
+		t.Error("expected empty string to return false")
+	}
+}
+
+func TestDefaultRoot(t *testing.T) {
+	root := DefaultRoot()
+	if root == "" {
+		t.Fatal("DefaultRoot returned empty string")
+	}
+}
+
+func TestStoreClear(t *testing.T) {
+	s := New(t.TempDir())
+	pkg := &xpkg.Package{Ref: "example.org/provider-test:v1", Digest: "sha256:abc"}
+	if err := s.Save(pkg, []schema.CRD{{Kind: "Widget"}}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	s.mu.RLock()
+	if len(s.memo) == 0 {
+		s.mu.RUnlock()
+		t.Fatal("expected memo to be populated after Save")
+	}
+	s.mu.RUnlock()
+
+	s.Clear()
+
+	s.mu.RLock()
+	if s.memo != nil {
+		s.mu.RUnlock()
+		t.Fatalf("expected s.memo to be nil after Clear, got %v", s.memo)
+	}
+	s.mu.RUnlock()
+
+	got, err := s.Load(pkg.Ref)
+	if err != nil {
+		t.Fatalf("Load after Clear: %v", err)
+	}
+	if len(got) != 1 || got[0].Kind != "Widget" {
+		t.Fatalf("Load returned unexpected CRDs: %v", got)
+	}
+}
+
+func TestFetchAndSave(t *testing.T) {
+	dir := t.TempDir()
+	s := New(filepath.Join(dir, "cache"))
+	lockPath := filepath.Join(dir, ".cf.lock")
+
+	validCRDDoc := []byte(`apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.test.org
+spec:
+  group: test.org
+  names:
+    kind: Widget
+    plural: widgets
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+`)
+
+	ref := "example.org/provider-test:v1.0.0"
+	ctx := context.Background()
+
+	// 1. Success case
+	pkg, crds, err := s.FetchAndSave(ctx, lockPath, ref, func(r string) (*xpkg.Package, error) {
+		return &xpkg.Package{
+			Ref:    r,
+			Digest: "sha256:deadbeef",
+			Docs:   [][]byte{validCRDDoc},
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("FetchAndSave failed: %v", err)
+	}
+	if len(crds) != 1 || crds[0].Kind != "Widget" {
+		t.Fatalf("unexpected crds: %v", crds)
+	}
+	if pkg.Digest != "sha256:deadbeef" {
+		t.Fatalf("unexpected digest: %s", pkg.Digest)
+	}
+
+	// Verify lock file written
+	l, err := ReadLock(lockPath)
+	if err != nil {
+		t.Fatalf("ReadLock: %v", err)
+	}
+	if entry, ok := l.FindProvider(ref); !ok || entry.Digest != "sha256:deadbeef" {
+		t.Fatalf("lock missing provider entry: %v", l.Providers)
+	}
+
+	// 2. Fetch error
+	_, _, err = s.FetchAndSave(ctx, lockPath, "bad/ref", func(string) (*xpkg.Package, error) {
+		return nil, fmt.Errorf("fetch error")
+	})
+	if err == nil {
+		t.Fatal("expected error on fetch failure")
+	}
+
+	// 3. Parse error
+	_, _, err = s.FetchAndSave(ctx, lockPath, "invalid/yaml", func(r string) (*xpkg.Package, error) {
+		return &xpkg.Package{
+			Ref:    r,
+			Digest: "sha256:111",
+			Docs:   [][]byte{[]byte(":::invalid yaml")},
+		}, nil
+	})
+	if err == nil {
+		t.Fatal("expected error on parse failure")
+	}
+}
+
+func TestSlugEmptyFallback(t *testing.T) {
+	// ref where stripped segment is empty should fallback to "ref-<hash>"
+	res := slug("///")
+	if !strings.HasPrefix(res, "ref-") {
+		t.Errorf("slug(\"///\") = %q, want prefix \"ref-\"", res)
+	}
+}
+
+func TestReadLockInvalidJSONErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "invalid.lock")
+	if err := os.WriteFile(path, []byte("{invalid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadLock(path); err == nil {
+		t.Fatal("expected error reading invalid json lockfile, got nil")
+	}
+}
+
+func TestSanitizeSlugSegment(t *testing.T) {
+	if got := sanitizeSlugSegment("a/b:c@d!e_1.2-3"); got != "a_b_c_d_e_1.2-3" {
+		t.Errorf("sanitizeSlugSegment = %q, want %q", got, "a_b_c_d_e_1.2-3")
 	}
 }

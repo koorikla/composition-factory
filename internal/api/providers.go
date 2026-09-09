@@ -101,17 +101,14 @@ type addProviderRequest struct {
 // fetch error's text verbatim (it names the registry's own reason), 500 the
 // server's own environment failing (lockfile, cache, index rebuild).
 //
-// srv.mu is held from the duplicate check through the index swap — the same
-// whole-sequence lost-update discipline as blueprint PUT (see server.mu).
-// Two concurrent adds otherwise both rebuild from the same starting index
-// and the second swap silently discards the first's kinds; two adds of the
-// same ref would both pass the duplicate check and pull twice. Holding the
-// lock across the fetch also serializes provider adds against blueprint
-// edits and generation for the duration of a pull; for this loopback,
-// single-user server that is the acceptable cost of making the check-fetch-
-// pin-swap sequence one atomic step, not a gap-riddled pipeline.
+// An initial duplicate check is performed under a quick srv.mu lock so already-cached
+// providers return 409 immediately without network traffic.
+// FetchAndSave then runs outside srv.mu so pulling large OCI images over the network
+// does not starve read endpoints (GET /api/kinds, GET /api/blueprint, preview rendering).
+// Once fetched, srv.mu is re-acquired to check duplicates, append to srv.Providers,
+// update the blueprint sources, and rebuild the index and schemas atomically.
 //
-// On-disk ordering inside the critical section mirrors ProviderAddCmd (see
+// On-disk ordering inside FetchAndSave mirrors ProviderAddCmd (see
 // cmd/cf/provider.go): lock first, then cache. A failure between the two
 // leaves a pin with no cached entry, which Load reports loudly with its own
 // "run: cf provider add <ref>" message — a visible, recoverable state,
@@ -135,14 +132,14 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	srv.mu.Lock()
-	defer srv.mu.Unlock()
-
 	for _, ref := range srv.Providers {
 		if ref == req.Ref {
+			srv.mu.Unlock()
 			writeJSONError(w, http.StatusConflict, fmt.Sprintf("provider %q is already cached", req.Ref))
 			return
 		}
 	}
+	srv.mu.Unlock()
 
 	fetch := srv.fetch
 	if fetch == nil {
@@ -154,6 +151,16 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSONError(w, http.StatusBadGateway, err.Error())
 		return
+	}
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	for _, ref := range srv.Providers {
+		if ref == req.Ref {
+			writeJSONError(w, http.StatusConflict, fmt.Sprintf("provider %q is already cached", req.Ref))
+			return
+		}
 	}
 
 	// Rebuild over the existing providers' CACHED schemas plus the CRDs just
