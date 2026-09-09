@@ -1,3 +1,10 @@
+- [x] **CF-121 — Renaming the XRD kind in the inspector leaves `plural` at the old value, the
+      plural is shown as static text and is editable nowhere, so Generate names every file and
+      the Composition after a kind that no longer exists.**
+      Re-derived XRD plural via `inferPlural` matching Go `adopt.go:inferPlural` when XRD kind
+      is updated in `#xk`, updating `spec.xrd.kind` and `spec.xrd.plural` simultaneously and
+      reflecting on inspector subtitle, API, and generated file naming.
+      — completed 2026-09-09
 - [x] **CF-109 — *(engine)* A `spec.conventions` entry that matches a native-kind field is
       silently ignored — not applied, not refused — although docs/dsl.md:342 and :418 say it is
       refused with `conventions cannot match native Kubernetes kind`.**

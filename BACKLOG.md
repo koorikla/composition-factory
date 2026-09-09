@@ -85,11 +85,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       `404 /api/kinds/autoready.fn.crossplane.io%2Fv1alpha1/AutoReady/fields`. The canvas's Import
       takes one file, so the XRD is never alongside — the CLI face of the same loss is CF-108.
       Round-Trip Rule: cf's own output must come back intact, or the loss must be named on screen.
-- [ ] **CF-121 — Renaming the XRD kind in the inspector leaves `plural` at the old value, the
-      plural is shown as static text and is editable nowhere, so Generate names every file and
-      the Composition after a kind that no longer exists.** J2 F3, twice: `XApp` → `XPostgres`,
-      subtitle stays `xapps.platform.example.org`, `/api/blueprint` `"kind":"XPostgres","plural":"xapps"`,
-      files `xapps.platform.example.org.yaml`. Renaming must re-derive or expose the plural.
 ### P2
 
 - [ ] **CF-093 — In the published image Validate always answers "validation check unavailable"
