@@ -245,6 +245,7 @@ function drawKinds() {
           (k.provider ? " (" + k.provider + ")" : "");
         h += '<div class="kind" draggable="true"' +
           ' title="' + esc(fullTitle) + '"' +
+          ' tabindex="0" role="button" aria-label="Add ' + esc(k.kind) + '"' +
           ' data-kind="' + esc(k.kind) + '"' +
           ' data-av="' + esc(k.apiVersion) + '"' +
           ' data-provider="' + esc(k.provider || "") + '"' +
@@ -627,7 +628,78 @@ function showKindPreview(row) {
   }).catch(function () { if (previewFor === key) hideKindPreview(); });
 }
 
+/* ---------------- kind placement (CF-050) ---------------- */
+
+function slug(k) {
+  return String(k).replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+}
+
+function uniqueResourceName(d, kind) {
+  const base = slug(kind);
+  const names = {};
+  ((d && d.spec && d.spec.resources) || []).forEach(function (r) { names[r.name] = true; });
+  if (!names[base]) return base;
+  let i = 2;
+  while (names[base + "-" + i]) i++;
+  return base + "-" + i;
+}
+
+function nextCardPosition(d) {
+  const positions = store.state.positions || {};
+  const resources = (d && d.spec && d.spec.resources) || [];
+  if (!resources.length) {
+    return { x: 330, y: 40 };
+  }
+  let maxX = 0;
+  let maxY = 0;
+  resources.forEach(function (r) {
+    const p = positions[r.name];
+    if (p) {
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+  });
+  if (maxX === 0 && maxY === 0) {
+    return { x: 330 + (resources.length * 28), y: 40 + (resources.length * 28) };
+  }
+  if (maxY + 180 > 560) {
+    return { x: maxX + 260, y: 40 };
+  }
+  return { x: Math.max(330, maxX), y: maxY + 140 };
+}
+
+function placeKind(kindName, apiVersion, provider) {
+  const d = store.state.doc;
+  if (!d) return;
+  const name = uniqueResourceName(d, kindName);
+  const pos = nextCardPosition(d);
+  store.setPosition(name, pos);
+  store.select(name);
+  store.replaceDoc(function (next) {
+    next.spec = next.spec || {};
+    if (provider && provider !== "k8s" && provider !== "cluster") {
+      next.spec.sources = next.spec.sources || [];
+      const isCrds = /\.ya?ml$/.test(provider);
+      const declared = next.spec.sources.some(function (s) {
+        return isCrds ? s.crds === provider : s.provider === provider;
+      });
+      if (!declared) next.spec.sources.push(isCrds ? { crds: provider } : { provider: provider });
+    }
+    next.spec.resources = next.spec.resources || [];
+    next.spec.resources.push({
+      name: name,
+      kind: kindName,
+      provider: provider || "",
+      fields: {},
+    });
+  }).then(function (res) {
+    if (res) store.select(name);
+  });
+}
+
 /* ---------------- event handlers & subscriptions ---------------- */
+
+let isPaletteDragging = false;
 
 function bindPaletteEvents() {
   if (tabsEl) {
@@ -698,6 +770,15 @@ function bindPaletteEvents() {
   });
 
   railEl.addEventListener("click", function (e) {
+    const kindRow = e.target.closest(".kind[data-kind]");
+    if (kindRow && !isPaletteDragging) {
+      hideKindPreview();
+      const kindName = kindRow.getAttribute("data-kind");
+      const apiVersion = kindRow.getAttribute("data-av");
+      const provider = kindRow.getAttribute("data-provider");
+      placeKind(kindName, apiVersion, provider);
+      return;
+    }
     const grpToggle = e.target.closest("[data-grp-toggle]");
     if (grpToggle) {
       const g = grpToggle.getAttribute("data-grp-toggle");
@@ -945,6 +1026,7 @@ function bindPaletteEvents() {
   railEl.addEventListener("mouseleave", hideKindPreview);
 
   railEl.addEventListener("dragstart", function (e) {
+    isPaletteDragging = true;
     hideKindPreview();
     const k = e.target.closest(".kind");
     if (!k) return;
@@ -958,6 +1040,24 @@ function bindPaletteEvents() {
       e.dataTransfer.setData("application/json", payload);
       e.dataTransfer.setData("text/plain", payload);
     } catch (_) { /* older engines */ }
+  });
+
+  railEl.addEventListener("dragend", function () {
+    setTimeout(function () { isPaletteDragging = false; }, 50);
+  });
+
+  railEl.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") {
+      const kindRow = e.target.closest(".kind[data-kind]");
+      if (kindRow) {
+        e.preventDefault();
+        hideKindPreview();
+        const kindName = kindRow.getAttribute("data-kind");
+        const apiVersion = kindRow.getAttribute("data-av");
+        const provider = kindRow.getAttribute("data-provider");
+        placeKind(kindName, apiVersion, provider);
+      }
+    }
   });
 }
 

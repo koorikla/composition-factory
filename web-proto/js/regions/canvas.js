@@ -137,6 +137,7 @@ function xrCardHTML(d, sel) {
   const params = xrd.parameters || {};
   const pos = S.getPosition(XR_ID) || { x: 36, y: 48 };
   let h = '<div class="node' + (sel === XR_ID ? " sel" : "") + '" data-id="' + esc(XR_ID) + '"' +
+    ' tabindex="0" role="region" aria-label="' + esc((xrd.kind || "XR") + " resource " + (d.metadata && d.metadata.name || "xrd")) + '"' +
     ' style="left:' + pos.x + 'px;top:' + pos.y + 'px">' +
     '<div class="node-h" style="background:var(--wire-xrd-soft)">' +
     '<span class="sw" style="background:' + COLORS.xrd + '"></span>' +
@@ -181,13 +182,14 @@ function resourceCardHTML(d, r, sel) {
 
   let h = '<div class="node' + (sel === r.name ? " sel" : "") +
     (r.forEach ? " stack" : "") + '" data-id="' + esc(r.name) + '"' +
+    ' tabindex="0" role="region" aria-label="' + esc(r.kind + " resource " + r.name) + '"' +
     ' style="left:' + pos.x + 'px;top:' + pos.y + 'px">' +
     '<div class="node-h" style="background:var(--surface-2)">' +
     '<span class="sw" style="background:' + (COLORS[fam] || "var(--wire-ref)") + '"></span>' +
     '<span class="k">' + esc(r.kind) + '</span>' +
     '<span class="nm">' + esc(r.name) + '</span>' +
-    '<button class="del" data-act="duplicate" data-res="' + esc(r.name) + '" title="Duplicate (\u2318C \u2318V)">\u29c9</button>' +
-    '<button class="del" data-act="delete" data-res="' + esc(r.name) + '" title="Remove (Delete)">\u00d7</button></div>' +
+    '<button class="del" data-act="duplicate" data-res="' + esc(r.name) + '" title="Duplicate (\u2318C \u2318V)" aria-label="Duplicate resource ' + esc(r.name) + '">\u29c9</button>' +
+    '<button class="del" data-act="delete" data-res="' + esc(r.name) + '" title="Remove (Delete)" aria-label="Delete resource ' + esc(r.name) + '">\u00d7</button></div>' +
     '<span data-resize data-res="' + esc(r.name) + '" title="Drag to resize \u00b7 double-click to reset"' +
     ' style="position:absolute;right:-2px;bottom:-2px;width:14px;height:14px;cursor:nwse-resize;' +
     'border-right:2px solid var(--faint);border-bottom:2px solid var(--faint);border-radius:0 0 4px 0"></span>' +
@@ -938,6 +940,18 @@ function onKeyDown(e) {
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
   if (String(window.getSelection && window.getSelection())) return; // real text copy wins
 
+  // Keyboard selection on focused card (.node)
+  const nodeEl = t && t.closest && t.closest(".node");
+  if (nodeEl && !t.closest("button, input, textarea, a, select, [role='button']")) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      selectedWire = null;
+      const id = nodeEl.getAttribute("data-id");
+      if (id) S.select(id);
+      return;
+    }
+  }
+
   // Keyboard navigation on focused wire path
   if (t && t.classList && t.classList.contains("wire-path")) {
     const idx = Number(t.getAttribute("data-wire-idx"));
@@ -1625,16 +1639,20 @@ function onPointerDown(e) {
   if (e.button !== undefined && e.button !== 0) return;
   if (e.target.closest("[data-act]") || e.target.closest("button")) return;
 
+  const nodeEl = e.target.closest(".node");
+  if (nodeEl) {
+    const name = nodeEl.getAttribute("data-id");
+    if (name) S.select(name);
+  }
+
   const portEl = e.target.closest(".port");
   if (portEl) {
     onWireDragDown(e, portEl);
     return;
   }
 
-  const nodeEl = e.target.closest(".node");
   if (!nodeEl) return;
   const name = nodeEl.getAttribute("data-id");
-  if (name) S.select(name);
 
   const h = e.target.closest(".node-h");
   if (!h) return;
