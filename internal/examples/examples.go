@@ -102,7 +102,7 @@ func All() []Example {
 			Description: "Periodic batch task orchestration composing native Kubernetes CronJob, ConfigMap, and ServiceAccount with cron scheduling and concurrency policies.",
 			Tags:        []string{"Cloud-Agnostic", "Kubernetes", "Batch", "CronJob", "Native"},
 			Sources:     []string{},
-			Icon:        ExampleIcon{Label: "CRON", Color: "#7c3aed"},
+			Icon:        ExampleIcon{Label: "CRON", Color: "var(--wire-status)"},
 			YAML:        strings.TrimSpace(k8sCronJobYAML),
 		},
 		{

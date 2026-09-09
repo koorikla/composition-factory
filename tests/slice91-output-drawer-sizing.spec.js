@@ -70,7 +70,7 @@ test('token definitions in proto.css and canvas-prototype.html remain in sync (z
     while ((m = re.exec(content)) !== null) {
       vars.push(`${m[1]}:${m[2].trim()}`)
     }
-    return vars.slice(0, 75)
+    return vars
   }
   const protoTokens = extractTokens(fs.readFileSync('web-proto/css/proto.css', 'utf8'))
   const canvasTokens = extractTokens(fs.readFileSync('docs/design/canvas-prototype.html', 'utf8'))
