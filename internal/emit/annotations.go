@@ -71,7 +71,7 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 			plan = append(plan, forProviderField{
 				path:       k,
 				rhs:        quoteYAML(f.Value),
-				structured: structuredRHS{kind: rhsLiteral, value: f.Value},
+				structured: structuredRHS{kind: rhsLiteral, value: f.Value, targetType: "string"},
 			})
 		case f.Raw != "":
 			// The raw escape hatch, verbatim as everywhere else. The author
@@ -79,7 +79,7 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 			plan = append(plan, forProviderField{
 				path:       k,
 				rhs:        blueprint.NormalizeRawGoTemplate(f.Raw),
-				structured: structuredRHS{kind: rhsRaw, value: f.Raw},
+				structured: structuredRHS{kind: rhsRaw, value: f.Raw, targetType: "string"},
 			})
 		case f.Template != "":
 			if _, ok := b.Spec.Templates[f.Template]; !ok {
@@ -88,7 +88,7 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 			plan = append(plan, forProviderField{
 				path:       k,
 				rhs:        templateCallRHS(f.Template, r.Name, k),
-				structured: structuredRHS{kind: rhsTemplate, value: f.Template},
+				structured: structuredRHS{kind: rhsTemplate, value: f.Template, targetType: "string"},
 			})
 		case f.From != "":
 			ref, err := blueprint.ParseFrom(f.From)
@@ -111,7 +111,7 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 					})
 					continue
 				}
-				guard, expr, err := statusWire(ref, r, fmt.Sprintf("annotation %q", k), b, crds, wantNamespaced)
+				guard, expr, leafType, err := statusWire(ref, r, fmt.Sprintf("annotation %q", k), b, crds, wantNamespaced)
 				if err != nil {
 					return nil, err
 				}
@@ -126,6 +126,8 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 						optional:   true,
 						guard:      guard,
 						rawExpr:    expr,
+						targetType: "string",
+						sourceType: leafType,
 					},
 				})
 				continue
@@ -143,10 +145,12 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 						path: k,
 						rhs:  rhs,
 						structured: structuredRHS{
-							kind:      rhsEnv,
-							param:     ref.Env,
-							paramSegs: []string{ref.Env},
-							rawExpr:   expr,
+							kind:       rhsEnv,
+							param:      ref.Env,
+							paramSegs:  []string{ref.Env},
+							rawExpr:    expr,
+							targetType: "string",
+							sourceType: envDecl.Type,
 						},
 					})
 				} else {
@@ -157,12 +161,14 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 						rhs:   rhs,
 						guard: guard,
 						structured: structuredRHS{
-							kind:      rhsEnv,
-							param:     ref.Env,
-							paramSegs: []string{ref.Env},
-							optional:  true,
-							guard:     guard,
-							rawExpr:   "$env." + ref.Env,
+							kind:       rhsEnv,
+							param:      ref.Env,
+							paramSegs:  []string{ref.Env},
+							optional:   true,
+							guard:      guard,
+							rawExpr:    "$env." + ref.Env,
+							targetType: "string",
+							sourceType: envDecl.Type,
 						},
 					})
 				}
@@ -178,10 +184,12 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 					path: k,
 					rhs:  rhs,
 					structured: structuredRHS{
-						kind:      rhsParam,
-						param:     ref.Param,
-						paramSegs: []string{ref.Param},
-						rawExpr:   "$spec." + ref.Param,
+						kind:       rhsParam,
+						param:      ref.Param,
+						paramSegs:  []string{ref.Param},
+						rawExpr:    "$spec." + ref.Param,
+						targetType: "string",
+						sourceType: decl.Type,
 					},
 				})
 				continue

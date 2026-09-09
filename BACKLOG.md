@@ -260,32 +260,12 @@ Report and re-runnable repros:
       Verified in-cluster: a live ServiceAccount lost `app: shop` 20 s after applying the
       regenerated Composition.
 
-- [ ] **CF-074 — A status wire into `fields:` is interpolated unquoted, so a string status
-      value that looks like a bool or number changes type and the API server rejects the
-      resource. [V]** The same wire is `| quote`d into an annotation and emitted bare into a
-      field: `internal/emit/composition.go:989-999` documents the asymmetry,
-      `statusWire:1056` checks only that the source leaf is scalar, `statusGuard:1172`
-      returns a bare expression. Repro: `repros/cf-002-status-wire-quoting/` with observed
-      `clusterAddress: "true"` renders `endpoint: true` beside
-      `platform.example.org/endpoint: "true"`; `kubectl apply --dry-run=server` fails with
-      `cannot unmarshal bool into Go struct field ConfigMap.data of type string`.
-      `--validate` cannot catch it — it renders without observed resources.
-
 ### P1
 
 - [ ] **CF-075 — `cf adopt` of a Composition without its XRD invents the plural by appending
       `s`. [V]** `internal/adopt/adopt.go:310-312` sets `Plural = strings.ToLower(Kind)+"s"`
       though the real plural was already read at `adopt.go:258-260`. Kind `MetaLoss` →
       `metalosss`, exit 0, no warning; applying the pair creates a second CRD.
-
-- [ ] **CF-080 — The `k8s-workload` starter composes a ConfigMap the API server rejects under
-      `--engine kcl` and `python`. [V]** `data[PORT]: {from: params.port}`
-      (`internal/examples/k8s-workload.cf.yaml:49`) is an integer going into a
-      `map[string]string`. Still current at `7edec90`: go-templating emits
-      `PORT: {{ $spec.port | quote }}`, KCL emits `PORT = _spec?.port`. Rendered, that is
-      `PORT: 8080`, which fails `kubectl apply --dry-run=server` with `cannot unmarshal
-      number into Go struct field ConfigMap.data of type string`. Same root cause as CF-074,
-      reached from a parameter rather than a status wire.
 
 ### P2
 

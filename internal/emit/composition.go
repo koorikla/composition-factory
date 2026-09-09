@@ -897,6 +897,7 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 								kind:       rhsParam,
 								param:      l.structured.param + "." + mName,
 								targetType: mDecl.Type,
+								sourceType: mDecl.Type,
 							},
 						})
 					}
@@ -991,36 +992,34 @@ var scalarStatusTypes = map[string]bool{
 // statusWire resolves one resources.<name>.status.<path> wire on resource r:
 // it checks the path against the SOURCE resource's CRD status schema (the
 // only layer that can — blueprint.Validate has no CRDs) and returns the
-// render-time guard condition plus the bare value EXPRESSION (no {{ }}), so
-// each caller wraps it for its own surface: planFields interpolates it bare
-// (the field's type is schema-checked here, and the observed value arrives
-// from the provider's own controller conforming to that same CRD — the
-// pre-existing, documented quoting decision for from: values), while
-// planAnnotations pipes it through quote, because an annotation value must
-// be a string whatever scalar type the status leaf declares.
+// render-time guard condition, the bare value EXPRESSION (no {{ }}), and the
+// source leaf's declared type, so each caller wraps it for its own surface:
+// string-typed fields and annotations quote or cast to string (so string
+// values like "true" or numeric values do not change type under YAML/JSON
+// unmarshaling), while non-string fields emit the bare scalar.
 //
 // The path must resolve to a scalar LEAF of the status tree. what names
 // where the wire sits on r, preformatted (`field "queueUrl"`,
 // `annotation "eks.amazonaws.com/role-arn"`), so one resolver serves both
 // surfaces without the field messages changing a byte.
-func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) (guard, expr string, err error) {
+func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) (guard, expr, leafType string, err error) {
 	src := b.ResourceNamed(ref.Resource)
 	if src == nil {
 		// Validate refuses this before any emitter runs; kept as a defensive
 		// error because planFields is reachable from in-memory blueprints.
-		return "", "", fmt.Errorf("resource %q %s: references the status of unknown resource %q",
+		return "", "", "", fmt.Errorf("resource %q %s: references the status of unknown resource %q",
 			r.Name, what, ref.Resource)
 	}
 	crd, err := resolveKind(crds, *src, wantNamespaced)
 	if err != nil {
-		return "", "", fmt.Errorf("resource %q %s: %w", r.Name, what, err)
+		return "", "", "", fmt.Errorf("resource %q %s: %w", r.Name, what, err)
 	}
 	nodes, err := crd.Status()
 	if err != nil {
-		return "", "", fmt.Errorf("resource %q %s: %w", r.Name, what, err)
+		return "", "", "", fmt.Errorf("resource %q %s: %w", r.Name, what, err)
 	}
 	if len(nodes) == 0 {
-		return "", "", fmt.Errorf("resource %q %s: kind %q declares no status schema in its CRD; "+
+		return "", "", "", fmt.Errorf("resource %q %s: kind %q declares no status schema in its CRD; "+
 			"nothing can be wired from resource %q's status", r.Name, what, src.Kind, ref.Resource)
 	}
 
@@ -1043,15 +1042,15 @@ func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blu
 			}
 		}
 		if branches[path] {
-			return "", "", fmt.Errorf("resource %q %s: status path %q on %s addresses an object "+
+			return "", "", "", fmt.Errorf("resource %q %s: status path %q on %s addresses an object "+
 				"subtree, not a scalar leaf -- interpolating it would render Go's fmt of the map, "+
 				"which is valid YAML and silently wrong", r.Name, what, path, crd.Kind)
 		}
 		if s := closestPath(path, suggestions); s != "" {
-			return "", "", fmt.Errorf("resource %q %s: status path %q is not in %s's status "+
+			return "", "", "", fmt.Errorf("resource %q %s: status path %q is not in %s's status "+
 				"schema; did you mean %q?", r.Name, what, path, crd.Kind, s)
 		}
-		return "", "", fmt.Errorf("resource %q %s: status path %q is not in %s's status schema",
+		return "", "", "", fmt.Errorf("resource %q %s: status path %q is not in %s's status schema",
 			r.Name, what, path, crd.Kind)
 	}
 	if !scalarStatusTypes[leaf.Type] {
@@ -1059,13 +1058,13 @@ func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blu
 		if typ == "" {
 			typ = "untyped"
 		}
-		return "", "", fmt.Errorf("resource %q %s: status path %q on %s is %s, and a wire can "+
+		return "", "", "", fmt.Errorf("resource %q %s: status path %q on %s is %s, and a wire can "+
 			"only carry a scalar (string, integer, number, boolean) -- a composite would render "+
 			"Go's fmt of the value", r.Name, what, path, crd.Kind, typ)
 	}
 
 	guard, expr = statusGuard(ref.Resource, ref.StatusPath)
-	return guard, expr, nil
+	return guard, expr, leaf.Type, nil
 }
 
 // forEachCountTypes are the status-leaf types an observed loop bound
