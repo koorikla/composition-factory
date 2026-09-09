@@ -71,9 +71,9 @@
   --ground:#E2E8F0; --surface:#FFFFFF; --surface-2:#F4F7FA; --sunk:#D8E0EA;
   --ink:#0B0F14; --ink-2:#2F3945; --muted:#54606F; --faint:#67727F;
   --rule:#BCC7D6; --rule-2:#9AA8BA;
-  --wire-xrd:#1560C8; --wire-status:#0A776B; --wire-ref:#A54524; --shared:#877200;
+  --wire-xrd:#1560C8; --wire-status:#0A776B; --wire-ref:#A54524; --shared:#826E00;
   --wire-xrd-soft:#DAE7F8; --wire-status-soft:#D3EDE9; --wire-ref-soft:#F8E4DB; --shared-soft:#F4ECCE;
-  --ok:#0D6D4B; --warn:#877200; --err:#B12A32;
+  --ok:#0D6D4B; --warn:#B45309; --err:#B12A32;
   --shadow:0 1px 2px rgba(11,15,20,.10),0 4px 14px rgba(11,15,20,.09);
   --shadow-lg:0 2px 6px rgba(11,15,20,.13),0 18px 40px rgba(11,15,20,.18);
   --grid:#C3CEDD;
@@ -89,7 +89,7 @@
     --rule:#272E39; --rule-2:#3B4450;
     --wire-xrd:#5CA0F5; --wire-status:#38B6A8; --wire-ref:#DE8055; --shared:#D6AB33;
     --wire-xrd-soft:#152741; --wire-status-soft:#0F2E2B; --wire-ref-soft:#331F16; --shared-soft:#2E2712;
-    --ok:#37B98C; --warn:#D6AB33; --err:#E96A72;
+    --ok:#37B98C; --warn:#F59E0B; --err:#E96A72;
     --shadow:0 1px 2px rgba(0,0,0,.45),0 4px 14px rgba(0,0,0,.4);
     --shadow-lg:0 2px 6px rgba(0,0,0,.55),0 18px 40px rgba(0,0,0,.55);
     --grid:#1C222B;
@@ -102,7 +102,7 @@
   --rule:#272E39; --rule-2:#3B4450;
   --wire-xrd:#5CA0F5; --wire-status:#38B6A8; --wire-ref:#DE8055; --shared:#D6AB33;
   --wire-xrd-soft:#152741; --wire-status-soft:#0F2E2B; --wire-ref-soft:#331F16; --shared-soft:#2E2712;
-  --ok:#37B98C; --warn:#D6AB33; --err:#E96A72;
+  --ok:#37B98C; --warn:#F59E0B; --err:#E96A72;
   --shadow:0 1px 2px rgba(0,0,0,.45),0 4px 14px rgba(0,0,0,.4);
   --shadow-lg:0 2px 6px rgba(0,0,0,.55),0 18px 40px rgba(0,0,0,.55);
   --grid:#1C222B;

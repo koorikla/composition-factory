@@ -132,6 +132,34 @@ test('dark and light theme primary button and fan badge meet WCAG AA contrast', 
   }
 })
 
+test('--shared and --warn are distinct and meet WCAG AA contrast against surfaces in both themes', async ({ page }) => {
+  for (const mode of ['light', 'dark']) {
+    await bootWithTheme(page, mode)
+
+    const tokens = await page.evaluate(() => {
+      const cs = getComputedStyle(document.documentElement)
+      return {
+        shared: cs.getPropertyValue('--shared').trim(),
+        warn: cs.getPropertyValue('--warn').trim(),
+        surface: cs.getPropertyValue('--surface').trim(),
+        surface2: cs.getPropertyValue('--surface-2').trim(),
+      }
+    })
+
+    expect(tokens.shared.toLowerCase(), `--shared and --warn should be distinct in ${mode} mode`).not.toBe(tokens.warn.toLowerCase())
+
+    const crSharedSurface = contrastRatio(tokens.shared, tokens.surface)
+    const crSharedSurface2 = contrastRatio(tokens.shared, tokens.surface2)
+    const crWarnSurface = contrastRatio(tokens.warn, tokens.surface)
+    const crWarnSurface2 = contrastRatio(tokens.warn, tokens.surface2)
+
+    expect(crSharedSurface, `--shared on --surface in ${mode} mode`).toBeGreaterThanOrEqual(4.5)
+    expect(crSharedSurface2, `--shared on --surface-2 in ${mode} mode`).toBeGreaterThanOrEqual(4.5)
+    expect(crWarnSurface, `--warn on --surface in ${mode} mode`).toBeGreaterThanOrEqual(4.5)
+    expect(crWarnSurface2, `--warn on --surface-2 in ${mode} mode`).toBeGreaterThanOrEqual(4.5)
+  }
+})
+
 test('token definitions in proto.css and canvas-prototype.html remain in sync', async () => {
   const fs = require('fs')
   function extractTokens(content) {
