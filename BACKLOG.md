@@ -54,13 +54,6 @@ Narrative, measurements and screenshots:
 No spec is written for any of these yet; the report lists the anchors and the order to write
 them in.
 
-### P2
-
-- [ ] **CF-066 — The button says Validate, every result says "render", and the generate chip
-      then erases it.** `Validate` (`index.html:32`) yields `rendering…` / `render ok · N
-      resources` / `render error` (`output.js:740-754`), and the same element is the generate
-      status chip — so a successful result is overwritten by the debounced preview 300 ms
-      after the next keystroke. The fix must keep one vocabulary and let the result survive.
 
 ### P3
 

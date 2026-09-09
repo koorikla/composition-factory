@@ -1,3 +1,8 @@
+- [x] **CF-066 — The button says Validate, every result says "render", and the generate chip
+      then erases it.**
+      Harmonized Validate outcome vocabulary to use "validating…", "valid · N resource(s)", and
+      "validation error", and preserved explicit validation status against idle background preview debounce.
+      — completed 2026-09-09
 - [x] **CF-067 — The light-theme code viewer fails AA on four of five syntax colours.**
       Re-derived light theme code syntax colors against `--sunk` (`#D8E0EA`) to meet WCAG AA (>= 4.5:1)
       contrast across templates (`.code .tm`), shared bindings (`.code .sh`), comments (`.code .co`),
