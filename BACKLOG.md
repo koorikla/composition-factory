@@ -189,26 +189,6 @@ them in.
 Found by re-checking the tree at `7edec90` and by reproducing a user report about
 providers. Every item below was executed, not read.
 
-### P0
-
-- [ ] **CF-082 — A provider dropped from `spec.sources` can never be re-added: the add
-      endpoint refuses it as "already cached" and nothing reconciles the two lists. [V]**
-      `syncBlueprintSourcesLocked` (`internal/api/blueprint.go:503`) only *appends* refs the
-      document gained; no path removes a ref the document lost, and the only pruning site
-      (`providers.go:310`) sits inside DELETE, which refuses while the ref is still
-      referenced. The 409 guard (`providers.go:138`) reads `srv.Providers` and returns
-      *before* the block at `providers.go:174` that would re-declare the source. Repro:
-      `cf init` → `POST /api/providers` (succeeds, source written) → any doc write whose
-      `spec.sources` omits it (the Edit-blueprint tab does this) → the file now says
-      `sources: []` while `GET /api/providers` still lists it → `POST /api/providers` returns
-      `409 provider "…" is already cached`. In that state the palette still offers the kinds
-      but adding one is refused with `provider "…" is not declared in spec.sources`; after a
-      restart the Sources tab is empty and the kinds are gone. Only a restart clears it. The
-      message is also wrong: nothing about the disk cache is involved, so it sends the user
-      to delete a cache that is not the problem. The fix must make `srv.Providers` and
-      `spec.sources` reconcile in both directions, and must re-declare the source when the
-      ref is already known.
-
 ### P1
 
 - [ ] **CF-083 — When Validate fails with the output drawer collapsed, the error text is

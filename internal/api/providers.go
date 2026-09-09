@@ -137,37 +137,19 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
-	for _, ref := range srv.Providers {
-		if ref == req.Ref {
-			writeJSONError(w, http.StatusConflict, fmt.Sprintf("provider %q is already cached", req.Ref))
-			return
-		}
-	}
-
-	fetch := srv.fetch
-	if fetch == nil {
-		fetch = func(ref string) (*xpkg.Package, error) {
-			return xpkg.Fetch(r.Context(), ref)
-		}
-	}
-	pkg, _, err := srv.Store.FetchAndSave(r.Context(), srv.Lock, req.Ref, fetch)
-	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-
-	// Rebuild over the existing providers' CACHED schemas plus the CRDs just
-	// fetched — the same single-load discipline cmd/cf/serve.go's startup
-	// enforces: the index and the store must describe the same bytes, so the
-	// existing refs are re-read from the store they were saved to, and the
-	// new ref uses the exact CRDs Save just persisted.
-	srv.Providers = append(srv.Providers, req.Ref)
-
-	// Declare the provider source in spec.sources idempotently
 	b, ok := srv.loadBlueprint(w)
 	if !ok {
 		return
 	}
+
+	isProvider := false
+	for _, ref := range srv.Providers {
+		if ref == req.Ref {
+			isProvider = true
+			break
+		}
+	}
+
 	hasSource := false
 	for _, s := range b.Spec.Sources {
 		if s.Provider == req.Ref {
@@ -175,6 +157,48 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+
+	// Only return 409 Conflict if already in srv.Providers AND already declared in spec.sources.
+	if isProvider && hasSource {
+		writeJSONError(w, http.StatusConflict, fmt.Sprintf("provider %q is already cached", req.Ref))
+		return
+	}
+
+	var pkgDigest string
+	if isProvider {
+		pkgDigest, _ = srv.Store.LoadDigest(req.Ref)
+	}
+	if pkgDigest == "" {
+		if _, err := srv.Store.Load(req.Ref); err == nil {
+			if digest, err := srv.Store.LoadDigest(req.Ref); err == nil {
+				pkgDigest = digest
+				if srv.Lock != "" {
+					if l, err := cache.ReadLock(srv.Lock); err == nil {
+						l.Set(req.Ref, digest)
+						_ = l.Write(srv.Lock)
+					}
+				}
+			}
+		}
+	}
+	if pkgDigest == "" {
+		fetch := srv.fetch
+		if fetch == nil {
+			fetch = func(ref string) (*xpkg.Package, error) {
+				return xpkg.Fetch(r.Context(), ref)
+			}
+		}
+		pkg, _, err := srv.Store.FetchAndSave(r.Context(), srv.Lock, req.Ref, fetch)
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		pkgDigest = pkg.Digest
+	}
+	if !isProvider {
+		srv.Providers = append(srv.Providers, req.Ref)
+	}
+
 	if !hasSource {
 		b.Spec.Sources = append(b.Spec.Sources, blueprint.Source{Provider: req.Ref})
 		if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
@@ -195,7 +219,7 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"provider": providerEntry{Ref: req.Ref, Digest: pkg.Digest, Kinds: len(added)},
+		"provider": providerEntry{Ref: req.Ref, Digest: pkgDigest, Kinds: len(added)},
 		"kinds":    added,
 	})
 }
