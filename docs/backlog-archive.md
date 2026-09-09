@@ -1,3 +1,21 @@
+- [x] **CF-050 — The core loop is pointer-only: a keyboard or touch user cannot place a kind
+      or select a card. [V]**
+      Made palette kind rows keyboard focusable (`tabindex="0"`, `role="button"`) and actionable
+      via Enter/Space, and enabled single click/touch placement on canvas. Made canvas cards focusable
+      regions selectable via Enter/Space or immediate touch, and made card action buttons
+      accessible when focused via keyboard (`:focus-within`).
+      — completed 2026-09-09
+- [x] **CF-059 — Raw Go errors and HTTP statuses reach the user verbatim.**
+      Surfaced friendly error diagnostics and actionable guidance across API requests and the
+      inspector. Formatted network disconnection with connection advice, converted 502/503/504
+      into meaningful status explanations, mapped blueprint coordinates (`spec.resources[i]`)
+      to readable card names, and replaced bare "operation failed" with action context.
+      — completed 2026-09-09
+- [x] **CF-065 — Clicking a palette kind row does nothing, and nothing says drag is
+      required. [V]**
+      Enabled clicking/tapping a palette kind row to immediately place and select the resource
+      card on canvas without requiring drag-and-drop.
+      — completed 2026-09-09
 - [x] **CF-063 — At 1280×720 the palette is 179 px and truncates every long kind name to the
       same prefix. [V]**
       Guaranteed palette width at least 220px across 1280x720 viewports, tuned padding, and added

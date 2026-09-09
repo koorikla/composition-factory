@@ -54,41 +54,9 @@ Narrative, measurements and screenshots:
 No spec is written for any of these yet; the report lists the anchors and the order to write
 them in.
 
-### P0
-
-- [ ] **CF-050 — The core loop is pointer-only: a keyboard or touch user cannot place a kind
-      or select a card. [V]** Palette rows are `draggable` `<div>`s — 46 rows, 0 tabbable, 0
-      with a role, 0 focusable children — and `onDrop` (`canvas.js:1724`) is the only code
-      that appends a resource. `proto.css:605-606` `display:none`s a card's buttons until it
-      is already selected, so the Inspector is pinned to the XRD panel. The only touch
-      handlers are canvas pan/zoom (`canvas.js:1753`). The fix must make adding a kind and
-      selecting a card succeed without a precise pointer; drag stays as the pointer path.
-
-
-### P1
-
-- [ ] **CF-059 — Raw Go errors and HTTP statuses reach the user verbatim.** `api.js:49`
-      surfaces `network error: Failed to fetch`; `api.js:60` falls back to a bare
-      `502 Bad Gateway`; `inspector.js:305` shows the literal `operation failed`. Server
-      messages arrive addressed in the blueprint's coordinate system (`spec.resources[3] …`)
-      after the user renamed a card. The pattern to copy is already here — `diagnoseError`
-      (`output.js:368-399`) keeps the server text and appends the fix.
-
-
-
 ### P2
 
 - [ ] **CF-064 — The output drawer takes 250 px of a 720 px viewport to show 142 px of
-      YAML. [V]** Measured at 1280×720: topbar 46, columns 424, drawer 250; inside it `#code`
-      is 142 px — seven lines of a ~500-line document, so 43% of the drawer is chrome. The
-      canvas gets 840×424 and the palette 277 px of list. The fix must give the authoring
-      surfaces the vertical space, at this viewport and smaller.
-
-- [ ] **CF-065 — Clicking a palette kind row does nothing, and nothing says drag is
-      required. [V]** The delegated click handler (`palette.js:696`) has thirteen `closest()`
-      branches and none matches `.kind`. The hint that says "Drag a kind onto the canvas" sits
-      below the fold of a 277 px list. The fix must make the first instinct — click the thing
-      you want — either work or explain itself.
 
 - [ ] **CF-066 — The button says Validate, every result says "render", and the generate chip
       then erases it.** `Validate` (`index.html:32`) yields `rendering…` / `render ok · N
