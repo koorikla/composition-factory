@@ -607,3 +607,55 @@ func TestAddProviderDeclaresSourceInBlueprintIdempotently(t *testing.T) {
 		t.Errorf("blueprint sources %+v does not declare added provider %s", b.Spec.Sources, addedProviderRef)
 	}
 }
+
+// TestAddProviderDroppedFromBlueprintSourcesCanBeReadded verifies CF-082:
+// when a provider is already known in srv.Providers (or cached) but missing
+// from bp.Spec.Sources, POST /api/providers does NOT return 409 Conflict.
+// Instead, it re-declares the source in bp.Spec.Sources, writes the blueprint,
+// and returns 200 OK.
+func TestAddProviderDroppedFromBlueprintSourcesCanBeReadded(t *testing.T) {
+	h, o := testProviderServer(t, func(ref string) (*xpkg.Package, error) {
+		t.Fatalf("unexpected remote fetch for already-cached provider %s", ref)
+		return nil, errors.New("unreachable")
+	})
+
+	// Manually drop testProviderRef from blueprint sources on disk, leaving it in srv.Providers
+	b, err := blueprint.Load(o.Blueprint)
+	if err != nil {
+		t.Fatalf("load blueprint: %v", err)
+	}
+	b.Spec.Sources = nil
+	// Main-queue resource references testProviderRef; drop it so blueprint remains valid
+	b.Spec.Resources = nil
+	if err := writeBlueprintFile(o.Blueprint, b); err != nil {
+		t.Fatalf("write blueprint: %v", err)
+	}
+
+	// Calling POST /api/providers for testProviderRef must re-declare the source and return 200
+	rec := do(t, h, "POST", "/api/providers", `{"ref":"`+testProviderRef+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	// Blueprint sources must now contain testProviderRef
+	reloaded, err := blueprint.Load(o.Blueprint)
+	if err != nil {
+		t.Fatalf("reload blueprint: %v", err)
+	}
+	found := false
+	for _, s := range reloaded.Spec.Sources {
+		if s.Provider == testProviderRef {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("blueprint sources %+v does not contain re-added provider %s", reloaded.Spec.Sources, testProviderRef)
+	}
+
+	// Calling POST again when it is already in spec.sources MUST return 409 Conflict
+	rec2 := do(t, h, "POST", "/api/providers", `{"ref":"`+testProviderRef+`"}`)
+	if rec2.Code != http.StatusConflict {
+		t.Fatalf("second POST status = %d, want 409: %s", rec2.Code, rec2.Body)
+	}
+}

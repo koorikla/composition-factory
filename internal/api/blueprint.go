@@ -40,6 +40,7 @@ import (
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/cluster"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 	"sigs.k8s.io/yaml"
@@ -159,6 +160,7 @@ func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	origProviders := append([]string(nil), srv.Providers...)
 	if err := srv.syncBlueprintSourcesLocked(ctx, &b); err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("failed to sync sources: %v", err))
 		return
@@ -166,12 +168,16 @@ func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 	crds, err := srv.loadSourceCRDs(&b)
 	if err == nil {
 		if err := srv.validateBlueprintAgainstCRDs(&b, crds); err != nil {
+			srv.Providers = origProviders
+			_ = srv.rebuildIndexLocked()
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 
 	if err := writeBlueprintFile(srv.Blueprint, &b); err != nil {
+		srv.Providers = origProviders
+		_ = srv.rebuildIndexLocked()
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -576,6 +582,31 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 		srv.Providers = append(srv.Providers, ref)
 	}
 
+	// Reconcile srv.Providers with b.Spec.Sources in document order.
+	// Providers dropped from b.Spec.Sources are evicted from srv.Providers (and thus the index).
+	// cluster.ProviderLabel is preserved if currently held.
+	currentProviders := make(map[string]bool, len(srv.Providers))
+	for _, p := range srv.Providers {
+		currentProviders[p] = true
+	}
+	reconciled := make([]string, 0, len(b.Spec.Sources)+1)
+	seen := make(map[string]bool, len(b.Spec.Sources)+1)
+	for _, s := range b.Spec.Sources {
+		if s.Provider != "" && s.Provider != blueprint.NativeProvider && !seen[s.Provider] {
+			if currentProviders[s.Provider] {
+				seen[s.Provider] = true
+				reconciled = append(reconciled, s.Provider)
+			}
+		}
+	}
+	for _, p := range srv.Providers {
+		if p == cluster.ProviderLabel && !seen[p] {
+			seen[p] = true
+			reconciled = append(reconciled, p)
+		}
+	}
+	srv.Providers = reconciled
+
 	if err := srv.rebuildIndexLocked(b); err != nil {
 		srv.Providers = origProviders
 		return err
@@ -593,11 +624,14 @@ func (srv *server) persistBlueprint(w http.ResponseWriter, r *http.Request, b *b
 	if r != nil {
 		ctx = r.Context()
 	}
+	origProviders := append([]string(nil), srv.Providers...)
 	if err := srv.syncBlueprintSourcesLocked(ctx, b); err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("failed to sync sources: %v", err))
 		return false
 	}
 	if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
+		srv.Providers = origProviders
+		_ = srv.rebuildIndexLocked()
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return false
 	}

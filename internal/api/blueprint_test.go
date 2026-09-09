@@ -1647,3 +1647,69 @@ func TestPutBlueprintSurvivesOfflineFetchFailure(t *testing.T) {
 		t.Errorf("expected at least 2 sources, got %d", len(reloaded.Spec.Sources))
 	}
 }
+
+// TestPutBlueprintDroppingSourceReconcilesProvidersAndAllowsReadd verifies CF-082:
+// dropping a source via PUT /api/blueprint reconciles srv.Providers so GET /api/providers
+// no longer advertises it, and POST /api/providers can re-declare it cleanly with 200 OK.
+func TestPutBlueprintDroppingSourceReconcilesProvidersAndAllowsReadd(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	// Fetch current blueprint
+	cur := mustLoadBlueprint(t, path)
+	updated := *cur
+	// Drop sources and resources so blueprint remains valid
+	updated.Spec.Sources = nil
+	updated.Spec.Resources = nil
+
+	body, err := json.Marshal(updated)
+	if err != nil {
+		t.Fatalf("marshal PUT body: %v", err)
+	}
+
+	rec := do(t, h, "PUT", "/api/blueprint", string(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d: %s", rec.Code, rec.Body)
+	}
+
+	// GET /api/providers should now reflect that the provider was dropped
+	var provs struct{ Providers []providerEntry }
+	if code := getJSON(t, h, "/api/providers", &provs); code != http.StatusOK {
+		t.Fatalf("GET /api/providers status = %d", code)
+	}
+	if len(provs.Providers) != 0 {
+		t.Errorf("providers after dropping source = %+v, want empty", provs.Providers)
+	}
+
+	// Calling POST /api/providers for testProviderRef must succeed (200 OK) and re-declare the source
+	postRec := do(t, h, "POST", "/api/providers", `{"ref":"`+testProviderRef+`"}`)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200: %s", postRec.Code, postRec.Body)
+	}
+
+	// Blueprint on disk must now declare testProviderRef in spec.sources
+	reloaded := mustLoadBlueprint(t, path)
+	found := false
+	for _, s := range reloaded.Spec.Sources {
+		if s.Provider == testProviderRef {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("blueprint sources %+v does not contain re-added provider %s", reloaded.Spec.Sources, testProviderRef)
+	}
+
+	// GET /api/providers must now list testProviderRef again
+	if code := getJSON(t, h, "/api/providers", &provs); code != http.StatusOK {
+		t.Fatalf("GET /api/providers status = %d", code)
+	}
+	if len(provs.Providers) != 1 || provs.Providers[0].Ref != testProviderRef {
+		t.Errorf("providers after re-add = %+v, want [%s]", provs.Providers, testProviderRef)
+	}
+
+	// Re-adding again when already declared in spec.sources returns 409
+	dupRec := do(t, h, "POST", "/api/providers", `{"ref":"`+testProviderRef+`"}`)
+	if dupRec.Code != http.StatusConflict {
+		t.Fatalf("duplicate POST status = %d, want 409: %s", dupRec.Code, dupRec.Body)
+	}
+}
