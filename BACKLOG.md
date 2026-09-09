@@ -53,26 +53,8 @@ unsafe API contract · P3 docs) is in `.claude/skills/backlog-authoring/SKILL.md
 Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md),
 [docs/comp-runs/](docs/comp-runs/2026-09-04-cachedservice-namespaced-roundtrip.md).
 
-### P0
-
-- [ ] **CF-090 — The Generate toast says `Output written to compositions · Apply: kubectl apply -f
-      compositions` while three of the four files land outside `compositions/`. [V]**
-      `output.js:452-453` builds the toast from one path; `POST /api/generate {write:true}` on
-      `f45c2a8` writes `compositions/<xrd>.yaml`, `xrds/<xrd>.yaml`, `functions.yaml`,
-      `providerconfigs/aws.yaml`. Following the toast applies a Composition without its XRD or
-      functions. The button title and confirm say the destination is `.`, which for the container
-      user is the mounted `$HOME`; the resolved directory is shown nowhere. The toast, the
-      button and the confirm must name the real directory and an apply command that covers
-      every written file.
-
 ### P1
 
-- [ ] **CF-091 — After the user repairs a missing provider from SOURCES, the top bar keeps saying
-      `error … not in the cache` and the composition pane stays at `0 lines` until an unrelated
-      edit or a reload.** Adding a provider triggers `POST /api/providers, GET /api/providers,
-      GET /api/kinds` and never a regenerate (J1, two runs). Validate in that state says
-      "validation check unavailable" and the pane still shows nothing. A successful provider add
-      must re-run the generate cycle and clear the stale error. Follows CF-088.
 - [ ] **CF-092 — Loading a starter example overwrites the served blueprint file on disk with no
       file-level cue. [V]** The card says "replaces current blueprint · undoable"; nothing says
       which file. Observed: `~/xqueue.cf.yaml` (the user's own file, bind-mounted) went

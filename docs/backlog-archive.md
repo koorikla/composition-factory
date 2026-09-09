@@ -1,3 +1,15 @@
+- [x] **CF-091 — After the user repairs a missing provider from SOURCES, the top bar keeps saying
+      `error … not in the cache` and the composition pane stays at `0 lines` until an unrelated
+      edit or a reload.**
+      Automatically re-ran generation (`store.generate(false)`) upon provider addition/removal,
+      clearing stale error banners and rendering composition manifests immediately.
+      — completed 2026-09-09
+- [x] **CF-090 — The Generate toast says `Output written to compositions · Apply: kubectl apply -f
+      compositions` while three of the four files land outside `compositions/`. [V]**
+      Included `outDir` in `POST /api/generate` response and updated next-steps banner, toasts,
+      and modals to display the real destination directory and instruct `kubectl apply -R -f <outDir>`
+      to apply XRDs, Compositions, functions, and provider configs.
+      — completed 2026-09-09
 - [x] **CF-089 — Adding a provider from SOURCES and then applying any full-document write
       (blueprint editor Apply, engine selector) silently drops that provider again. [V]**
       Synchronized client store document via `store.loadDoc()` and re-ran generation on provider
