@@ -1,3 +1,10 @@
+- [x] **CF-063 — At 1280×720 the palette is 179 px and truncates every long kind name to the
+      same prefix. [V]**
+      Guaranteed palette width at least 220px across 1280x720 viewports, tuned padding, and added
+      rich tooltip titles (`<kind> · <apiVersion> (<provider>)`) across all palette kind rows,
+      making kinds with long shared prefixes easily distinguishable while maintaining zero token
+      drift between `proto.css` and `canvas-prototype.html`.
+      — completed 2026-09-09
 - [x] **CF-055 — An optional parameter wired into a required provider field renders invalid,
       and the error blames the field. [V]**
       Flagged when an optional parameter is bound or wired to a required provider field.

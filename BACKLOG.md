@@ -78,13 +78,6 @@ them in.
 
 ### P2
 
-- [ ] **CF-063 — At 1280×720 the palette is 179 px and truncates every long kind name to the
-      same prefix. [V]** `#lrail` measures 179×277 — nine rows of forty-six. `bucket` yields
-      `BucketAnaly…`, `BucketCorsC…`, and two rows both reading `BucketObject…`; the
-      catalogue's three `s3` matches all render as `provider-aws-…`. The column is not
-      resizable — dragging its edge selects text in the YAML viewer. Long CRD kind names are
-      the normal case for upjet providers. The fix must let a user tell two rows apart.
-
 - [ ] **CF-064 — The output drawer takes 250 px of a 720 px viewport to show 142 px of
       YAML. [V]** Measured at 1280×720: topbar 46, columns 424, drawer 250; inside it `#code`
       is 142 px — seven lines of a ~500-line document, so 43% of the drawer is chrome. The
