@@ -791,7 +791,7 @@ func TestValidateRequiresProviderNameForNamespacedScope(t *testing.T) {
 				t.Errorf("err = %v, want it to name providerName", err)
 			}
 			if tt.name == "absent entirely" {
-				wantMsg := "spec.xrd.parameters.providerName is required for a Namespaced XRD: run cf serve without --blueprint to scaffold one, or add: providerName: {type: string, required: true}"
+				wantMsg := "spec.xrd.parameters.providerName is required for a Namespaced XRD: run cf init (or cf serve without --blueprint) to scaffold one, or add: providerName: {type: string, required: true}"
 				if err.Error() != wantMsg {
 					t.Errorf("err = %q, want %q", err.Error(), wantMsg)
 				}

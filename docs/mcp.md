@@ -1,8 +1,9 @@
 # cf mcp — the MCP server
 
-`cf mcp` serves compositionfactory's full authoring surface as MCP tools over
+`cf mcp` serves compositionfactory's core authoring surface as MCP tools over
 stdio: schema browsing, blueprint editing, provider management, generation and
-the render check. Every tool is a thin bridge over the exact same handler
+the render check (19 MCP tools bridging key operations from `cf serve`'s 36
+HTTP routes). Every tool is a thin bridge over the exact same handler
 `cf serve` exposes on HTTP, so the two front doors validate identically and
 report identical error messages — see `internal/mcp`'s package comment for the
 architecture.
@@ -65,7 +66,7 @@ column names the route each tool bridges to.
 | Tool | HTTP equivalent | What it does |
 |---|---|---|
 | `list_kinds` | `GET /api/kinds` | Search the cached providers' managed-resource kinds (`search`, `limit`). |
-| `get_kind_fields` | `GET /api/kinds/{apiVersion}/{kind}/fields` | One kind's settable `forProvider` fields, filterable by `prefix`, `max_depth`, `search`, `required_only` (effectively required: `requiredChain`, the whole ancestor chain, not the raw per-object flag), `limit`; `total` counts the pre-`limit` set, and `requiredBranches` lists required subtrees with no effectively-required leaf (a Deployment's `spec.selector`/`spec.template`). |
+| `get_kind_fields` | `GET /api/kinds/{apiVersion}/{kind}/fields` | One kind's settable `forProvider` fields. Takes `api_version` (group/version, e.g. `sqs.aws.m.upbound.io/v1beta1`) and `kind` (e.g. `Queue`), filterable by `prefix`, `max_depth`, `search`, `required_only` (effectively required: `requiredChain`, the whole ancestor chain, not the raw per-object flag), `limit`, and `status` (boolean: return status fields instead of spec); `total` counts the pre-`limit` set, and `requiredBranches` lists required subtrees with no effectively-required leaf (a Deployment's `spec.selector`/`spec.template`). |
 | `get_blueprint` | `GET /api/blueprint` | The whole blueprint document as JSON. |
 | `replace_blueprint` | `PUT /api/blueprint` | Replace the whole document (full replace, not a merge; unknown keys rejected). |
 | `add_parameter` | `POST /api/blueprint/parameters` | Declare a new XRD parameter; duplicates refused. |

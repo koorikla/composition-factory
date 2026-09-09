@@ -16,6 +16,7 @@ var version = "dev"
 
 // CLI is the kong root. Subcommands are added as fields in later tasks.
 type CLI struct {
+	Help        HelpCmd          `cmd:"" help:"Show help."`
 	VersionFlag kong.VersionFlag `name:"version" help:"Print the cf version."`
 	Version     VersionCmd       `cmd:"" help:"Print the cf version."`
 	Init        InitCmd          `cmd:"" help:"Scaffold a minimal valid blueprint."`
@@ -30,6 +31,21 @@ type CLI struct {
 	Kinds       KindsCmd         `cmd:"" help:"List available CRD kinds from cached providers and native kinds."`
 	Fields      FieldsCmd        `cmd:"" help:"Print the field schema tree for a given kind."`
 	Catalogue   CatalogueCmd     `cmd:"" help:"Search the provider catalogue."`
+}
+
+type HelpCmd struct {
+	Command []string `arg:"" optional:"" help:"Show help for a command."`
+}
+
+func (h *HelpCmd) Run(k *kong.Kong) error {
+	ctx, err := kong.Trace(k, h.Command)
+	if err != nil {
+		return err
+	}
+	if ctx.Error != nil {
+		return ctx.Error
+	}
+	return ctx.PrintUsage(false)
 }
 
 type VersionCmd struct{}

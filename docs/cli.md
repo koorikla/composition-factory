@@ -197,17 +197,18 @@ cf serve --blueprint <blueprint.cf.yaml> --out <output-dir> [flags]
 
 ---
 
-### `cf adopt` — Ingest Existing Compositions
+### `cf adopt` (alias: `cf import`) — Ingest Existing Compositions
 
-Adopts an existing Crossplane Composition (supporting both `function-go-templating` and classic patch-and-transform, with optional embedded or sibling XRDs) into a structured Blueprint:
+Adopts an existing Crossplane Composition (supporting both `function-go-templating` and classic patch-and-transform, with optional embedded or sibling XRDs) or an entire Configuration directory into a structured Blueprint. Accepts a file path, a Configuration directory path (`<dir>`), or `-` for standard input:
 
 ```sh
-cf adopt <composition.yaml> -o <blueprint.cf.yaml> [--provider <ref>]
+cf adopt <composition.yaml | dir | -> -o <blueprint.cf.yaml> [flags]
 ```
 
 #### Flags:
 - `-o`, `--out <path>`: Output file path (defaults to stdout).
 - `--provider <ref>`: Default provider package reference when not inferrable from CRDs.
+- `--cache-dir <dir>`: Schema cache directory.
 
 ---
 
@@ -221,7 +222,7 @@ cf package <blueprint.cf.yaml> -o out/package.xpkg [flags]
 
 #### Flags:
 - `-o`, `--out <path>`: Output path (defaults to `<blueprint-name>.xpkg` or `<blueprint-name>.package.yaml` with `--yaml`).
-- `--yaml`: Write the `package.yaml` multi-document stream instead of an `.xpkg` image (importable back via the GUI or `POST /api/blueprint/import`).
+- `--yaml`: Write the `package.yaml` multi-document stream instead of an `.xpkg` image (importable back via the GUI or `POST /api/blueprint/import`, or via `cf adopt <package.yaml>`).
 - `--cache-dir <dir>`: Schema cache directory.
 
 Features:
@@ -251,11 +252,16 @@ cf push ghcr.io/org/my-configuration:v1.0.0 out/my-configuration.xpkg
 Fetches only CRD layer metadata from an OCI package and caches it locally:
 
 ```sh
-cf provider add ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0
+cf provider add <ref> [flags]
 ```
 
-- Appends the resolved digest to `.cf.lock`.
-- Saves schemas to `~/.cache/compositionfactory/` (Linux) or `~/Library/Caches/compositionfactory/` (macOS).
+#### Flags:
+- `--lock <path>`: Lockfile path to record provider digests (defaults to `.cf.lock`).
+- `--cache-dir <dir>`: Schema cache directory.
+
+Notes:
+- Appends the resolved digest to `.cf.lock` (or the file specified by `--lock`).
+- Saves schemas to `~/.cache/compositionfactory/` (Linux) or `~/Library/Caches/compositionfactory/` (macOS), or `--cache-dir` if specified.
 
 ---
 
@@ -318,7 +324,7 @@ spec:
 
 If `providerName` is missing or optional, `cf gen` will fail with:
 ```
-spec.xrd.parameters.providerName is required for a Namespaced XRD: run cf serve without --blueprint to scaffold one, or add: providerName: {type: string, required: true}
+spec.xrd.parameters.providerName is required for a Namespaced XRD: run cf init (or cf serve without --blueprint) to scaffold one, or add: providerName: {type: string, required: true}
 ```
 
 *Exception*: If a blueprint is composed purely of native Kubernetes resources (`provider: k8s`), `providerConfigRef` is not generated and `providerName` is not required.

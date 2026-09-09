@@ -339,7 +339,7 @@ conventions:
 ```
 
 - `match` performs a case-sensitive suffix match against field paths (e.g., `tags` matches `tags` and `spec.tags`).
-- Conventions are refused on native Kubernetes kinds (`provider: k8s`).
+- Conventions apply to managed provider resources; native Kubernetes kinds (`provider: k8s`) do not match conventions.
 - Conventions are supported only with the `go-templating` engine.
 
 ---
@@ -411,9 +411,8 @@ The `cf` generator validates blueprints strictly and returns actionable error me
 | `spec.environment.<key>: type is required (must be string, integer, number, or boolean)` | Environment key must declare a scalar type (`string`, `integer`, `number`, `boolean`). |
 | `spec.pipeline[<i>].name: "render-resources" collides with the built-in templating step's name` | Step name `render-resources` is reserved for the built-in templating step. Choose another name. |
 | `spec.pipeline[<i>].position: "<pos>" is not valid (must be "before" or "after")` | Position must be either `before` or `after` the templating step. |
-| `resource "<name>" field "<path>": unknown path -- did you mean "<suggestion>"?` | Field path does not exist in CRD schema. Check typo or update to suggested schema path. |
-| `resource "<name>" field "<path>": template: fields are not supported on a native Kubernetes kind...` | `template:` references are only supported on managed provider fields or in `annotations:`. Use `value:`, `from:`, or `raw:` on native fields. |
+| `resource "<name>": field "<path>" is not in <Kind> spec.forProvider; did you mean "<suggestion>"?` | Field path does not exist in CRD schema. Check typo or update to suggested schema path. |
+| `resource "<name>" field "<path>": template: fields are not supported on a native Kubernetes resource (provider "k8s") in v1...` | `template:` references are only supported on managed provider fields or in `annotations:`. Use `value:`, `from:`, or `raw:` on native fields. |
 | `resource "<name>" field "<path>": engine "<engine>" does not support template: fields` | `template:` and `spec.conventions` are only supported with the `go-templating` engine. Use `value:`, `from:`, or engine-native `raw:`. |
-| `resource "<name>" envelope "<path>": status wires (...) are not supported in envelope` | `from: resources.<name>.status...` is not permitted in `envelope`. Status references can only be wired into `fields:` or `annotations:`. |
-| `resource "<name>": conventions cannot match native Kubernetes kind` | `conventions` can only target managed provider resources, not native Kubernetes resources. |
+| `resource "<name>" envelope "<path>": from must start with params. or env. (got "...") -- cross-resource status wires are supported in fields:, not in envelope entries, in v1` | `from: resources.<name>.status...` is not permitted in `envelope`. Status references can only be wired into `fields:` or `annotations:`. |
 
