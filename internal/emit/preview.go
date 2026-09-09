@@ -52,6 +52,9 @@ func PreviewExpressionContext(ctx context.Context, b *blueprint.Blueprint, resou
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, defaultPreviewTimeout)
@@ -344,6 +347,9 @@ func PreviewExpressionContext(ctx context.Context, b *blueprint.Blueprint, resou
 	case <-ctx.Done():
 		return "", ctx.Err()
 	case res := <-resCh:
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		return res.rendered, res.err
 	}
 }
