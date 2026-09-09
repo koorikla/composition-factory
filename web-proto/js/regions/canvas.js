@@ -118,13 +118,17 @@ function schemaFor(resource) {
 /* ---------- rendering ---------- */
 
 function portRow(owner, path, opts) {
-  // opts: {dir, dotColor, req, ty, label, title, fan, cls}
+  // opts: {dir, dotColor, req, ty, label, title, fan, cls, warn}
+  const warnHtml = opts.warn
+    ? '<span class="port-warn" title="' + esc(opts.warn) + '" style="color:var(--warn);margin-left:2px;font-size:10px">\u26a0</span>'
+    : '';
   return '<div class="port' + (opts.req ? " req" : "") + (opts.cls ? " " + opts.cls : "") + '"' +
     ' data-owner="' + esc(owner) + '" data-path="' + esc(path) + '"' +
     ' title="' + esc(opts.title || path) + '">' +
     '<span class="d ' + opts.dir + '" style="background:' + opts.dotColor + '"></span>' +
     '<span class="nm">' + esc(opts.label || path) + '</span>' +
     '<span class="ty">' + esc(opts.ty || "") + '</span>' +
+    warnHtml +
     (opts.fan || "") + '</div>';
 }
 
@@ -217,14 +221,28 @@ function resourceCardHTML(d, r, sel) {
         dot = "var(--wire-status)";
       }
     }
+    const isFieldReq = !!(sf && (sf.required || sf.requiredChain));
+    let optWarn = false;
+    if (isFieldReq && parsed && parsed.kind === "param") {
+      const pObj = (d.spec.xrd && d.spec.xrd.parameters && d.spec.xrd.parameters[parsed.param]) || {};
+      if (!pObj.required && !pObj.requiredChain) {
+        optWarn = true;
+      }
+    }
+    let title = p + (sf ? " \u00b7 " + sf.type + (sf.required ? " \u00b7 required" : "") : "") +
+      (sf && sf.description ? "\n" + sf.description : "");
+    if (optWarn) {
+      title += " \u00b7 \u26a0 optional parameter wired to required field: render will omit if missing";
+    }
     h += portRow(r.name, p, {
       dir: "in",
       dotColor: dot,
-      req: !!(sf && sf.required),
+      req: isFieldReq,
+      warn: optWarn ? "Optional parameter wired to required field: render will omit if missing" : null,
+      cls: optWarn ? "port-opt-warn" : "",
       ty: sf ? sf.type : "",
       label: shortPath(p),
-      title: p + (sf ? " \u00b7 " + sf.type + (sf.required ? " \u00b7 required" : "") : "") +
-        (sf && sf.description ? "\n" + sf.description : ""),
+      title: title,
     });
   });
 
@@ -1141,10 +1159,14 @@ function renderFieldPickerItems(listEl, items, selectedIndex, srcPath) {
     const mismatchBadge = item.typeMismatch
       ? '<span class="wire-picker-mismatch" title="Type mismatch: $' + esc(srcPath) + ' is ' + esc(item.srcType) + ', but field expects ' + esc(item.targetType) + '">mismatch: ' + esc(item.srcType) + ' \u2260 ' + esc(item.targetType) + '</span>'
       : '';
+    const optWarnBadge = item.optionalWarning
+      ? '<span class="wire-picker-opt-warning" title="Optional parameter bound to required field: render will omit if missing">optional \u2192 req</span>'
+      : '';
     h += '<div class="wire-picker-item' + (idx === selectedIndex ? ' active' : '') + (item.suggested ? ' match' : '') + '" data-idx="' + idx + '">' +
       '<span style="font-family:var(--mono);color:' + (item.color || 'inherit') + '">' + esc(item.label || item.path) + '</span>' +
       '<span class="dg">' + esc(item.type || "") + '</span>' +
       (item.required ? '<span class="rq">req</span>' : '') +
+      optWarnBadge +
       mismatchBadge +
       (item.description ? '<span class="desc" title="' + esc(item.description) + '">' + esc(item.description) + '</span>' : '') +
       '</div>';
@@ -1172,6 +1194,7 @@ function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
   const srcType = ctx.srcType || "string";
   const res = ctx.resource || {};
   const isSecret = res.kind === "Secret";
+  const isSrcParamReq = !!(ctx.param && (ctx.param.required || ctx.param.requiredChain));
 
   // 1. Spec / forProvider fields
   (specFields || []).forEach(function (f) {
@@ -1194,6 +1217,7 @@ function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
     const targetType = f.type || "string";
     const typeMatch = isFieldPickerTypeMatch(srcType, targetType);
     const isReq = !!(f.requiredChain || f.required);
+    const isOptWarn = !!(isReq && ctx.srcOwner === XR_ID && !isSrcParamReq);
     const isMatch = srcTerm && (pNorm.indexOf(srcTerm) >= 0 || srcTerm.indexOf(pNorm) >= 0);
     let score = 20;
     if (isReq) score += 40;
@@ -1212,6 +1236,7 @@ function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
       label: p,
       category: isMatch && typeMatch && !q ? "Suggested Matches" : "Spec Fields",
       required: isReq,
+      optionalWarning: isOptWarn,
       suggested: isMatch && typeMatch,
       typeMismatch: !typeMatch,
       srcType: srcType,
@@ -1232,6 +1257,7 @@ function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
       return;
     }
     const isReq = !!(ef.requiredChain || ef.required);
+    const isOptWarn = !!(isReq && ctx.srcOwner === XR_ID && !isSrcParamReq);
     let score = 10;
     if (isReq) score += 30;
     if (q) {
@@ -1245,6 +1271,7 @@ function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
       label: "envelope." + p,
       category: "Envelope",
       required: isReq,
+      optionalWarning: isOptWarn,
       suggested: false,
       description: desc,
       applyType: "envelope",
@@ -1362,15 +1389,17 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
   let currentItems = [];
 
   let srcType = "string";
+  let paramObj = null;
   if (srcOwner === XR_ID) {
-    const pObj = (d.spec.xrd && d.spec.xrd.parameters && d.spec.xrd.parameters[srcPath]) || {};
-    srcType = pObj.type || "string";
+    paramObj = (d.spec.xrd && d.spec.xrd.parameters && d.spec.xrd.parameters[srcPath]) || {};
+    srcType = paramObj.type || "string";
   }
 
   const pickerContext = {
     srcOwner: srcOwner,
     srcPath: srcPath,
     srcType: srcType,
+    param: paramObj,
     resource: res,
   };
 
@@ -1383,22 +1412,28 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
     renderFieldPickerItems(listEl, currentItems, selectedIndex, srcPath);
   }
 
-  function selectItem(item) {
+  async function selectItem(item) {
     if (!item) return;
     closeWirePicker();
     if (item.typeMismatch && srcOwner === XR_ID && item.targetType) {
       if (window.confirm("Parameter '$" + srcPath + "' is " + item.srcType + ", but '" + item.path + "' expects " + item.targetType + ".\n\nConvert parameter type to " + item.targetType + " and wire?")) {
         const pObj = (d.spec.xrd && d.spec.xrd.parameters && d.spec.xrd.parameters[srcPath]) || {};
-        S.updateParameter(srcPath, Object.assign({}, pObj, { type: item.targetType }));
+        await S.updateParameter(srcPath, Object.assign({}, pObj, { type: item.targetType }));
+      }
+    }
+    if (item.optionalWarning && srcOwner === XR_ID) {
+      if (window.confirm("Parameter '$" + srcPath + "' is optional, but '" + item.path + "' is required.\n\nMark parameter as required to guarantee presence in render?")) {
+        const pObj = (d.spec.xrd && d.spec.xrd.parameters && d.spec.xrd.parameters[srcPath]) || {};
+        await S.updateParameter(srcPath, Object.assign({}, pObj, { required: true }));
       }
     }
     const applyActions = {
-      ann: function () { applyWire(srcOwner, srcPath, targetRes, "annotations." + item.path); },
-      envelope: function () { applyWire(srcOwner, srcPath, targetRes, "envelope." + item.path); },
-      field: function () { applyWire(srcOwner, srcPath, targetRes, item.path); },
+      ann: function () { return applyWire(srcOwner, srcPath, targetRes, "annotations." + item.path); },
+      envelope: function () { return applyWire(srcOwner, srcPath, targetRes, "envelope." + item.path); },
+      field: function () { return applyWire(srcOwner, srcPath, targetRes, item.path); },
     };
     const action = applyActions[item.applyType] || applyActions.field;
-    action();
+    return action();
   }
 
   function updateActiveItem() {
