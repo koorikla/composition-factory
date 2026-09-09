@@ -832,6 +832,9 @@ function bindPaletteEvents() {
       api.removeProvider(ref).then(function () {
         expandedProvider = null; providerKinds = null;
         loadProviders(); loadKinds();
+        return store.loadDoc();
+      }).then(function () {
+        store.generate(false);
       }).catch(function (err) {
         providersErr = err && err.message || String(err);
         drawRail();
@@ -869,6 +872,9 @@ function bindPaletteEvents() {
       api.addProvider(addRef).then(function () {
         loadProviders();
         loadKinds();             // new kinds must appear in the KINDS tab
+        return store.loadDoc();
+      }).then(function () {
+        store.generate(false);
       }).catch(function (err) {
         providersErr = err && err.message || String(err);
         drawRail();
@@ -888,9 +894,11 @@ function bindPaletteEvents() {
       api.addProvider(catRef).then(function () {
         return Promise.all([
           api.getProviders().then(function (r) { providers = r.providers || []; }),
-          api.getKinds().then(function (d) { kinds = d.kinds || []; kindsLoaded = true; })
+          api.getKinds().then(function (d) { kinds = d.kinds || []; kindsLoaded = true; }),
+          store.loadDoc()
         ]);
       }).then(function () {
+        store.generate(false);
         const inst = (providers || []).find(function (p) { return p.ref === catRef; });
         const kCount = inst && inst.kinds ? (inst.kinds + " kinds") : "schemas loaded";
         showToast("Installed <strong>" + esc(catRef.split("/").pop()) + "</strong> (" + kCount + ") \u2014 <span class=\"toast-link\">Open KINDS</span>", function () {
