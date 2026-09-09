@@ -506,6 +506,7 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
   flex: 1;
   min-height: 0;
   display: flex;
+  flex-direction: column;
   overflow: hidden;
   position: relative;
 }
@@ -560,6 +561,7 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
   resize: both;
   overflow: hidden;
   display: flex !important;
+  flex-direction: column;
 }
 .drawer.floated-panel.minimized {
   height: 36px !important;

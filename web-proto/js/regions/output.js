@@ -819,7 +819,7 @@ function initBlueprintEditor() {
   editBar = document.createElement("div");
   editBar.id = "code-editbar";
   editBar.hidden = true;
-  editBar.style.cssText = "display:flex;gap:8px;padding:6px 12px;border-top:1px solid var(--rule)";
+  editBar.style.cssText = "display:flex;gap:8px;padding:6px 12px;border-top:1px solid var(--rule);flex-shrink:0";
   editBar.innerHTML = '<button class="btn" id="code-apply">Apply</button>' +
     '<button class="btn" id="code-cancel">Cancel</button>' +
     '<span class="dg" style="align-self:center">applied through the same gate as an import — invalid YAML never lands</span>';
@@ -827,11 +827,10 @@ function initBlueprintEditor() {
 
   editBtn.addEventListener("click", function () {
     editor.value = currentText();
-    // the pre owns the drawer's free space via CSS; the textarea inherits its box
-    editor.style.height = Math.max(80, el.code.clientHeight - 36) + "px";
     el.code.hidden = true;
     editor.hidden = false;
     editBar.hidden = false;
+    editor.scrollTop = 0;
     editor.focus();
   });
 
