@@ -411,6 +411,7 @@ function mapResourceCoordinates(msg) {
 function formatErrorMessage(errMsg) {
   if (!errMsg) return "";
   var mapped = mapResourceCoordinates(errMsg);
+  mapped = mapped.replace(/is not in the cache;\s*run:\s*cf provider add\s+\S+/g, "is not in the cache; add it via the SOURCES tab's Add");
   var diag = diagnoseError(mapped);
   if (diag.isEnv && diag.tip) {
     return mapped + "\n\n💡 Environment Fix Tip: " + diag.tip;

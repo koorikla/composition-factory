@@ -36,7 +36,7 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string, cl *clust
 				// A source missing from the cache no longer kills startup: the
 				// server comes up with a partial index and the runtime auto-sync
 				// fetches it on demand.
-				fmt.Fprintf(os.Stderr, "cf: warning: %v — continuing without it; schemas load on demand\n", err)
+				fmt.Fprintf(os.Stderr, "cf: warning: provider %q is not in the cache — continuing without it; schemas load on demand\n", s.Provider)
 				continue
 			}
 			refs = append(refs, s.Provider)

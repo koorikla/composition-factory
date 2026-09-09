@@ -131,16 +131,21 @@ type server struct {
 	// add or delete) and srv.Providers (appended to / removed from).
 	// Handlers that read either take mu for the snapshot — see server.index
 	// and handleListProviders.
-	mu sync.Mutex
+	mu            sync.Mutex
+	failedSources map[string]error
 }
 
 // index returns the server's current index. It is a snapshot: POST
 // /api/providers may swap in a rebuilt index at any moment, so a handler
 // takes the pointer once under mu and serves its whole response from that
 // one consistent index, rather than re-reading srv.Index mid-request.
+//
+// CF-088: uncached declared sources are loaded on demand under mu before
+// returning the index snapshot.
 func (srv *server) index() *index.Index {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
+	_ = srv.ensureBlueprintSourcesLoadedLocked(context.Background(), nil)
 	return srv.Index
 }
 
@@ -155,7 +160,10 @@ func New(o Options) (http.Handler, error) {
 		return nil, err
 	}
 
-	srv := &server{Options: o}
+	srv := &server{
+		Options:       o,
+		failedSources: make(map[string]error),
+	}
 	// srv.Providers is mutable state (POST /api/providers appends to it), so
 	// it must not share a backing array with the caller's slice — an append
 	// with spare capacity would write into memory the caller still holds.
@@ -188,7 +196,12 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("PUT /api/blueprint/resources/{name}", srv.handleSetResource)
 	mux.HandleFunc("POST /api/blueprint/resources/{name}/rename", srv.handleRenameResource)
 	mux.HandleFunc("DELETE /api/blueprint/resources/{name}", srv.handleDeleteResource)
-	mux.HandleFunc("GET /api/providers", srv.handleListProviders)
+	mux.HandleFunc("GET /api/providers", func(w http.ResponseWriter, r *http.Request) {
+		srv.mu.Lock()
+		_ = srv.ensureBlueprintSourcesLoadedLocked(r.Context(), nil)
+		srv.mu.Unlock()
+		srv.handleListProviders(w, r)
+	})
 	mux.HandleFunc("POST /api/providers", srv.handleAddProvider)
 	mux.HandleFunc("DELETE /api/providers/{ref}", srv.handleDeleteProvider)
 	mux.HandleFunc("GET /api/functions", srv.handleListFunctions)

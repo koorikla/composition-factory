@@ -11,6 +11,8 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -135,6 +137,14 @@ func (srv *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 // no source (blueprint.Validate refuses a source called "k8s") and live in
 // no cache: they are compiled into the binary and always available.
 func (srv *server) loadSourceCRDs(b *blueprint.Blueprint) ([]schema.CRD, error) {
+	_ = srv.ensureBlueprintSourcesLoadedLocked(context.Background(), b)
+	for _, s := range b.Spec.Sources {
+		if s.Provider != "" && s.Provider != blueprint.NativeProvider {
+			if fetchErr, ok := srv.failedSources[s.Provider]; ok && fetchErr != nil {
+				return nil, fmt.Errorf("provider %q could not be loaded: %v; add it via the SOURCES tab's Add", s.Provider, fetchErr)
+			}
+		}
+	}
 	crds, err := cache.LoadSources(srv.Store, b, filepath.Dir(srv.Blueprint))
 	if err != nil {
 		return nil, err

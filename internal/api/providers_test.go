@@ -106,6 +106,7 @@ spec:
                 required: [region]
                 properties:
                   region: {type: string}
+                  maxMessageSize: {type: integer}
 `, plural, group, group, kind, plural))
 }
 
