@@ -458,6 +458,73 @@ type Resource struct {
 	Annotations map[string]Field `json:"annotations,omitempty"`
 }
 
+// UnmarshalJSON decodes a Resource and wraps field/envelope/annotation unmarshaling
+// errors with their field name and resource context.
+func (r *Resource) UnmarshalJSON(data []byte) error {
+	type rawResource struct {
+		Name        string                     `json:"name"`
+		Kind        string                     `json:"kind"`
+		Provider    string                     `json:"provider"`
+		ForEach     string                     `json:"forEach"`
+		When        string                     `json:"when"`
+		Fields      map[string]json.RawMessage `json:"fields"`
+		Envelope    map[string]json.RawMessage `json:"envelope,omitempty"`
+		Annotations map[string]json.RawMessage `json:"annotations,omitempty"`
+	}
+	var raw rawResource
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&raw); err != nil {
+		return err
+	}
+	r.Name = raw.Name
+	r.Kind = raw.Kind
+	r.Provider = raw.Provider
+	r.ForEach = raw.ForEach
+	r.When = raw.When
+
+	if raw.Fields != nil {
+		r.Fields = make(map[string]Field, len(raw.Fields))
+		for k, v := range raw.Fields {
+			var f Field
+			if err := json.Unmarshal(v, &f); err != nil {
+				if r.Name != "" {
+					return fmt.Errorf("resource %q field %q: %w", r.Name, k, err)
+				}
+				return fmt.Errorf("field %q: %w", k, err)
+			}
+			r.Fields[k] = f
+		}
+	}
+	if raw.Envelope != nil {
+		r.Envelope = make(map[string]Field, len(raw.Envelope))
+		for k, v := range raw.Envelope {
+			var f Field
+			if err := json.Unmarshal(v, &f); err != nil {
+				if r.Name != "" {
+					return fmt.Errorf("resource %q envelope %q: %w", r.Name, k, err)
+				}
+				return fmt.Errorf("envelope %q: %w", k, err)
+			}
+			r.Envelope[k] = f
+		}
+	}
+	if raw.Annotations != nil {
+		r.Annotations = make(map[string]Field, len(raw.Annotations))
+		for k, v := range raw.Annotations {
+			var f Field
+			if err := json.Unmarshal(v, &f); err != nil {
+				if r.Name != "" {
+					return fmt.Errorf("resource %q annotation %q: %w", r.Name, k, err)
+				}
+				return fmt.Errorf("annotation %q: %w", k, err)
+			}
+			r.Annotations[k] = f
+		}
+	}
+	return nil
+}
+
 // when grammar, compiled once. The literal character class excludes '"' and
 // '\\' so the emitted Go-syntax quoting (%q) is always the literal wrapped
 // in plain quotes — byte-deterministic, no escape sequences to reason about.
@@ -516,6 +583,15 @@ type Field struct {
 
 // UnmarshalJSON permits scalar values (booleans, numbers, strings) for Value, From, Raw, Template.
 func (f *Field) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		val := string(trimmed)
+		var s string
+		if json.Unmarshal(trimmed, &s) == nil {
+			val = s
+		}
+		return fmt.Errorf("field value must be a mapping with one of value, from, raw, or template (got bare scalar %s; did you mean {value: %s}?)", string(trimmed), val)
+	}
 	type rawField struct {
 		From     any `json:"from"`
 		Value    any `json:"value"`

@@ -1720,3 +1720,107 @@ spec:
 		t.Fatalf("expected error mentioning 'resourcez', got: %v", err)
 	}
 }
+
+func TestCF112BareScalarFieldError(t *testing.T) {
+	badYAML := `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  resources:
+    - name: db
+      kind: Instance
+      fields:
+        engine: postgres
+`
+	_, err := Parse([]byte(badYAML))
+	if err == nil {
+		t.Fatal("expected error for bare scalar field, got nil")
+	}
+	if strings.Contains(err.Error(), "blueprint.rawField") {
+		t.Errorf("error exposed Go internals: %v", err)
+	}
+	if !strings.Contains(err.Error(), "field \"engine\"") && !strings.Contains(err.Error(), "engine") {
+		t.Errorf("expected error to name field 'engine', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "value:") && !strings.Contains(err.Error(), "{value: postgres}") && !strings.Contains(err.Error(), "bare scalar") && !strings.Contains(err.Error(), "must be a mapping") && !strings.Contains(err.Error(), "expected mapping") {
+		t.Errorf("expected error to provide actionable guidance for field mode, got: %v", err)
+	}
+}
+
+func TestCF112BareScalarFieldError_Variants(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantIn  []string
+		wantOut []string
+	}{
+		{
+			name: "numeric scalar",
+			yaml: `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  resources:
+    - name: db
+      kind: Instance
+      fields:
+        port: 5432
+`,
+			wantIn:  []string{"resource \"db\"", "field \"port\"", "bare scalar 5432", "{value: 5432}"},
+			wantOut: []string{"blueprint.rawField"},
+		},
+		{
+			name: "boolean scalar",
+			yaml: `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  resources:
+    - name: db
+      kind: Instance
+      fields:
+        enabled: true
+`,
+			wantIn:  []string{"resource \"db\"", "field \"enabled\"", "bare scalar true", "{value: true}"},
+			wantOut: []string{"blueprint.rawField"},
+		},
+		{
+			name: "envelope bare scalar",
+			yaml: `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  resources:
+    - name: db
+      kind: Instance
+      envelope:
+        providerConfigRef.name: default
+`,
+			wantIn:  []string{"resource \"db\"", "envelope \"providerConfigRef.name\"", "bare scalar"},
+			wantOut: []string{"blueprint.rawField"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(tc.yaml))
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			for _, in := range tc.wantIn {
+				if !strings.Contains(err.Error(), in) {
+					t.Errorf("expected error to contain %q, got: %v", in, err)
+				}
+			}
+			for _, out := range tc.wantOut {
+				if strings.Contains(err.Error(), out) {
+					t.Errorf("error unexpectedly contained %q: %v", out, err)
+				}
+			}
+		})
+	}
+}
