@@ -55,14 +55,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
 
 ### P0
 
-- [ ] **CF-089 — Adding a provider from SOURCES and then applying any full-document write
-      (blueprint editor Apply, engine selector) silently drops that provider again. [V]** Neither
-      add path in `web-proto/js/regions/palette.js:869` / `:887` refreshes the client document
-      after `POST /api/providers`, so `store.replaceDoc` PUTs a `spec.sources` that predates the
-      add and the server's reconciliation evicts the provider. Scripted repro on `f45c2a8`, twice:
-      after Add `/api/providers` = s3+iam, the editor text lists only s3, after Apply
-      `/api/providers` = s3 and the file on disk has lost iam; no error anywhere. The client
-      document must never carry stale `spec.sources` into a write.
 - [ ] **CF-090 — The Generate toast says `Output written to compositions · Apply: kubectl apply -f
       compositions` while three of the four files land outside `compositions/`. [V]**
       `output.js:452-453` builds the toast from one path; `POST /api/generate {write:true}` on

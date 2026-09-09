@@ -1,3 +1,8 @@
+- [x] **CF-089 — Adding a provider from SOURCES and then applying any full-document write
+      (blueprint editor Apply, engine selector) silently drops that provider again. [V]**
+      Synchronized client store document via `store.loadDoc()` and re-ran generation on provider
+      add/remove in palette, preventing stale `spec.sources` from evicting providers on full-doc writes.
+      — completed 2026-09-09
 - [x] **CF-106 — *(engine)* `cf gen` accepts an unknown key under `spec` (`resourcez:`), emits a
       Composition with zero composed resources and exits 0; the HTTP and MCP doors reject the same
       document with `unknown field "resourcez"`. [V]**
