@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -658,5 +660,38 @@ func TestAddProviderDroppedFromBlueprintSourcesCanBeReadded(t *testing.T) {
 	rec2 := do(t, h, "POST", "/api/providers", `{"ref":"`+testProviderRef+`"}`)
 	if rec2.Code != http.StatusConflict {
 		t.Fatalf("second POST status = %d, want 409: %s", rec2.Code, rec2.Body)
+	}
+}
+
+func testHandlerWithStore(t *testing.T) (http.Handler, *cache.Store, string) {
+	t.Helper()
+	h, bp, store, _ := testServerParts(t)
+	return h, store, bp
+}
+
+func TestCF098AddProviderReportsLockWriteError(t *testing.T) {
+	_, store, _ := testHandlerWithStore(t)
+	parentDir := filepath.Join(t.TempDir(), "ro")
+	if err := os.MkdirAll(parentDir, 0o555); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parentDir, 0o755) })
+	unwritableLock := filepath.Join(parentDir, ".cf.lock")
+
+	idx, _ := BuildIndex(store, []string{testProviderRef}, nil, "")
+	srv := &server{
+		Store:     store,
+		Index:     idx,
+		Providers: []string{},
+		Lock:      unwritableLock,
+		Blueprint: testBlueprintPath(t),
+	}
+	rec := httptest.NewRecorder()
+	body := fmt.Sprintf(`{"ref":%q}`, testProviderRef)
+	req := httptest.NewRequest("POST", "/api/providers", strings.NewReader(body))
+	srv.handleAddProvider(rec, req)
+
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected HTTP error when lockfile cannot be written, got 200: %s", rec.Body.String())
 	}
 }

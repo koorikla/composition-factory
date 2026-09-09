@@ -170,13 +170,22 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if pkgDigest == "" {
 		if _, err := srv.Store.Load(req.Ref); err == nil {
-			if digest, err := srv.Store.LoadDigest(req.Ref); err == nil {
-				pkgDigest = digest
-				if srv.Lock != "" {
-					if l, err := cache.ReadLock(srv.Lock); err == nil {
-						l.Set(req.Ref, digest)
-						_ = l.Write(srv.Lock)
-					}
+			digest, err := srv.Store.LoadDigest(req.Ref)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			pkgDigest = digest
+			if srv.Lock != "" {
+				l, err := cache.ReadLock(srv.Lock)
+				if err != nil {
+					writeJSONError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				l.Set(req.Ref, digest)
+				if err := l.Write(srv.Lock); err != nil {
+					writeJSONError(w, http.StatusInternalServerError, err.Error())
+					return
 				}
 			}
 		}
