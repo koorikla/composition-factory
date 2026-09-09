@@ -1,3 +1,8 @@
+- [x] **CF-067 — The light-theme code viewer fails AA on four of five syntax colours.**
+      Re-derived light theme code syntax colors against `--sunk` (`#D8E0EA`) to meet WCAG AA (>= 4.5:1)
+      contrast across templates (`.code .tm`), shared bindings (`.code .sh`), comments (`.code .co`),
+      keys (`.code .k`), and values, maintaining zero token drift with `canvas-prototype.html`.
+      — completed 2026-09-09
 - [x] **CF-064 — The output drawer takes 250 px of a 720 px viewport to show 142 px of
       YAML. [V]**
       Compacted output drawer default height to 200px and tightened padding across tab chrome,

@@ -62,12 +62,6 @@ them in.
       status chip — so a successful result is overwritten by the debounced preview 300 ms
       after the next keystroke. The fix must keep one vocabulary and let the result survive.
 
-- [ ] **CF-067 — The light-theme code viewer fails AA on four of five syntax colours.** All
-      on `--sunk` `#D8E0EA`: template 3.55:1, shared 3.55:1, comment 3.68:1, key 4.46:1; only
-      strings pass. All five pass in dark, so the light theme is the one never measured. The
-      same 4.46:1 pair breaks the raw-expression editor and the selected artifact-tree row.
-      The fix must choose the light accents against `--sunk`, not against white.
-
 ### P3
 
 - [ ] **CF-071 — Design-token hygiene: a purple, five undefined `var()`s, and no type or
