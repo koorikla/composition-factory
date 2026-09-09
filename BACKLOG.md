@@ -99,11 +99,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       `404 /api/kinds/autoready.fn.crossplane.io%2Fv1alpha1/AutoReady/fields`. The canvas's Import
       takes one file, so the XRD is never alongside — the CLI face of the same loss is CF-108.
       Round-Trip Rule: cf's own output must come back intact, or the loss must be named on screen.
-- [ ] **CF-120 — The Edit-blueprint Apply (and `POST /api/blueprint/import`) silently discards an
-      unknown key while applying the rest, under a note that promises "invalid YAML never lands";
-      `PUT /api/blueprint` rejects the same key. [V]** J2 F5, twice (and twice again by the author via the raw-YAML import route: 200, `xrd` keys unchanged, nothing on disk): a hand-typed `xrd.status:` block
-      vanished, the `sources` change in the same Apply landed, no toast, header still `preview`.
-      Same class as CF-106 on the CLI; the import gate must refuse unknown keys like PUT does.
 - [ ] **CF-121 — Renaming the XRD kind in the inspector leaves `plural` at the old value, the
       plural is shown as static text and is editable nowhere, so Generate names every file and
       the Composition after a kind that no longer exists.** J2 F3, twice: `XApp` → `XPostgres`,

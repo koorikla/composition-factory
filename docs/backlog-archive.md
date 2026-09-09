@@ -1,3 +1,9 @@
+- [x] **CF-120 — The Edit-blueprint Apply (and `POST /api/blueprint/import`) silently discards an
+      unknown key while applying the rest, under a note that promises "invalid YAML never lands";
+      `PUT /api/blueprint` rejects the same key. [V]**
+      Configured `blueprint.Parse` via `DisallowUnknownFields()` to reject unknown keys in raw YAML
+      import and editor apply, returning HTTP 400 Bad Request naming the offending key.
+      — completed 2026-09-09
 - [x] **CF-091 — After the user repairs a missing provider from SOURCES, the top bar keeps saying
       `error … not in the cache` and the composition pane stays at `0 lines` until an unrelated
       edit or a reload.**
