@@ -75,3 +75,18 @@ func TestListExamples(t *testing.T) {
 		}
 	}
 }
+
+func TestExampleIconColorDesignTokenHygiene(t *testing.T) {
+	for _, ex := range All() {
+		if ex.Icon.Color == "#7c3aed" {
+			t.Errorf("example %q uses rogue violet #7c3aed breaching palette rules", ex.ID)
+		}
+	}
+	cron, err := Get("k8s-cronjob")
+	if err != nil {
+		t.Fatalf("failed to get k8s-cronjob: %v", err)
+	}
+	if cron.Icon.Color != "var(--wire-status)" {
+		t.Errorf("k8s-cronjob color = %q, want %q", cron.Icon.Color, "var(--wire-status)")
+	}
+}

@@ -169,7 +169,7 @@ test('token definitions in proto.css and canvas-prototype.html remain in sync', 
     while ((m = re.exec(content)) !== null) {
       vars.push(`${m[1]}:${m[2].trim()}`)
     }
-    return vars.slice(0, 75)
+    return vars
   }
   const protoTokens = extractTokens(fs.readFileSync('web-proto/css/proto.css', 'utf8'))
   const canvasTokens = extractTokens(fs.readFileSync('docs/design/canvas-prototype.html', 'utf8'))
@@ -205,4 +205,75 @@ test('light theme code syntax colors meet WCAG AA contrast against sunk backgrou
     expect(crCodeBg, `.code .${cls} contrast against code background (${color} on ${codeBg})`).toBeGreaterThanOrEqual(4.5)
   }
 })
+
+test('CRON example card icon does not use rogue violet #7c3aed', async ({ page }) => {
+  await page.goto('/')
+  const btn = page.locator('#examplesBtn')
+  await expect(btn).toBeVisible()
+  await btn.click()
+  const cronCard = page.locator('.example-card[data-id="k8s-cronjob"]')
+  await expect(cronCard).toBeVisible()
+  const icon = cronCard.locator('.example-icon')
+  await expect(icon).toHaveText('CRON')
+  const bg = await icon.evaluate((el) => {
+    return {
+      inlineBg: el.style.background,
+      computedBg: getComputedStyle(el).backgroundColor,
+    }
+  })
+  expect(bg.inlineBg, 'CRON inline background must not be rogue violet #7c3aed').not.toContain('#7c3aed')
+  expect(bg.computedBg, 'CRON computed background must not be rogue violet rgb(124, 58, 237)').not.toBe('rgb(124, 58, 237)')
+})
+
+test('--dim, --accent, --pri, --panel, and --fg are defined in computed styles in both light and dark modes', async ({ page }) => {
+  for (const mode of ['light', 'dark']) {
+    await bootWithTheme(page, mode)
+    const tokens = await page.evaluate(() => {
+      const cs = getComputedStyle(document.documentElement)
+      return {
+        dim: cs.getPropertyValue('--dim').trim(),
+        accent: cs.getPropertyValue('--accent').trim(),
+        pri: cs.getPropertyValue('--pri').trim(),
+        panel: cs.getPropertyValue('--panel').trim(),
+        fg: cs.getPropertyValue('--fg').trim(),
+      }
+    })
+    expect(tokens.dim, `--dim should be defined in ${mode} mode`).toBeTruthy()
+    expect(tokens.accent, `--accent should be defined in ${mode} mode`).toBeTruthy()
+    expect(tokens.pri, `--pri should be defined in ${mode} mode`).toBeTruthy()
+    expect(tokens.panel, `--panel should be defined in ${mode} mode`).toBeTruthy()
+    expect(tokens.fg, `--fg should be defined in ${mode} mode`).toBeTruthy()
+  }
+})
+
+test('tour card computed background and color follow theme tokens', async ({ page }) => {
+  for (const mode of ['light', 'dark']) {
+    await bootWithTheme(page, mode)
+    const cardPaint = await page.evaluate(() => {
+      const card = document.createElement('div')
+      card.className = 'tour-card'
+      document.body.appendChild(card)
+      const cs = getComputedStyle(card)
+      const paint = {
+        bg: cs.backgroundColor,
+        color: cs.color,
+      }
+      card.remove()
+      return paint
+    })
+    if (mode === 'light') {
+      // Must not fall back to dark defaults #16181d (rgb(22, 24, 29)) and #e6e6e6 (rgb(230, 230, 230))
+      expect(cardPaint.bg, 'tour card background in light mode must not be dark fallback').not.toBe('rgb(22, 24, 29)')
+      expect(cardPaint.color, 'tour card color in light mode must not be light fallback').not.toBe('rgb(230, 230, 230)')
+      // Light surface is #FFFFFF (rgb(255, 255, 255)) and ink is #0B0F14 (rgb(11, 15, 20))
+      expect(cardPaint.bg, 'tour card background in light mode matches surface').toBe('rgb(255, 255, 255)')
+      expect(cardPaint.color, 'tour card color in light mode matches ink').toBe('rgb(11, 15, 20)')
+    } else {
+      // Dark surface is #161B22 (rgb(22, 27, 34)) and ink is #E8ECF2 (rgb(232, 236, 242))
+      expect(cardPaint.bg, 'tour card background in dark mode matches dark surface').toBe('rgb(22, 27, 34)')
+      expect(cardPaint.color, 'tour card color in dark mode matches dark ink').toBe('rgb(232, 236, 242)')
+    }
+  }
+})
+
 
