@@ -85,7 +85,7 @@
   :root:not([data-theme="light"]){
     color-scheme: dark;
     --ground:#0C1015; --surface:#161B22; --surface-2:#1C222B; --sunk:#0F141A;
-    --ink:#E8ECF2; --ink-2:#B4BDC9; --muted:#8A94A2; --faint:#6A747F;
+    --ink:#E8ECF2; --ink-2:#B4BDC9; --muted:#8A94A2; --faint:#8E99A8;
     --rule:#272E39; --rule-2:#3B4450;
     --wire-xrd:#5CA0F5; --wire-status:#38B6A8; --wire-ref:#DE8055; --shared:#D6AB33;
     --wire-xrd-soft:#152741; --wire-status-soft:#0F2E2B; --wire-ref-soft:#331F16; --shared-soft:#2E2712;
@@ -98,7 +98,7 @@
 :root[data-theme="dark"]{
   color-scheme: dark;
   --ground:#0C1015; --surface:#161B22; --surface-2:#1C222B; --sunk:#0F141A;
-  --ink:#E8ECF2; --ink-2:#B4BDC9; --muted:#8A94A2; --faint:#6A747F;
+  --ink:#E8ECF2; --ink-2:#B4BDC9; --muted:#8A94A2; --faint:#8E99A8;
   --rule:#272E39; --rule-2:#3B4450;
   --wire-xrd:#5CA0F5; --wire-status:#38B6A8; --wire-ref:#DE8055; --shared:#D6AB33;
   --wire-xrd-soft:#152741; --wire-status-soft:#0F2E2B; --wire-ref-soft:#331F16; --shared-soft:#2E2712;
@@ -136,6 +136,10 @@ html,body{height:100%;overflow:hidden}
 .btn:hover{background:var(--sunk);color:var(--ink)}
 .btn.pri{background:var(--wire-xrd);border-color:var(--wire-xrd);color:#fff}
 .btn.pri:hover{filter:brightness(1.08)}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .btn.pri{color:var(--ground)}
+}
+:root[data-theme="dark"] .btn.pri{color:var(--ground)}
 .btn.sm{height:21px;padding:0 7px;font-size:11px}
 .chip-ok{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--ok);font-weight:500}
 .chip-ok::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
@@ -232,6 +236,10 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
   background:var(--shared);color:#fff;border-radius:7px;height:13px;min-width:19px;
   display:grid;place-items:center;font-family:var(--mono);font-size:9px;padding:0 3px;
   border:1.5px solid var(--surface)}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .fan{color:var(--ground)}
+}
+:root[data-theme="dark"] .fan{color:var(--ground)}
 .legend{position:absolute;left:12px;bottom:12px;display:flex;gap:11px;padding:6px 10px;
   background:var(--surface);border:1px solid var(--rule);border-radius:6px;box-shadow:var(--shadow)}
 .legend .i{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--muted)}
