@@ -72,22 +72,29 @@ func TestGenerateIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestSourceHeaderPreservesRealBlueprintPath(t *testing.T) {
-	b := testBlueprint()
-	b.SetSourcePath("custom/path/to/my-blueprint.cf.yaml")
+func TestSourceHeaderDeterministic(t *testing.T) {
+	for _, p := range []string{
+		"custom/path/to/my-blueprint.cf.yaml",
+		"/abs/path/to/my-blueprint.cf.yaml",
+		"",
+	} {
+		b := testBlueprint()
+		b.SetSourcePath(p)
 
-	outs, err := Generate(b, testCRDs(t), "out")
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	for _, o := range outs {
-		if filepath.ToSlash(o.Path) == "out/providerconfigs/aws.yaml" {
-			// ProviderConfig headers are sourced from provider package references
-			continue
+		outs, err := Generate(b, testCRDs(t), "out")
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
 		}
-		if !strings.Contains(string(o.Body), "# Source: custom/path/to/my-blueprint.cf.yaml") {
-			t.Errorf("%s: missing preserved source path in header:\n%s", o.Path, string(o.Body))
+
+		for _, o := range outs {
+			if filepath.ToSlash(o.Path) == "out/providerconfigs/aws.yaml" {
+				// ProviderConfig headers are sourced from provider package references
+				continue
+			}
+			want := "# Source: " + b.Metadata.Name
+			if !strings.Contains(string(o.Body), want) {
+				t.Errorf("%s (sourcePath=%q): missing deterministic source header %q:\n%s", o.Path, p, want, string(o.Body))
+			}
 		}
 	}
 }

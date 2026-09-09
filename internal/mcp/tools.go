@@ -6,14 +6,15 @@
 //
 //   - Tool and property names are snake_case; each maps onto the HTTP
 //     route's own path/query/body parameter, spelled for an agent caller.
-//   - Whole-document and whole-parameter inputs (replace_blueprint's
-//     blueprint, add_parameter/update_parameter's parameter) are held as
+//   - Whole-document, whole-parameter, and whole-resource inputs
+//     (replace_blueprint's blueprint, add_parameter/update_parameter's
+//     parameter, add_resource/update_resource's resource) are held as
 //     json.RawMessage and forwarded to the HTTP layer BYTE-FOR-BYTE. This is
 //     load-bearing: internal/api decodes every body with
 //     DisallowUnknownFields, so a typo'd key must reach that decoder intact
 //     to be rejected with the same error a browser client would see.
 //     Re-decoding into typed structs here would silently drop the very keys
-//     that gate exists to catch. Those three tools carry hand-written input
+//     that gate exists to catch. Those five tools carry hand-written input
 //     schemas because the SDK's reflection would otherwise describe
 //     json.RawMessage as a byte array.
 //   - Numeric and boolean filters are typed (integer/boolean) rather than
@@ -162,6 +163,66 @@ func (s *server) register(srv *sdk.Server) {
 			"those fields first) or if deleting it would leave the blueprint invalid (e.g. " +
 			"providerName on a Namespaced XRD). Returns the updated document.",
 	}, s.deleteParameter)
+
+	addResource := &sdk.Tool{
+		Name: "add_resource",
+		Description: "Declare a new composed resource on the blueprint and persist it. " +
+			"The name must be a valid Kubernetes resource name and not already declared (a duplicate is refused). " +
+			"The resource object's keys are kind, provider, fields, when, forEach, envelope, annotations; " +
+			"unknown keys are rejected. Returns the updated document.",
+	}
+	addResource.InputSchema = mustSchemaJSON(`{
+		"type": "object",
+		"properties": {
+			"name": {
+				"type": "string",
+				"description": "The new composed resource's name."
+			},
+			"resource": {
+				"type": "object",
+				"description": "The resource declaration: {kind, provider, fields, when, forEach, ...}."
+			}
+		},
+		"required": ["name", "resource"],
+		"additionalProperties": false
+	}`)
+	sdk.AddTool(srv, addResource, s.addResource)
+
+	updateResource := &sdk.Tool{
+		Name: "update_resource",
+		Description: "Replace an existing composed resource's declaration IN FULL and persist it — " +
+			"this is not a merge. The resource object's keys are kind, provider, fields, when, forEach, " +
+			"envelope, annotations; an unknown name is an error. Returns the updated document.",
+	}
+	updateResource.InputSchema = mustSchemaJSON(`{
+		"type": "object",
+		"properties": {
+			"name": {
+				"type": "string",
+				"description": "The declared composed resource to replace."
+			},
+			"resource": {
+				"type": "object",
+				"description": "The complete replacement resource declaration."
+			}
+		},
+		"required": ["name", "resource"],
+		"additionalProperties": false
+	}`)
+	sdk.AddTool(srv, updateResource, s.updateResource)
+
+	sdk.AddTool(srv, &sdk.Tool{
+		Name: "rename_resource",
+		Description: "Rename a composed resource and rewrite every cross-resource status reference " +
+			"(resources.<name>.status.<path>), atomically, then persist. Renaming to the same name is a no-op " +
+			"success; renaming to an already-declared name is refused. Returns the updated document.",
+	}, s.renameResource)
+
+	sdk.AddTool(srv, &sdk.Tool{
+		Name: "delete_resource",
+		Description: "Delete a composed resource and persist the result. Refused if any other " +
+			"resource still wires from its status or metadata. Returns the updated document.",
+	}, s.deleteResource)
 
 	sdk.AddTool(srv, &sdk.Tool{
 		Name: "add_provider",
@@ -369,6 +430,66 @@ type deleteParameterInput struct {
 // deleteParameter mirrors DELETE /api/blueprint/parameters/{name}.
 func (s *server) deleteParameter(_ context.Context, _ *sdk.CallToolRequest, in deleteParameterInput) (*sdk.CallToolResult, any, error) {
 	return s.bridge(http.MethodDelete, "/api/blueprint/parameters/"+url.PathEscape(in.Name), nil)
+}
+
+// --- resources ---
+
+type addResourceInput struct {
+	Name     string          `json:"name"`
+	Resource json.RawMessage `json:"resource"` // raw: see the file comment
+}
+
+// addResource mirrors POST /api/blueprint/resources.
+func (s *server) addResource(_ context.Context, _ *sdk.CallToolRequest, in addResourceInput) (*sdk.CallToolResult, any, error) {
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(rawOrNull(in.Resource), &rawMap); err != nil || rawMap == nil {
+		return s.bridge(http.MethodPost, "/api/blueprint/resources", rawOrNull(in.Resource))
+	}
+	nameBytes, err := json.Marshal(in.Name)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode request: %w", err)
+	}
+	rawMap["name"] = nameBytes
+	body, err := json.Marshal(rawMap)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode request: %w", err)
+	}
+	return s.bridge(http.MethodPost, "/api/blueprint/resources", body)
+}
+
+type updateResourceInput struct {
+	Name     string          `json:"name"`
+	Resource json.RawMessage `json:"resource"` // raw: see the file comment
+}
+
+// updateResource mirrors PUT /api/blueprint/resources/{name}.
+func (s *server) updateResource(_ context.Context, _ *sdk.CallToolRequest, in updateResourceInput) (*sdk.CallToolResult, any, error) {
+	return s.bridge(http.MethodPut, "/api/blueprint/resources/"+url.PathEscape(in.Name), rawOrNull(in.Resource))
+}
+
+type renameResourceInput struct {
+	Name string `json:"name" jsonschema:"The declared composed resource to rename."`
+	To   string `json:"to" jsonschema:"The new name (valid Kubernetes resource name, not already declared)."`
+}
+
+// renameResource mirrors POST /api/blueprint/resources/{name}/rename.
+func (s *server) renameResource(_ context.Context, _ *sdk.CallToolRequest, in renameResourceInput) (*sdk.CallToolResult, any, error) {
+	body, err := json.Marshal(struct {
+		To string `json:"to"`
+	}{To: in.To})
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode request: %w", err)
+	}
+	return s.bridge(http.MethodPost, "/api/blueprint/resources/"+url.PathEscape(in.Name)+"/rename", body)
+}
+
+type deleteResourceInput struct {
+	Name string `json:"name" jsonschema:"The declared composed resource to delete."`
+}
+
+// deleteResource mirrors DELETE /api/blueprint/resources/{name}.
+func (s *server) deleteResource(_ context.Context, _ *sdk.CallToolRequest, in deleteResourceInput) (*sdk.CallToolResult, any, error) {
+	return s.bridge(http.MethodDelete, "/api/blueprint/resources/"+url.PathEscape(in.Name), nil)
 }
 
 // --- providers ---

@@ -71,6 +71,30 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 		// Metadata
 		sb.WriteString(fmt.Sprintf("%smetadata = {\n", inner))
 		metaInner := inner + "    "
+		if crd.Native {
+			var metaName *forProviderField
+			for i := range pres.MetaPlan {
+				if pres.MetaPlan[i].path == "metadata.name" || pres.MetaPlan[i].path == "name" {
+					metaName = &pres.MetaPlan[i]
+					break
+				}
+			}
+			if metaName != nil {
+				rhs := kclStructuredRHS(metaName.structured, metaName.rhs)
+				if metaName.structured.kind == rhsStatus {
+					sb.WriteString(fmt.Sprintf("%sif %s:\n", metaInner, rhs))
+					sb.WriteString(fmt.Sprintf("%s    name = %s\n", metaInner, rhs))
+				} else {
+					sb.WriteString(fmt.Sprintf("%sname = %s\n", metaInner, rhs))
+				}
+			} else {
+				if r.ForEach != "" {
+					sb.WriteString(fmt.Sprintf("%sname = \"${_xr}-%s-${_i}\"\n", metaInner, r.Name))
+				} else {
+					sb.WriteString(fmt.Sprintf("%sname = \"${_xr}-%s\"\n", metaInner, r.Name))
+				}
+			}
+		}
 		sb.WriteString(fmt.Sprintf("%sannotations = {\n", metaInner))
 		annInner := metaInner + "    "
 		if r.ForEach != "" {

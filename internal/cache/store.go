@@ -273,44 +273,43 @@ func (l *Lock) SetFunction(ref, digest string) {
 	sort.Slice(l.Functions, func(i, j int) bool { return l.Functions[i].Ref < l.Functions[j].Ref })
 }
 
+// cleanRefSegment strips any digest (@...), tag (:...), or path prefix (/...),
+// returning the base package or function name segment.
+func cleanRefSegment(ref string) string {
+	s := ref
+	if i := strings.Index(s, "@"); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.LastIndex(s, ":"); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		s = s[i+1:]
+	}
+	return s
+}
+
+// cleanFunctionRef normalizes a function name or reference by extracting its
+// clean segment, lowercasing, and stripping standard function prefixes ("function-", "fn-").
+func cleanFunctionRef(ref string) string {
+	s := strings.ToLower(cleanRefSegment(ref))
+	s = strings.TrimPrefix(s, "function-")
+	s = strings.TrimPrefix(s, "fn-")
+	return s
+}
+
 // FindFunction returns the lock entry matching function name or ref, if found.
 func (l *Lock) FindFunction(nameOrRef string) (LockEntry, bool) {
 	if l == nil {
 		return LockEntry{}, false
 	}
-	clean := nameOrRef
-	if i := strings.Index(clean, "@"); i >= 0 {
-		clean = clean[:i]
-	}
-	if i := strings.LastIndex(clean, ":"); i >= 0 {
-		clean = clean[:i]
-	}
-	if i := strings.LastIndex(clean, "/"); i >= 0 {
-		clean = clean[i+1:]
-	}
-	clean = strings.ToLower(clean)
-	clean = strings.TrimPrefix(clean, "function-")
-	clean = strings.TrimPrefix(clean, "fn-")
+	clean := cleanFunctionRef(nameOrRef)
 
 	for _, f := range l.Functions {
 		if f.Ref == nameOrRef {
 			return f, true
 		}
-		fClean := f.Ref
-		if i := strings.Index(fClean, "@"); i >= 0 {
-			fClean = fClean[:i]
-		}
-		if i := strings.LastIndex(fClean, ":"); i >= 0 {
-			fClean = fClean[:i]
-		}
-		if i := strings.LastIndex(fClean, "/"); i >= 0 {
-			fClean = fClean[i+1:]
-		}
-		fClean = strings.ToLower(fClean)
-		fClean = strings.TrimPrefix(fClean, "function-")
-		fClean = strings.TrimPrefix(fClean, "fn-")
-
-		if fClean == clean && clean != "" {
+		if fClean := cleanFunctionRef(f.Ref); fClean == clean && clean != "" {
 			return f, true
 		}
 	}
@@ -322,30 +321,12 @@ func (l *Lock) FindProvider(providerRef string) (LockEntry, bool) {
 	if l == nil {
 		return LockEntry{}, false
 	}
+	reqLast := cleanRefSegment(providerRef)
 	for _, p := range l.Providers {
 		if p.Ref == providerRef || strings.HasPrefix(p.Ref, providerRef+":") || strings.HasPrefix(p.Ref, providerRef+"@") {
 			return p, true
 		}
-		pLast := p.Ref
-		if i := strings.Index(pLast, "@"); i >= 0 {
-			pLast = pLast[:i]
-		}
-		if i := strings.LastIndex(pLast, ":"); i >= 0 {
-			pLast = pLast[:i]
-		}
-		if i := strings.LastIndex(pLast, "/"); i >= 0 {
-			pLast = pLast[i+1:]
-		}
-		reqLast := providerRef
-		if i := strings.Index(reqLast, "@"); i >= 0 {
-			reqLast = reqLast[:i]
-		}
-		if i := strings.LastIndex(reqLast, ":"); i >= 0 {
-			reqLast = reqLast[:i]
-		}
-		if i := strings.LastIndex(reqLast, "/"); i >= 0 {
-			reqLast = reqLast[i+1:]
-		}
+		pLast := cleanRefSegment(p.Ref)
 		if pLast == reqLast && reqLast != "" {
 			return p, true
 		}
@@ -406,14 +387,18 @@ func (s *Store) FetchAndSave(ctx context.Context, lockPath, ref string, fetch fu
 	// Load then fails loudly with its own "run: cf provider add <ref>"
 	// message — a visible, recoverable state. Do not swap this order
 	// without re-reading that tradeoff.
+	s.mu.Lock()
 	l, err := ReadLock(lockPath)
 	if err != nil {
+		s.mu.Unlock()
 		return nil, nil, err
 	}
 	l.Set(ref, pkg.Digest)
 	if err := l.Write(lockPath); err != nil {
+		s.mu.Unlock()
 		return nil, nil, err
 	}
+	s.mu.Unlock()
 	if err := s.Save(pkg, crds); err != nil {
 		return nil, nil, err
 	}

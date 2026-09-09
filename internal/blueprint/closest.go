@@ -43,26 +43,48 @@ func ClosestPath(target string, candidates []string) string {
 	return ""
 }
 
-// editDistance is Levenshtein distance over runes, two rows at a time.
+// editDistance is Levenshtein distance over runes. It avoids heap allocations
+// for typical string lengths using a stack-allocated row buffer.
 func editDistance(a, b string) int {
+	if a == b {
+		return 0
+	}
 	ar, br := []rune(a), []rune(b)
-	prev := make([]int, len(br)+1)
-	curr := make([]int, len(br)+1)
-	for j := range prev {
-		prev[j] = j
+	if len(ar) == 0 {
+		return len(br)
+	}
+	if len(br) == 0 {
+		return len(ar)
+	}
+	if len(br) > len(ar) {
+		ar, br = br, ar
+	}
+
+	var stackBuf [64]int
+	var row []int
+	if len(br)+1 <= len(stackBuf) {
+		row = stackBuf[:len(br)+1]
+	} else {
+		row = make([]int, len(br)+1)
+	}
+
+	for j := range row {
+		row[j] = j
 	}
 	for i := 1; i <= len(ar); i++ {
-		curr[0] = i
+		prevCorner := row[0]
+		row[0] = i
 		for j := 1; j <= len(br); j++ {
+			prevAbove := row[j]
 			cost := 1
 			if ar[i-1] == br[j-1] {
 				cost = 0
 			}
-			curr[j] = min(prev[j]+1, curr[j-1]+1, prev[j-1]+cost)
+			row[j] = min(prevAbove+1, row[j-1]+1, prevCorner+cost)
+			prevCorner = prevAbove
 		}
-		prev, curr = curr, prev
 	}
-	return prev[len(br)]
+	return row[len(br)]
 }
 
 func isCloseMatch(target string, dist int) bool {

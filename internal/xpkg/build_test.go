@@ -2,10 +2,12 @@ package xpkg
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 )
 
@@ -92,5 +94,62 @@ func TestWriteTarballReadsBack(t *testing.T) {
 	}
 	if !bytes.Equal(want, got) {
 		t.Fatal("package.yaml changed across the tarball round-trip")
+	}
+}
+
+func TestPackageStream(t *testing.T) {
+	img, err := Build(metaDoc, [][]byte{xrdDoc, compDoc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := PackageStream(img)
+	if err != nil {
+		t.Fatalf("PackageStream failed: %v", err)
+	}
+	want := Stream(metaDoc, [][]byte{xrdDoc, compDoc})
+	if !bytes.Equal(stream, want) {
+		t.Fatalf("PackageStream = %q, want %q", stream, want)
+	}
+
+	// PackageStream fails when image has no base layer
+	if _, err := PackageStream(empty.Image); err == nil {
+		t.Error("PackageStream(empty.Image) expected error, got nil")
+	}
+}
+
+func TestWriteTarballTo(t *testing.T) {
+	img, err := Build(metaDoc, [][]byte{xrdDoc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := WriteTarballTo(&buf, img, "xqueue"); err != nil {
+		t.Fatalf("WriteTarballTo failed: %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Fatal("WriteTarballTo wrote 0 bytes")
+	}
+
+	// Verify the written bytes are a valid tarball image readable back
+	tarBytes := buf.Bytes()
+	back, err := tarball.Image(func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(tarBytes)), nil
+	}, nil)
+	if err != nil {
+		t.Fatalf("tarball.Image failed to read back tarball: %v", err)
+	}
+	stream, err := PackageStream(back)
+	if err != nil {
+		t.Fatalf("PackageStream on read-back tarball failed: %v", err)
+	}
+	want := Stream(metaDoc, [][]byte{xrdDoc})
+	if !bytes.Equal(stream, want) {
+		t.Fatalf("round-trip stream mismatch: got %s, want %s", stream, want)
+	}
+
+	// Invalid tag returns an error
+	var errBuf bytes.Buffer
+	if err := WriteTarballTo(&errBuf, img, "invalid::tag::name"); err == nil {
+		t.Error("WriteTarballTo with invalid tag expected error, got nil")
 	}
 }

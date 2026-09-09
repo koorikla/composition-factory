@@ -475,3 +475,20 @@ spec:
 		t.Errorf("Status = %+v, want exactly the storage version's [current]", st)
 	}
 }
+
+func TestRequiredLeaves(t *testing.T) {
+	c := parseOne(t, nestedCRD)
+	fp, err := c.ForProvider()
+	if err != nil {
+		t.Fatalf("ForProvider: %v", err)
+	}
+	reqLeaves := RequiredLeaves(fp, "")
+	var got []string
+	for _, l := range reqLeaves {
+		got = append(got, l.Path)
+	}
+	want := []string{"region"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("RequiredLeaves paths (-want +got):\n%s", diff)
+	}
+}

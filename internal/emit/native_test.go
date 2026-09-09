@@ -733,3 +733,146 @@ func TestSecretDataB64enc(t *testing.T) {
 		t.Errorf("Secret stringData wire missing quote without b64enc:\n%s", s)
 	}
 }
+
+func TestNativeMetadataNameParityAcrossEngines(t *testing.T) {
+	b := nativeTestBlueprint()
+
+	// 1. Go-template
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineGoTemplating}
+	compGo, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(go): %v", err)
+	}
+	goStr := string(compGo)
+	if !strings.Contains(goStr, "name: {{ $xr }}-web") {
+		t.Errorf("Go-template missing deterministic name for web:\n%s", goStr)
+	}
+	if !strings.Contains(goStr, "name: {{ $xr }}-web-svc") {
+		t.Errorf("Go-template missing deterministic name for web-svc:\n%s", goStr)
+	}
+
+	// 2. KCL
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+	compKCL, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(kcl): %v", err)
+	}
+	kclStr := string(compKCL)
+	if !strings.Contains(kclStr, `name = "${_xr}-web"`) {
+		t.Errorf("KCL missing deterministic name for web:\n%s", kclStr)
+	}
+	if !strings.Contains(kclStr, `name = "${_xr}-web-svc"`) {
+		t.Errorf("KCL missing deterministic name for web-svc:\n%s", kclStr)
+	}
+
+	// 3. Python
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	compPy, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(python): %v", err)
+	}
+	pyStr := string(compPy)
+	if !strings.Contains(pyStr, `"name": f"{xr_name}-web",`) {
+		t.Errorf("Python missing deterministic name for web:\n%s", pyStr)
+	}
+	if !strings.Contains(pyStr, `"name": f"{xr_name}-web-svc",`) {
+		t.Errorf("Python missing deterministic name for web-svc:\n%s", pyStr)
+	}
+
+	// Looped native resource test across engines
+	bLooped := nativeTestBlueprint()
+	bLooped.Spec.XRD.Parameters["replicas"] = blueprint.Parameter{Type: "integer", Default: "2"}
+	for i := range bLooped.Spec.Resources {
+		if bLooped.Spec.Resources[i].Name == "web" {
+			bLooped.Spec.Resources[i].ForEach = "params.replicas"
+		}
+	}
+
+	// Looped Go-template
+	bLooped.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineGoTemplating}
+	compGoLooped, err := Composition(bLooped, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(go looped): %v", err)
+	}
+	if !strings.Contains(string(compGoLooped), `name: {{ printf "%s-web-%d" $xr $i }}`) {
+		t.Errorf("Go-template looped missing name:\n%s", string(compGoLooped))
+	}
+
+	// Looped KCL
+	bLooped.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+	compKCLLooped, err := Composition(bLooped, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(kcl looped): %v", err)
+	}
+	if !strings.Contains(string(compKCLLooped), `name = "${_xr}-web-${_i}"`) {
+		t.Errorf("KCL looped missing name:\n%s", string(compKCLLooped))
+	}
+
+	// Looped Python
+	bLooped.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	compPyLooped, err := Composition(bLooped, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(python looped): %v", err)
+	}
+	if !strings.Contains(string(compPyLooped), `"name": f"{xr_name}-web-{_i}",`) {
+		t.Errorf("Python looped missing name:\n%s", string(compPyLooped))
+	}
+}
+
+func TestNativeMetadataNameExplicitOverride(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xoverride"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XOverride", Plural: "xoverrides",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"customName": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "sa", Kind: "ServiceAccount", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "params.customName"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	// Go-template
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineGoTemplating}
+	compGo, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(go): %v", err)
+	}
+	if !strings.Contains(string(compGo), "name: {{ $spec.customName | quote }}") {
+		t.Errorf("Go-template missing custom metadata.name:\n%s", string(compGo))
+	}
+
+	// KCL
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+	compKCL, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(kcl): %v", err)
+	}
+	if !strings.Contains(string(compKCL), "name = _spec?.customName") {
+		t.Errorf("KCL missing custom metadata.name:\n%s", string(compKCL))
+	}
+
+	// Python
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	compPy, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(python): %v", err)
+	}
+	if !strings.Contains(string(compPy), `"name": spec.get("customName"),`) {
+		t.Errorf("Python missing custom metadata.name:\n%s", string(compPy))
+	}
+}

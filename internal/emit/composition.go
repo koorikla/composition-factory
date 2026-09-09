@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
@@ -743,12 +744,13 @@ func checkStatusRefs(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 // admits both "containers[0]" and "containers".
 func ancestorPaths(path string) []string {
 	var out []string
-	segments := strings.Split(path, ".")
-	for i := 1; i < len(segments); i++ {
-		prefix := strings.Join(segments[:i], ".")
-		out = append(out, prefix)
-		if trimmed, found := strings.CutSuffix(prefix, "[0]"); found {
-			out = append(out, trimmed)
+	for i := 0; i < len(path); i++ {
+		if path[i] == '.' {
+			prefix := path[:i]
+			out = append(out, prefix)
+			if trimmed, found := strings.CutSuffix(prefix, "[0]"); found {
+				out = append(out, trimmed)
+			}
 		}
 	}
 	return out
@@ -1024,31 +1026,35 @@ func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blu
 
 	path := strings.Join(ref.StatusPath, ".")
 	leaves := schema.Leaves(nodes, "")
-	branches := make(map[string]bool, len(leaves))
-	suggestions := make([]string, 0, len(leaves))
 	var leaf *schema.Node
 	for _, l := range leaves {
-		suggestions = append(suggestions, l.Path)
 		if l.Path == path {
 			leaf = l.Node
-		}
-		for _, ancestor := range ancestorPaths(l.Path) {
-			branches[ancestor] = true
+			break
 		}
 	}
-	switch {
-	case leaf == nil && branches[path]:
-		return "", "", fmt.Errorf("resource %q %s: status path %q on %s addresses an object "+
-			"subtree, not a scalar leaf -- interpolating it would render Go's fmt of the map, "+
-			"which is valid YAML and silently wrong", r.Name, what, path, crd.Kind)
-	case leaf == nil:
+	if leaf == nil {
+		branches := make(map[string]bool, len(leaves))
+		suggestions := make([]string, 0, len(leaves))
+		for _, l := range leaves {
+			suggestions = append(suggestions, l.Path)
+			for _, ancestor := range ancestorPaths(l.Path) {
+				branches[ancestor] = true
+			}
+		}
+		if branches[path] {
+			return "", "", fmt.Errorf("resource %q %s: status path %q on %s addresses an object "+
+				"subtree, not a scalar leaf -- interpolating it would render Go's fmt of the map, "+
+				"which is valid YAML and silently wrong", r.Name, what, path, crd.Kind)
+		}
 		if s := closestPath(path, suggestions); s != "" {
 			return "", "", fmt.Errorf("resource %q %s: status path %q is not in %s's status "+
 				"schema; did you mean %q?", r.Name, what, path, crd.Kind, s)
 		}
 		return "", "", fmt.Errorf("resource %q %s: status path %q is not in %s's status schema",
 			r.Name, what, path, crd.Kind)
-	case !scalarStatusTypes[leaf.Type]:
+	}
+	if !scalarStatusTypes[leaf.Type] {
 		typ := leaf.Type
 		if typ == "" {
 			typ = "untyped"
@@ -1170,18 +1176,29 @@ func forEachStatusBound(ref blueprint.FromRef, r blueprint.Resource, b *blueprin
 //
 //	(index $.observed.resources "<resName>").resource.status...
 func statusGuard(resName string, segs []string) (guard, expr string) {
-	digKeys := []string{`"resources"`, fmt.Sprintf("%q", resName), `"resource"`, `"status"`}
+	digKeys := make([]string, 0, 3+len(segs))
+	digKeys = append(digKeys, `"resources"`, strconv.Quote(resName), `"resource"`, `"status"`)
 	for _, seg := range segs[:len(segs)-1] {
-		digKeys = append(digKeys, fmt.Sprintf("%q", seg))
+		digKeys = append(digKeys, strconv.Quote(seg))
 	}
 	leaf := segs[len(segs)-1]
-	guard = fmt.Sprintf(`hasKey (dig %s dict $.observed) %q`, strings.Join(digKeys, " "), leaf)
+	guard = fmt.Sprintf(`hasKey (dig %s dict $.observed) %s`, strings.Join(digKeys, " "), strconv.Quote(leaf))
 
-	cur := fmt.Sprintf(`(index $.observed.resources %q).resource`, resName)
-	for _, seg := range append([]string{"status"}, segs...) {
-		cur += "." + seg
+	quotedRes := strconv.Quote(resName)
+	totalLen := len(`(index $.observed.resources `) + len(quotedRes) + len(`).resource.status`)
+	for _, seg := range segs {
+		totalLen += 1 + len(seg)
 	}
-	return guard, cur
+	var b strings.Builder
+	b.Grow(totalLen)
+	b.WriteString(`(index $.observed.resources `)
+	b.WriteString(quotedRes)
+	b.WriteString(`).resource.status`)
+	for _, seg := range segs {
+		b.WriteByte('.')
+		b.WriteString(seg)
+	}
+	return guard, b.String()
 }
 
 // writeMapField emits "key:" (or "key: {}") at keyIndent, plus plan's fields
