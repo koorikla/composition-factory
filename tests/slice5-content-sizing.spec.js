@@ -24,7 +24,7 @@ test('every field label on every card is fully visible', async ({ page }) => {
 
 test('long palette kind names ellipsize cleanly and carry the full name as a title', async ({ page }) => {
   await page.goto('/')
-  const row = page.locator('#lrail .kind[data-kind="BucketAccelerateConfiguration"]').first()
+  const row = page.locator('#lrail .kind[data-kind="QueueRedriveAllowPolicy"]').first()
   await expect(row).toBeVisible()
   const state = await row.evaluate(el => {
     const name = el.querySelector('.nm') || el
@@ -39,6 +39,6 @@ test('long palette kind names ellipsize cleanly and carry the full name as a tit
     }
   })
   expect(state.overflow).toBe('ellipsis')
-  expect(state.title).toBe('BucketAccelerateConfiguration')
+  expect(state.title).toBe('QueueRedriveAllowPolicy')
   expect(state.overlaps).toBe(false)
 })
