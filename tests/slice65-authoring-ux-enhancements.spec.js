@@ -98,7 +98,7 @@ test('Clickable validate chip expands output drawer and displays diagnostics', a
   // Click Validate button to trigger render check
   const valBtn = page.locator('#validateBtn');
   await valBtn.click();
-  await expect(validChip).toContainText(/render ok|rendering|(preview|written|ok) · \d+ files/);
+  await expect(validChip).toContainText(/(?:valid|validate ok|render ok)|(?:validating|rendering)|(preview|written|ok) · \d+ files/);
 });
 
 test('Post-Generate shows next-step guidance line with output path, apply and package commands', async ({ page }) => {

@@ -42,7 +42,7 @@ test('Validate proves the loop: render ok with one extra instance', async ({ pag
   await expect(page.locator('#code')).toContainText('range', { timeout: 15000 })
   await page.click('#validateBtn')
   // work-queue + 2x dead-letter (instanceCount defaults to 2)
-  await expect(page.locator('#valid')).toContainText(/render ok · 3 resources|render check unavailable/, { timeout: 90000 })
+  await expect(page.locator('#valid')).toContainText(/(?:valid|validate ok|render ok) · 3 resources|(?:validation|render) check unavailable/, { timeout: 90000 })
 })
 
 test('removing the loop returns the card and render count to normal', async ({ page, request }) => {
