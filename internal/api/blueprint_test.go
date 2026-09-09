@@ -1421,8 +1421,9 @@ func TestPutBlueprintWithUnknownFieldGivesDidYouMeanSuggestionAndLeavesFileUntou
 	}
 }
 
-func TestPutBlueprintWithUnknownSourceFetchFailureSucceedsOffline(t *testing.T) {
+func TestPutBlueprintWithUnknownSourceFetchFailureLeavesFileUntouched(t *testing.T) {
 	h, path := testHandlerWithPath(t)
+	before, _ := os.ReadFile(path)
 
 	rec := do(t, h, "GET", "/api/blueprint", "")
 	var doc blueprint.Blueprint
@@ -1437,16 +1438,13 @@ func TestPutBlueprintWithUnknownSourceFetchFailureSucceedsOffline(t *testing.T) 
 	body, _ := json.Marshal(doc)
 
 	rec = do(t, h, "PUT", "/api/blueprint", string(body))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
 	}
 
-	reloaded, err := blueprint.Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if len(reloaded.Spec.Sources) < 2 {
-		t.Errorf("expected updated sources, got %d", len(reloaded.Spec.Sources))
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Error("the blueprint file changed despite a rejected PUT")
 	}
 }
 
@@ -1617,6 +1615,7 @@ func TestRenameParameterInRawRewritesRaw(t *testing.T) {
 
 func TestPutBlueprintSurvivesOfflineFetchFailure(t *testing.T) {
 	h, path := testHandlerWithPath(t)
+	before, _ := os.ReadFile(path)
 
 	// Fetch current blueprint JSON
 	rec := do(t, h, "GET", "/api/blueprint", "")
@@ -1635,16 +1634,13 @@ func TestPutBlueprintSurvivesOfflineFetchFailure(t *testing.T) {
 
 	bodyBytes, _ := json.Marshal(bp)
 	rec = do(t, h, "PUT", "/api/blueprint", string(bodyBytes))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT /api/blueprint status = %d, want 200: %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT /api/blueprint status = %d, want 400: %s", rec.Code, rec.Body)
 	}
 
-	reloaded, err := blueprint.Load(path)
-	if err != nil {
-		t.Fatalf("reloading blueprint: %v", err)
-	}
-	if len(reloaded.Spec.Sources) < 2 {
-		t.Errorf("expected at least 2 sources, got %d", len(reloaded.Spec.Sources))
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Error("the blueprint file changed despite a rejected PUT")
 	}
 }
 
