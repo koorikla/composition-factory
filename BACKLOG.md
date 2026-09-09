@@ -93,27 +93,11 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       one of the canvas's two headline actions non-functional and the tip is not actionable there.
       Either the image carries the `crossplane` CLI (static binary) or the canvas says the action
       is unavailable in this deployment and why.
-- [ ] **CF-094 — Every server-side write of the blueprint fills the file with zero-value noise the
-      editor never shows: `conventions: null`, `templates: null`, `enum: null`, `from: ""`,
-      `raw: ""`, `template: ""`. [V]** 35 such lines in a doc written by `f45c2a8` after a
-      starter load; the drawer's edit view of the same document shows a clean form, so what the
-      user reads is not what is in their directory (and what they commit to git). The writer must
-      omit empty fields, byte-identically for documents that already lack them.
 - [ ] **CF-095 — The top bar and drawer show paths that do not exist: `blueprints/<name>.cf.yaml`
       and `compositions/<name>.yaml`, while the real files are `<served path>` and
       `compositions/<xrd plural>.<group>.yaml`.** `output.js:81` and `:617` synthesise the
       names from `metadata.name`; the served path is never fetched or shown. Show the real
       paths (relative to the workspace) or none.
-- [ ] **CF-099 — *(engine)* A `crds:` source whose file is missing is skipped silently: its kinds
-      vanish from the index with no error, no warning and no UI state.** `internal/api/server.go:484-486`
-      `if os.IsNotExist(err) { continue }` inside `BuildIndex`. Cards bound to those kinds lose
-      their schema and the user sees nothing. A missing declared source must surface like an
-      unfetchable provider (CF-087/CF-088).
-- [ ] **CF-100 — *(engine)* The three write-rollback paths ignore the index rebuild's error, so a
-      failed write can leave `/api/kinds` serving a provider the server no longer holds.**
-      `internal/api/blueprint.go:172`, `:180`, `:634` `_ = srv.rebuildIndexLocked()`; the rebuild
-      swaps `srv.Index` only on success (`server.go:565`). After the rollback `srv.Providers` and
-      `srv.Index` disagree. Rollback must restore both or report that it could not.
 - [ ] **CF-101 — *(engine)* The Playwright suite runs against the developer's real schema cache:
       `playwright.config.js:27` starts the engine without `--cache-dir`, so specs skip or pass
       depending on what the host has cached and `make test-e2e` writes provider-nop into
@@ -127,13 +111,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       `cmd/cf/kinds.go:29-31`, `cmd/cf/fields.go:32-34` treat a load error as "no blueprint";
       `cmd/cf/options.go:29-58` is the third copy of the provider-set assembly with different
       behaviour. One loader, one warning policy.
-- [ ] **CF-110 — *(engine)* `POST /api/blueprint/resources`, `PUT /api/blueprint/resources/{name}`
-      and the MCP `add_resource`/`update_resource` tools accept an unknown kind or a misspelt field
-      path, answer success and persist it; `PUT /api/blueprint` on the same server rejects the
-      same content with the nearest-match error.** J3 F5, twice over HTTP and MCP: `Instanze`
-      and `instanceClas` land in the file and every later generate fails until it is hand-edited.
-      An agent must call generate after every write to find out whether the write was valid. The
-      per-resource routes must validate like the whole-document route.
 - [ ] **CF-116 — A mistyped provider ref in SOURCES shows `Server unavailable (HTTP 502 Bad
       Gateway): fetch "…": GET https://ghcr.io/v2/…: MANIFEST_UNKNOWN … The backend server may be
       restarting or unreachable.`** Residue of CF-059: `providers.go:193` answers 502 for a

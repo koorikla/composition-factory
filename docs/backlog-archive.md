@@ -1,3 +1,27 @@
+- [x] **CF-110 — *(engine)* `POST /api/blueprint/resources`, `PUT /api/blueprint/resources/{name}`
+      and the MCP `add_resource`/`update_resource` tools accept an unknown kind or a misspelt field
+      path, answer success and persist it; `PUT /api/blueprint` on the same server rejects the
+      same content with the nearest-match error.**
+      Validated resource kind and field paths against CRD schemas on `handleAddResource` and `handleSetResource`,
+      returning HTTP 400 Bad Request with nearest-match suggestions matching `PUT /api/blueprint`.
+      — completed 2026-09-09
+- [x] **CF-094 — Every server-side write of the blueprint fills the file with zero-value noise the
+      editor never shows: `conventions: null`, `templates: null`, `enum: null`, `from: ""`,
+      `raw: ""`, `template: ""`. [V]**
+      Added `omitempty` JSON struct tags to Blueprint `Spec.Templates`, `Spec.Conventions`, `Parameter.Enum`,
+      `Parameter.Default`, `Parameter.Description`, `Resource.ForEach`, `Resource.When`, `Resource.Provider`,
+      and all `Field` struct fields (`From`, `Value`, `Raw`, `Template`), preventing empty keys and null slices on serialization.
+      — completed 2026-09-09
+- [x] **CF-100 — *(engine)* The three write-rollback paths ignore the index rebuild's error, so a
+      failed write can leave `/api/kinds` serving a provider the server no longer holds.**
+      Checked error returned from `srv.rebuildIndexLocked()` on rollback paths in `internal/api/blueprint.go`,
+      returning HTTP 500 when index restoration fails to keep `srv.Providers` and `srv.Index` synchronized.
+      — completed 2026-09-09
+- [x] **CF-099 — *(engine)* A `crds:` source whose file is missing is skipped silently: its kinds
+      vanish from the index with no error, no warning and no UI state.**
+      Removed `if os.IsNotExist(err) { continue }` in `BuildIndex` in `internal/api/server.go`, loudly returning
+      `fmt.Errorf("read crds %s: %w", p, err)` when a declared CRD file cannot be read.
+      — completed 2026-09-09
 - [x] **CF-113 — CLI/docs polish from the same run: `cf help` exits 80 as an error while
       `cf --help` says to use it; `cf init` writes `blueprint.cf.yaml` but `kinds`/`fields`/`serve`
       default to `doc.cf.yaml` and init's own hint points at `cf kinds`; the `providerName`
