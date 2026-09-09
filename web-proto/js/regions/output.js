@@ -388,13 +388,30 @@ function diagnoseError(errMsg) {
   return { isEnv: false, tip: "" };
 }
 
+function mapResourceCoordinates(msg) {
+  if (!msg || typeof msg !== "string") return msg;
+  return msg.replace(/spec\.resources\[(\d+)\]/g, function (match, indexStr) {
+    var idx = parseInt(indexStr, 10);
+    var doc = store && store.state && store.state.doc;
+    var resList = doc && doc.spec && doc.spec.resources;
+    if (resList && resList[idx]) {
+      var name = resList[idx].name || resList[idx].kind;
+      if (name) {
+        return "resource '" + name + "' (" + match + ")";
+      }
+    }
+    return match;
+  });
+}
+
 function formatErrorMessage(errMsg) {
   if (!errMsg) return "";
-  var diag = diagnoseError(errMsg);
+  var mapped = mapResourceCoordinates(errMsg);
+  var diag = diagnoseError(mapped);
   if (diag.isEnv && diag.tip) {
-    return errMsg + "\n\n💡 Environment Fix Tip: " + diag.tip;
+    return mapped + "\n\n💡 Environment Fix Tip: " + diag.tip;
   }
-  return errMsg;
+  return mapped;
 }
 
 function updateNextSteps(result) {
