@@ -1,3 +1,32 @@
+- [x] **CF-113 — CLI/docs polish from the same run: `cf help` exits 80 as an error while
+      `cf --help` says to use it; `cf init` writes `blueprint.cf.yaml` but `kinds`/`fields`/`serve`
+      default to `doc.cf.yaml` and init's own hint points at `cf kinds`; the `providerName`
+      remedy sends CLI users to `cf serve`; `--validate` failures cite `line N` of a file never
+      written; `cf fields Instanc` silently resolves to `InstanceProfile`; docs/dsl.md quotes
+      four error messages the binary no longer emits; docs/cli.md omits `cf adopt <dir>`, `-`,
+      the `import` alias and `provider add --lock/--cache-dir`; docs/mcp.md:3 says "full
+      authoring surface" for 19 of 36 routes and never names the `api_version` argument.**
+      Added `cf help [subcommand]` command exiting 0, updated `providerName` error remedy to
+      point at `cf init` (or `cf serve`), and updated `docs/cli.md`, `docs/mcp.md`, and `docs/dsl.md`.
+      — completed 2026-09-09
+- [x] **CF-112 — *(engine)* A field written as a bare scalar (`engine: postgres` instead of
+      `engine: {value: postgres}`) fails with `json: cannot unmarshal string into Go value of type
+      blueprint.rawField`, naming no resource, field or line.**
+      Decoded fields, envelope, and annotations individually to wrap field errors with
+      `resource %q field %q: %w`, and provided friendly error for bare scalars suggesting `{value: ...}`.
+      — completed 2026-09-09
+- [x] **CF-111 — *(engine)* `cf adopt` refuses cf's own `--engine kcl` and `--engine python`
+      output with `spec.pipeline[0].name: "render-resources" collides with the built-in templating
+      step's name`, which names the adopter's own construction, not the cause (only
+      function-go-templating and patch-and-transform are adoptable).**
+      Clearly refused unsupported composition engines with an actionable error message listing
+      supported engines (`function-go-templating` and `function-patch-and-transform`).
+      — completed 2026-09-09
+- [x] **CF-098 — *(engine)* `POST /api/providers` for an already-cached ref answers 200 while
+      discarding the lockfile write error.**
+      Checked lockfile read and write errors in `internal/api/providers.go` on provider add, returning
+      HTTP 500 when the lockfile cannot be pinned.
+      — completed 2026-09-09
 - [x] **CF-121 — Renaming the XRD kind in the inspector leaves `plural` at the old value, the
       plural is shown as static text and is editable nowhere, so Generate names every file and
       the Composition after a kind that no longer exists.**

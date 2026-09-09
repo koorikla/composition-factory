@@ -104,11 +104,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       `compositions/<xrd plural>.<group>.yaml`.** `output.js:81` and `:617` synthesise the
       names from `metadata.name`; the served path is never fetched or shown. Show the real
       paths (relative to the workspace) or none.
-- [ ] **CF-098 — *(engine)* `POST /api/providers` for an already-cached ref answers 200 while
-      discarding the lockfile write error.** `internal/api/providers.go:178` `_ = l.Write(srv.Lock)`;
-      the same operation in `blueprint.go:547-550` returns an error. A failed pin leaves `.cf.lock`
-      without the digest the reproducibility rule (AGENTS.md §1) depends on. The add must fail
-      loudly when the pin cannot be written.
 - [ ] **CF-099 — *(engine)* A `crds:` source whose file is missing is skipped silently: its kinds
       vanish from the index with no error, no warning and no UI state.** `internal/api/server.go:484-486`
       `if os.IsNotExist(err) { continue }` inside `BuildIndex`. Cards bound to those kinds lose
@@ -139,16 +134,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       and `instanceClas` land in the file and every later generate fails until it is hand-edited.
       An agent must call generate after every write to find out whether the write was valid. The
       per-resource routes must validate like the whole-document route.
-- [ ] **CF-111 — *(engine)* `cf adopt` refuses cf's own `--engine kcl` and `--engine python`
-      output with `spec.pipeline[0].name: "render-resources" collides with the built-in templating
-      step's name`, which names the adopter's own construction, not the cause (only
-      function-go-templating and patch-and-transform are adoptable).** J3 F6, twice per engine.
-      The refusal must say which engines adopt supports and which one it found.
-- [ ] **CF-112 — *(engine)* A field written as a bare scalar (`engine: postgres` instead of
-      `engine: {value: postgres}`) fails with `json: cannot unmarshal string into Go value of type
-      blueprint.rawField`, naming no resource, field or line.** J3 F7, twice. The two-modes case
-      next to it is precise (`resource "db" field "engine": set exactly one of …`); this one must
-      reach the same standard.
 - [ ] **CF-116 — A mistyped provider ref in SOURCES shows `Server unavailable (HTTP 502 Bad
       Gateway): fetch "…": GET https://ghcr.io/v2/…: MANIFEST_UNKNOWN … The backend server may be
       restarting or unreachable.`** Residue of CF-059: `providers.go:193` answers 502 for a
@@ -207,17 +192,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       ordered by risk with the tests that cover each seam, is
       [docs/code-audit.md](docs/code-audit.md) §8 items 5–8; do them in that order, one branch
       each, before any file split from §7.
-- [ ] **CF-113 — CLI/docs polish from the same run: `cf help` exits 80 as an error while
-      `cf --help` says to use it; `cf init` writes `blueprint.cf.yaml` but `kinds`/`fields`/`serve`
-      default to `doc.cf.yaml` and init's own hint points at `cf kinds`; the `providerName`
-      remedy sends CLI users to `cf serve`; `--validate` failures cite `line N` of a file never
-      written; `cf fields Instanc` silently resolves to `InstanceProfile`; docs/dsl.md quotes
-      four error messages the binary no longer emits; docs/cli.md omits `cf adopt <dir>`, `-`,
-      the `import` alias and `provider add --lock/--cache-dir`; docs/mcp.md:3 says "full
-      authoring surface" for 19 of 36 routes and never names the `api_version` argument.**
-      Every item quoted both sides in
-      [docs/comp-runs/2026-09-09-cli-mcp-journey.md](docs/comp-runs/2026-09-09-cli-mcp-journey.md)
-      (F8–F13, F17, F18, mismatch table). Acceptance: none — documentation and messages.
 - [ ] **CF-115 — The cross-engine acceptance diff (`TestAcceptanceAlternativeEnginesRender`) runs
       on `testdata/xqueue.cf.yaml`, which has no integer→string field and no status wire, so the
       CF-114 class it was added for (CF-081) passes it.** Extend the fixture (or diff the
