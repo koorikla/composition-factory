@@ -78,12 +78,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       F2. Adopting the directory (XRD present) is lossless. README:121 promises losses are named
       on screen. When the XRD is absent the adopter must say what it could not recover, per
       parameter, and must not invent `type: string`.
-- [ ] **CF-109 — *(engine)* A `spec.conventions` entry that matches a native-kind field is
-      silently ignored — not applied, not refused — although docs/dsl.md:342 and :418 say it is
-      refused with `conventions cannot match native Kubernetes kind`.** J3 F4: `match: immutable`
-      against a `Secret` → exit 0, the `define` block is emitted and never called, the Secret has
-      no `immutable:`. The same convention on a managed field works. A user relying on a
-      convention for labels on native kinds gets nothing on the cluster and no signal.
 - [ ] **CF-119 — Importing the Composition that Generate just wrote comes back with every
       parameter's `required` flag lost and the inferred `auto-ready` step turned into a custom
       pipeline step whose kind 404s.** J2 F1, twice: `required:false` for `dbName`,

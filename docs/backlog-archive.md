@@ -1,3 +1,10 @@
+- [x] **CF-109 — *(engine)* A `spec.conventions` entry that matches a native-kind field is
+      silently ignored — not applied, not refused — although docs/dsl.md:342 and :418 say it is
+      refused with `conventions cannot match native Kubernetes kind`.**
+      Refused conventions matching un-overridden top-level leaf fields on native Kubernetes kinds
+      with `resource "<name>": conventions cannot match native Kubernetes kind`, while continuing
+      to safely skip native kinds when conventions do not match their schema.
+      — completed 2026-09-09
 - [x] **CF-122 — "Float editor window" turns the blueprint editor into a 24 px-wide textarea
       (one character per line); docked, it is 80 px tall for an 80-line document and opens
       scrolled to the end.**
