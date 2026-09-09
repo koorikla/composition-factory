@@ -313,3 +313,58 @@ spec:
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
+
+func TestValidateRenderedNativeServiceIntOrStringTargetPort(t *testing.T) {
+	crds := testCRDsWithNative(t)
+
+	// Integer targetPort must be valid for IntOrString
+	intService := `---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-svc
+  annotations:
+    crossplane.io/composition-resource-name: my-svc
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+`
+	if err := ValidateRendered([]byte(intService), crds); err != nil {
+		t.Fatalf("ValidateRendered with integer targetPort failed: %v", err)
+	}
+
+	// Named/string targetPort must also be valid for IntOrString
+	strService := `---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-svc
+  annotations:
+    crossplane.io/composition-resource-name: my-svc
+spec:
+  ports:
+  - port: 80
+    targetPort: http
+`
+	if err := ValidateRendered([]byte(strService), crds); err != nil {
+		t.Fatalf("ValidateRendered with string targetPort failed: %v", err)
+	}
+
+	// Non-scalar (e.g. boolean or map) must still be rejected
+	invalidService := `---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-svc
+  annotations:
+    crossplane.io/composition-resource-name: my-svc
+spec:
+  ports:
+  - port: 80
+    targetPort: true
+`
+	if err := ValidateRendered([]byte(invalidService), crds); err == nil {
+		t.Fatal("expected error for boolean targetPort, got nil")
+	}
+}

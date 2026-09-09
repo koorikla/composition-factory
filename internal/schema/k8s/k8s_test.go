@@ -202,6 +202,33 @@ func TestIntOrStringResolvesToAStringLeaf(t *testing.T) {
 	}
 }
 
+func TestIntOrStringPreservesIntOrStringMetadata(t *testing.T) {
+	crd := kindByName(t, "Service")
+	pref, err := crd.Preferred()
+	if err != nil {
+		t.Fatalf("Preferred: %v", err)
+	}
+	spec, ok := pref.Properties["spec"].(map[string]any)
+	if !ok {
+		t.Fatal("no spec in Service properties")
+	}
+	specProps, _ := spec["properties"].(map[string]any)
+	ports, _ := specProps["ports"].(map[string]any)
+	items, _ := ports["items"].(map[string]any)
+	itemsProps, _ := items["properties"].(map[string]any)
+	targetPort, ok := itemsProps["targetPort"].(map[string]any)
+	if !ok {
+		t.Fatal("missing targetPort in Service ports.items.properties")
+	}
+
+	if intOrStr, ok := targetPort["x-kubernetes-int-or-string"].(bool); !ok || !intOrStr {
+		t.Errorf("targetPort schema x-kubernetes-int-or-string = %v, want true", targetPort["x-kubernetes-int-or-string"])
+	}
+	if _, ok := targetPort["oneOf"]; !ok {
+		t.Errorf("targetPort schema missing oneOf")
+	}
+}
+
 func TestConfigMapAndSecretExposeTheirDataFields(t *testing.T) {
 	cm := leafPaths(t, kindByName(t, "ConfigMap"))
 	for _, path := range []string{"data", "binaryData", "immutable"} {

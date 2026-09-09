@@ -208,11 +208,10 @@ func resolveRef(name string, schemas map[string]json.RawMessage, stack []string)
 //   - A bare {"$ref": ...} (items, additionalProperties) resolves the same
 //     way.
 //   - IntOrString and Quantity carry "oneOf" and no "type", which BuildTree
-//     has no notion of; they become "type": "string" — the one spelling
-//     that is always legal for both ("8080" and "500m" round-trip; the API
-//     server coerces where it must). This is the single lossy step in the
-//     whole pipeline, and it is deliberate and documented rather than an
-//     accident of decoding.
+//     has no notion of; they receive "type": "string" so BuildTree treats
+//     them as string leaves, while IntOrString retains "x-kubernetes-int-or-string": true
+//     and "oneOf" so downstream validators (e.g. render validation) accept
+//     integer representations like targetPort: 8080.
 func resolveNode(node map[string]any, schemas map[string]json.RawMessage, stack []string) (map[string]any, error) {
 	out := make(map[string]any, len(node))
 
@@ -282,8 +281,36 @@ func resolveNode(node map[string]any, schemas map[string]json.RawMessage, stack 
 	if _, hasType := out["type"]; !hasType {
 		if _, hasOneOf := out["oneOf"]; hasOneOf {
 			out["type"] = "string"
-			delete(out, "oneOf")
 		}
 	}
+	if isIntOrString(out) {
+		out["x-kubernetes-int-or-string"] = true
+	}
 	return out, nil
+}
+
+func isIntOrString(schema map[string]any) bool {
+	if intOrStr, _ := schema["x-kubernetes-int-or-string"].(bool); intOrStr {
+		return true
+	}
+	if format, _ := schema["format"].(string); format == "int-or-string" {
+		return true
+	}
+	if oneOf, ok := schema["oneOf"].([]any); ok {
+		hasStr, hasInt := false, false
+		for _, o := range oneOf {
+			if om, ok := o.(map[string]any); ok {
+				if om["type"] == "string" {
+					hasStr = true
+				}
+				if om["type"] == "integer" {
+					hasInt = true
+				}
+			}
+		}
+		if hasStr && hasInt {
+			return true
+		}
+	}
+	return false
 }
