@@ -1701,3 +1701,22 @@ func TestLoadRefusesGoTemplateInRawUnderNonGoEngine(t *testing.T) {
 		})
 	}
 }
+
+func TestCF106RejectUnknownFieldUnderSpec(t *testing.T) {
+	badYAML := `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  resourcez:
+    - name: main-queue
+      kind: Queue
+`
+	_, err := Parse([]byte(badYAML))
+	if err == nil {
+		t.Fatal("expected error for unknown field 'resourcez', got nil")
+	}
+	if !strings.Contains(err.Error(), "resourcez") {
+		t.Fatalf("expected error mentioning 'resourcez', got: %v", err)
+	}
+}

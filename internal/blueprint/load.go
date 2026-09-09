@@ -1,6 +1,7 @@
 package blueprint
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -356,7 +357,9 @@ func Parse(body []byte) (*Blueprint, error) {
 		return nil, fmt.Errorf("parse blueprint: %w", err)
 	}
 	var b Blueprint
-	if err := json.Unmarshal(jsonBytes, &b); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(jsonBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&b); err != nil {
 		return nil, fmt.Errorf("parse blueprint: %w", err)
 	}
 	if err := b.Validate(); err != nil {
