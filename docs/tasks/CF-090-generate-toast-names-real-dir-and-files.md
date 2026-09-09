@@ -64,8 +64,8 @@ test('generate banner and toast instruct an apply command that covers all writte
   // Accept the generate confirmation dialog
   page.on('dialog', dialog => dialog.accept())
 
-  await page.click('#dtabs button[data-tab="comp"]')
-  await page.click('#gen-btn')
+  // Click topbar Generate button
+  await page.click('#generateBtn')
 
   // The output next-steps banner must be visible
   const banner = page.locator('#out-next-steps')
