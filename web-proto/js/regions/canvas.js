@@ -382,7 +382,6 @@ function applyDependencyLayout(onlyUnplaced) {
     return el ? el.offsetHeight : 160;
   }
   let x = X0 + width(XR_ID) + GX; // layer 1 starts right of the XR card
-  const xrEl = canvasEl.querySelector('.node[data-id="' + XR_ID + '"]');
   if (!S.getPosition(XR_ID) || !onlyUnplaced) S.setPosition(XR_ID, { x: X0, y: Y0 });
   Object.keys(byLayer).map(Number).sort(function (a, b) { return a - b; }).forEach(function (L) {
     let y = Y0;
@@ -432,20 +431,51 @@ function render() {
   const d = doc();
   if (!d) { canvasEl.innerHTML = ""; wiresEl.innerHTML = ""; return; }
   const sel = S.state.selectedResource;
-  let h = xrCardHTML(d, sel);
+  const desired = [{ id: XR_ID, html: xrCardHTML(d, sel) }];
   (d.spec.resources || []).forEach(function (r) {
-    h += resourceCardHTML(d, r, sel);
+    desired.push({ id: r.name, html: resourceCardHTML(d, r, sel) });
   });
+
+  let emptyEl = canvasEl.querySelector("#canvas-empty-state");
   if ((d.spec.resources || []).length === 0) {
-    h += '<div class="canvas-empty-state" id="canvas-empty-state">' +
-      '<div class="canvas-empty-title">1. Drag kinds from KINDS  2. Add cloud providers in SOURCES</div>' +
-      '<div class="canvas-empty-steps">' +
-        '<div class="canvas-empty-step"><span class="step-num">1</span> Drag kinds onto canvas from <strong>KINDS</strong> (14 native Kubernetes kinds ready without providers)</div>' +
-        '<div class="canvas-empty-step"><span class="step-num">2</span> Add cloud providers in <strong>SOURCES</strong> for AWS, Azure, GCP</div>' +
-      '</div>' +
-    '</div>';
+    if (!emptyEl) {
+      emptyEl = document.createElement("div");
+      emptyEl.className = "canvas-empty-state";
+      emptyEl.id = "canvas-empty-state";
+      emptyEl.innerHTML = '<div class="canvas-empty-title">1. Drag kinds from KINDS  2. Add cloud providers in SOURCES</div>' +
+        '<div class="canvas-empty-steps">' +
+          '<div class="canvas-empty-step"><span class="step-num">1</span> Drag kinds onto canvas from <strong>KINDS</strong> (14 native Kubernetes kinds ready without providers)</div>' +
+          '<div class="canvas-empty-step"><span class="step-num">2</span> Add cloud providers in <strong>SOURCES</strong> for AWS, Azure, GCP</div>' +
+        '</div>';
+      canvasEl.appendChild(emptyEl);
+    }
+  } else if (emptyEl) {
+    emptyEl.remove();
   }
-  canvasEl.innerHTML = h;
+
+  const existing = new Map();
+  canvasEl.querySelectorAll(".node").forEach(function (el) {
+    existing.set(el.getAttribute("data-id"), el);
+  });
+  const desiredIds = new Set(desired.map(function (x) { return x.id; }));
+  existing.forEach(function (el, id) {
+    if (!desiredIds.has(id)) el.remove();
+  });
+  desired.forEach(function (item) {
+    const prev = existing.get(item.id);
+    const temp = document.createElement("div");
+    temp.innerHTML = item.html;
+    const nextEl = temp.firstElementChild;
+    if (!nextEl) return;
+    if (!prev) {
+      canvasEl.appendChild(nextEl);
+    } else {
+      prev.className = nextEl.className;
+      if (prev.innerHTML !== nextEl.innerHTML) {
+        prev.innerHTML = nextEl.innerHTML;
+      }
+    }
+  });
   // measured layout pass for cards that have no stored position
   const freshCards = (d.spec.resources || []).some(function (r) { return !S.getPosition(r.name); }) ||
     !S.getPosition(XR_ID);
@@ -638,10 +668,8 @@ function onPanDown(e) {
   if (e.button !== 0) return;
   if (e.target.closest(".node") || e.target.closest("button") || e.target.closest("svg path")) return;
   const sx = e.clientX, sy = e.clientY, ox = view.x, oy = view.y;
-  let moved = false;
   const abortDrag = startDrag(e, function mv(ev) {
     if (!ev.buttons) { abortDrag(); return; } // release happened while unfocused
-    moved = true;
     view.x = ox + ev.clientX - sx;
     view.y = oy + ev.clientY - sy;
     applyView();
@@ -827,13 +855,6 @@ function uniqueResourceName(d, kind) {
   let i = 2;
   while (names[base + "-" + i]) i++;
   return base + "-" + i;
-}
-
-function uniqueParamName(d) {
-  const params = d.spec.xrd && d.spec.xrd.parameters || {};
-  let i = 1, n = "newField";
-  while (params[n]) { i++; n = "newField" + i; }
-  return n;
 }
 
 /* ---------- duplicate / remove (slice 4) ---------- */
@@ -1588,22 +1609,23 @@ function onPointerDown(e) {
   const sx = e.clientX, sy = e.clientY;
   let lx = start.x, ly = start.y;
 
-  function mv(ev) {
-    if (!ev.buttons) { up(); return; } // release happened while unfocused
-    lx = Math.max(4, start.x + (ev.clientX - sx) / view.k);
-    ly = Math.max(4, start.y + (ev.clientY - sy) / view.k);
-    el.style.left = lx + "px";
-    el.style.top = ly + "px";
-    scheduleWires();
-  }
-  const abortDrag = startDrag(e, mv, function up() {
+  function onUp() {
     S.setPosition(name, { x: lx, y: ly }); // client-side only, recorded on release
     if (Math.abs(lx - start.x) > 3 || Math.abs(ly - start.y) > 3) {
       autoPlaced.delete(name);             // a real drag: the user owns it now
     }
     drawWires();
     gestureEnd();
-  });
+  }
+  function mv(ev) {
+    if (!ev.buttons) { onUp(); return; } // release happened while unfocused
+    lx = Math.max(4, start.x + (ev.clientX - sx) / view.k);
+    ly = Math.max(4, start.y + (ev.clientY - sy) / view.k);
+    el.style.left = lx + "px";
+    el.style.top = ly + "px";
+    scheduleWires();
+  }
+  const abortDrag = startDrag(e, mv, onUp);
   gestureBegin(abortDrag);
   e.preventDefault();
 }

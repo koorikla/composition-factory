@@ -493,29 +493,61 @@ store.subscribe("error", function (err) {
    */
   function reportAdoptLoss() {
     var r = store.state.lastAdoptReport;
-    store.state.lastAdoptReport = null;
     if (!r || !r.drops || !r.drops.length) return;
     var head = "adopted with " + r.drops.length + " dropped item" +
       (r.drops.length === 1 ? "" : "s") + ": ";
-    notice(head + r.drops.map(function (d) { return d.path + " (" + d.reason + ")"; }).join("; "), false);
-  }
-
-  /** Shared warn bar under the topbar; isError picks the alert role. */
-  function notice(text, isError) {
-    var bar = document.getElementById("import-warn");
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = "import-warn";
-      bar.className = "warnbar";
-      bar.setAttribute("role", "alert");
-      var host = document.getElementById("region-topbar") || document.body;
-      host.parentNode.insertBefore(bar, host.nextSibling);
-    }
-    bar.hidden = false;
-    bar.textContent = text;
-    setTimeout(function () { bar.hidden = true; }, isError ? 8000 : 12000);
+    notice(head + r.drops.map(function (d) { return d.path + " (" + d.reason + ")"; }).join("; "), false, true);
   }
 })();
+
+var noticeTimer = null;
+
+/** Shared warn bar under the topbar; isError picks the alert role; persistent prevents auto-hiding. */
+function notice(text, isError, persistent) {
+  if (noticeTimer) {
+    clearTimeout(noticeTimer);
+    noticeTimer = null;
+  }
+  var bar = document.getElementById("import-warn");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "import-warn";
+    bar.className = "warnbar";
+    var host = document.getElementById("region-topbar") || document.body;
+    host.parentNode.insertBefore(bar, host.nextSibling);
+  }
+  bar.setAttribute("role", isError ? "alert" : "status");
+  bar.hidden = false;
+  bar.removeAttribute("hidden");
+  bar.innerHTML = "";
+
+  var textSpan = document.createElement("span");
+  textSpan.style.flex = "1";
+  textSpan.textContent = text;
+  bar.appendChild(textSpan);
+
+  var dismissBtn = document.createElement("button");
+  dismissBtn.type = "button";
+  dismissBtn.className = "del modal-close warnbar-dismiss";
+  dismissBtn.setAttribute("aria-label", "Dismiss");
+  dismissBtn.setAttribute("title", "Dismiss");
+  dismissBtn.textContent = "\u00d7";
+  dismissBtn.onclick = function () {
+    bar.hidden = true;
+    if (noticeTimer) {
+      clearTimeout(noticeTimer);
+      noticeTimer = null;
+    }
+  };
+  bar.appendChild(dismissBtn);
+
+  if (!persistent) {
+    noticeTimer = setTimeout(function () {
+      bar.hidden = true;
+      noticeTimer = null;
+    }, isError ? 8000 : 12000);
+  }
+}
 
 
 /* ---- package: one-click Configuration .xpkg download ---- */
@@ -523,12 +555,36 @@ store.subscribe("error", function (err) {
   var btn = document.getElementById("packageBtn");
   if (!btn) return;
   btn.addEventListener("click", function () {
-    var a = document.createElement("a");
-    a.href = "/api/package";
-    a.download = ""; // filename comes from Content-Disposition
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    fetch("/api/package")
+      .then(function (res) {
+        if (!res.ok) {
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            notice((data && data.error) || ("package build failed (" + res.status + ")"), true);
+          });
+        }
+        var filename = "package.xpkg";
+        var disp = res.headers.get("Content-Disposition");
+        if (disp) {
+          var m = /filename\*=(?:UTF-8'')?([^;\r\n]+)/i.exec(disp) ||
+                  /filename="?([^";\r\n]+)"?/i.exec(disp);
+          if (m && m[1]) {
+            filename = decodeURIComponent(m[1].replace(/['"]/g, "").trim());
+          }
+        }
+        return res.blob().then(function (blob) {
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        });
+      })
+      .catch(function (err) {
+        notice("package download failed: " + ((err && err.message) || String(err)), true);
+      });
   });
 })();
 
@@ -652,6 +708,25 @@ store.subscribe("error", function (err) {
     }
   });
 
+  function showCardError(card, msg) {
+    if (!card) return;
+    card.classList.add("has-error");
+    card.style.borderColor = "var(--err)";
+    var errEl = card.querySelector(".example-card-error");
+    if (!errEl) {
+      errEl = document.createElement("div");
+      errEl.className = "example-card-error";
+      errEl.setAttribute("role", "alert");
+      var btn = card.querySelector(".example-btn");
+      if (btn && btn.nextSibling) {
+        card.insertBefore(errEl, btn.nextSibling);
+      } else {
+        card.appendChild(errEl);
+      }
+    }
+    errEl.textContent = msg;
+  }
+
   grid.addEventListener("click", function (e) {
     var loadBtn = e.target.closest("[data-load-id]");
     if (!loadBtn) return;
@@ -659,16 +734,29 @@ store.subscribe("error", function (err) {
     var ex = (cachedExamples || []).find(function (item) { return item.id === id; });
     if (!ex) return;
 
+    var card = loadBtn.closest(".example-card");
+    if (card) {
+      card.classList.remove("has-error");
+      card.style.borderColor = "";
+      var prevErr = card.querySelector(".example-card-error");
+      if (prevErr) prevErr.remove();
+    }
+
     loadBtn.disabled = true;
     loadBtn.textContent = "Loading…";
     var p = (store.loadExample && typeof store.loadExample === "function")
       ? store.loadExample(id)
       : store.importBlueprint(ex.yaml);
     p.then(function (doc) {
-      if (doc) store.select(null);
+      if (!doc || doc.error) {
+        showCardError(card, (doc && doc.error) || "Failed to load example: empty blueprint returned");
+        return;
+      }
+      store.select(null);
       closeModal();
     }).catch(function (err) {
-      alert("Failed to load example: " + (err && err.message || err));
+      var msg = (err && err.message) || String(err || "Failed to load example");
+      showCardError(card, msg);
     }).finally(function () {
       loadBtn.disabled = false;
       loadBtn.textContent = "Load Blueprint";

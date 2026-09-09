@@ -213,6 +213,26 @@ func TestServeIntegration(t *testing.T) {
 		t.Errorf("GET / body does not look like the embedded canvas app (no title marker); got %d bytes starting %.80q",
 			len(rootBody), rootBody)
 	}
+	if strings.Contains(string(rootBody), "fonts.googleapis.com") || strings.Contains(string(rootBody), "fonts.gstatic.com") {
+		t.Errorf("GET / body contains external Google Fonts links; fonts must be vendored locally for offline use (CF-061)")
+	}
+
+	// Font assets must be embedded and served locally for offline operation.
+	fontResp, err := http.Get("http://" + addr + "/fonts/ibm-plex-sans-400.woff2")
+	if err != nil {
+		t.Fatalf("GET /fonts/ibm-plex-sans-400.woff2: %v", err)
+	}
+	fontBody, err := io.ReadAll(fontResp.Body)
+	fontResp.Body.Close()
+	if err != nil {
+		t.Fatalf("reading font body: %v", err)
+	}
+	if fontResp.StatusCode != http.StatusOK {
+		t.Errorf("GET /fonts/ibm-plex-sans-400.woff2 status = %d, want 200", fontResp.StatusCode)
+	}
+	if len(fontBody) == 0 {
+		t.Errorf("GET /fonts/ibm-plex-sans-400.woff2 returned empty body")
+	}
 
 	// A module asset must come back with a JavaScript content type, or the
 	// browser refuses to execute it as an ES module.

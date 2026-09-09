@@ -34,7 +34,6 @@ let store = defaultStore;
 let api = defaultApi;
 let booted = false;
 
-let root = null;
 let tabsEl = null;
 let searchWrapEl = null;
 let searchEl = null;
@@ -755,11 +754,15 @@ function bindPaletteEvents() {
       });
       return;
     }
-    if (e.target.closest("#src-add-btn")) {
+    const addBtn = e.target.closest("#src-add-btn");
+    if (addBtn) {
       const addInput = railEl.querySelector("#src-add-ref");
       const addRef = addInput && addInput.value.trim();
       if (!addRef) return;
-      e.target.disabled = true;
+      const origBtnText = addBtn.innerHTML;
+      addBtn.disabled = true;
+      addBtn.innerHTML = '<span class="spinner"></span> Adding\u2026';
+      if (addInput) addInput.disabled = true;
       providersErr = null;
       api.addProvider(addRef).then(function () {
         loadProviders();
@@ -767,6 +770,10 @@ function bindPaletteEvents() {
       }).catch(function (err) {
         providersErr = err && err.message || String(err);
         drawRail();
+      }).finally(function () {
+        addBtn.disabled = false;
+        addBtn.innerHTML = origBtnText || "Add";
+        if (addInput) addInput.disabled = false;
       });
       return;
     }
@@ -983,7 +990,6 @@ export function init(rootEl, deps) {
 
   store = deps && deps.store || defaultStore;
   api = deps && deps.api || defaultApi;
-  root = rootEl;
 
   tabsEl = rootEl.querySelector("#rtabs");
   searchWrapEl = rootEl.querySelector("#lsearch");

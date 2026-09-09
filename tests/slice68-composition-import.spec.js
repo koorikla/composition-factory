@@ -146,6 +146,12 @@ spec:
 
   // and the adoption still landed
   await expect(page.locator('.node[data-id="adopted-queue"]')).toBeVisible()
+
+  // warnbar has explicit dismiss button that hides the report when clicked (CF-051)
+  const dismissBtn = warn.locator('.warnbar-dismiss')
+  await expect(dismissBtn).toBeVisible()
+  await dismissBtn.click()
+  await expect(warn).toBeHidden()
 })
 
 // cf's own package.yaml is a Configuration stream that also contains an XRD and

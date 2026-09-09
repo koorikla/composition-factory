@@ -1,4 +1,4 @@
-// Slice 66 — Canvas UX & Error Visibility Enhancements:
+// Slice 67 — Canvas UX & Error Visibility Enhancements:
 //  - CF-010: Output drawer feedback (preview vs disk write)
 //  - CF-011: Make all rejected canvas actions visible to user (toast + status chip)
 //  - CF-012: Secret data base64 encoding & stringData steering / inspector guidance
@@ -6,6 +6,7 @@
 //  - CF-035 & CF-038: Inspector & sidebar layout, empty canvas hint
 //  - CF-036: Filter out read-only system metadata in wire picker
 //  - CF-037: Undo duplicate inspector state, Enter key on param rename, action hit targets
+//  - CF-056: Focus and select new parameter input on + Add parameter
 
 const { test, expect } = require('@playwright/test');
 const { resetDoc, guardPageErrors, canvasSettled, settledBox } = require('./helpers');
@@ -230,3 +231,32 @@ test('CF-037: Enter key on XRD param commits rename and node actions have access
     }
   }
 });
+
+test('CF-056: "+ Add parameter" focuses and selects the new parameter name input', async ({ page }) => {
+  await page.goto('/');
+
+  // Select XRD card to reveal inspector
+  const xrCard = page.locator('.node[data-id="xrd"]');
+  await expect(xrCard).toBeVisible();
+  await xrCard.click();
+
+  // Click "+ Add parameter"
+  const addBtn = page.locator('#addParamBtn');
+  await expect(addBtn).toBeVisible();
+  await addBtn.click();
+
+  // The newly created parameter name input should be focused with text selected
+  const nameInput = page.locator('input[data-pn="newParam"]');
+  await expect(nameInput).toBeVisible();
+  await expect(nameInput).toBeFocused();
+
+  const selection = await nameInput.evaluate(el => ({
+    start: el.selectionStart,
+    end: el.selectionEnd,
+    value: el.value,
+  }));
+  expect(selection.value).toBe('newParam');
+  expect(selection.start).toBe(0);
+  expect(selection.end).toBe('newParam'.length);
+});
+
