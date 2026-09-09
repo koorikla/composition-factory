@@ -101,3 +101,28 @@ func TestImportPackageWithoutAnnotationExplains(t *testing.T) {
 		t.Fatalf("error does not name the missing annotation: %s", rec.Body)
 	}
 }
+
+func TestImportRejectsUnknownFields(t *testing.T) {
+	srv, _, _, _ := testServerParts(t)
+	bad := `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata: {name: x}
+spec:
+  xrd:
+    group: platform.example.org
+    kind: XTest
+    plural: xtests
+    version: v1alpha1
+    status:
+      someUnknownKey: true
+`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/blueprint/import", strings.NewReader(bad))
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "status") {
+		t.Fatalf("expected error naming unknown field, got: %s", rec.Body)
+	}
+}
