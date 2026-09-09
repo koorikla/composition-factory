@@ -246,7 +246,7 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 		}
 		expr := sb.String()
 		if s.targetType == "string" {
-			return fmt.Sprintf("str(%s)", expr)
+			return fmt.Sprintf("str(%s) if %s is not None else None", expr, expr)
 		}
 		return expr
 	case rhsMetadata:

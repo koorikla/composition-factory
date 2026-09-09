@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"sigs.k8s.io/yaml"
 
 	"github.com/koorikla/compositionfactory/internal/rendertest"
@@ -1477,8 +1478,10 @@ func TestUnavailableFailsWhenAcceptanceIsRequired(t *testing.T) {
 	}
 }
 
-// TestAcceptanceAlternativeEnginesRender renders KCL and Python engines through
-// their real function images to verify cross-engine render correctness.
+// TestAcceptanceAlternativeEnginesRender renders the same blueprint across
+// go-templating, KCL, and Python engines through their real function images,
+// decodes the rendered composed resources into structured documents, and
+// structurally diffs them across engines (CF-081).
 func TestAcceptanceAlternativeEnginesRender(t *testing.T) {
 	if testing.Short() {
 		unavailable(t, "acceptance test needs Docker; skipped under -short")
@@ -1489,7 +1492,10 @@ func TestAcceptanceAlternativeEnginesRender(t *testing.T) {
 	bin := testBin
 	cacheDir := testCacheDir
 
-	for _, engine := range []string{"kcl", "python"} {
+	engines := []string{"go-templating", "kcl", "python"}
+	renderedByEngine := make(map[string]map[string]map[string]any)
+
+	for _, engine := range engines {
 		t.Run("engine="+engine, func(t *testing.T) {
 			outDir := filepath.Join(t.TempDir(), "out-"+engine)
 			bpPath := filepath.Join(t.TempDir(), "xqueue-"+engine+".cf.yaml")
@@ -1515,6 +1521,7 @@ func TestAcceptanceAlternativeEnginesRender(t *testing.T) {
 			if err != nil {
 				t.Fatalf("crossplane composition render (%s): %v\n%s", engine, err, rendered)
 			}
+
 			got := string(rendered)
 			for _, want := range []string{
 				"apiVersion: sqs.aws.m.upbound.io/v1beta1",
@@ -1526,6 +1533,118 @@ func TestAcceptanceAlternativeEnginesRender(t *testing.T) {
 					t.Errorf("rendered %s output missing %q\n---\n%s", engine, want, got)
 				}
 			}
+
+			docs := decodeComposedResources(t, rendered)
+			renderedByEngine[engine] = docs
 		})
 	}
+
+	t.Run("diff-engines", func(t *testing.T) {
+		for _, engine := range engines {
+			if len(renderedByEngine[engine]) == 0 {
+				t.Fatalf("engine %q produced 0 composed resources; cannot compare", engine)
+			}
+		}
+
+		gtDocs := renderedByEngine["go-templating"]
+		gtNames := mapKeys(gtDocs)
+
+		for _, other := range []string{"kcl", "python"} {
+			otherDocs := renderedByEngine[other]
+			otherNames := mapKeys(otherDocs)
+
+			// 1. Verify resource names match identically across engines.
+			if diff := cmp.Diff(gtNames, otherNames); diff != "" {
+				t.Errorf("composed resource names mismatch between go-templating and %s (-go-templating +%s):\n%s",
+					other, other, diff)
+				continue
+			}
+
+			// 2. For each composed resource, verify kind, apiVersion, and normalized spec/metadata.
+			for _, name := range gtNames {
+				gtDoc := gtDocs[name]
+				otherDoc := otherDocs[name]
+
+				if gtKind, otherKind := gtDoc["kind"], otherDoc["kind"]; gtKind != otherKind {
+					t.Errorf("resource %q kind mismatch: go-templating=%v, %s=%v", name, gtKind, other, otherKind)
+				}
+				if gtAPI, otherAPI := gtDoc["apiVersion"], otherDoc["apiVersion"]; gtAPI != otherAPI {
+					t.Errorf("resource %q apiVersion mismatch: go-templating=%v, %s=%v", name, gtAPI, other, otherAPI)
+				}
+
+				gtNorm := normalizeComposedResource(gtDoc)
+				otherNorm := normalizeComposedResource(otherDoc)
+				if diff := cmp.Diff(gtNorm, otherNorm); diff != "" {
+					t.Errorf("resource %q diff between go-templating and %s (-go-templating +%s):\n%s",
+						name, other, other, diff)
+				}
+			}
+		}
+	})
+}
+
+// normalizeComposedResource returns a normalized copy of a composed resource
+// document for deep comparison across different composition rendering engines.
+//
+// Fields compared:
+//   - apiVersion and kind
+//   - metadata.annotations (preserves crossplane.io/composition-resource-name and user annotations)
+//   - metadata.labels (preserves crossplane.io/composite and user labels)
+//   - metadata.generateName
+//   - spec (full comparison of forProvider, providerConfigRef, and all wire-interpolated fields)
+//
+// Fields ignored / allowed to differ:
+//   - metadata.name: Crossplane's render engine synthesizes a pseudorandom hex hash
+//     suffix (e.g. demo-6818f8514b5e) onto metadata.generateName. While deterministic
+//     within a specific render run, the generated name is an internal Crossplane render
+//     artifact rather than an engine-emitted property. metadata.generateName is compared
+//     instead.
+func normalizeComposedResource(doc map[string]any) map[string]any {
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return doc
+	}
+	var clone map[string]any
+	if err := json.Unmarshal(raw, &clone); err != nil {
+		return doc
+	}
+	if meta, ok := clone["metadata"].(map[string]any); ok {
+		delete(meta, "name")
+	}
+	return clone
+}
+
+func mapKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func decodeComposedResources(t *testing.T, rendered []byte) map[string]map[string]any {
+	t.Helper()
+	res := make(map[string]map[string]any)
+	for _, chunk := range strings.Split(string(rendered), "\n---\n") {
+		chunk = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(chunk), "---"))
+		if chunk == "" {
+			continue
+		}
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(chunk), &doc); err != nil {
+			t.Fatalf("rendered document is not valid YAML: %v\n---\n%s", err, chunk)
+		}
+		meta, _ := doc["metadata"].(map[string]any)
+		ann, _ := meta["annotations"].(map[string]any)
+		name, _ := ann["crossplane.io/composition-resource-name"].(string)
+		if name == "" {
+			continue // XR document carries no composition-resource-name annotation
+		}
+		if _, exists := res[name]; exists {
+			t.Errorf("composition-resource-name %q appears twice", name)
+		}
+		res[name] = doc
+	}
+	return res
 }
