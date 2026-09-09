@@ -69,8 +69,8 @@ test('Validate and Generate announce results with accessible screen-reader text'
 
   // Trigger validate
   await page.click('#validateBtn')
-  await expect(validChip).toContainText(/render ok · \d+ resources|render check unavailable/, { timeout: 90000 })
-  await expect(validChip).toHaveAttribute('aria-label', /(Validation succeeded|Render check unavailable)/i)
+  await expect(validChip).toContainText(/(?:valid|validate ok|render ok) · \d+ resources?|(?:validation|render) check unavailable/, { timeout: 90000 })
+  await expect(validChip).toHaveAttribute('aria-label', /(?:Validation succeeded|(?:validation|render) check unavailable)/i)
 
   // Inject render error
   const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
@@ -81,6 +81,6 @@ test('Validate and Generate announce results with accessible screen-reader text'
 
   await page.goto('/')
   await page.click('#validateBtn')
-  await expect(validChip).toContainText(/render error|render check unavailable/, { timeout: 90000 })
-  await expect(validChip).toHaveAttribute('aria-label', /(Render error|Render check unavailable)/i, { timeout: 90000 })
+  await expect(validChip).toContainText(/(?:validation|render) error|(?:validation|render) check unavailable/, { timeout: 90000 })
+  await expect(validChip).toHaveAttribute('aria-label', /(?:Validation error|Render error|(?:validation|render) check unavailable)/i, { timeout: 90000 })
 })

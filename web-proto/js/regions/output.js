@@ -47,6 +47,10 @@ var collapsedGroups = {};
 var rbacCache = null;      // invalidated on every doc emit
 var pkgCache = null;       // same lifecycle: the package renders the live doc
 var onTabSelected = null;
+var docRevision = 0;
+var lastDocJson = "";
+var validatedRevision = -1;
+var isValidating = false;
 
 var editBtn = null;
 var editor = null;
@@ -670,8 +674,8 @@ function chipErr(message) {
 
 function chipWorking(text) {
   if (!el.valid) return;
-  var visible = text || "rendering…";
-  var srText = text === "generating…" ? "Generating manifests…" : "Rendering composition…";
+  var visible = text || "validating…";
+  var srText = text === "generating…" ? "Generating manifests…" : "Validating composition…";
   el.valid.textContent = visible;
   el.valid.title = "";
   el.valid.style.color = "";
@@ -684,7 +688,7 @@ function renderOk(resources) {
     ? (resources.resources || 0)
     : Number(resources || 0);
   showWarn("");
-  el.valid.textContent = "render ok · " + n + " resource" + (n === 1 ? "" : "s");
+  el.valid.textContent = "valid · " + n + " resource" + (n === 1 ? "" : "s");
   el.valid.title = "";
   el.valid.style.color = "";
   el.valid.setAttribute("aria-label", "Validation succeeded: " + n + " resource" + (n === 1 ? "" : "s") + " rendered");
@@ -704,17 +708,17 @@ function renderErr(error, unavailable) {
   }
   if (unavail) {
     var formattedUnavail = formatErrorMessage(unavail);
-    el.valid.textContent = "render check unavailable";
+    el.valid.textContent = "validation check unavailable";
     el.valid.title = formattedUnavail;
     el.valid.style.color = "var(--warn)";
-    el.valid.setAttribute("aria-label", "Render check unavailable: " + formattedUnavail);
+    el.valid.setAttribute("aria-label", "Validation check unavailable: " + formattedUnavail);
     showWarn(unavail);
   } else {
     var formattedErr = formatErrorMessage(err || "");
-    el.valid.textContent = "render error";
+    el.valid.textContent = "validation error";
     el.valid.title = formattedErr;
     el.valid.style.color = "var(--err)";
-    el.valid.setAttribute("aria-label", "Render error: " + formattedErr);
+    el.valid.setAttribute("aria-label", "Validation error: " + formattedErr);
     showWarn(err || "");
   }
 }
@@ -937,7 +941,9 @@ function bindOutputEvents() {
 
   el.validateBtn.addEventListener("click", function () {
     el.validateBtn.disabled = true;
-    chipWorking("rendering\u2026");
+    isValidating = true;
+    var runRevision = docRevision;
+    chipWorking("validating\u2026");
     api.renderCheck().then(function (r) {
       if (r.ok) {
         renderOk(r);
@@ -946,10 +952,15 @@ function bindOutputEvents() {
       } else {
         renderErr(r.error);
       }
+      validatedRevision = runRevision;
     }).catch(function (err) {
       var msg = err && err.message || String(err);
       renderErr(msg);
-    }).finally(function () { el.validateBtn.disabled = false; });
+      validatedRevision = runRevision;
+    }).finally(function () {
+      isValidating = false;
+      el.validateBtn.disabled = false;
+    });
   });
 
   if (el.engineSel) {
@@ -995,6 +1006,11 @@ function bindOutputEvents() {
 
 function bindOutputStoreSubscriptions() {
   store.subscribe("doc", function (doc) {
+    var curJson = JSON.stringify(doc);
+    if (curJson !== lastDocJson) {
+      lastDocJson = curJson;
+      docRevision++;
+    }
     drawTopbar(doc);
     drawWarn(doc);
     if (el.engineSel) {
@@ -1015,8 +1031,17 @@ function bindOutputStoreSubscriptions() {
 
   store.subscribe("doc", function () { rbacCache = null; pkgCache = null; });
   store.subscribe("generate", function (result) {
-    showWarn("");
-    chipOk(result && result.outputs ? result.outputs.length : 0, result && result.written);
+    var isWritten = !!(result && result.written);
+    var isValidationActive = isValidating || (validatedRevision === docRevision && validatedRevision >= 0);
+    if (isWritten) {
+      isValidating = false;
+      validatedRevision = -1;
+      showWarn("");
+      chipOk(result && result.outputs ? result.outputs.length : 0, true);
+    } else if (!isValidationActive) {
+      showWarn("");
+      chipOk(result && result.outputs ? result.outputs.length : 0, false);
+    }
     buildTabs(); // providerconfig families can appear/vanish with sources
     updateNextSteps(result);
     if (tab !== "bp") render();
@@ -1024,6 +1049,8 @@ function bindOutputStoreSubscriptions() {
 
   store.subscribe("error", function (err) {
     if (err) {
+      isValidating = false;
+      validatedRevision = -1;
       chipErr(err.message || String(err));
     }
   });
@@ -1080,6 +1107,8 @@ export function init(rootEl, deps) {
   /* ---------- first paint ---------- */
   buildTabs();
   if (store.state.doc) {
+    lastDocJson = JSON.stringify(store.state.doc);
+    docRevision = 0;
     drawTopbar(store.state.doc);
     drawWarn(store.state.doc);
     scheduleGenerate();

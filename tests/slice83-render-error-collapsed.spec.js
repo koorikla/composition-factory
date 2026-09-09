@@ -27,8 +27,8 @@ test('when Validate fails while the drawer is collapsed, the failure error messa
   // Click Validate
   await page.click('#validateBtn')
 
-  // Validation fails: valid chip displays render error
-  await expect(page.locator('#valid')).toContainText(/render error|render check unavailable/, { timeout: 90000 })
+  // Validation fails: valid chip displays validation error
+  await expect(page.locator('#valid')).toContainText(/(?:validation|render) error|(?:validation|render) check unavailable/, { timeout: 90000 })
 
   // Failure error message must be visible in the viewport!
   const errorBanner = page.locator('.render-warn-banner, #render-warn-banner')
@@ -69,7 +69,7 @@ test('clicking valid chip expands collapsed drawer and reveals error diagnostics
   // Validate to trigger error
   await page.click('#validateBtn')
   const validChip = page.locator('#valid')
-  await expect(validChip).toContainText(/render error|render check unavailable/, { timeout: 90000 })
+  await expect(validChip).toContainText(/(?:validation|render) error|(?:validation|render) check unavailable/, { timeout: 90000 })
 
   // Dismiss top banner to test valid chip reveal
   await page.click('#render-warn-dismiss')

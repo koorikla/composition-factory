@@ -12,7 +12,7 @@ test('Validate renders the composition for real and reports the resource count',
   test.setTimeout(90000)
   await page.goto('/')
   await page.click('#validateBtn')
-  await expect(page.locator('#valid')).toContainText(/render ok · \d+ resources|render check unavailable/, { timeout: 90000 })
+  await expect(page.locator('#valid')).toContainText(/(?:valid|validate ok|render ok) · \d+ resources?|(?:validation|render) check unavailable/, { timeout: 90000 })
 })
 
 test('a template that dies under missingkey=error surfaces the render error verbatim', async ({ page, request }) => {

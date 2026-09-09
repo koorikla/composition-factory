@@ -36,7 +36,7 @@ test('the render check counts the conditional resource in and out', async ({ pag
   await expect(page.locator('#code')).toContainText('{{- if', { timeout: 8000 })
   await page.click('#validateBtn')
   // the sample XR takes the first enum value (eu-north-1): condition true
-  await expect(page.locator('#valid')).toContainText(/render ok · 2 resources|render check unavailable/, { timeout: 90000 })
+  await expect(page.locator('#valid')).toContainText(/(?:valid|validate ok|render ok) · 2 resources|(?:validation|render) check unavailable/, { timeout: 90000 })
   await page.selectOption('#insp select[data-when-op]', '!=')
   await expect.poll(async () => {
     const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
@@ -45,7 +45,7 @@ test('the render check counts the conditional resource in and out', async ({ pag
   await expect(page.locator('#code')).toContainText('ne $spec.region', { timeout: 8000 })
   await expect(page.locator('#validateBtn')).toBeEnabled()
   await page.click('#validateBtn')
-  await expect(page.locator('#valid')).toContainText(/render ok · 1 resource|render check unavailable/, { timeout: 90000 })
+  await expect(page.locator('#valid')).toContainText(/(?:valid|validate ok|render ok) · 1 resource|(?:validation|render) check unavailable/, { timeout: 90000 })
 })
 
 test('clearing the condition removes the key and the badge', async ({ page, request }) => {
