@@ -416,3 +416,22 @@ func TestGenCleansUpOrphanedFiles(t *testing.T) {
 		t.Fatalf("check after cleanup: code=%d err=%v, want 0/nil", code, err)
 	}
 }
+
+func TestGenRejectsUnknownFieldInBlueprint(t *testing.T) {
+	dir := t.TempDir()
+	bpPath := filepath.Join(dir, "bad.cf.yaml")
+	badYAML := strings.Replace(genBlueprint, "  resources:", "  resourcez:", 1)
+	if err := os.WriteFile(bpPath, []byte(badYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out")
+	var buf bytes.Buffer
+	cmd := &GenCmd{Blueprint: bpPath, Out: out, CacheDir: filepath.Join(dir, "cache")}
+	code, err := cmd.run(&buf)
+	if code == 0 || err == nil {
+		t.Fatalf("expected non-zero exit and error for unknown field, got code=%d err=%v", code, err)
+	}
+	if !strings.Contains(err.Error(), "resourcez") {
+		t.Fatalf("expected error mentioning 'resourcez', got: %v", err)
+	}
+}
