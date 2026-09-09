@@ -33,7 +33,7 @@ test('the loaded blueprint renders three cards with wires; shared fan-out is col
   await expect(canvas.locator('.node[data-id="work-queue"]')).toBeVisible()
   await expect(canvas.locator('.node[data-id="dead-letter"]')).toBeVisible()
   // wires live IN the doc: region -> 2 fields (shared), retention -> 1 (xrd blue)
-  await expect(page.locator('#wires path')).toHaveCount(3)
+  await expect(page.locator('#wires path.wire-path')).toHaveCount(3)
   await expect(page.locator('#wires path.wire-shared')).toHaveCount(2)
   await expect(page.locator('#wires path.wire-xrd')).toHaveCount(1)
   // the XR card marks region's fan-out ×2
