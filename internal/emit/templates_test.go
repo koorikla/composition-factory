@@ -431,3 +431,77 @@ func TestTemplateObservedContextAccess(t *testing.T) {
 		t.Fatalf("emitted template does not include cf.statusPolicy: %s", tmpl)
 	}
 }
+
+func TestCF109ConventionMatchingNativeKindIsRefused(t *testing.T) {
+	native, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+	crds := append(native, conventionCRDs(t)...)
+
+	b := conventionTestBlueprint()
+	// Add a convention that matches a top-level leaf field on Secret (e.g. "immutable" or "type")
+	b.Spec.Conventions = append(b.Spec.Conventions, blueprint.Convention{
+		Match:    "immutable",
+		Template: "cf.tags",
+	})
+	b.Spec.Resources = append(b.Spec.Resources, blueprint.Resource{
+		Name:     "secret",
+		Kind:     "Secret",
+		Provider: blueprint.NativeProvider,
+		Fields: map[string]blueprint.Field{
+			"type": {Value: "Opaque"},
+		},
+	})
+
+	_, err = Composition(b, crds)
+	if err == nil {
+		t.Fatal("expected error when convention matches native kind field, got nil")
+	}
+	wantMsg := `resource "secret": conventions cannot match native Kubernetes kind`
+	if !strings.Contains(err.Error(), wantMsg) {
+		t.Fatalf("expected error containing %q, got: %v", wantMsg, err)
+	}
+}
+
+// Explicit declaration on native kind wins over a matching convention: that IS
+// the override mechanism, so the resource is not refused and no template call leaks.
+func TestCF109ConventionExplicitOverrideOnNativeKindAllowed(t *testing.T) {
+	native, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+	crds := append(native, conventionCRDs(t)...)
+
+	b := conventionTestBlueprint()
+	b.Spec.Conventions = append(b.Spec.Conventions, blueprint.Convention{
+		Match:    "immutable",
+		Template: "cf.tags",
+	})
+	b.Spec.Resources = append(b.Spec.Resources, blueprint.Resource{
+		Name:     "secret",
+		Kind:     "Secret",
+		Provider: blueprint.NativeProvider,
+		Fields: map[string]blueprint.Field{
+			"type":      {Value: "Opaque"},
+			"immutable": {Value: "true"},
+		},
+	})
+
+	comp, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v, want explicit override on native kind allowed", err)
+	}
+	doc := string(comp)
+	secretStart := strings.Index(doc, `setResourceNameAnnotation "secret"`)
+	if secretStart < 0 {
+		t.Fatal("native secret resource document not found in Composition")
+	}
+	rest := doc[secretStart:]
+	if next := strings.Index(rest[1:], "setResourceNameAnnotation"); next > 0 {
+		rest = rest[:next+1]
+	}
+	if strings.Contains(rest, `include "cf.tags"`) {
+		t.Error("convention template call leaked into native secret document")
+	}
+}

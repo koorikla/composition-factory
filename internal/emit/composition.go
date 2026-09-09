@@ -552,13 +552,37 @@ func conventionFields(r blueprint.Resource, b *blueprint.Blueprint, crd schema.C
 	if len(b.Spec.Conventions) == 0 {
 		return r.Fields, nil
 	}
-	// blueprint.Validate refuses this combination at the source (see the
-	// conventions ruling in load.go); kept as a real error rather than a
-	// silent skip because Composition is exported and callable on its own —
-	// the same discipline checkStatusRefs applies to its unknown-resource
-	// case. A silent skip here would be a convention that silently never
-	// applies, this project's central defect class.
+	// Conventions cannot target native Kubernetes kinds (docs/dsl.md:418).
+	// If any convention matches an un-overridden top-level leaf of the native
+	// object, return a real error rather than a silent skip. Non-matching
+	// conventions safely skip the native kind so blueprints can freely compose
+	// native kinds alongside convention-governed managed resources.
 	if crd.Native {
+		nodes, err := crd.FieldTree()
+		if err != nil {
+			return nil, fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
+		}
+		for _, n := range nodes {
+			if len(n.Children) > 0 {
+				continue // a branch is a subtree, not a settable field
+			}
+			hasExplicit := false
+			for k := range r.Fields {
+				base, _, isMap := blueprint.ParseFieldPath(k)
+				if k == n.Name || (isMap && base == n.Name) {
+					hasExplicit = true
+					break
+				}
+			}
+			if hasExplicit {
+				continue // explicit wins: that IS the override
+			}
+			for _, c := range b.Spec.Conventions {
+				if strings.HasSuffix(n.Name, c.Match) {
+					return nil, fmt.Errorf("resource %q: conventions cannot match native Kubernetes kind", r.Name)
+				}
+			}
+		}
 		return r.Fields, nil
 	}
 	nodes, err := crd.ForProvider()

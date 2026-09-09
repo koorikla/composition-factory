@@ -52,13 +52,9 @@ func planSingleResource(r blueprint.Resource, b *blueprint.Blueprint, crds []sch
 		return plannedResource{}, err
 	}
 
-	fields := r.Fields
-	if !crd.Native {
-		var cerr error
-		fields, cerr = conventionFields(r, b, crd)
-		if cerr != nil {
-			return plannedResource{}, cerr
-		}
+	fields, cerr := conventionFields(r, b, crd)
+	if cerr != nil {
+		return plannedResource{}, cerr
 	}
 	rc := r
 	rc.Fields = fields
