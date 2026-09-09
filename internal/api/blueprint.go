@@ -529,6 +529,7 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 	}
 
 	origProviders := append([]string(nil), srv.Providers...)
+	var fetchErrs []string
 	for _, ref := range newProviders {
 		// If already in store cache, ensure it is pinned in lockfile and record in srv.Providers
 		if _, err := srv.Store.Load(ref); err == nil {
@@ -556,6 +557,7 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 		pkg, err := fetch(ref)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "cf: warning: unable to fetch source %q: %v — continuing offline\n", ref, err)
+			fetchErrs = append(fetchErrs, fmt.Sprintf("unable to fetch source %q: %v", ref, err))
 			continue
 		}
 		crds, err := schema.ParseCRDs(pkg.Docs)
@@ -610,6 +612,9 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 	if err := srv.rebuildIndexLocked(b); err != nil {
 		srv.Providers = origProviders
 		return err
+	}
+	if len(fetchErrs) > 0 {
+		return errors.New(strings.Join(fetchErrs, "; "))
 	}
 	return nil
 }
