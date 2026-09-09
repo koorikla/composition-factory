@@ -1,3 +1,9 @@
+- [x] **CF-064 — The output drawer takes 250 px of a 720 px viewport to show 142 px of
+      YAML. [V]**
+      Compacted output drawer default height to 200px and tightened padding across tab chrome,
+      header, and code viewports, expanding canvas and palette vertical authoring space to >= 460px
+      on 1280x720 viewports with zero token drift between `proto.css` and `canvas-prototype.html`.
+      — completed 2026-09-09
 - [x] **CF-072 — Interface copy: implementation words, a wrong count, and dead-end empty
       states. [V for the count]**
       Corrected empty canvas onboarding count to match the actual 16 native Kubernetes kinds,
