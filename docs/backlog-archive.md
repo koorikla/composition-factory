@@ -1,3 +1,16 @@
+- [x] **CF-083 — When Validate fails with the output drawer collapsed, the error text is
+      rendered off-screen and only the words "render error" reach the user. [V]**
+      `showWarn` (`web-proto/js/regions/output.js:448-457`) inserts the warn bar before
+      `#code-viewport`, inside the drawer. With the drawer collapsed the bar is not hidden —
+      it is laid out below the fold. Measured on the `k8s-workload` starter at 1280×720:
+      `#render-warn` has `hidden: false`, full text, and `getBoundingClientRect().top = 745`
+      against `innerHeight = 720`. The only on-screen artefact is the `#valid` chip reading
+      `render error`, whose `title` carries the message — a hover a user has no reason to
+      try. The engine's message is the good part (`line 131: resource "svc" (Service): field
+      "spec.ports[0].targetPort": invalid type: expected string, got integer 8080`); it just
+      never arrives. The fix must put the failure text somewhere the collapsed layout can
+      show, and must not depend on hover.
+      — completed 2026-09-09
 - [x] **CF-074 — A status wire into `fields:` is interpolated unquoted, so a string status
       value that looks like a bool or number changes type and the API server rejects the
       resource. [V]** The same wire is `| quote`d into an annotation and emitted bare into a

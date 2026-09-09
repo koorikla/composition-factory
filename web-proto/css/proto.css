@@ -802,6 +802,38 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 }
 .warnbar-dismiss:hover{opacity:1}
 
+/* CF-083: render-failure banner anchored below topbar so error is visible when drawer is collapsed */
+.render-warn-banner {
+  position: fixed;
+  top: 46px;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-family: var(--mono);
+  background: var(--surface-2);
+  color: var(--err);
+  border-bottom: 1px solid var(--rule);
+  box-shadow: var(--shadow);
+  word-break: break-word;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.render-warn-banner .render-warn-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.render-warn-banner .render-warn-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+
 /* interactive tour */
 #tour-overlay { position: fixed; inset: 0; z-index: 3000; }
 #tour-overlay[hidden] { display: none; }
