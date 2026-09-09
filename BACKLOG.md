@@ -57,6 +57,10 @@ them in.
 ### P2
 
 - [ ] **CF-064 — The output drawer takes 250 px of a 720 px viewport to show 142 px of
+      YAML. [V]** Measured at 1280×720: topbar 46, columns 424, drawer 250; inside it `#code`
+      is 142 px — seven lines of a ~500-line document, so 43% of the drawer is chrome. The
+      canvas gets 840×424 and the palette 277 px of list. The fix must give the authoring
+      surfaces the vertical space, at this viewport and smaller.
 
 - [ ] **CF-066 — The button says Validate, every result says "render", and the generate chip
       then erases it.** `Validate` (`index.html:32`) yields `rendering…` / `render ok · N
