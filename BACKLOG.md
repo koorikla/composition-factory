@@ -55,15 +55,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
 
 ### P0
 
-- [ ] **CF-086 — The SOURCES tab shows the provider list it fetched first; loading a starter
-      example (or any doc change that swaps sources) leaves it stale until a page reload. [V]**
-      `web-proto/js/regions/palette.js:58` caches `GET /api/providers` and refetches only while
-      the cache is `null`; the `"doc"` subscription (`:1088`) never clears it and the view (`:401`)
-      prefers the cache over `doc.spec.sources`. Repro: open SOURCES → Examples → load RDS: the
-      canvas shows Instance, `/api/providers` lists provider-aws-rds, the tab still lists the
-      previous provider (the user's "CF-082 is not fixed" report; CF-082 itself holds server-side).
-      The tab must reflect the server's list after every doc change.
-      Brief: `docs/tasks/CF-086-sources-tab-stale-provider-list.md`.
 - [ ] **CF-089 — Adding a provider from SOURCES and then applying any full-document write
       (blueprint editor Apply, engine selector) silently drops that provider again. [V]** Neither
       add path in `web-proto/js/regions/palette.js:869` / `:887` refreshes the client document
@@ -175,14 +166,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
 
 ### P2
 
-- [ ] **CF-087 — *(engine)* A document write whose declared source cannot be fetched answers
-      200 and reports the failure only on the server's stderr. [V]** `blueprint.go:558` prints
-      `continuing offline` and `continue`s; `persistBlueprint` (`:622`) and `handleLoadExample`
-      (`examples.go:88`) then report success. Repro: empty cache, no registry credentials,
-      `PUT /api/blueprint` with a new source → `200`, `/api/providers` `[]`, next generate `400`.
-      An agent on HTTP/MCP cannot tell a good write from one that left the document unbuildable.
-      The write's answer must name the source and the fetch reason; the canvas must show it at
-      save time. Brief: `docs/tasks/CF-087-write-hides-source-fetch-failure.md`.
 - [ ] **CF-093 — In the published image Validate always answers "validation check unavailable"
       and its fix tip prescribes `curl … | sh` in a container that has no curl and runs as
       uid 100.** `/api/render` → `unavailable: crossplane CLI not found on PATH`. The image ships

@@ -1,3 +1,15 @@
+- [x] **CF-086 — The SOURCES tab shows the provider list it fetched first; loading a starter
+      example (or any doc change that swaps sources) leaves it stale until a page reload. [V]**
+      Invalidated cached provider list in palette on document source signature changes, refreshing
+      the providers list and catalogue badges dynamically while preserving fallback to document
+      sources during fetch.
+      — completed 2026-09-09
+- [x] **CF-087 — *(engine)* A document write whose declared source cannot be fetched answers
+      200 and reports the failure only on the server's stderr. [V]**
+      Reported source fetch failures as HTTP 400 Bad Request on blueprint writes and example loads,
+      naming the unresolvable source and verbatim error to caller and canvas without persisting
+      an unbuildable document.
+      — completed 2026-09-09
 - [x] **CF-071 — Design-token hygiene: a purple, five undefined `var()`s, and no type or
       spacing scale. [V for the purple]**
       Replaced `#7c3aed` rogue violet on the CRON card icon with `var(--wire-status)` in
