@@ -216,7 +216,7 @@ func TestIntegerParamIntoStringMapAcrossEngines(t *testing.T) {
 		}
 	})
 
-	// 3. Python: emits "PORT": str(spec.get("port"))
+	// 3. Python: emits "PORT": _str(spec.get("port"))
 	t.Run("python", func(t *testing.T) {
 		b := makeBP(blueprint.EnginePython)
 		out, err := Composition(b, crds)
@@ -224,8 +224,8 @@ func TestIntegerParamIntoStringMapAcrossEngines(t *testing.T) {
 			t.Fatalf("Composition(python): %v", err)
 		}
 		s := string(out)
-		if !strings.Contains(s, `"PORT": str(spec.get("port"))`) {
-			t.Errorf("Python expected \"PORT\": str(spec.get(\"port\")), got:\n%s", s)
+		if !strings.Contains(s, `"PORT": _str(spec.get("port"))`) {
+			t.Errorf("Python expected \"PORT\": _str(spec.get(\"port\")), got:\n%s", s)
 		}
 	})
 }
@@ -278,8 +278,36 @@ func TestK8sWorkloadConfigMapPortQuotedAcrossEngines(t *testing.T) {
 			t.Fatalf("Composition(python): %v", err)
 		}
 		s := string(out)
-		if !strings.Contains(s, `"PORT": str(spec.get("port"))`) {
-			t.Errorf("Python expected \"PORT\": str(spec.get(\"port\")), got:\n%s", s)
+		if !strings.Contains(s, `"PORT": _str(spec.get("port"))`) {
+			t.Errorf("Python expected \"PORT\": _str(spec.get(\"port\")), got:\n%s", s)
 		}
 	})
+}
+
+func TestCF114PythonEngineIntegerParamStringFormatting(t *testing.T) {
+	native, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+
+	b, err := blueprint.Load("../examples/k8s-workload.cf.yaml")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+
+	out, err := Composition(b, native)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(out)
+
+	// An integer parameter wired into a string target must not be converted via plain str(val)
+	// because MessageToDict delivers numbers as floats (8080.0 -> "8080.0").
+	if strings.Contains(s, `"PORT": str(spec.get("port"))`) {
+		t.Errorf("Python engine emitted uncoerced str(spec.get(\"port\")), which formats float as 8080.0:\n%s", s)
+	}
+	if !strings.Contains(s, `_str(spec.get("port"))`) && !strings.Contains(s, `str(int(spec.get("port")))`) {
+		t.Errorf("Python engine expected integer-safe string conversion for port, got:\n%s", s)
+	}
 }

@@ -26,7 +26,8 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 	// An optional parameter the XR omits, or a status leaf not yet observed,
 	// reads as None; dropping it keeps the key out of the desired object,
 	// the way the go-templating engine's hasKey guard does.
-	sb.WriteString("_present = lambda d: {k: v for k, v in d.items() if v is not None}\n\n\n")
+	sb.WriteString("_present = lambda d: {k: v for k, v in d.items() if v is not None}\n")
+	sb.WriteString("_str = lambda v: str(int(v)) if not isinstance(v, bool) and isinstance(v, (int, float)) and (isinstance(v, int) or v.is_integer()) else (str(v) if v is not None else None)\n\n\n")
 	sb.WriteString("def compose(req: fnv1.RunFunctionRequest, rsp: fnv1.RunFunctionResponse):\n")
 	sb.WriteString("    oxr = MessageToDict(req.observed.composite.resource)\n")
 	sb.WriteString("    ocds = {k: {\"resource\": MessageToDict(v.resource)} for k, v in req.observed.resources.items()}\n")
@@ -227,7 +228,7 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 			expr = translateParamAccessToPython(s.param)
 		}
 		if s.targetType == "string" && s.sourceType != "" && s.sourceType != "string" {
-			return fmt.Sprintf("str(%s)", expr)
+			return fmt.Sprintf("_str(%s)", expr)
 		}
 		return expr
 	case rhsStatus:
@@ -246,7 +247,7 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 		}
 		expr := sb.String()
 		if s.targetType == "string" {
-			return fmt.Sprintf("str(%s) if %s is not None else None", expr, expr)
+			return fmt.Sprintf("_str(%s)", expr)
 		}
 		return expr
 	case rhsMetadata:
@@ -254,7 +255,7 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 	case rhsEnv:
 		expr := fmt.Sprintf("env.get(%q)", s.param)
 		if s.targetType == "string" && s.sourceType != "" && s.sourceType != "string" {
-			return fmt.Sprintf("str(%s)", expr)
+			return fmt.Sprintf("_str(%s)", expr)
 		}
 		return expr
 	default:
