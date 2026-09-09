@@ -204,19 +204,7 @@ providers. Every item below was executed, not read.
       never arrives. The fix must put the failure text somewhere the collapsed layout can
       show, and must not depend on hover.
 
-- [ ] **CF-084 — Five of the seven shipped starter examples fail their own Validate button,
-      including the IRSA demo the README opens with. [V]** Reproduced through both doors —
-      `POST /api/render` after `POST /api/examples/<id>/load`, and `cf gen <example>
-      --validate` at the CLI. `irsa` and `sqs-queue`: `field "spec.forProvider.policy":
-      invalid type: expected string, got object`. `k8s-workload`: `field
-      "spec.ports[0].targetPort": invalid type: expected string, got integer 8080`.
-      `k8s-app`: both. `s3-bucket`: `kind "BucketVersioningConfiguration" not found in any
-      cached provider`, so it cannot render until the user adds a provider by hand. Only
-      `rds-postgres` and `k8s-cronjob` pass. Two of these trace to CF-076 (int-or-string
-      collapsed to `string`); the `policy` ones need a ruling on whether a JSON object in the
-      blueprint should be encoded into the CRD's string field or refused at author time. A
-      starter that fails the first button a new user presses is the worst possible first
-      contact, so whichever side is wrong, the shipped set must pass.
+
 
 
 ---

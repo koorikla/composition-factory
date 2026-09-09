@@ -55,4 +55,4 @@ spec:
       fields:
         region: {from: params.region}
         queueUrl: {from: resources.main-queue.status.atProvider.url}
-        policy: {raw: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"*"},"Action":"sqs:SendMessage","Resource":"*"}]}'}
+        policy: {raw: "'{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"*\"},\"Action\":\"sqs:SendMessage\",\"Resource\":\"*\"}]}'"}

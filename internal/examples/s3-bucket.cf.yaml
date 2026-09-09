@@ -40,7 +40,7 @@ spec:
         region: {from: params.region}
         objectLockEnabled: {value: false}
     - name: versioning
-      kind: BucketVersioningConfiguration
+      kind: BucketVersioning
       provider: ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0
       when: params.versioning
       fields:

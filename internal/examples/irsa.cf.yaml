@@ -57,7 +57,7 @@ spec:
       provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
       fields:
         role: {from: resources.role.status.atProvider.id}
-        policy: {raw: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:ListBucket"],"Resource":["arn:aws:s3:::*"]}]}'}
+        policy: {raw: "'{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\",\"s3:ListBucket\"],\"Resource\":[\"arn:aws:s3:::*\"]}]}'"}
     - name: sa
       kind: ServiceAccount
       provider: k8s

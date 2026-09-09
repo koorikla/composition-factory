@@ -71,7 +71,7 @@ spec:
       provider: ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0
       fields:
         role: {from: resources.role.status.atProvider.id}
-        policy: {raw: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["sqs:SendMessage","sqs:ReceiveMessage","sqs:DeleteMessage","sqs:GetQueueAttributes"],"Resource":["arn:aws:sqs:*:*:*"]}]}'}
+        policy: {raw: "'{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"sqs:SendMessage\",\"sqs:ReceiveMessage\",\"sqs:DeleteMessage\",\"sqs:GetQueueAttributes\"],\"Resource\":[\"arn:aws:sqs:*:*:*\"]}]}'"}
     - name: db
       kind: Instance
       provider: ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0

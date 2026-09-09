@@ -1,3 +1,10 @@
+- [x] **CF-084 — Five of the seven shipped starter examples fail their own Validate button,
+      including the IRSA demo the README opens with. [V]** Fixed starter example schemas
+      and policy string formatting: corrected S3 bucket versioning kind name to
+      `BucketVersioning`, properly quoted policy raw JSON strings so they decode as YAML string
+      scalars instead of parsed objects, and int-or-string targetPort resolved via CF-076.
+      All starter examples now pass `cf gen --validate`.
+      — completed 2026-09-09
 - [x] **CF-078 — The auto-ready package documented in `docs/dsl.md` and `docs/cli.md` is
       neither the registry nor the version `cf gen` emits. [V]** Docs say
       `xpkg.crossplane.io/…/function-auto-ready:v0.5.1` (`dsl.md:352`, `:49`, `:361`, `:378`,
