@@ -170,7 +170,10 @@ func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		if err := srv.validateBlueprintAgainstCRDs(&b, crds); err != nil {
 			srv.Providers = origProviders
-			_ = srv.rebuildIndexLocked()
+			if rerr := srv.rebuildIndexLocked(); rerr != nil {
+				writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("validation failed (%v) and index restore failed: %v", err, rerr))
+				return
+			}
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -178,7 +181,10 @@ func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 
 	if err := writeBlueprintFile(srv.Blueprint, &b); err != nil {
 		srv.Providers = origProviders
-		_ = srv.rebuildIndexLocked()
+		if rerr := srv.rebuildIndexLocked(); rerr != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write failed (%v) and index restore failed: %v", err, rerr))
+			return
+		}
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -790,7 +796,10 @@ func (srv *server) persistBlueprint(w http.ResponseWriter, r *http.Request, b *b
 	}
 	if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
 		srv.Providers = origProviders
-		_ = srv.rebuildIndexLocked()
+		if rerr := srv.rebuildIndexLocked(); rerr != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write failed (%v) and index restore failed: %v", err, rerr))
+			return false
+		}
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return false
 	}

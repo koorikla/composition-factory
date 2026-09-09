@@ -1709,3 +1709,91 @@ func TestPutBlueprintDroppingSourceReconcilesProvidersAndAllowsReadd(t *testing.
 		t.Fatalf("duplicate POST status = %d, want 409: %s", dupRec.Code, dupRec.Body)
 	}
 }
+
+func TestCF100WriteRollbackReportsIndexRebuildError(t *testing.T) {
+	// Verify that if rebuildIndexLocked fails during a failed write rollback,
+	// the handler returns an internal server error reporting the rollback failure
+	// rather than masking it.
+	t.Run("PersistBlueprintWriteFailureRollback", func(t *testing.T) {
+		h, path := testHandlerWithPath(t)
+
+		// Make the blueprint path a directory so that writeBlueprintFile fails during
+		// atomicWriteFile when persistBlueprint attempts to write to it.
+		// Note: rebuildIndexLocked() will read srv.Blueprint, see it is a directory,
+		// and return an error: "read blueprint: read <path>: is a directory".
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove blueprint: %v", err)
+		}
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatalf("mkdir blueprint: %v", err)
+		}
+
+		// POST /api/blueprint/import parses body without loading srv.Blueprint first,
+		// then calls persistBlueprint.
+		req := httptest.NewRequest("POST", "/api/blueprint/import", bytes.NewBufferString(testBlueprintYAML))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected status 500, got %d: %s", rec.Code, rec.Body)
+		}
+		if !strings.Contains(rec.Body.String(), "index restore failed") {
+			t.Errorf("expected error message to contain 'index restore failed', got: %s", rec.Body)
+		}
+	})
+
+	t.Run("PutBlueprintWriteFailureRollback", func(t *testing.T) {
+		h, path := testHandlerWithPath(t)
+		cur := mustLoadBlueprint(t, path)
+		curBytes, err := json.Marshal(cur)
+		if err != nil {
+			t.Fatalf("marshal blueprint: %v", err)
+		}
+
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove blueprint: %v", err)
+		}
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatalf("mkdir blueprint: %v", err)
+		}
+
+		rec := do(t, h, "PUT", "/api/blueprint", string(curBytes))
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected status 500, got %d: %s", rec.Code, rec.Body)
+		}
+		if !strings.Contains(rec.Body.String(), "index restore failed") {
+			t.Errorf("expected error message to contain 'index restore failed', got: %s", rec.Body)
+		}
+	})
+
+	t.Run("PutBlueprintValidationFailureRollback", func(t *testing.T) {
+		h, path := testHandlerWithPath(t)
+		cur := mustLoadBlueprint(t, path)
+		// Add an invalid field reference to fail validateBlueprintAgainstCRDs
+		cur.Spec.Resources[0].Fields["nonexistentField"] = blueprint.Field{
+			Value: "invalid",
+		}
+		curBytes, err := json.Marshal(cur)
+		if err != nil {
+			t.Fatalf("marshal blueprint: %v", err)
+		}
+
+		// Corrupt the blueprint file on disk so rebuildIndexLocked fails during rollback
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove blueprint: %v", err)
+		}
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatalf("mkdir blueprint: %v", err)
+		}
+
+		rec := do(t, h, "PUT", "/api/blueprint", string(curBytes))
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected status 500, got %d: %s", rec.Code, rec.Body)
+		}
+		if !strings.Contains(rec.Body.String(), "index restore failed") {
+			t.Errorf("expected error message to contain 'index restore failed', got: %s", rec.Body)
+		}
+	})
+}
