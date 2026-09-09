@@ -46,7 +46,11 @@ async function request(method, path, body, opts) {
   try {
     res = await fetch(path, fetchOpts);
   } catch (e) {
-    const err = new Error("network error: " + (e && e.message || e));
+    const rawMsg = (e && e.message) || String(e || "Failed to fetch");
+    const detail = rawMsg ? " (" + rawMsg + ")" : "";
+    const msg = "Failed to connect to the Composition Factory server at " + path +
+      ". Ensure 'cf serve' is running and reachable" + detail + ".";
+    const err = new Error(msg);
     err.status = 0;
     throw err;
   }
@@ -56,8 +60,19 @@ async function request(method, path, body, opts) {
     try { data = JSON.parse(text); } catch (_) { /* non-JSON body */ }
   }
   if (!res.ok) {
-    const message = (data && typeof data.error === "string" && data.error)
-      || text || (res.status + " " + res.statusText);
+    const rawMsg = (data && typeof data.error === "string" && data.error) || text;
+    let message = rawMsg;
+    const statusText = res.statusText ? " " + res.statusText : "";
+    const statusStr = res.status + statusText;
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      let detail = "";
+      if (rawMsg && rawMsg.trim() !== res.statusText && rawMsg.trim() !== statusStr) {
+        detail = ": " + rawMsg.trim();
+      }
+      message = "Server unavailable (HTTP " + statusStr + ")" + detail + ". The backend server may be restarting or unreachable.";
+    } else if (!message) {
+      message = "Server returned HTTP " + statusStr + " with empty body.";
+    }
     console.warn("[API ERROR]", res.status, path, message);
     const err = new Error(message);
     err.status = res.status;

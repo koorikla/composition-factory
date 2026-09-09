@@ -308,23 +308,50 @@ function setPathVal(obj, path, val) {
   }
 }
 
+export function mapResourceCoordinates(msg) {
+  if (!msg || typeof msg !== "string") return msg;
+  return msg.replace(/spec\.resources\[(\d+)\]/g, function (match, indexStr) {
+    var idx = parseInt(indexStr, 10);
+    var doc = store && store.state && store.state.doc;
+    var resList = doc && doc.spec && doc.spec.resources;
+    if (resList && resList[idx]) {
+      var name = resList[idx].name || resList[idx].kind;
+      if (name) {
+        return "resource '" + name + "' (" + match + ")";
+      }
+    }
+    return match;
+  });
+}
+
 /**
  * Run a store operation, capturing the "error" the store emits for it so the
- * inspector can show the server's message verbatim in its warnbar.
+ * inspector can show the server's message in its warnbar.
  * warnMsg is cleared up-front so the success-path "doc" re-render is clean.
  */
-async function op(fn) {
+export async function op(fn, actionContext) {
   warnMsg = null;
   var err = null;
   var un = store.subscribe("error", function (e) { err = e; });
   var res;
   try {
     res = await fn();
+  } catch (e) {
+    if (!err) err = e;
+    res = null;
   } finally {
     un();
   }
   if (res === null) {
-    warnMsg = err ? err.message : "operation failed";
+    var detail = err ? (err.message || "") : "";
+    if (detail) {
+      warnMsg = mapResourceCoordinates(detail);
+    } else {
+      var act = actionContext || (store.state && store.state.selectedResource ? "unable to update resource '" + store.state.selectedResource + "'" : "unable to update field");
+      warnMsg = act.indexOf("Operation failed") === 0 || act.indexOf("Failed") === 0
+        ? act
+        : "Operation failed: " + act;
+    }
     render();
   }
   return res;
@@ -1387,7 +1414,7 @@ function setField(path, form) {
         }
       }
     });
-  });
+  }, "unable to update field");
 }
 
 function setEnvelopeField(path, form) {
@@ -1408,7 +1435,7 @@ function setEnvelopeField(path, form) {
         }
       }
     });
-  });
+  }, "unable to update envelope field");
 }
 
 function paramFrom(existing, patch) {
