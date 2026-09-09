@@ -1,3 +1,10 @@
+- [x] **CF-122 — "Float editor window" turns the blueprint editor into a 24 px-wide textarea
+      (one character per line); docked, it is 80 px tall for an 80-line document and opens
+      scrolled to the end.**
+      Added `flex-direction: column;` to `.drawer.floated-panel` in `web-proto/css/proto.css` so
+      header and body stack vertically in floated mode, and removed fixed 80px height clamp in
+      `web-proto/js/regions/output.js` so `#code-editor` cleanly fills available viewport space.
+      — completed 2026-09-09
 - [x] **CF-097 — *(engine)* `cf gen -o <dir>` deletes every file under `<dir>` it did not write,
       recursively, with no flag, no confirmation and no mention in the docs. [V]**
       Confined `findExistingManagedFiles` cleanup to known Crossplane artifact paths (`compositions/`,

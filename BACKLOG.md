@@ -96,11 +96,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       the Composition after a kind that no longer exists.** J2 F3, twice: `XApp` → `XPostgres`,
       subtitle stays `xapps.platform.example.org`, `/api/blueprint` `"kind":"XPostgres","plural":"xapps"`,
       files `xapps.platform.example.org.yaml`. Renaming must re-derive or expose the plural.
-- [ ] **CF-122 — "Float editor window" turns the blueprint editor into a 24 px-wide textarea
-      (one character per line); docked, it is 80 px tall for an 80-line document and opens
-      scrolled to the end.** J2 F4, twice: textarea box `{w:24,h:80}` floated vs `{w:684,h:80}`
-      docked. Hand-editing is impossible in the mode built for it.
-
 ### P2
 
 - [ ] **CF-093 — In the published image Validate always answers "validation check unavailable"
