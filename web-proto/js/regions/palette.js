@@ -195,7 +195,10 @@ function loadFunctions(q) {
 function drawKinds() {
   if (kindsError) return '<div class="empty">' + esc(kindsError) + "</div>";
   if (!kindsLoaded) return '<div class="empty">Loading kinds…</div>';
-  if (!kinds.length) return '<div class="empty">No kinds match.</div>';
+  const q = (searchEl && searchEl.value || "").trim();
+  if (!kinds.length) {
+    return '<div class="empty">' + (q ? "No kinds match search query." : "No kinds available. Run: <code>cf provider add &lt;ref&gt;</code> to add a provider.") + "</div>";
+  }
   // Group by `group`, first-appearance order (header rows like the prototype).
   const order = [];
   const byGroup = {};
@@ -205,11 +208,13 @@ function drawKinds() {
     if (!byGroup[g]) { byGroup[g] = []; order.push(g); }
     byGroup[g].push(k);
   });
+  if (!order.length) {
+    return '<div class="empty">' + (q ? "No kinds match search query." : "No kinds available. Run: <code>cf provider add &lt;ref&gt;</code> to add a provider.") + "</div>";
+  }
   const doc = store.state.doc;
   const xrdScope = (doc && doc.spec && doc.spec.xrd && doc.spec.xrd.scope) || "Namespaced";
   const isNamespacedXRD = xrdScope !== "Cluster";
 
-  const q = (searchEl && searchEl.value || "").trim();
   let h = "";
   order.forEach(function (g) {
     const items = byGroup[g];
@@ -603,15 +608,20 @@ function showKindPreview(row) {
     let h = '<div style="font-family:var(--mono);font-size:12px;font-weight:600">' + esc(kind) + "</div>" +
       '<div class="dg" style="margin:1px 0 6px">' + esc(av) + " \u00b7 " + scope + (prov ? " \u00b7 " + esc(prov) : "") + "</div>";
     if (info) {
-      h += '<div class="dg" style="margin-bottom:4px">' + info.total + " fields \u00b7 " +
-        info.required.length + " required</div>";
-      info.required.slice(0, 5).forEach(function (f) {
-        h += '<div style="margin-bottom:3px"><span style="font-family:var(--mono)">' + esc(f.path) +
-          '</span> <span class="dg">' + esc(f.type) + "</span>" +
-          (f.description ? '<div class="dg" style="font-size:9.5px;line-height:1.4">' +
-            esc(f.description.slice(0, 110)) + (f.description.length > 110 ? "\u2026" : "") + "</div>" : "") +
-          "</div>";
-      });
+      if (info.missingSchema) {
+        h += '<div class="dg" style="margin-bottom:4px">No schema found for kind ' + esc(kind) + '.</div>' +
+          '<div class="dg">Run: <code>cf provider add ' + esc(info.provider || "<ref>") + '</code></div>';
+      } else {
+        h += '<div class="dg" style="margin-bottom:4px">' + info.total + " fields \u00b7 " +
+          info.required.length + " required</div>";
+        info.required.slice(0, 5).forEach(function (f) {
+          h += '<div style="margin-bottom:3px"><span style="font-family:var(--mono)">' + esc(f.path) +
+            '</span> <span class="dg">' + esc(f.type) + "</span>" +
+            (f.description ? '<div class="dg" style="font-size:9.5px;line-height:1.4">' +
+              esc(f.description.slice(0, 110)) + (f.description.length > 110 ? "\u2026" : "") + "</div>" : "") +
+            "</div>";
+        });
+      }
     } else {
       h += '<div class="dg">loading\u2026</div>';
     }
@@ -625,7 +635,13 @@ function showKindPreview(row) {
       previewCache[key] = { total: all.total, required: req.fields || [] };
       paint(previewCache[key]);
     });
-  }).catch(function () { if (previewFor === key) hideKindPreview(); });
+  }).catch(function () {
+    if (previewFor === key) {
+      const prov = row.getAttribute("data-provider");
+      previewCache[key] = { missingSchema: true, provider: prov };
+      paint(previewCache[key]);
+    }
+  });
 }
 
 /* ---------------- kind placement (CF-050) ---------------- */

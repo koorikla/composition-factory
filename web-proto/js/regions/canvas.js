@@ -464,7 +464,7 @@ function render() {
       emptyEl.id = "canvas-empty-state";
       emptyEl.innerHTML = '<div class="canvas-empty-title">1. Drag kinds from KINDS  2. Add cloud providers in SOURCES</div>' +
         '<div class="canvas-empty-steps">' +
-          '<div class="canvas-empty-step"><span class="step-num">1</span> Drag kinds onto canvas from <strong>KINDS</strong> (14 native Kubernetes kinds ready without providers)</div>' +
+          '<div class="canvas-empty-step"><span class="step-num">1</span> Drag kinds onto canvas from <strong>KINDS</strong> (16 native Kubernetes kinds ready without providers)</div>' +
           '<div class="canvas-empty-step"><span class="step-num">2</span> Add cloud providers in <strong>SOURCES</strong> for AWS, Azure, GCP</div>' +
         '</div>';
       canvasEl.appendChild(emptyEl);

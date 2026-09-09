@@ -191,7 +191,7 @@ test('CF-035 & CF-038: Left tabs fit without truncation and empty canvas shows c
   // Verify empty canvas hint
   const emptyState = page.locator('#canvas-empty-state');
   await expect(emptyState).toBeVisible();
-  await expect(emptyState).toContainText('14 native Kubernetes kinds ready without providers');
+  await expect(emptyState).toContainText('16 native Kubernetes kinds ready without providers');
   await expect(emptyState).toContainText('SOURCES');
 
   // Check left rail tabs
