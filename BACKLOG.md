@@ -62,14 +62,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       `blueprints/xpostgres.cf.yaml`, a path that does not exist, so the user cannot see that
       `xqueue.cf.yaml` is what changed. Undo covers the session only. The load must say which
       file it replaces, or write elsewhere.
-- [ ] **CF-097 — *(engine)* `cf gen -o <dir>` deletes every file under `<dir>` it did not write,
-      recursively, with no flag, no confirmation and no mention in the docs. [V]**
-      `cmd/cf/gen.go:198-203` removes whatever `findExistingManagedFiles` (`:250`, a walk of the
-      whole directory when `-o` is not `.`) did not just emit; `gen_test.go:394` pins it as
-      designed. Repro on `f45c2a8`, twice: `-o gitops/` holding `kustomization.yaml`, `README.md`,
-      `base/app.yaml` → all three `removed …`, exit 0. `docs/cli.md:118` says only "Output
-      directory (defaults to `.`)". A user pointing at a GitOps folder loses hand-written files.
-      Pruning must be opt-in or confined to files cf itself wrote, and documented either way.
 - [ ] **CF-107 — *(engine)* Omitting a CRD-required field (`region` on every `Bucket`) passes
       `cf gen`, `PUT /api/blueprint` and `POST /api/generate` with exit 0 and no warning; only
       `--validate` (a real render) catches it. [V]** `cf fields Bucket --required` already knows

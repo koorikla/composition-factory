@@ -1,3 +1,9 @@
+- [x] **CF-097 — *(engine)* `cf gen -o <dir>` deletes every file under `<dir>` it did not write,
+      recursively, with no flag, no confirmation and no mention in the docs. [V]**
+      Confined `findExistingManagedFiles` cleanup to known Crossplane artifact paths (`compositions/`,
+      `xrds/`, `providerconfigs/`, `runtime/`, `templates/`, `functions.yaml`, `rbac.yaml`) within the
+      target output directory, ensuring user and hand-written files are never removed.
+      — completed 2026-09-09
 - [x] **CF-120 — The Edit-blueprint Apply (and `POST /api/blueprint/import`) silently discards an
       unknown key while applying the rest, under a note that promises "invalid YAML never lands";
       `PUT /api/blueprint` rejects the same key. [V]**
