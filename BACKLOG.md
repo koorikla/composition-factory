@@ -43,42 +43,51 @@ not an exception for the importer to special-case.
 
 ---
 
-## Open — 2026-09-04 canvas UX run (at `0d3e914`)
-
-Severities below are the **UX** scale, not the engine scale above: **P0** lost work,
-impossible, or the interface states something false · **P1** completable only with knowledge
-that exists solely in the source · **P2** completable, wastefully · **P3** polish.
-
-Narrative, measurements and screenshots:
-[docs/ux-runs/2026-09-04-m1-first-contact.md](docs/ux-runs/2026-09-04-m1-first-contact.md).
-No spec is written for any of these yet; the report lists the anchors and the order to write
-them in.
-
-
-
-
----
-
 ## Open — 2026-09-09 provider/sources, render errors, starter health
 
-Found by re-checking the tree at `7edec90` and by reproducing a user report about
-providers. Every item below was executed, not read.
+Severities in this section use the **UX** scale unless marked *engine*: **P0** lost work,
+impossible, or the interface states something false · **P1** completable only with knowledge
+that exists solely in the source · **P2** completable, wastefully · **P3** polish. Engine scale
+(P0 wrong output silently · P1 loss that survives to the cluster · P2 source-only knowledge or
+unsafe API contract · P3 docs) is in `.claude/skills/backlog-authoring/SKILL.md`.
+Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md),
+[docs/comp-runs/](docs/comp-runs/2026-09-04-cachedservice-namespaced-roundtrip.md).
 
+### P0
 
----
+- [ ] **CF-086 — The SOURCES tab shows the provider list it fetched first; loading a starter
+      example (or any doc change that swaps sources) leaves it stale until a page reload. [V]**
+      `web-proto/js/regions/palette.js:58` caches `GET /api/providers` and refetches only while
+      the cache is `null`; the `"doc"` subscription (`:1088`) never clears it and the view (`:401`)
+      prefers the cache over `doc.spec.sources`. Repro: open SOURCES → Examples → load RDS: the
+      canvas shows Instance, `/api/providers` lists provider-aws-rds, the tab still lists the
+      previous provider (the user's "CF-082 is not fixed" report; CF-082 itself holds server-side).
+      The tab must reflect the server's list after every doc change.
+      Brief: `docs/tasks/CF-086-sources-tab-stale-provider-list.md`.
 
+### P1
 
----
+- [ ] **CF-088 — Opening a blueprint whose declared source is not in the cache lands on a red
+      generate error telling the user to run `cf provider add`; the startup log promised the
+      schema would load on demand, and nothing does until a write happens. [V]** Only
+      `syncBlueprintSourcesLocked` (`internal/api/blueprint.go:509`) fetches, and only writes call
+      it; `cmd/cf/options.go:39` skips the ref with "schemas load on demand". Repro: empty
+      `--cache-dir`, blueprint `internal/examples/sqs-queue.cf.yaml`, open the canvas: top bar
+      `error`, banner `provider "…" is not in the cache; run: cf provider add …`, `/api/providers`
+      `[]`. This is the "fresh pod → instant render error" report; in the container the CLI is
+      unreachable from the canvas. Must load on first need or name the in-canvas repair.
+      Brief: `docs/tasks/CF-088-declared-source-not-loaded-on-demand.md`. Merges after CF-087.
 
-## Open — 2026-09-04 composition-tester run and cross-engine audit (at `0d3e914`)
+### P2
 
-Renumbered from CF-049…CF-057 to CF-073…CF-081 on 2026-09-09: the canvas UX run above had
-already bound CF-049…CF-072, and its report cross-references those ids. Branch
-`CF-049-comp-tester-findings` carries the old numbers and is superseded by this section.
-Report and re-runnable repros:
-[docs/comp-runs/2026-09-04-cachedservice-namespaced-roundtrip.md](docs/comp-runs/2026-09-04-cachedservice-namespaced-roundtrip.md).
-
-
+- [ ] **CF-087 — *(engine)* A document write whose declared source cannot be fetched answers
+      200 and reports the failure only on the server's stderr. [V]** `blueprint.go:558` prints
+      `continuing offline` and `continue`s; `persistBlueprint` (`:622`) and `handleLoadExample`
+      (`examples.go:88`) then report success. Repro: empty cache, no registry credentials,
+      `PUT /api/blueprint` with a new source → `200`, `/api/providers` `[]`, next generate `400`.
+      An agent on HTTP/MCP cannot tell a good write from one that left the document unbuildable.
+      The write's answer must name the source and the fetch reason; the canvas must show it at
+      save time. Brief: `docs/tasks/CF-087-write-hides-source-fetch-failure.md`.
 
 ---
 
