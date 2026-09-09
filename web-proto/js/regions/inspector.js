@@ -1032,7 +1032,9 @@ async function renderResource(res) {
   if (loadErr) {
     h += '<div class="warnbar">' + esc(loadErr) + "</div>";
   } else if (!meta) {
-    h += '<div class="empty">No schema found for kind ' + esc(res.kind) + ".</div>";
+    var provRef = res.provider || "<provider>";
+    h += '<div class="empty">No schema found for kind ' + esc(res.kind) +
+      '.<div class="dg" style="margin-top:4px">Run: <code>cf provider add ' + esc(provRef) + '</code></div></div>';
   } else {
     var params = paramsOf(doc);
     // Required branches (e.g. Deployment's spec.selector / spec.template):
