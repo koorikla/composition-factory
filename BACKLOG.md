@@ -74,13 +74,6 @@ them in.
       same 4.46:1 pair breaks the raw-expression editor and the selected artifact-tree row.
       The fix must choose the light accents against `--sunk`, not against white.
 
-- [ ] **CF-069 — Nothing announces a Validate or Generate result, and the error text is
-      hover-only.** A repo-wide grep for `aria-live` returns nothing; the state chip is a
-      `<span>` mutated with `textContent` (`index.html:21`) whose full error lives only in a
-      `title`, which a keyboard user cannot summon. The chip is given `cursor:pointer` and a
-      click handler without being focusable. The fix must announce the outcome and make the
-      error readable without hovering.
-
 ### P3
 
 - [ ] **CF-071 — Design-token hygiene: a purple, five undefined `var()`s, and no type or

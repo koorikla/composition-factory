@@ -1,3 +1,9 @@
+- [x] **CF-069 — Nothing announces a Validate or Generate result, and the error text is
+      hover-only.**
+      Added `role="status"` and `aria-live="polite"` live announcements for Validate and Generate
+      results, and made the `#valid` status chip keyboard-focusable (`tabindex="0"`) and expandable
+      via Enter/Space to reveal diagnostics without requiring mouse hover.
+      — completed 2026-09-09
 - [x] **CF-068 — Wire hit targets are a 2.25 px stroke and parameter dots are 7×7 px. [V]**
       Rendered invisible wide stroke `.wire-hit` paths (14px wide) along each wire before the drawn
       stroke, enabling easy wire selection and right-click context menu even when clicking slightly
