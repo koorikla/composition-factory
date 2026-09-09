@@ -56,6 +56,7 @@ let paramType = "string";    // add-form type; controls which inputs render
 let paramMembers = [];       // typed-object member rows in the add form
 
 let providers = null;        // server-side cached providers, null = not loaded
+let providerSeq = 0;
 let providersErr = null;     // verbatim server error from the last add/list
 let catRows = null;          // catalogue search results, null = untouched
 let catTimer = null;
@@ -136,6 +137,10 @@ function switchTab(r) {
   if (rail === "src") {
     if (providers === null) loadProviders();
     loadCluster();
+    if (searchEl && searchEl.value) {
+      searchEl.value = "";
+      loadKinds();
+    }
   }
   drawRail();
 }
@@ -144,19 +149,19 @@ function switchTab(r) {
 
 /* ---- kinds fetch (server-side search via api.getKinds(q)) ---- */
 function loadKinds() {
-  const q = (searchEl && searchEl.value || "").trim();
+  const q = (rail === "kinds" && searchEl && searchEl.value || "").trim();
   const seq = ++searchSeq;
   api.getKinds(q).then(function (d) {
     if (seq !== searchSeq) return; // stale response
     kinds = d && d.kinds || [];
     kindsError = null;
     kindsLoaded = true;
-    if (rail === "kinds") drawRail();
+    if (rail === "kinds" || rail === "src") drawRail();
   }, function (e) {
     if (seq !== searchSeq) return;
     kindsError = e.message;
     kindsLoaded = true;
-    if (rail === "kinds") drawRail();
+    if (rail === "kinds" || rail === "src") drawRail();
   });
 }
 
@@ -171,10 +176,13 @@ function loadCluster() {
 }
 
 function loadProviders() {
+  const seq = ++providerSeq;
   api.getProviders().then(function (r) {
+    if (seq !== providerSeq) return;
     providers = r.providers || [];
     if (rail === "src") drawRail();
   }).catch(function () {
+    if (seq !== providerSeq) return;
     providers = null;        // endpoint absent or down: fall back to doc sources
     if (rail === "src") drawRail();
   });
@@ -722,15 +730,7 @@ function bindPaletteEvents() {
     tabsEl.addEventListener("click", function (e) {
       const b = e.target.closest("button");
       if (!b) return;
-      rail = b.getAttribute("data-r");
-      if (rail === "src") {
-        if (providers === null) loadProviders();
-        loadCluster();
-      }
-      [].forEach.call(tabsEl.children, function (c) {
-        c.setAttribute("aria-pressed", String(c === b));
-      });
-      drawRail();
+      switchTab(b.getAttribute("data-r"));
     });
   }
 
@@ -1089,10 +1089,14 @@ function bindPaletteStoreSubscriptions() {
     // Sources and kinds only change when a new doc has different sources (providers).
     const d = store.state.doc;
     const sig = ((d && d.spec && d.spec.sources) || [])
-      .map(function (s) { return s.provider; }).join("|");
+      .map(function (s) { return s.provider || s.crds || ""; }).join("|");
     if (sig !== lastSourcesSig) {
       lastSourcesSig = sig;
+      providers = null;
+      expandedProvider = null;
+      providerKinds = null;
       loadKinds();
+      loadProviders();
     }
     drawRail();
   });
