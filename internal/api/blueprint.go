@@ -421,6 +421,11 @@ func (srv *server) handleAddResource(w http.ResponseWriter, r *http.Request) {
 			}
 			return status, err
 		}
+		if crds, err := srv.loadSourceCRDs(b); err == nil {
+			if err := srv.validateBlueprintAgainstCRDs(b, crds); err != nil {
+				return http.StatusBadRequest, err
+			}
+		}
 		return http.StatusOK, nil
 	})
 }
@@ -448,6 +453,11 @@ func (srv *server) handleSetResource(w http.ResponseWriter, r *http.Request) {
 				status = http.StatusNotFound
 			}
 			return status, err
+		}
+		if crds, err := srv.loadSourceCRDs(b); err == nil {
+			if err := srv.validateBlueprintAgainstCRDs(b, crds); err != nil {
+				return http.StatusBadRequest, err
+			}
 		}
 		return http.StatusOK, nil
 	})

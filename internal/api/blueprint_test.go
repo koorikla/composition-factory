@@ -1931,3 +1931,45 @@ func TestCF094MarshalBlueprintOmitsEmptyFields(t *testing.T) {
 		t.Fatalf("marshaled YAML failed to validate: %v", err)
 	}
 }
+
+func TestCF110ResourceEndpointsRejectUnknownKindAndField(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	before, _ := os.ReadFile(path)
+
+	// 1. POST /api/blueprint/resources with unknown kind "Instanze" must return HTTP 400
+	newRes := blueprint.Resource{
+		Name: "test-instanze",
+		Kind: "Instanze",
+	}
+	body, _ := json.Marshal(newRes)
+	rec := do(t, h, "POST", "/api/blueprint/resources", string(body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/blueprint/resources with unknown kind status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+
+	// 2. PUT /api/blueprint/resources/{name} with misspelled field "instanceClas" must return HTTP 400 with nearest match
+	updated := blueprint.Resource{
+		Name: "main-queue",
+		Kind: "Queue",
+		Fields: map[string]blueprint.Field{
+			"instanceClas": {Value: "db.t3.micro"},
+		},
+	}
+	body, _ = json.Marshal(updated)
+	rec = do(t, h, "PUT", "/api/blueprint/resources/main-queue", string(body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT /api/blueprint/resources/main-queue with misspelled field status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	var errBody errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if !strings.Contains(errBody.Error, "instanceClas") {
+		t.Errorf("error body = %q, want it to mention instanceClas", errBody.Error)
+	}
+
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Error("the blueprint file changed despite rejected resource mutations")
+	}
+}
