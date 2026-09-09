@@ -1,3 +1,10 @@
+- [x] **CF-088 — Opening a blueprint whose declared source is not in the cache lands on a red
+      generate error telling the user to run `cf provider add`; the startup log promised the
+      schema would load on demand, and nothing does until a write happens. [V]**
+      Loaded declared blueprint sources on demand on first read (`/api/kinds`, `GET /api/providers`,
+      `POST /api/generate`) with cache deduplication, retry suppression on failures, and actionable
+      in-canvas remediation instructions rather than prescribing CLI commands to browser users.
+      — completed 2026-09-09
 - [x] **CF-086 — The SOURCES tab shows the provider list it fetched first; loading a starter
       example (or any doc change that swaps sources) leaves it stale until a page reload. [V]**
       Invalidated cached provider list in palette on document source signature changes, refreshing

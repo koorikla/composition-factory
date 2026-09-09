@@ -89,16 +89,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
 
 ### P1
 
-- [ ] **CF-088 — Opening a blueprint whose declared source is not in the cache lands on a red
-      generate error telling the user to run `cf provider add`; the startup log promised the
-      schema would load on demand, and nothing does until a write happens. [V]** Only
-      `syncBlueprintSourcesLocked` (`internal/api/blueprint.go:509`) fetches, and only writes call
-      it; `cmd/cf/options.go:39` skips the ref with "schemas load on demand". Repro: empty
-      `--cache-dir`, blueprint `internal/examples/sqs-queue.cf.yaml`, open the canvas: top bar
-      `error`, banner `provider "…" is not in the cache; run: cf provider add …`, `/api/providers`
-      `[]`. This is the "fresh pod → instant render error" report; in the container the CLI is
-      unreachable from the canvas. Must load on first need or name the in-canvas repair.
-      Brief: `docs/tasks/CF-088-declared-source-not-loaded-on-demand.md`. Merges after CF-087.
 - [ ] **CF-091 — After the user repairs a missing provider from SOURCES, the top bar keeps saying
       `error … not in the cache` and the composition pane stays at `0 lines` until an unrelated
       edit or a reload.** Adding a provider triggers `POST /api/providers, GET /api/providers,
