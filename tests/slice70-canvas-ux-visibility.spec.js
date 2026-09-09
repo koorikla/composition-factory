@@ -17,6 +17,7 @@ test.beforeEach(async ({ request }) => {
 });
 
 test('CF-010: Output drawer feedback distinguishes preview vs disk write', async ({ page }) => {
+  page.on('dialog', d => d.accept());
   await page.goto('/');
 
   // On initial load, debounced preview runs -> banner says Preview only

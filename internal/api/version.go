@@ -9,6 +9,7 @@ import (
 type versionResponse struct {
 	Version string   `json:"version"`
 	Engines []string `json:"engines"`
+	OutDir  string   `json:"outDir"`
 }
 
 func (srv *server) handleVersion(w http.ResponseWriter, r *http.Request) {
@@ -19,5 +20,6 @@ func (srv *server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, versionResponse{
 		Version: v,
 		Engines: blueprint.SupportedEngines,
+		OutDir:  srv.OutDir,
 	})
 }
