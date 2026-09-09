@@ -88,13 +88,6 @@ them in.
       click handler without being focusable. The fix must announce the outcome and make the
       error readable without hovering.
 
-- [ ] **CF-070 — `--shared` and `--warn` are the same hex, so a shared binding and a warning
-      are the same colour. [V]** `proto.css:10,12` both `#877200`; `:26,28` both `#D6AB33`.
-      In the YAML viewer `.code .tm` and `.code .sh` are two different facts rendered
-      identically, while the canvas legend (`index.html:63`) teaches that this colour means
-      "shared"; selection reuses `--warn` as a fourth meaning (`proto.css:136`). The fix must
-      make the semantic tokens pairwise distinct in both themes.
-
 ### P3
 
 - [ ] **CF-071 — Design-token hygiene: a purple, five undefined `var()`s, and no type or

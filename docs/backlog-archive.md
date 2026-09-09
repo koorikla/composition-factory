@@ -1,3 +1,10 @@
+- [x] **CF-070 — `--shared` and `--warn` are the same hex, so a shared binding and a warning
+      are the same colour. [V]**
+      Separated `--warn` and `--shared` semantic design tokens across light and dark themes
+      (Light: `--warn: #B45309`, `--shared: #826E00`; Dark: `--warn: #F59E0B`, `--shared: #D6AB33`),
+      guaranteeing pairwise distinct colors with >= 4.5:1 WCAG AA contrast against surfaces
+      while maintaining zero token drift with `canvas-prototype.html`.
+      — completed 2026-09-09
 - [x] **CF-050 — The core loop is pointer-only: a keyboard or touch user cannot place a kind
       or select a card. [V]**
       Made palette kind rows keyboard focusable (`tabindex="0"`, `role="button"`) and actionable
