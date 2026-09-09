@@ -55,17 +55,7 @@ No spec is written for any of these yet; the report lists the anchors and the or
 them in.
 
 
-### P3
 
-- [ ] **CF-071 — Design-token hygiene: a purple, five undefined `var()`s, and no type or
-      spacing scale. [V for the purple]** `#7c3aed` (hue 262.1°) ships as the CRON card colour
-      (`internal/examples/examples.go:105`, painted inline at `main.js:577`) — the only violet
-      in the served graph, and against the project's own rule. `--dim`, `--accent`, `--pri`,
-      `--panel` and `--fg` are referenced but never defined, silently discarding intent and
-      rendering the tour card near-black in the light theme. There are 14 font sizes over
-      8–18 px and 23 spacing values with no tokens for either; 288 inline `style=` attributes
-      in JS carry most of them, which is why `proto.css` review cannot see them. A hue and
-      token lint is the gate that would hold this; it belongs with the CF-048 work.
 
 ---
 

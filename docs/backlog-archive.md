@@ -1,3 +1,11 @@
+- [x] **CF-071 — Design-token hygiene: a purple, five undefined `var()`s, and no type or
+      spacing scale. [V for the purple]**
+      Replaced `#7c3aed` rogue violet on the CRON card icon with `var(--wire-status)` in
+      `internal/examples/examples.go`, defined the five missing CSS variables (`--dim`,
+      `--accent`, `--pri`, `--panel`, `--fg`) across light and dark theme blocks in `web-proto/css/proto.css`
+      and `docs/design/canvas-prototype.html`, resolving light theme tour card styling and maintaining zero
+      token drift across all 90 tokens.
+      — completed 2026-09-09
 - [x] **CF-066 — The button says Validate, every result says "render", and the generate chip
       then erases it.**
       Harmonized Validate outcome vocabulary to use "validating…", "valid · N resource(s)", and
