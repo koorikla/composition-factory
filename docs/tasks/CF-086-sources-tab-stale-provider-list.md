@@ -111,6 +111,7 @@ Locator: locator('#region-palette')
   providers `GET /api/providers` returns for that document, with their kind counts, plus
   the native `k8s` row. No entry from a previous document survives.
 - The catalogue's installed/not-installed state derives from that same fresh list.
+- The native `k8s` row's kind count follows the same rule: after a starter load and after undo it must read the live count (J2 saw `k8s · 1 kinds` persist after undoing back to a document the server reported byte-identical to the one that showed `16 kinds`).
 - The existing fallback (when `/api/providers` is unreachable the tab shows
   `doc.spec.sources`) keeps working.
 - No extra `/api/providers` request when the document's sources did not change; the
