@@ -716,3 +716,22 @@ func TestAPIVersionReturnsVersionAndEngines(t *testing.T) {
 		}
 	}
 }
+
+func TestCF099BuildIndexErrorsOnMissingCRDsSource(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{
+				{CRDs: "does/not/exist.yaml"},
+			},
+		},
+	}
+	_, err := BuildIndex(nil, nil, bp, "/tmp")
+	if err == nil {
+		t.Fatalf("expected BuildIndex to fail on missing CRDs source, got nil")
+	}
+	if !strings.Contains(err.Error(), "read crds") {
+		t.Errorf("expected error to mention 'read crds', got: %v", err)
+	}
+}

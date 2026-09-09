@@ -494,9 +494,6 @@ func BuildIndex(store *cache.Store, providers []string, b *blueprint.Blueprint, 
 				}
 				crdData, err := os.ReadFile(p)
 				if err != nil {
-					if os.IsNotExist(err) {
-						continue
-					}
 					return nil, fmt.Errorf("read crds %s: %w", p, err)
 				}
 				scanned, err := schema.ParseCRDManifest(crdData)
