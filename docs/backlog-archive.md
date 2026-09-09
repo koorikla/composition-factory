@@ -1,3 +1,15 @@
+- [x] **CF-106 — *(engine)* `cf gen` accepts an unknown key under `spec` (`resourcez:`), emits a
+      Composition with zero composed resources and exits 0; the HTTP and MCP doors reject the same
+      document with `unknown field "resourcez"`. [V]**
+      Configured `blueprint.Parse` and `blueprint.Load` to disallow unknown fields via
+      `DisallowUnknownFields()`, guaranteeing all front doors (CLI, API, MCP) reject invalid
+      keys loudly.
+      — completed 2026-09-09
+- [x] **CF-114 — *(engine)* The python engine renders an integer parameter wired into a string map
+      as `PORT: "8080.0"`; go-templating and kcl render `"8080"`.**
+      Added integer-coercing `_str` helper in Python template script to format whole-number floats
+      from protobuf `MessageToDict` as integer strings (e.g. `"8080"`) while safely passing None.
+      — completed 2026-09-09
 - [x] **CF-088 — Opening a blueprint whose declared source is not in the cache lands on a red
       generate error telling the user to run `cf provider add`; the startup log promised the
       schema would load on demand, and nothing does until a write happens. [V]**

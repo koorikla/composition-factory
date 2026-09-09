@@ -72,20 +72,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       user is the mounted `$HOME`; the resolved directory is shown nowhere. The toast, the
       button and the confirm must name the real directory and an apply command that covers
       every written file.
-- [ ] **CF-106 — *(engine)* `cf gen` accepts an unknown key under `spec` (`resourcez:`), emits a
-      Composition with zero composed resources and exits 0; the HTTP and MCP doors reject the same
-      document with `unknown field "resourcez"`. [V]** The CLI's blueprint parse is not strict where
-      `PUT /api/blueprint` (`decodeJSON`, `DisallowUnknownFields`) is. Repro on `f45c2a8`, twice:
-      `sed 's/^  resources:$/  resourcez:/' internal/examples/s3-bucket.cf.yaml` → four `wrote …`
-      lines, the composition's template holds only the three `$spec/$xr/$xrMeta` assignments.
-      A typo silently deletes every resource from the cluster on the next apply. All three doors
-      must refuse unknown keys identically.
-- [ ] **CF-114 — *(engine)* The python engine renders an integer parameter wired into a string map
-      as `PORT: "8080.0"`; go-templating and kcl render `"8080"`.** Residue of CF-080: `python.go:31`
-      goes through `MessageToDict`, whose numbers are floats, then `str()`. Real render, twice
-      (J4). The API server accepts it, so the wrong value reaches the cluster with no error. The
-      guard `TestK8sWorkloadConfigMapPortQuotedAcrossEngines` compares emitted source text, not the
-      rendered value; the fix needs a rendered-value assertion.
 
 ### P1
 
