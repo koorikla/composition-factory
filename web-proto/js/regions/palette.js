@@ -240,13 +240,17 @@ function drawKinds() {
         const kClusterTag = k.provider === "cluster"
           ? '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:rgba(6,182,212,0.12);color:#06b6d4;border-radius:3px;margin-right:4px">cluster</span>'
           : "";
+        const fullTitle = k.kind +
+          (k.apiVersion ? " \u00b7 " + k.apiVersion : "") +
+          (k.provider ? " (" + k.provider + ")" : "");
         h += '<div class="kind" draggable="true"' +
+          ' title="' + esc(fullTitle) + '"' +
           ' data-kind="' + esc(k.kind) + '"' +
           ' data-av="' + esc(k.apiVersion) + '"' +
           ' data-provider="' + esc(k.provider || "") + '"' +
           ' data-fam="' + esc(fam) + '">' +
           '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
-          '<span class="nm" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(k.kind) + '">' + esc(k.kind) + '</span>' +
+          '<span class="nm" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(fullTitle) + '">' + esc(k.kind) + '</span>' +
           kClusterTag +
           '<span class="req">' + (k.required | 0) + " req</span></div>";
       });
@@ -594,8 +598,9 @@ function showKindPreview(row) {
     el.style.left = (r.right + 8) + "px";
     el.style.top = Math.min(r.top, innerHeight - 180) + "px";
     const scope = /\.m\./.test(av) || row.getAttribute("data-provider") === "k8s" ? "Namespaced" : "Cluster";
+    const prov = row.getAttribute("data-provider");
     let h = '<div style="font-family:var(--mono);font-size:12px;font-weight:600">' + esc(kind) + "</div>" +
-      '<div class="dg" style="margin:1px 0 6px">' + esc(av) + " \u00b7 " + scope + "</div>";
+      '<div class="dg" style="margin:1px 0 6px">' + esc(av) + " \u00b7 " + scope + (prov ? " \u00b7 " + esc(prov) : "") + "</div>";
     if (info) {
       h += '<div class="dg" style="margin-bottom:4px">' + info.total + " fields \u00b7 " +
         info.required.length + " required</div>";
@@ -934,7 +939,7 @@ function bindPaletteEvents() {
     const key = row.getAttribute("data-kind") + "|" + row.getAttribute("data-av");
     if (key === previewFor) return;
     clearTimeout(previewTimer);
-    previewTimer = setTimeout(function () { showKindPreview(row); }, 220);
+    previewTimer = setTimeout(function () { showKindPreview(row); }, 150);
   });
 
   railEl.addEventListener("mouseleave", hideKindPreview);
