@@ -76,9 +76,11 @@ input,select{font-family:inherit;font-size:inherit;color:inherit}
 .chip-ok{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--ok);font-weight:500}
 .chip-ok::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
 
-.cols{display:grid;grid-template-columns:216px 1fr 330px;min-height:0;overflow:hidden}
+.cols{display:grid;grid-template-columns:220px 1fr 330px;min-height:0;overflow:hidden}
 .pane{background:var(--surface);min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .pane.l{border-right:1px solid var(--rule)}
+#region-palette{min-width:220px}
+#lrail{scrollbar-width:thin}
 .pane.r{border-left:1px solid var(--rule)}
 .pane-h{display:flex;align-items:center;gap:8px;padding:8px 12px;
   border-bottom:1px solid var(--rule);flex:0 0 auto}
@@ -95,7 +97,7 @@ input,select{font-family:inherit;font-size:inherit;color:inherit}
 .search:focus{outline:none;border-color:var(--wire-xrd);background:var(--surface)}
 .grp{padding:9px 12px 3px;display:flex;align-items:center;gap:6px}
 .grp .n{font-family:var(--mono);font-size:10px;color:var(--faint);margin-left:auto}
-.kind{display:flex;align-items:center;gap:7px;padding:4.5px 12px;cursor:grab;border-left:2px solid transparent}
+.kind{display:flex;align-items:center;gap:6px;padding:4.5px 8px;cursor:grab;border-left:2px solid transparent}
 .kind:hover{background:var(--sunk);border-left-color:var(--wire-xrd)}
 .kind .sw{width:5px;height:14px;border-radius:1.5px;flex:0 0 auto}
 .kind .nm{font-family:var(--mono);font-size:12px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -640,9 +642,11 @@ function drawRail(){
       h+='<div class="grp"><span class="lbl">'+esc(g.g)+'</span><span class="n">'+it.length+'</span></div>';
       it.forEach(function(k){
         var sc=SCH[k]||[],rq=reqLeaves(sc).length;
-        h+='<div class="kind" draggable="true" data-kind="'+esc(k)+'" data-av="'+esc(g.av)+'" data-fam="'+g.fam+'">'+
+        var prov=g.fam==="aws"?"provider-aws":(g.fam==="k8s"?"k8s":"cluster");
+        var fullTitle=k+(g.av?" \u00b7 "+g.av:"")+" ("+prov+")";
+        h+='<div class="kind" draggable="true" title="'+esc(fullTitle)+'" data-kind="'+esc(k)+'" data-av="'+esc(g.av)+'" data-fam="'+g.fam+'">'+
            '<span class="sw" style="background:'+COLORS[g.fam]+'"></span>'+
-           '<span class="nm">'+esc(k)+'</span><span class="req">'+rq+' req</span></div>'});
+           '<span class="nm" title="'+esc(fullTitle)+'">'+esc(k)+'</span><span class="req">'+rq+' req</span></div>'});
     });
     if(!h)h='<div class="empty">No kinds match.</div>';
     document.getElementById("lhint").innerHTML='Drag a kind onto the canvas. Schemas load per-kind — <span class="mono">4.5 KB</span> median.';

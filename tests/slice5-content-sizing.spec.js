@@ -39,6 +39,6 @@ test('long palette kind names ellipsize cleanly and carry the full name as a tit
     }
   })
   expect(state.overflow).toBe('ellipsis')
-  expect(state.title).toBe('QueueRedriveAllowPolicy')
+  expect(state.title).toContain('QueueRedriveAllowPolicy')
   expect(state.overlaps).toBe(false)
 })
