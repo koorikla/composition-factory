@@ -365,8 +365,8 @@ func TestGenCheckDetectsExtraStaleFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Add an extra/stale file in out/
-	staleFile := filepath.Join(out, "stale.yaml")
+	// Add an extra/stale file in managed compositions/ directory
+	staleFile := filepath.Join(out, "compositions", "stale.yaml")
 	if err := os.WriteFile(staleFile, []byte("stale content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -391,8 +391,8 @@ func TestGenCleansUpOrphanedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Add an orphaned file in out/
-	staleFile := filepath.Join(out, "orphaned.yaml")
+	// Add an orphaned file in managed compositions/ directory
+	staleFile := filepath.Join(out, "compositions", "orphaned.yaml")
 	if err := os.WriteFile(staleFile, []byte("orphaned\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -433,5 +433,39 @@ func TestGenRejectsUnknownFieldInBlueprint(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "resourcez") {
 		t.Fatalf("expected error mentioning 'resourcez', got: %v", err)
+	}
+}
+
+func TestGenPreservesUnmanagedFilesInOutputDir(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	out := filepath.Join(dir, "gitops")
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	keepFiles := []string{
+		filepath.Join(out, "kustomization.yaml"),
+		filepath.Join(out, "README.md"),
+		filepath.Join(out, "custom", "app.yaml"),
+	}
+	for _, f := range keepFiles {
+		if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f, []byte("# hand written\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var buf bytes.Buffer
+	cmd := &GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir}
+	if err := cmd.Run(&buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, f := range keepFiles {
+		if _, err := os.Stat(f); err != nil {
+			t.Errorf("hand-written file was deleted by cf gen: %s", f)
+		}
 	}
 }

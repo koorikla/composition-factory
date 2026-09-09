@@ -166,6 +166,13 @@ cf gen --check <blueprint.cf.yaml> -o <output-dir>
 - Exits `0` if in sync.
 - Exits `2` if output files have drifted or are missing.
 
+#### Cleanup of Stale Files
+When generating manifests, `cf gen` automatically prunes orphaned files from previous generations (such as an old composition after an XRD rename). Cleanup is strictly confined to managed paths:
+- Subdirectories: `compositions/`, `xrds/`, `providerconfigs/`, `runtime/`, and `templates/`
+- Root manifests: `functions.yaml` and `rbac.yaml`
+
+Unmanaged files and directories in the output folder (e.g. `kustomization.yaml`, `README.md`, or custom manifest folders) are never walked, modified, or removed.
+
 ---
 
 ### `cf serve` — Visual Canvas Server

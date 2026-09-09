@@ -226,34 +226,24 @@ func (c *GenCmd) findExistingManagedFiles() ([]string, error) {
 	cleanOut := filepath.Clean(c.Out)
 	var found []string
 
-	if cleanOut == "." {
-		managedDirs := []string{"compositions", "xrds", "providerconfigs", "runtime", "templates"}
-		for _, d := range managedDirs {
-			if _, err := os.Stat(d); err == nil {
-				_ = filepath.Walk(d, func(path string, info os.FileInfo, err error) error {
-					if err != nil || info.IsDir() {
-						return nil
-					}
-					found = append(found, filepath.Clean(path))
-					return nil
-				})
-			}
-		}
-		topFiles := []string{"functions.yaml", "rbac.yaml"}
-		for _, f := range topFiles {
-			if _, err := os.Stat(f); err == nil {
-				found = append(found, filepath.Clean(f))
-			}
-		}
-	} else {
-		if _, err := os.Stat(cleanOut); err == nil {
-			_ = filepath.Walk(cleanOut, func(path string, info os.FileInfo, err error) error {
+	managedDirs := []string{"compositions", "xrds", "providerconfigs", "runtime", "templates"}
+	for _, d := range managedDirs {
+		dir := filepath.Join(cleanOut, d)
+		if _, err := os.Stat(dir); err == nil {
+			_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 				if err != nil || info.IsDir() {
 					return nil
 				}
 				found = append(found, filepath.Clean(path))
 				return nil
 			})
+		}
+	}
+	topFiles := []string{"functions.yaml", "rbac.yaml"}
+	for _, f := range topFiles {
+		file := filepath.Join(cleanOut, f)
+		if _, err := os.Stat(file); err == nil {
+			found = append(found, filepath.Clean(file))
 		}
 	}
 	return found, nil
