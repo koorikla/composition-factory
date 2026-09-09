@@ -240,6 +240,31 @@ providers. Every item below was executed, not read.
 
 ---
 
+## Open — 2026-09-09 canvas DOM stability (blocks the pending UX work)
+
+### P1
+
+- [ ] **CF-085 — The canvas replaces every card element when web fonts finish loading,
+      so a click or drag in flight lands on a detached node. [V]** `render()` rebuilds the
+      whole canvas (`web-proto/js/regions/canvas.js:447`, `canvasEl.innerHTML = h`) and the
+      decision to re-lay is driven by measured card geometry (`canvas.js:364`, `:455`,
+      `:458`). Nothing in `web-proto/js` references `document.fonts`, so when the faces land
+      after first paint every card's `offsetWidth` changes at once and the next render
+      detaches every node — under the pointer, if someone is mid-gesture. Latent until the
+      fonts were vendored locally (`web-proto/index.html` dropped the Google Fonts `<link>`,
+      which in a test browser never resolved): on `wip-2026-09-09-uncommitted`
+      `tests/slice33-stable-canvas-dom` and `tests/slice40-interaction-stability` fail
+      consistently in a full `make test-e2e` run — 179 passed, 2 failed, twice — while both
+      pass in isolation 3/3 and the full suite is green on `main`. Reverting `index.html`
+      alone fixes the `slice32 → slice33` pair but not the full suite, so a second factor is
+      unaccounted for. **Dead end already burned:** forcing the re-measure early via
+      `document.fonts.ready` does not help, because `render()` *is* the rebuild — triggering
+      it early only moves it. The fix must make a geometry re-measure update card position
+      and size in place instead of replacing the elements. This blocks landing the canvas UX
+      work; brief at [docs/tasks/CF-085-canvas-rebuild-on-font-load.md](docs/tasks/CF-085-canvas-rebuild-on-font-load.md).
+
+---
+
 ## Open — 2026-09-04 composition-tester run and cross-engine audit (at `0d3e914`)
 
 Renumbered from CF-049…CF-057 to CF-073…CF-081 on 2026-09-09: the canvas UX run above had
