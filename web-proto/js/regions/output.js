@@ -647,16 +647,76 @@ function drawTopbar(doc) {
 }
 
 function chipOk(n, written) {
+  if (!el.valid) return;
+  var count = typeof n === "number" ? n : 0;
   var prefix = written ? "written" : "preview";
-  el.valid.textContent = prefix + " · " + n + " file" + (n === 1 ? "" : "s");
+  el.valid.textContent = prefix + " · " + count + " file" + (count === 1 ? "" : "s");
   el.valid.title = "";
   el.valid.style.color = "";
+  var srText = written
+    ? "Generated " + count + " manifest" + (count === 1 ? "" : "s")
+    : "Preview: " + count + " file" + (count === 1 ? "" : "s");
+  el.valid.setAttribute("aria-label", srText);
 }
 
 function chipErr(message) {
+  if (!el.valid) return;
+  var formatted = formatErrorMessage(message);
   el.valid.textContent = "error";
-  el.valid.title = formatErrorMessage(message); // server's message, verbatim + fix tips
+  el.valid.title = formatted; // server's message, verbatim + fix tips
   el.valid.style.color = "var(--err)";
+  el.valid.setAttribute("aria-label", "Generate error: " + formatted);
+}
+
+function chipWorking(text) {
+  if (!el.valid) return;
+  var visible = text || "rendering…";
+  var srText = text === "generating…" ? "Generating manifests…" : "Rendering composition…";
+  el.valid.textContent = visible;
+  el.valid.title = "";
+  el.valid.style.color = "";
+  el.valid.setAttribute("aria-label", srText);
+}
+
+function renderOk(resources) {
+  if (!el.valid) return;
+  var n = (typeof resources === "object" && resources !== null)
+    ? (resources.resources || 0)
+    : Number(resources || 0);
+  showWarn("");
+  el.valid.textContent = "render ok · " + n + " resource" + (n === 1 ? "" : "s");
+  el.valid.title = "";
+  el.valid.style.color = "";
+  el.valid.setAttribute("aria-label", "Validation succeeded: " + n + " resource" + (n === 1 ? "" : "s") + " rendered");
+}
+
+function renderErr(error, unavailable) {
+  if (!el.valid) return;
+  var unavail = unavailable;
+  var err = error;
+  if (typeof error === "object" && error !== null && !unavailable) {
+    if (error.unavailable) {
+      unavail = error.unavailable;
+      err = null;
+    } else {
+      err = error.error || error.message || String(error);
+    }
+  }
+  if (unavail) {
+    var formattedUnavail = formatErrorMessage(unavail);
+    el.valid.textContent = "render check unavailable";
+    el.valid.title = formattedUnavail;
+    el.valid.style.color = "var(--warn)";
+    el.valid.setAttribute("aria-label", "Render check unavailable: " + formattedUnavail);
+    showWarn(unavail);
+  } else {
+    var formattedErr = formatErrorMessage(err || "");
+    el.valid.textContent = "render error";
+    el.valid.title = formattedErr;
+    el.valid.style.color = "var(--err)";
+    el.valid.setAttribute("aria-label", "Render error: " + formattedErr);
+    showWarn(err || "");
+  }
 }
 
 /* ---------- theme: system → light → dark → system ---------- */
@@ -850,7 +910,7 @@ function bindOutputEvents() {
 
   if (el.valid) {
     el.valid.style.cursor = "pointer";
-    el.valid.addEventListener("click", function () {
+    function triggerValidAction() {
       if (isDrawerCollapsed()) {
         expandDrawer(250);
       }
@@ -865,36 +925,30 @@ function bindOutputEvents() {
           banner.hidden = false;
         }
       }
+    }
+    el.valid.addEventListener("click", triggerValidAction);
+    el.valid.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+        e.preventDefault();
+        triggerValidAction();
+      }
     });
   }
 
   el.validateBtn.addEventListener("click", function () {
     el.validateBtn.disabled = true;
-    el.valid.textContent = "rendering\u2026";
-    el.valid.style.color = "";
+    chipWorking("rendering\u2026");
     api.renderCheck().then(function (r) {
       if (r.ok) {
-        showWarn("");
-        el.valid.textContent = "render ok \u00b7 " + r.resources + " resource" + (r.resources === 1 ? "" : "s");
-        el.valid.title = "";
-        el.valid.style.color = "";
+        renderOk(r);
       } else if (r.unavailable) {
-        el.valid.textContent = "render check unavailable";
-        el.valid.title = formatErrorMessage(r.unavailable);
-        el.valid.style.color = "var(--warn)";
-        showWarn(r.unavailable);
+        renderErr(null, r.unavailable);
       } else {
-        el.valid.textContent = "render error";
-        el.valid.title = formatErrorMessage(r.error);
-        el.valid.style.color = "var(--err)";
-        showWarn(r.error);   // verbatim engine failure with fix tips
+        renderErr(r.error);
       }
     }).catch(function (err) {
       var msg = err && err.message || String(err);
-      el.valid.textContent = "render error";
-      el.valid.title = formatErrorMessage(msg);
-      el.valid.style.color = "var(--err)";
-      showWarn(msg);
+      renderErr(msg);
     }).finally(function () { el.validateBtn.disabled = false; });
   });
 
