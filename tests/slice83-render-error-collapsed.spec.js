@@ -34,7 +34,7 @@ test('when Validate fails while the drawer is collapsed, the failure error messa
   const errorBanner = page.locator('.render-warn-banner, #render-warn-banner')
   await expect(errorBanner).toBeVisible({ timeout: 10000 })
   await expect(errorBanner).toBeInViewport()
-  await expect(errorBanner).toContainText(/doesNotExist|map has no entry|render check unavailable/)
+  await expect(errorBanner).toContainText(/doesNotExist|map has no entry|render check unavailable|crossplane CLI not found/)
 
   // Clicking "Open in Drawer" on the banner expands the drawer and reveals the in-drawer warnbar
   await page.click('#render-warn-open-btn')

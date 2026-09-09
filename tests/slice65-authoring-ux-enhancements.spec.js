@@ -104,9 +104,11 @@ test('Clickable validate chip expands output drawer and displays diagnostics', a
 test('Post-Generate shows next-step guidance line with output path, apply and package commands', async ({ page }) => {
   page.on('dialog', d => d.accept());
   await page.goto('/');
-  // Expand output drawer to view code viewport
+  // Ensure output drawer is expanded to view code viewport
   const drawer = page.locator('#region-output');
-  await page.click('#drawer-min-btn');
+  if (await drawer.getAttribute('data-collapsed') !== null) {
+    await page.click('#drawer-min-btn');
+  }
   await page.click('#generateBtn');
   const banner = page.locator('#next-steps-banner');
   await expect(banner).toBeVisible({ timeout: 10000 });
