@@ -242,12 +242,6 @@ Report and re-runnable repros:
       `internal/emit/render_validate.go:509` already detects these, but the `oneOf` is
       flattened before it runs.
 
-- [ ] **CF-077 — `cf function add` writes the lockfile pin and then exits 1 for a function
-      with no typed Input CRD, including the one cf's own pipeline emits. [V]**
-      `cmd/cf/function.go:30` calls `store.FetchAndSave` before the `inputs == 0` refusal at
-      `function.go:45-50`. Repro is the worked example at `docs/cli.md:269` verbatim. A
-      function with no input is normal, not an error.
-
 - [ ] **CF-081 — Nothing renders one blueprint through every engine and compares composed
       output, so the class behind CF-004, CF-045 and CF-080 stays unguarded.**
       `TestAcceptanceAlternativeEnginesRender` (`acceptance_test.go:1482`) loops over

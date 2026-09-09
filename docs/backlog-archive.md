@@ -1,3 +1,9 @@
+- [x] **CF-077 — `cf function add` writes the lockfile pin and then exits 1 for a function
+      with no typed Input CRD, including the one cf's own pipeline emits. [V]**
+      `cmd/cf/function.go:30` calls `store.FetchAndSave` before the `inputs == 0` refusal at
+      `function.go:45-50`. Repro is the worked example at `docs/cli.md:269` verbatim. A
+      function with no input is normal, not an error.
+      — completed 2026-09-09
 - [x] **CF-074 — A status wire into `fields:` is interpolated unquoted, so a string status
       value that looks like a bool or number changes type and the API server rejects the
       resource. [V]** The same wire is `| quote`d into an annotation and emitted bare into a
