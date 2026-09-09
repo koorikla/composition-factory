@@ -604,6 +604,9 @@ function drawWires() {
     const dPath = 'M' + a.x + ',' + a.y +
       ' C' + (a.x + dx) + ',' + a.y + ' ' + (b.x - dx) + ',' + b.y +
       ' ' + b.x + ',' + b.y;
+    s += '<path class="wire-hit" d="' + dPath +
+      '" stroke="transparent" stroke-width="14" fill="none" pointer-events="stroke" data-wire-idx="' + idx + '">' +
+      '<title>' + title + '</title></path>';
     s += '<path class="wire-path ' + cls + (isSel ? " wire-selected" : "") + '" d="' + dPath +
       '" stroke="' + col + '" data-wire-idx="' + idx + '" pointer-events="stroke" tabindex="0" role="button" aria-label="' + esc(title) + '">' +
       '<title>' + title + '</title></path>';

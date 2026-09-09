@@ -195,6 +195,9 @@ svg.wires path{fill:none;stroke-width:2.25;transition:stroke-width .12s,opacity 
 svg.wires path:hover{stroke-width:3.75}
 svg.wires path.hot{stroke-width:3.5}
 svg.wires .dim{opacity:.18}
+svg.wires path.wire-hit{fill:none;stroke:transparent;stroke-width:14px;cursor:pointer;pointer-events:stroke}
+svg.wires path.wire-hit:hover{stroke-width:14px}
+svg.wires path.wire-hit:hover + path.wire-path{stroke-width:3.75}
 svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !important;stroke-dasharray:6 3;animation:wire-selected-dash .6s linear infinite;filter:drop-shadow(0 0 4px rgba(245, 158, 11, 0.7))}
 @keyframes wire-selected-dash{to{stroke-dashoffset:-9}}
 .wire-del-btn{cursor:pointer;pointer-events:all}
@@ -220,6 +223,8 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .port:hover{background:var(--sunk)}
 .port .d{position:absolute;width:7px;height:7px;border-radius:50%;
   border:1.5px solid var(--surface);top:50%;transform:translateY(-50%)}
+.port .d::before{content:"";position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);width:18px;height:18px;border-radius:50%;pointer-events:auto}
 .port .d.in{left:-4px} .port .d.out{right:-4px}
 .port .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .port .ty{margin-left:auto;font-size:9.5px;color:var(--faint);flex:0 0 auto}
@@ -681,7 +686,7 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 
 /* Drag-to-wire */
 .port .d{cursor:crosshair;transition:transform .12s}
-.port .d:hover{transform:scale(1.45)}
+.port .d:hover{transform:translateY(-50%) scale(1.45)}
 .port.wire-target-hover{background:var(--wire-xrd-soft);border-radius:3px}
 .node.wire-target-hover{outline:2px dashed var(--wire-xrd);outline-offset:3px}
 
