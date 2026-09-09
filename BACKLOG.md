@@ -233,15 +233,6 @@ Report and re-runnable repros:
 
 ### P2
 
-- [ ] **CF-076 — Every `x-kubernetes-int-or-string` field is typed `string`, so `--validate`
-      rejects the integer form and the form it demands is the one Kubernetes refuses. [V]**
-      `internal/schema/k8s/k8s.go:210-215` collapses IntOrString/Quantity to `string` on the
-      premise that the string spelling is always legal; the API server disproves it —
-      `targetPort: 8080` is accepted, `targetPort: "8080"` is rejected with `must contain at
-      least one letter (a-z)`. `raw:` does not escape it. This is half of CF-084.
-      `internal/emit/render_validate.go:509` already detects these, but the `oneOf` is
-      flattened before it runs.
-
 - [ ] **CF-081 — Nothing renders one blueprint through every engine and compares composed
       output, so the class behind CF-004, CF-045 and CF-080 stays unguarded.**
       `TestAcceptanceAlternativeEnginesRender` (`acceptance_test.go:1482`) loops over

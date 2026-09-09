@@ -1,3 +1,12 @@
+- [x] **CF-076 — Every `x-kubernetes-int-or-string` field is typed `string`, so `--validate`
+      rejects the integer form and the form it demands is the one Kubernetes refuses. [V]**
+      `internal/schema/k8s/k8s.go:210-215` collapses IntOrString/Quantity to `string` on the
+      premise that the string spelling is always legal; the API server disproves it —
+      `targetPort: 8080` is accepted, `targetPort: "8080"` is rejected with `must contain at
+      least one letter (a-z)`. `raw:` does not escape it. This is half of CF-084.
+      `internal/emit/render_validate.go:509` already detects these, but the `oneOf` is
+      flattened before it runs.
+      — completed 2026-09-09
 - [x] **CF-077 — `cf function add` writes the lockfile pin and then exits 1 for a function
       with no typed Input CRD, including the one cf's own pipeline emits. [V]**
       `cmd/cf/function.go:30` calls `store.FetchAndSave` before the `inputs == 0` refusal at
