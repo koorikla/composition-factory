@@ -989,6 +989,8 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 					}
 				}
 			}
+		} else if fnName == "function-kcl" || strings.Contains(fnName, "kcl") || fnName == "function-python" || strings.Contains(fnName, "python") || stepName == "render-resources" {
+			return fmt.Errorf("cannot adopt composition with function %q: cf adopt supports function-go-templating and function-patch-and-transform", fnName)
 		} else {
 			var pkg string
 			var inputYAML string

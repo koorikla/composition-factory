@@ -1265,3 +1265,31 @@ spec:
 		})
 	}
 }
+
+func TestCF111AdoptRefusesKCLAndPythonEnginesClearly(t *testing.T) {
+	for _, engine := range []string{"function-kcl", "function-python"} {
+		compYAML := fmt.Sprintf(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xdatabases.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XDatabase
+  pipeline:
+    - step: render-resources
+      functionRef:
+        name: %s
+`, engine)
+		_, _, err := Adopt([]byte(compYAML), Options{})
+		if err == nil {
+			t.Fatalf("expected error adopting %s composition, got nil", engine)
+		}
+		if strings.Contains(err.Error(), "collides with the built-in templating step's name") {
+			t.Errorf("expected clear engine refusal for %s, got collision error: %v", engine, err)
+		}
+		if !strings.Contains(err.Error(), "function-go-templating") || !strings.Contains(err.Error(), engine) {
+			t.Errorf("expected error to name %s and supported engines, got: %v", engine, err)
+		}
+	}
+}
