@@ -23,6 +23,62 @@
  */
 
 /**
+ * Formats an upstream package/registry fetch error into a clear, actionable message.
+ * @param {string} rawMsg
+ * @returns {string}
+ */
+function formatRegistryFetchError(rawMsg) {
+  let ref = "";
+  const refMatch = rawMsg && rawMsg.match(/(?:fetch|resolve image|digest|parse reference)\s+"([^"]+)"/i);
+  if (refMatch) {
+    ref = refMatch[1];
+  }
+
+  const isNotFound = /MANIFEST_UNKNOWN|NAME_UNKNOWN|manifest unknown|repository name not known|404|not found/i.test(rawMsg);
+  const isConnErr = /connection refused|dial tcp|i\/o timeout|no such host|network is unreachable/i.test(rawMsg);
+  const isAuthErr = /DENIED|UNAUTHORIZED|401|403|authentication required/i.test(rawMsg);
+
+  if (/parse reference/i.test(rawMsg)) {
+    if (ref) {
+      return 'Invalid package reference "' + ref + '": check that the reference format is valid (e.g. ghcr.io/org/provider-x:v1.0.0).';
+    }
+    return "Invalid package reference: check that the reference format is valid (e.g. ghcr.io/org/provider-x:v1.0.0).";
+  }
+
+  if (isNotFound) {
+    let reason = "manifest unknown";
+    if (/NAME_UNKNOWN|repository name not known/i.test(rawMsg)) {
+      reason = "repository not found";
+    } else if (/404/i.test(rawMsg)) {
+      reason = "not found (HTTP 404)";
+    }
+    if (ref) {
+      return 'Failed to fetch package from registry: package not found at ref "' + ref + '" (' + reason + '). Check that the package reference and tag are correct.';
+    }
+    return "Failed to fetch package from registry: package not found (" + reason + "). Check that the package reference and tag are correct.";
+  }
+
+  if (isConnErr) {
+    if (ref) {
+      return 'Failed to fetch package from registry: could not connect to registry for "' + ref + '". Ensure the registry is reachable and network access is available.';
+    }
+    return "Failed to fetch package from registry: could not connect to registry. Ensure the registry is reachable and network access is available.";
+  }
+
+  if (isAuthErr) {
+    if (ref) {
+      return 'Failed to fetch package from registry: authentication or access denied for "' + ref + '".';
+    }
+    return "Failed to fetch package from registry: authentication or access denied.";
+  }
+
+  if (ref) {
+    return 'Failed to fetch package from registry: could not fetch package "' + ref + '": ' + rawMsg + '.';
+  }
+  return "Failed to fetch package from registry: could not fetch package: " + rawMsg + ".";
+}
+
+/**
  * Core request helper.
  * @param {string} method
  * @param {string} path   Relative path starting with /api
@@ -65,11 +121,21 @@ async function request(method, path, body, opts) {
     const statusText = res.statusText ? " " + res.statusText : "";
     const statusStr = res.status + statusText;
     if (res.status === 502 || res.status === 503 || res.status === 504) {
-      let detail = "";
-      if (rawMsg && rawMsg.trim() !== res.statusText && rawMsg.trim() !== statusStr) {
-        detail = ": " + rawMsg.trim();
+      const isUpstreamPackageFetch = Boolean(rawMsg && (
+        /(?:fetch|resolve image|digest|parse reference)\s+"[^"]+"/i.test(rawMsg) ||
+        /MANIFEST_UNKNOWN|NAME_UNKNOWN|manifest unknown/i.test(rawMsg) ||
+        ((path.startsWith("/api/providers") || path.startsWith("/api/functions")) &&
+          rawMsg.trim() !== res.statusText && rawMsg.trim() !== statusStr)
+      ));
+      if (isUpstreamPackageFetch) {
+        message = formatRegistryFetchError(rawMsg);
+      } else {
+        let detail = "";
+        if (rawMsg && rawMsg.trim() !== res.statusText && rawMsg.trim() !== statusStr) {
+          detail = ": " + rawMsg.trim();
+        }
+        message = "Server unavailable (HTTP " + statusStr + ")" + detail + ". The backend server may be restarting or unreachable.";
       }
-      message = "Server unavailable (HTTP " + statusStr + ")" + detail + ". The backend server may be restarting or unreachable.";
     } else if (!message) {
       message = "Server returned HTTP " + statusStr + " with empty body.";
     }
