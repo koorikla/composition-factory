@@ -7,7 +7,7 @@ Composition Factory includes a headless recording harness that drives the live w
 ## Overview
 
 The recording pipeline consists of two components:
-1. **`scripts/record-demos/run.sh`**: Lifecycle supervisor. Builds the Go binary, seeds a scratch directory with test blueprints and lockfiles, starts `cf serve` on an isolated port (`8086`), executes the recording script, and ensures clean teardown.
+1. **`scripts/record-demos/run.sh`**: Lifecycle supervisor. Builds the Go binary, seeds a scratch directory with test blueprints and lockfiles, starts `cf serve` on an isolated dynamic port in the 28000–37999 range (overridable via `CF_DEMO_PORT`), executes the recording script, and ensures clean teardown.
 2. **`scripts/record-demos/record.js`**: Playwright driver. Orchestrates real UI scenarios (drag-to-wire, provider discovery, full IRSA demo) while sampling canvas frames at a calibrated frame rate.
 
 ---

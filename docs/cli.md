@@ -184,7 +184,7 @@ cf serve --blueprint <blueprint.cf.yaml> --out <output-dir> [flags]
 ```
 
 #### Flags:
-- `--blueprint <path>`: Path to blueprint file (defaults to `doc.cf.yaml`; scaffolds a blank blueprint if file does not exist).
+- `--blueprint <path>` (alias: `--file`): Path to blueprint file (defaults to `doc.cf.yaml`; scaffolds a blank blueprint if file does not exist).
 - `-o`, `--out <dir>`: Output directory for `POST /api/generate` writes (defaults to `.`).
 - `--addr <ip:port>`: Bind address (defaults to `127.0.0.1:8080`). Must be loopback unless `--i-know-this-is-unauthenticated` is explicitly passed.
 - `--i-know-this-is-unauthenticated`: Allow binding a non-loopback address (required when running inside Docker containers or public networks).

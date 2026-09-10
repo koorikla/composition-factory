@@ -20,6 +20,10 @@ consumer's git diff.
   `docs/non-findings.md` holds settled non-findings, `docs/backlog-archive.md` is frozen.
   `AGENTS.md` §4, `docs/task-execution-contract.md` and the two skills describe the flow.
 
+## [0.10.0] - 2026-09-09
+
+### Added
+
 - `cf init`: CLI command to scaffold a minimal valid blueprint document with Namespaced XRD and required `providerName` parameter.
 - `spec.environment` & `from: env.<key>`: declared environment keys in blueprint DSL (Crossplane v2 EnvironmentConfigs) with scalar type validation (`string`, `integer`, `number`, `boolean`), supporting `from: env.<key>` across `fields:`, `annotations:`, `envelope:`, `when:` conditionals, and `forEach:` loops. Automatically injects `function-environment-configs` pipeline step and preserves schema via `factory.crossplane.io/environment-keys` metadata annotation for round-trip fidelity.
 - `cf function`: schema-aware Function Input caching and management CLI (`cf function add <ref>`) that fetches function packages, extracts Input CRDs, and pins digests in `.cf.lock`.
@@ -28,15 +32,7 @@ consumer's git diff.
 
 ### Changed
 
-- `BACKLOG.md` records 44 defects found by four end-to-end journeys against
-  `075646f` (CLI, canvas, HTTP API, and a probe of the three features that
-  shipped that morning), plus a static pass. Every finding was reproduced at
-  least twice by the agent that found it; the most consequential were
-  re-verified by hand. Static gates stayed clean throughout — every defect is in
-  behaviour gofmt, vet, staticcheck, the race detector and 859 Go tests do not
-  reach.
-
-
+- Reconciled journey findings against `075646f` across the CLI, visual canvas, HTTP API, and the new feature surfaces into the backlog.
 
 ## [0.9.0] - 2026-09-03
 
@@ -375,7 +371,9 @@ Re-tag of 0.5.6; no code change.
 - Research notes, design spec, M1 plan and the UX prototype that the canvas is
   built from.
 
-[Unreleased]: https://github.com/koorikla/compositionfactory/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/koorikla/compositionfactory/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/koorikla/compositionfactory/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/koorikla/compositionfactory/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/koorikla/compositionfactory/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/koorikla/compositionfactory/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/koorikla/compositionfactory/compare/v0.5.7...v0.6.0

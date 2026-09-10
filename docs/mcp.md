@@ -22,7 +22,7 @@ With [Claude Code](https://docs.anthropic.com/en/docs/claude-code):
 
 ```sh
 claude mcp add compositionfactory -- \
-  cf mcp --blueprint blueprints/xqueue.cf.yaml --out ./platform
+  cf mcp --blueprint testdata/xqueue.cf.yaml --out ./platform
 ```
 
 Or in any MCP client that takes a JSON server definition:
@@ -34,7 +34,7 @@ Or in any MCP client that takes a JSON server definition:
       "command": "cf",
       "args": [
         "mcp",
-        "--blueprint", "blueprints/xqueue.cf.yaml",
+        "--blueprint", "testdata/xqueue.cf.yaml",
         "--out", "./platform"
       ]
     }

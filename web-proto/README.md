@@ -7,7 +7,7 @@ directly so every fetch is a same-origin relative `/api` path.
 ## Run
 
 ```sh
-cf serve --blueprint blueprints/xqueue.cf.yaml --out ./out
+cf serve --blueprint testdata/xqueue.cf.yaml --out ./out
 ```
 
 then open <http://127.0.0.1:8080>.
@@ -19,9 +19,9 @@ then open <http://127.0.0.1:8080>.
 | `index.html` | the approved prototype markup, split into marked regions with stable root ids (`#region-topbar`, `#region-palette`, `#cw`, `#region-inspector`, `#region-output`) |
 | `css/proto.css` | the prototype's CSS, extracted unchanged |
 | `js/dom.js` | shared DOM helpers and HTML escaping (`esc`) |
-| `js/api.js` | fetch wrappers for every endpoint; throws `{status, message}` with the server's verbatim error text — **frozen contract, do not edit** |
-| `js/store.js` | single state container `{doc, selectedResource, positions, lastGenerate}` + pub/sub (topics: `doc`, `selection`, `generate`, `error`) — **frozen contract, do not edit** |
-| `js/wires.js` | pure doc helpers: `listWires(doc)`, `fanOut(doc, param)` — **frozen contract, do not edit** |
+| `js/api.js` | fetch wrappers for every endpoint; throws `{status, message}` with the server's verbatim error text |
+| `js/store.js` | single state container `{doc, selectedResource, positions, undoStack, redoStack, lastGenerate, generateError}` + pub/sub (topics: `doc`, `selection`, `generate`, `error`) |
+| `js/wires.js` | pure doc helpers: `listWires(doc)`, `fanOut(doc, param)` |
 | `js/main.js` | boot: imports the region modules, then `store.loadDoc()` |
 | `js/regions/*.js` | one module per region, each owned by its region agent |
 

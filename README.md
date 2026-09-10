@@ -234,7 +234,7 @@ crossplane composition render testdata/xr.yaml \
 
 ## Development
 
-Requires Go 1.25+ and Node.js for Playwright e2e tests.
+Requires Go 1.27+ and Node.js 18+ / npm for JavaScript linting (`make lint`) and Playwright browser tests (`make test-e2e`).
 
 ```sh
 make build          # Build bin/cf
@@ -242,7 +242,7 @@ make test           # Run unit tests (no Docker required)
 make test-race      # Run unit tests with race detector
 make test-docker    # Run acceptance tests with Docker + crossplane CLI
 make test-e2e       # Run Playwright browser tests
-make lint           # Check formatting and vet
+make lint           # Check Go formatting (gofmt), vet (go vet), and JS linting (npm run lint:js)
 make serve          # Launch local visual canvas on port 8080
 make clean          # Remove build artifacts and test outputs
 ```

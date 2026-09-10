@@ -8,8 +8,8 @@ Composition Factory is a schema-aware generator and visual canvas for Crossplane
 
 ## 1. Prerequisites
 
-- **Go**: Version 1.25 or later.
-- **Node.js**: Version 18+ and npm (for Playwright browser e2e tests).
+- **Go**: Version 1.27 or later.
+- **Node.js**: Version 18+ and npm (for JavaScript linting in `make lint` and Playwright browser e2e tests).
 - **Docker** & **Crossplane CLI** (optional): Required for running end-to-end acceptance render tests (`make test-docker`).
 
 ---
@@ -21,7 +21,7 @@ Composition Factory is a schema-aware generator and visual canvas for Crossplane
 - **`internal/api`**: HTTP server implementation for `cf serve`.
 - **`internal/mcp`**: Model Context Protocol stdio bridge for AI agents.
 - **`internal/cache`**: Provider package schema cache and OCI CRD layer extraction.
-- **`cmd/cf`**: CLI entrypoint and subcommand implementations (`gen`, `serve`, `package`, `push`, `adopt`, `provider`, `mcp`, `version`).
+- **`cmd/cf`**: CLI entrypoint and subcommand implementations (`init`, `gen`, `serve`, `package`, `push`, `adopt` (alias: `import`), `provider`, `function`, `kinds`, `fields`, `catalogue`, `mcp`, `version`).
 - **`web-proto/`**: Embedded visual canvas frontend built with native ES modules and pure DOM/SVG (no build step or bundling required).
 - **`tests/`**: Playwright browser e2e test suite.
 
@@ -37,17 +37,19 @@ make test         # Run unit tests
 make test-race    # Run unit tests with Go race detector
 make test-e2e     # Run Playwright browser e2e tests
 make test-docker  # Run acceptance tests with Docker daemon and crossplane CLI
-make lint         # Check formatting (gofmt) and vet (go vet)
+make lint         # Check Go formatting (gofmt), vet (go vet), and JS linting (npm run lint:js)
 make serve        # Launch visual canvas server on http://localhost:8080
 make clean        # Clean build outputs and test artifacts
 ```
 
 ### Port Allocation Contract
-- **Port 8080**: Human developer canvas (`make serve` / `cf serve`).
-- **Port 8081**: Automated Playwright test runner (`make test-e2e`).
-- **Port 8086**: Headless demo recorder (`scripts/record-demos/`).
+To prevent concurrent processes and test runners from trampling each other or the developer's live workspace:
+- **Port 8080**: Human developer canvas (`make serve` / `cf serve` with default `--addr 127.0.0.1:8080`).
+- **Port 8090**: UX tester canvas (`.claude/skills/canvas-ux-tester`), seeded from scratch dir `.testrun-ux`.
+- **Dynamic Worktree Port (18000–27999)**: Automated Playwright e2e test suite (`make test-e2e`, derived from hashing the git worktree path; overridable via `CF_E2E_PORT`). Runs against isolated scratch caches.
+- **Dynamic Demo Port (28000–37999)**: Headless demo GIF recorder instance (`scripts/record-demos/`; overridable via `CF_DEMO_PORT`).
 
-*Do not run test suites against port 8080.*
+*Never run test suites or recording harnesses against port 8080.*
 
 ---
 
