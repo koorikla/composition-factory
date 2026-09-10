@@ -657,9 +657,6 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 	var newProviders []string
 	for _, s := range b.Spec.Sources {
 		if s.Provider != "" && s.Provider != blueprint.NativeProvider && !existing[s.Provider] {
-			if srv.failedSources != nil && srv.failedSources[s.Provider] != nil {
-				continue
-			}
 			newProviders = append(newProviders, s.Provider)
 			existing[s.Provider] = true
 		}
