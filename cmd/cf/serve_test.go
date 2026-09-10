@@ -11,7 +11,33 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alecthomas/kong"
 )
+
+// defaults applies kong's declared flag defaults (the `default:"..."` tags
+// on ServeCmd's fields) onto c, without going through a full Parse --
+// so a test can assert on ServeCmd's zero-value defaults without building a
+// complete CLI invocation or supplying the required --blueprint flag.
+//
+// It builds the exact same grammar kong.Parse would, via kongOptions() (so
+// the ${cachedir} var resolves identically to production), traces an empty
+// argument list to get a Context, and applies defaults through kong's own
+// Context.ApplyDefaults. That writes through the reflect.Value kong.New
+// already bound directly to c's fields, so this exercises the real default
+// resolution the CLI itself uses -- not a hand-rolled reimplementation of it
+// that could silently drift from what kong.Parse actually does.
+func defaults(c *ServeCmd) error {
+	k, err := kong.New(c, kongOptions()...)
+	if err != nil {
+		return err
+	}
+	ctx, err := kong.Trace(k, nil)
+	if err != nil {
+		return err
+	}
+	return ctx.ApplyDefaults()
+}
 
 func TestServeDefaultsToLoopback(t *testing.T) {
 	var c ServeCmd

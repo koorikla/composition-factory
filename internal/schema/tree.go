@@ -161,34 +161,6 @@ func appendLeaves(out *[]Leaf, nodes []*Node, prefix string) {
 	}
 }
 
-// RequiredLeaves flattens nodes to chain-required leaf fields with their paths.
-// The tree must have been annotated by ComputeRequiredChain first — on an
-// unannotated tree this returns nothing.
-func RequiredLeaves(nodes []*Node, prefix string) []Leaf {
-	var out []Leaf
-	appendRequiredLeaves(&out, nodes, prefix)
-	return out
-}
-
-func appendRequiredLeaves(out *[]Leaf, nodes []*Node, prefix string) {
-	for _, n := range nodes {
-		path := n.Name
-		if prefix != "" {
-			path = prefix + "." + n.Name
-		}
-		switch {
-		case len(n.Children) == 0:
-			if n.RequiredChain {
-				*out = append(*out, Leaf{Path: path, Node: n})
-			}
-		case n.Type == "array":
-			appendRequiredLeaves(out, n.Children, path+"[0]")
-		default:
-			appendRequiredLeaves(out, n.Children, path)
-		}
-	}
-}
-
 // BuildTree converts an OpenAPI properties map into sorted Nodes. Sorting keeps
 // emitted output deterministic.
 func BuildTree(props map[string]any, required []string) []*Node {

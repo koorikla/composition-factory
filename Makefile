@@ -18,7 +18,7 @@ test-race:
 
 # Lane B: needs a Docker daemon and the crossplane CLI on PATH.
 test-docker:
-	go test ./... -run Acceptance -v -count=1
+	go test $$(go list ./... | grep -v /node_modules/) -run Acceptance -v -count=1
 
 # Playwright behavior suite over web-proto/. Boots its own isolated engine
 # on a workspace-derived port with a scratch blueprint (see playwright.config.js).
@@ -59,12 +59,12 @@ lint:
 # staticcheck.conf. Pinned and `go run` so it needs no separate install and
 # cannot drift between a developer's machine and CI.
 lint-strict:
-	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK) ./...
+	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK) $$(go list ./... | grep -v /node_modules/)
 
 # BLUEPRINT and OUT are overridable: make serve BLUEPRINT=path/to/other.cf.yaml
 serve: build
 	./$(BIN) serve --blueprint $(BLUEPRINT) --out $(OUT)
 
 clean:
-	rm -rf bin $(OUT) .testrun* .demorun* test-results playwright-report web/dist
+	rm -rf bin $(OUT) .testrun* .demorun* test-results playwright-report
 
