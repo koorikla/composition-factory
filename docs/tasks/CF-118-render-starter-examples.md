@@ -9,7 +9,7 @@
 | **Severity** | P3 |
 | **Closes** | `#14` — `CF-118 — No test renders the seven starter examples; CF-084 was closed by editing YAML and TestAllExamplesAreValidBlueprints only calls Validate().` |
 | **Worktree** | `.worktrees/CF-118` on branch `CF-118-render-starter-examples` |
-| **May write** | `internal/examples/render_test.go` |
+| **May write** | `acceptance_test.go` |
 | **Merges after** | `nothing` |
 
 ## Symptom
@@ -35,39 +35,40 @@ None of the seven starter examples (`irsa`, `rds-postgres`, `k8s-app`, `k8s-work
 
 ## Location
 
-Add `internal/examples/render_test.go` (or acceptance test in that package) gated behind acceptance test prerequisites (`docker` and `crossplane`). Use the existing acceptance testing pattern (e.g. `rendertest.Render` or `emit.Generate` + `emit.SampleXR` + `crossplane composition render`) to verify each of the starter examples.
+In `acceptance_test.go`:
+1. In `TestMain`, add the remaining starter example provider schemas to the pre-cached `providers` slice:
+   - `ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0`
+   - `ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0`
+2. Add `TestAcceptanceAllStarterExamplesRender(t *testing.T)` table-driven across all starter examples from `examples.All()`.
+3. Use the established `acceptance_test.go` pattern (`testBin`, `testCacheDir`, `testLockFile`, `renderComposition`) to generate and render each starter example, asserting successful rendering with no `<no value>` or `<nil>`.
 
 ## Acceptance test
 
-Write this test in `internal/examples/render_test.go`:
+Write this test in `acceptance_test.go`:
 
 ```go
-package examples_test
+func TestAcceptanceAllStarterExamplesRender(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
 
-import (
-	"testing"
-	// ...
-)
-
-func TestAllStarterExamplesRender(t *testing.T) {
-	// Table-driven test over all starter examples in internal/examples.
-	// For each starter example:
-	// 1. Skip if docker / crossplane CLI unavailable (using requireTool pattern).
-	// 2. Generate artifacts (Composition, XRD, functions, ProviderConfig).
-	// 3. Render composition with crossplane composition render using sample XR.
-	// 4. Assert render succeeds and contains no "<no value>" or render errors.
+	for _, ex := range examples.All() {
+		t.Run(ex.ID, func(t *testing.T) {
+			// Write ex.YAML to temp blueprint file
+			// Run testBin gen with --cache-dir testCacheDir --lock testLockFile
+			// Render with crossplane composition render
+			// Assert exit 0 and no "<no value>"
+		})
+	}
 }
-```
-
-**Fails today with:**
-```
-Test does not exist today.
 ```
 
 ## Contract
 
-1. A table-driven test covers all starter examples returned by `examples.All()`.
-2. The test executes the real render pipeline (or invokes the render helper) under `make test-docker`.
+1. A table-driven acceptance test covers all starter examples returned by `examples.All()`.
+2. The test executes within `acceptance_test.go` and runs under `make test-docker`.
 3. When prerequisites are missing, it gracefully skips unless `CF_REQUIRE_ACCEPTANCE=1` is set.
 4. All current starter examples must pass cleanly.
 
@@ -80,8 +81,8 @@ make test-docker
 
 ## Out of scope
 
-Modifying the starter blueprints unless a demonstrable defect in their output is uncovered.
+Modifying the starter blueprints unless an actual render defect is uncovered.
 
 ## Handover
 
-Branch `CF-118-render-starter-examples`, committed, not pushed, not merged. In your final report: the failing run (before adding the test or when asserting invalid input) and passing run of the test, and output of `make test-docker`.
+Branch `CF-118-render-starter-examples`, committed, not pushed, not merged. In your final report: the passing run of `make test-docker` and every gate run.
