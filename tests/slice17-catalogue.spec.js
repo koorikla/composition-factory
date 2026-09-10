@@ -21,9 +21,6 @@ test('searching the catalogue lists matches with add buttons only where a ref ex
 })
 
 test('one-click add from the catalogue installs the provider and its kinds appear', async ({ page, request }) => {
-  const REF_HINT = 'provider-nop'
-  const have = await (await request.get(ENGINE + '/api/providers')).json()
-  test.skip(have.providers.some(p => p.ref.includes(REF_HINT)), 'nop already cached from a prior run')
   await page.goto('/')
   await page.click('#rtabs button[data-r="src"]')
   await page.fill('#cat-search', 'nop')
