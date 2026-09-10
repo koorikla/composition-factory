@@ -1,3 +1,12 @@
+- [x] **CF-123 — A parameter dot can be dropped on a resource card's *output* row; the server
+      answers 400 with `field "status.atProvider.…" is not in Instance spec.forProvider (an unknown
+      field is silently pruned …)` and the header chip sticks on `error` until the next successful
+      edit.**
+      Prevented dragging outgoing wires onto status output rows on resource cards, falling back to card
+      hover and the field picker instead. Prevented rejected mutations from corrupting the header status
+      chip to error when the document remains unmodified, and set pointer-events: none on the fan-out counter
+      badge so the underlying parameter port dot remains interactive.
+      — completed 2026-09-10
 - [x] **CF-125 — `providerName` looks editable (name input, enabled `×`) but rename and delete
       are reverted with `run cf serve without --blueprint to scaffold one`, a terminal instruction
       shown in the browser.**

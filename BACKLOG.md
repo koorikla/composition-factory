@@ -115,11 +115,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       or the promote action.** Residue of CF-055: the picker badge and inspector warning exist,
       the render-time message is unchanged (twice, J4). The message must name `params.region`,
       say it is optional, and point at the promote action.
-- [ ] **CF-123 — A parameter dot can be dropped on a resource card's *output* row; the server
-      answers 400 with `field "status.atProvider.…" is not in Instance spec.forProvider (an unknown
-      field is silently pruned …)` and the header chip sticks on `error` until the next successful
-      edit.** J2 F6, twice. Output rows must not accept the drop, and a rejected write must not
-      leave the chip in `error` for a document that is unchanged.
 - [ ] **CF-126 — "Remove provider" is reachable only ~1300 px down inside the expanded provider
       entry, after its full kind list; the row itself offers nothing on hover, click or
       right-click, and the control speaks of "the cache" for what the user sees as the blueprint's
