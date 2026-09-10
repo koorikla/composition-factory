@@ -155,7 +155,7 @@ function xrCardHTML(d, sel) {
       ty: p.type || "",
       label: name,
       title: name + (p.description ? " — " + p.description : ""),
-      fan: n > 1 ? '<span class="fan">×' + n + '</span>' : "",
+      fan: n > 1 ? '<span class="fan" style="pointer-events:none">×' + n + '</span>' : "",
     });
   });
   h += '</div>';
@@ -1548,6 +1548,22 @@ function onWireDragDown(e, portEl) {
     if (lastHoverPort) { lastHoverPort.classList.remove("wire-target-hover"); lastHoverPort = null; }
   }
 
+  function isValidTargetPort(targetPortEl) {
+    if (!targetPortEl) return false;
+    const tOwner = targetPortEl.getAttribute("data-owner");
+    const tPath = targetPortEl.getAttribute("data-path");
+    if (!tOwner || tOwner === owner) return false;
+    if (dir === "out") {
+      if (tOwner === XR_ID) return false;
+      if (tPath.startsWith("status.") || tPath.indexOf("status.") === 0) return false;
+      return true;
+    }
+    if (dir === "in") {
+      return tOwner === XR_ID || tPath.startsWith("status.") || tPath.indexOf("status.") === 0;
+    }
+    return false;
+  }
+
   function mv(ev) {
     if (!ev.buttons) { up(ev); return; }
     if (!hasMoved) {
@@ -1576,15 +1592,20 @@ function onWireDragDown(e, portEl) {
     const elements = document.elementsFromPoint(ev.clientX, ev.clientY) || [];
     let p = null, n = null;
     for (let i = 0; i < elements.length; i++) {
-      if (!p) p = elements[i].closest(".port");
+      if (!p) {
+        const candidate = elements[i].closest(".port");
+        if (isValidTargetPort(candidate)) p = candidate;
+      }
       if (!n) n = elements[i].closest(".node");
     }
-    if (p && p.getAttribute("data-owner") !== owner) {
+    if (p) {
       lastHoverPort = p;
       p.classList.add("wire-target-hover");
     } else if (n && n.getAttribute("data-id") !== owner) {
-      lastHoverNode = n;
-      n.classList.add("wire-target-hover");
+      if (dir === "out" && n.getAttribute("data-id") !== XR_ID) {
+        lastHoverNode = n;
+        n.classList.add("wire-target-hover");
+      }
     }
   }
 
@@ -1602,21 +1623,22 @@ function onWireDragDown(e, portEl) {
     const elements = document.elementsFromPoint(ev.clientX, ev.clientY) || [];
     let targetPort = null, targetNode = null;
     for (let i = 0; i < elements.length; i++) {
-      if (!targetPort) targetPort = elements[i].closest(".port");
+      if (!targetPort) {
+        const candidate = elements[i].closest(".port");
+        if (isValidTargetPort(candidate)) targetPort = candidate;
+      }
       if (!targetNode) targetNode = elements[i].closest(".node");
     }
 
     if (targetPort) {
       const tOwner = targetPort.getAttribute("data-owner");
       const tPath = targetPort.getAttribute("data-path");
-      if (tOwner && tOwner !== owner) {
-        if (dir === "out" && tOwner !== XR_ID) {
-          applyWire(owner, path, tOwner, tPath);
-        } else if (dir === "in" && (tOwner === XR_ID || tPath.indexOf("status.") === 0)) {
-          applyWire(tOwner, tPath, owner, path);
-        }
-        return;
+      if (dir === "out" && tOwner !== XR_ID) {
+        applyWire(owner, path, tOwner, tPath);
+      } else if (dir === "in" && (tOwner === XR_ID || tPath.indexOf("status.") === 0)) {
+        applyWire(tOwner, tPath, owner, path);
       }
+      return;
     }
 
     if (targetNode) {
