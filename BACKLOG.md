@@ -120,10 +120,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       field is silently pruned …)` and the header chip sticks on `error` until the next successful
       edit.** J2 F6, twice. Output rows must not accept the drop, and a rejected write must not
       leave the chip in `error` for a document that is unchanged.
-- [ ] **CF-124 — Every successful parameter add or rename is followed by a false error toast and
-      a sticky inspector banner `rename parameter: "newParam" is not declared`.** J2 F7, five
-      times: Enter and blur each send the rename; the second 404s and is reported as a failure
-      though the first succeeded. One rename per edit, and no error for an operation that worked.
 - [ ] **CF-125 — `providerName` looks editable (name input, enabled `×`) but rename and delete
       are reverted with `run cf serve without --blueprint to scaffold one`, a terminal instruction
       shown in the browser.** J2 F8, three attempts. The row must read as locked and the message

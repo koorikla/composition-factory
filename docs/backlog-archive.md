@@ -1,3 +1,9 @@
+- [x] **CF-124 — Every successful parameter add or rename is followed by a false error toast and
+      a sticky inspector banner `rename parameter: "newParam" is not declared`.**
+      Prevented duplicate parameter rename requests by removing redundant change event dispatch
+      after blur on Enter in `web-proto/js/regions/inspector.js`, and synchronously updating `data-pn`
+      on initiation to guard against concurrent change events.
+      — completed 2026-09-10
 - [x] **CF-116 — A mistyped provider ref in SOURCES shows `Server unavailable (HTTP 502 Bad
       Gateway): fetch "…": GET https://ghcr.io/v2/…: MANIFEST_UNKNOWN … The backend server may be
       restarting or unreachable.`**
