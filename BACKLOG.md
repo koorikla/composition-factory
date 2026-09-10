@@ -55,6 +55,17 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
 
 ### P1
 
+- [ ] **CF-130 — `spec.environment` has no GUI: environment keys can be declared only by
+      hand in the Edit tab, and generation emits nothing to fill.** The DSL documents
+      `spec.environment` (docs/dsl.md:114) and the canvas offers declared keys as wire sources
+      (`web-proto/js/regions/canvas.js:270` `env.<key>`), but the inspector has no section to
+      add, type, default or remove an environment key, the XRD card shows none, and
+      `internal/emit/pipeline.go:40-51` emits the `function-environment-configs` step
+      referencing an EnvironmentConfig named `default` without emitting an EnvironmentConfig
+      scaffold that lists the declared keys. A canvas user cannot use the feature; a CLI user
+      has nothing to fill in. Contract: declare/edit keys in the inspector, see them on the
+      XRD card as wire sources, and get a scaffold with every declared key.
+
 - [ ] **CF-092 — Loading a starter example overwrites the served blueprint file on disk with no
       file-level cue. [V]** The card says "replaces current blueprint · undoable"; nothing says
       which file. Observed: `~/xqueue.cf.yaml` (the user's own file, bind-mounted) went
@@ -196,6 +207,46 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       its ref wraps onto four lines under the `INSTALLED · 44 KINDS` badge, and the search-term
       highlight from an earlier query is painted inside the installed list's name.** J2 F12,
       screenshots in [docs/ux-runs/2026-09-09-canvas-xpostgres-build.md](docs/ux-runs/2026-09-09-canvas-xpostgres-build.md).
+
+---
+
+## Open — floci lane: real AWS objects against an emulator
+
+Facts, field names and the design sketch: [docs/research/2026-09-10-floci-lane.md](docs/research/2026-09-10-floci-lane.md).
+These are lane items, not defects: each one's acceptance run is the first time the path is
+executed, and every failure it surfaces is filed as its own item. Order: CF-131 first.
+
+- [ ] **CF-131 — Lane D bring-up: floci reachable from the kind cluster, an emulator
+      ProviderConfig, and one smoke path (sqs-queue starter → XR → Queue Ready → the queue is
+      listed by `aws --endpoint-url http://127.0.0.1:4566 sqs list-queues`).** Contract: `make
+      cluster` can start a pinned `floci/floci:<tag>` on the kind network (opt-in, e.g.
+      `FLOCI=1`); the providerconfig scaffold gains a documented emulator variant using
+      `spec.endpoint.url.static`, the `skip_*` flags and `s3_use_path_style` with the exact
+      CRD field names; `make test-floci` installs provider-aws-sqs v2.7.0, applies the
+      starter's XRD/Composition/XR in the workspace namespace and passes only when the
+      managed Queue is Ready and visible through the AWS CLI. Gated on Docker like Lane C.
+- [ ] **CF-132 — Status wires proven on real objects: the Queue's `status.atProvider.url` and
+      `arn` reach the XR status and a composed Secret, and match what the AWS CLI reports.**
+      Today the only oracle for status wires is `crossplane composition render` with a
+      hand-written observed resource. Contract: a Lane D test that builds a blueprint with a
+      status wire into a native Secret `stringData` key and one into an XR status field,
+      applies it, waits for Ready, and asserts both values equal `aws sqs get-queue-url` /
+      `get-queue-attributes` output. Merges after CF-131.
+- [ ] **CF-133 — "crd mode" on the lane cluster: `cf serve --cluster` / Connect & Sync CRDs
+      against the kind cluster with the providers installed, then build, apply and round-trip
+      from discovered kinds.** Contract: the discovered kind set for an installed provider
+      equals the cached package's kind set (parity assertion, names and apiVersions); a
+      blueprint authored from discovered kinds generates byte-identically to one authored from
+      the package cache; `cf gen` → `kubectl apply` → `kubectl get <xr> -o yaml` → `cf adopt`
+      → `cf gen` reproduces the original bytes with server-added fields named in the loss
+      report (the Round-Trip Rule as stated above, now on objects that actually reconciled).
+      Merges after CF-131.
+- [ ] **CF-134 — Every AWS starter through Lane D: s3-bucket, sqs-queue, irsa (IAM/STS are
+      emulated) and rds-postgres (floci runs a real PostgreSQL behind RDS; needs the Docker
+      socket mounted into floci).** Contract: each starter's XR reaches Ready, its objects are
+      visible through the AWS CLI, and for rds-postgres the `writeConnectionSecretToRef` Secret
+      holds an endpoint a `psql` connection from inside the cluster accepts. Each failure is a
+      new backlog item against the emitter, not a special case in the lane. Merges after CF-132.
 
 ---
 
