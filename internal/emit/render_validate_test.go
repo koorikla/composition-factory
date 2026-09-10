@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
@@ -366,5 +367,88 @@ spec:
 `
 	if err := ValidateRendered([]byte(invalidService), crds); err == nil {
 		t.Fatal("expected error for boolean targetPort, got nil")
+	}
+}
+
+func TestValidateRenderedOptionalParamHint(t *testing.T) {
+	crdWithRequired := []schema.CRD{
+		{
+			Group:      "sqs.aws.m.upbound.io",
+			Kind:       "Queue",
+			Plural:     "queues",
+			Scope:      "Namespaced",
+			Categories: []string{"crossplane", "managed"},
+			Versions: []schema.Version{
+				{
+					Name:    "v1beta1",
+					Served:  true,
+					Storage: true,
+					Properties: map[string]any{
+						"spec": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"forProvider": map[string]any{
+									"type":     "object",
+									"required": []any{"region"},
+									"properties": map[string]any{
+										"region": map[string]any{"type": "string"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test-bp
+spec:
+  xrd:
+    group: example.org
+    kind: XTest
+    plural: xtests
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+      region:
+        type: string
+        required: false
+  resources:
+    - name: dead-letter
+      kind: Queue
+      fields:
+        region:
+          from: params.region
+`
+	bp, err := blueprint.Parse([]byte(bpYAML))
+	if err != nil {
+		t.Fatalf("blueprint.Parse: %v", err)
+	}
+
+	// Rendered stream where dead-letter has omitted region because params.region is optional
+	stream := `---
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: dead-letter
+spec:
+  forProvider: {}
+`
+	err = ValidateRenderedWithBlueprint([]byte(stream), crdWithRequired, bp)
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	expectedSubstr := `missing required field "spec.forProvider.region" in Queue spec.forProvider (fed by optional parameter params.region; mark parameter required in the XRD or provide a default)`
+	if !strings.Contains(err.Error(), expectedSubstr) {
+		t.Fatalf("error %q does not contain expected substring %q", err.Error(), expectedSubstr)
 	}
 }

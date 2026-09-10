@@ -164,7 +164,7 @@ func (srv *server) handleRender(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Schema validation of rendered composed resources against cached CRDs
-	if err := emit.ValidateRendered(out, crds); err != nil {
+	if err := emit.ValidateRenderedWithBlueprint(out, crds, b); err != nil {
 		writeJSON(w, http.StatusOK, renderResponse{Error: err.Error()})
 		return
 	}
