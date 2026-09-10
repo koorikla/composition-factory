@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -216,5 +217,80 @@ func TestCatalogueCommand(t *testing.T) {
 	}
 	if strings.Contains(outStr, "provider-bitbucket-server") {
 		t.Errorf("expected provider-bitbucket-server to be excluded for --kind=Bucket, got:\n%s", outStr)
+	}
+}
+
+func TestCF102KindsAndFieldsErrorOnInvalidBlueprint(t *testing.T) {
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, "cache")
+	badBP := filepath.Join(dir, "bad.cf.yaml")
+	if err := os.WriteFile(badBP, []byte("spec: [invalid yaml"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	kindsCmd := &KindsCmd{
+		CacheDir:  cacheDir,
+		Blueprint: badBP,
+	}
+	var out bytes.Buffer
+	if err := kindsCmd.Run(&out); err == nil {
+		t.Fatal("expected kindsCmd.Run to fail on invalid blueprint, got nil")
+	}
+
+	fieldsCmd := &FieldsCmd{
+		Kind:      "Deployment",
+		CacheDir:  cacheDir,
+		Blueprint: badBP,
+	}
+	out.Reset()
+	if err := fieldsCmd.Run(&out); err == nil {
+		t.Fatal("expected fieldsCmd.Run to fail on invalid blueprint, got nil")
+	}
+}
+
+func TestCF102KindsAndFieldsWarnOnUncachedSource(t *testing.T) {
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, "cache")
+	bpFile := filepath.Join(dir, "doc.cf.yaml")
+	bpContent := `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0
+  xrd:
+    group: platform.example.org
+    version: v1alpha1
+    kind: XApp
+    plural: xapps
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+`
+	if err := os.WriteFile(bpFile, []byte(bpContent), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	kindsCmd := &KindsCmd{
+		CacheDir:  cacheDir,
+		Blueprint: bpFile,
+	}
+	var out bytes.Buffer
+	// Should succeed (partial index with native kinds) but warn on stderr about uncached provider
+	if err := kindsCmd.Run(&out); err != nil {
+		t.Fatalf("kindsCmd.Run failed: %v", err)
+	}
+
+	fieldsCmd := &FieldsCmd{
+		Kind:      "Deployment",
+		CacheDir:  cacheDir,
+		Blueprint: bpFile,
+	}
+	out.Reset()
+	if err := fieldsCmd.Run(&out); err != nil {
+		t.Fatalf("fieldsCmd.Run failed: %v", err)
 	}
 }
