@@ -67,9 +67,9 @@ function formatRegistryFetchError(rawMsg) {
 
   if (isAuthErr) {
     if (ref) {
-      return 'Failed to fetch package from registry: authentication or access denied for "' + ref + '".';
+      return 'Failed to fetch package from registry: package not found or access denied for "' + ref + '".';
     }
-    return "Failed to fetch package from registry: authentication or access denied.";
+    return "Failed to fetch package from registry: package not found or access denied.";
   }
 
   if (ref) {

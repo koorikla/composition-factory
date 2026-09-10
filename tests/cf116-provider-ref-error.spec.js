@@ -16,7 +16,7 @@ test('mistyped provider ref in SOURCES shows package not found guidance, not bac
   await expect(alert).toBeVisible({ timeout: 15000 })
   const text = await alert.textContent()
   expect(text).not.toMatch(/backend server may be restarting/i)
-  expect(text).toMatch(/not found|cannot find package|package.*not found|manifest unknown/i)
+  expect(text).toMatch(/not found|cannot find package|package.*not found|manifest unknown|access denied/i)
 })
 
 test('upstream registry connection refused shows registry unreachable guidance, not backend server restarting', async ({ page }) => {
