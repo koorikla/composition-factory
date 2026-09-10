@@ -115,11 +115,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       or the promote action.** Residue of CF-055: the picker badge and inspector warning exist,
       the render-time message is unchanged (twice, J4). The message must name `params.region`,
       say it is optional, and point at the promote action.
-- [ ] **CF-126 — "Remove provider" is reachable only ~1300 px down inside the expanded provider
-      entry, after its full kind list; the row itself offers nothing on hover, click or
-      right-click, and the control speaks of "the cache" for what the user sees as the blueprint's
-      sources.** J2 F9, three gestures before it was found. The refusal itself (still referenced
-      by resources "instance") is correct and well placed.
 
 ### P3
 

@@ -1,3 +1,11 @@
+- [x] **CF-126 — "Remove provider" is reachable only ~1300 px down inside the expanded provider
+      entry, after its full kind list; the row itself offers nothing on hover, click or
+      right-click, and the control speaks of "the cache" for what the user sees as the blueprint's
+      sources.**
+      Moved `#src-remove-btn` to the top of `.src-detail` immediately visible upon expansion without
+      scrolling, added a direct row remove button (`.src-row-remove`) with `stopPropagation`, and updated
+      tooltips and dialogs to use sources terminology instead of cache.
+      — completed 2026-09-10
 - [x] **CF-123 — A parameter dot can be dropped on a resource card's *output* row; the server
       answers 400 with `field "status.atProvider.…" is not in Instance spec.forProvider (an unknown
       field is silently pruned …)` and the header chip sticks on `error` until the next successful
