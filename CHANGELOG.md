@@ -15,6 +15,11 @@ consumer's git diff.
 
 ## [Unreleased]
 
+- The backlog moved from `BACKLOG.md` to GitHub Issues (one issue per `CF-NNN`, labels
+  for severity/scale/verified/brief-ready/in-progress). `BACKLOG.md` is now a pointer,
+  `docs/non-findings.md` holds settled non-findings, `docs/backlog-archive.md` is frozen.
+  `AGENTS.md` §4, `docs/task-execution-contract.md` and the two skills describe the flow.
+
 - `cf init`: CLI command to scaffold a minimal valid blueprint document with Namespaced XRD and required `providerName` parameter.
 - `spec.environment` & `from: env.<key>`: declared environment keys in blueprint DSL (Crossplane v2 EnvironmentConfigs) with scalar type validation (`string`, `integer`, `number`, `boolean`), supporting `from: env.<key>` across `fields:`, `annotations:`, `envelope:`, `when:` conditionals, and `forEach:` loops. Automatically injects `function-environment-configs` pipeline step and preserves schema via `factory.crossplane.io/environment-keys` metadata annotation for round-trip fidelity.
 - `cf function`: schema-aware Function Input caching and management CLI (`cf function add <ref>`) that fetches function packages, extracts Input CRDs, and pins digests in `.cf.lock`.

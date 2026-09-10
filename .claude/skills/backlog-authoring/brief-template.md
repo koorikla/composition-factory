@@ -7,7 +7,7 @@
 | | |
 |---|---|
 | **Severity** | P0 / P1 / P2 / P3 |
-| **Closes** | the `BACKLOG.md` line, quoted verbatim |
+| **Closes** | `#<issue>` — the issue title (`CF-NNN — …`), quoted verbatim |
 | **Worktree** | `.worktrees/CF-NNN` on branch `CF-NNN-<slug>` |
 | **May write** | the only files this task is allowed to change |
 | **Merges after** | `CF-NNN`, or `nothing` |

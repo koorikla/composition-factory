@@ -164,7 +164,9 @@ Write `docs/ux-runs/YYYY-MM-DD-<mission>.md` with screenshots beside it. Structu
   only").
 - **What worked** - name it. A run that only lists complaints cannot be calibrated.
 
-Do not tick anything in `BACKLOG.md`. You are the oracle, not the driver.
+Do not open or close issues yourself; hand the report to the dispatcher, who files each
+finding as a GitHub issue per `.claude/skills/backlog-authoring/`. You are the oracle, not
+the driver.
 
 ## 7. Cleanup
 

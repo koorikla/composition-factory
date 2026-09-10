@@ -1,6 +1,6 @@
 ---
 name: backlog-authoring
-description: Use when scanning or auditing the codebase to file work - turning what you found into ID'd BACKLOG.md lines and, when a task is dispatched, a self-contained brief a subagent can execute without asking a single question. Not for executing a task (that is docs/task-execution-contract.md), and not for judging the canvas as a user (that is canvas-ux-tester).
+description: Use when scanning or auditing the codebase to file work - turning what you found into ID'd GitHub issues and, when a task is dispatched, a self-contained brief a subagent can execute without asking a single question. Not for executing a task (that is docs/task-execution-contract.md), and not for judging the canvas as a user (that is canvas-ux-tester).
 ---
 
 # Backlog Authoring
@@ -13,13 +13,13 @@ Two artifacts, written at different times:
 
 | | Written | Cost | Read by |
 |---|---|---|---|
-| **A backlog line** | when you find it | every agent, every session | humans choosing what is next |
+| **An issue** | when you find it | every agent that lists the backlog | humans choosing what is next |
 | **A task brief** | when it is dispatched | only the subagent that gets it | one subagent, once |
 
-`BACKLOG.md` is read into every agent's context, so its length is a running cost
-(`AGENTS.md` §4). Keep the line short and put the depth in the brief - and write the
-brief only when the work actually goes out. Most lines never become briefs, and that
-is the point.
+The backlog is GitHub Issues in `koorikla/composition-factory` (`AGENTS.md` §4). Every
+agent lists it, so an issue body is read many times: keep it short and put the depth
+in the brief - and write the brief only when the work actually goes out. Most issues
+never become briefs, and that is the point.
 
 ## 1. Before you file anything
 
@@ -33,9 +33,9 @@ git diff --stat                                     # what they are already fixi
 ```
 
 **A defect already being fixed in the dirty tree is not a finding.** Check the diff
-before you write the line, not after. Then grep `docs/backlog-archive.md` and the
-`Non-findings` section of `BACKLOG.md` - re-raising a settled item costs a reviewer
-the whole round trip to work out it is settled.
+before you write the line, not after. Then search closed issues (`gh issue list --state all --search "<keyword>"`),
+`docs/backlog-archive.md` (pre-migration history) and `docs/non-findings.md` - re-raising
+a settled item costs a reviewer the whole round trip to work out it is settled.
 
 ## 2. The evidence bar
 
@@ -69,22 +69,34 @@ one moment where the tool did the wrong thing.
 Silence is what moves severity up. An emitter that refuses loudly is P2; the same
 emitter exiting 0 on the same input is P0.
 
-## 4. The backlog line
+## 4. The issue
 
-```
-- [ ] **CF-041 — One sentence naming the wrong behaviour. [V]** The mechanism, in
-      two or three sentences, with `file.go:NN` and a literal repro. What it costs
-      the user. What the fix must achieve - never how to write it.
+```sh
+gh issue create \
+  --title "CF-041 — One sentence naming the wrong behaviour." \
+  --label "severity:P1,scale:engine,verified" \
+  --body "$(cat <<'EOF'
+The mechanism, in two or three sentences, with `file.go:NN` and a literal repro.
+What it costs the user. What the fix must achieve - never how to write it.
+EOF
+)"
 ```
 
-**IDs are permanent.** The next free one is
-`max(CF-NNN across BACKLOG.md, docs/tasks/, docs/backlog-archive.md) + 1`. Never
-reuse a number, including one whose item was archived or reclassified as a
+Labels are the triage: exactly one `severity:P0..P3` (or `lane:<name>` for a lane item),
+exactly one of `scale:engine` / `scale:ux`, `verified` only when §2's bar is met, and
+`brief-ready` once a brief exists. Keep the title under 110 characters; the full
+sentence goes first in the body.
+
+**IDs are permanent.** The next free one is one more than the highest `CF-NNN` across
+open and closed issue titles, `docs/tasks/`, and `docs/backlog-archive.md`:
+
+```sh
+{ gh issue list --state all --limit 500 --json title --jq '.[].title'; ls docs/tasks; grep -oE 'CF-[0-9]{3}' docs/backlog-archive.md; } | grep -oE 'CF-[0-9]{3}' | sort -u | tail -1
+```
+
+Never reuse a number, including one whose item was closed or reclassified as a
 non-finding - a stale link that resolves to the wrong task is worse than one that
 resolves to nothing.
-
-File it under the existing severity heading, above items you judge less urgent.
-Do not create new headings for one item.
 
 ## 5. Promoting a line to a brief
 
@@ -147,11 +159,12 @@ prompt that vanishes when the session ends.
 
 ## 8. After it lands
 
-You do not tick items and you do not merge. When the driver merges a task, the item
-moves - original wording plus `— completed <date>` - into `docs/backlog-archive.md`,
-and no `[x]` is left behind in `BACKLOG.md` (`AGENTS.md` §4). The brief in
-`docs/tasks/` stays: it is the record of what was asked, and it is the only thing
-that makes the merge reviewable a month later.
+You do not close issues and you do not merge. When the driver merges a task they close
+the issue with the merge commit and the guarding test named in the closing comment
+(`AGENTS.md` §4). The brief in `docs/tasks/` stays: it is the record of what was asked,
+and it is the only thing that makes the merge reviewable a month later. A half-fix
+does not close the issue: file the residue under a new id and close the original
+pointing at it.
 
 ## Traps
 
@@ -165,8 +178,8 @@ that makes the merge reviewable a month later.
   unrun test that passes today sends an agent hunting a bug that does not exist.
 - **`[V]` on the run that found it.** `[V]` means a second, independent check.
   Applying it to your own first run makes the marker worthless for everyone.
-- **Long lines in `BACKLOG.md`.** Every agent pays for them on every read. Depth
+- **Long issue bodies.** Every agent that lists the backlog pays for them. Depth
   belongs in the brief.
-- **Growing `BACKLOG.md` with items no one will ever pick.** A backlog nobody
+- **Growing the backlog with items no one will ever pick.** A backlog nobody
   triages is a document, not a queue. If it does not deserve a brief within the
-  month, it deserves to be dropped.
+  month, close it as `wontfix` with one line saying why.

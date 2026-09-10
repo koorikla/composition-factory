@@ -1,7 +1,8 @@
 # Task Execution Contract
 
 **Read this before you touch anything.** You have been handed one task from
-`BACKLOG.md`, described by a brief in `docs/tasks/CF-NNN-<slug>.md`. The brief says
+the GitHub Issues backlog (`gh issue view <n>`), described by a brief in
+`docs/tasks/CF-NNN-<slug>.md`. The brief says
 *what*. This says *how you work* — and it binds you whatever tool spawned you.
 
 You are one of several agents in this repository right now. Others hold their own
@@ -120,9 +121,9 @@ tasks in one branch is how a revert becomes impossible.
 - **Do not merge, and do not touch `main`.** Exactly one driver merges (`AGENTS.md`
   §4, the One-Driver Rule). You hand over a clean branch; the driver owns the merge
   and its CI.
-- **Do not tick or edit `BACKLOG.md`.** The driver moves the item to
-  `docs/backlog-archive.md` after the merge. An `[x]` from you claims a merge that
-  has not happened.
+- **Do not close the issue.** The driver closes it after the merge and a green CI. A
+  close from you claims a merge that has not happened. Do comment `taking — <branch>`
+  and add the `in-progress` label when you start, so no one else picks it up.
 - **Do not fix adjacent bugs.** Note them in the handover. A brief's `Out of scope`
   section is a boundary, not a suggestion.
 - **Do not edit another task's brief**, another agent's files, or any file outside
