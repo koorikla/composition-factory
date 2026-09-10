@@ -1065,6 +1065,11 @@ function bindOutputStoreSubscriptions() {
 
   store.subscribe("error", function (err) {
     if (err) {
+      // Mutation errors leave state.doc unmodified and surface via toasts;
+      // only generation/validation or document-load failures should transition the header chip.
+      if (err.source && err.source !== "generate" && err.source !== "loadDoc") {
+        return;
+      }
       isValidating = false;
       validatedRevision = -1;
       chipErr(err.message || String(err));
