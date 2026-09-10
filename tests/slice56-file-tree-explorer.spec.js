@@ -42,7 +42,7 @@ test('tree explorer displays categorized artifacts and switches editor on click'
   await expect(bpItem).toHaveClass(/active/)
   await expect(page.locator('#tabs button[data-t="bp"]')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('#code')).toContainText('kind: Blueprint')
-  await expect(page.locator('#eb-path')).toContainText('xnotify.cf.yaml')
+  await expect(page.locator('#eb-path')).toContainText(/doc\.cf\.yaml|xnotify\.cf\.yaml/)
   await expect(page.locator('#code-edit')).toBeVisible()
 })
 

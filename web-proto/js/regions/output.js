@@ -56,6 +56,7 @@ var editBtn = null;
 var editor = null;
 var editBar = null;
 var outDir = "";
+var servedBlueprintPath = "";
 
 /* ---------- tree explorer + tabs (built live) ---------- */
 
@@ -70,6 +71,15 @@ function buildTree() {
   var g = store.state.lastGenerate;
   var outputs = (g && g.outputs || []);
   var bpLabel = bpTabLabel(doc);
+  var name = doc && doc.metadata && doc.metadata.name || "blueprint";
+
+  var bpPath = servedBlueprintPath || (name + ".cf.yaml");
+
+  var compOut = matchOutput("comp");
+  var compPath = compOut ? compOut.path : ("compositions/" + (doc && doc.spec && doc.spec.xrd && doc.spec.xrd.plural && doc.spec.xrd.group ? doc.spec.xrd.plural + "." + doc.spec.xrd.group + ".yaml" : "composition.yaml"));
+
+  var xrdOut = matchOutput("xrd");
+  var xrdPath = xrdOut ? xrdOut.path : ("xrds/" + (doc && doc.spec && doc.spec.xrd && doc.spec.xrd.plural && doc.spec.xrd.group ? doc.spec.xrd.plural + "." + doc.spec.xrd.group + ".yaml" : "definition.yaml"));
 
   var categories = [];
 
@@ -78,7 +88,7 @@ function buildTree() {
     id: "meta",
     title: "Blueprint & Package",
     items: [
-      { key: "bp", name: bpLabel, icon: "⚡", path: "blueprints/" + bpLabel },
+      { key: "bp", name: bpLabel, icon: "⚡", path: bpPath },
       { key: "pkg", name: "package.yaml", icon: "📦", path: "package.yaml" },
       { key: "rbac", name: "rbac", icon: "🛡️", path: "rbac" },
     ]
@@ -89,8 +99,8 @@ function buildTree() {
     id: "engine",
     title: "Compositions & XRDs",
     items: [
-      { key: "comp", name: "composition.yaml", icon: "🧩", path: "compositions/" + (doc && doc.metadata && doc.metadata.name ? doc.metadata.name + ".yaml" : "composition.yaml") },
-      { key: "xrd", name: "definition.yaml", icon: "📋", path: "xrds/" + (doc && doc.metadata && doc.metadata.name ? doc.metadata.name + ".yaml" : "definition.yaml") },
+      { key: "comp", name: "composition.yaml", icon: "🧩", path: compPath },
+      { key: "xrd", name: "definition.yaml", icon: "📋", path: xrdPath },
       { key: "fns", name: "functions.yaml", icon: "λ", path: "functions.yaml" },
     ]
   });
@@ -167,6 +177,7 @@ function updateBreadcrumb() {
     el.ebPath.textContent = tab;
   }
 }
+
 
 function buildTabs() {
   var bpLabel = bpTabLabel(store.state.doc);
@@ -629,19 +640,43 @@ function drawWarn(doc) {
 
 /* ---------- topbar ---------- */
 
-function drawTopbar(doc) {
+function drawTopbarCrumb(doc) {
+  if (!el.crumb) return;
   var name = doc && doc.metadata && doc.metadata.name || "blueprint";
-  el.crumb.innerHTML = "blueprints/<b>" + esc(name) + ".cf.yaml</b>";
-  // the wordmark shows the BUILD version (the doc's schema version was
-  // read as "I'm on an old app" — it lives with the blueprint name now)
+  var crumbHtml;
+  if (servedBlueprintPath) {
+    var slashIdx = Math.max(servedBlueprintPath.lastIndexOf("/"), servedBlueprintPath.lastIndexOf("\\"));
+    if (slashIdx >= 0) {
+      var dir = servedBlueprintPath.slice(0, slashIdx + 1);
+      var base = servedBlueprintPath.slice(slashIdx + 1);
+      crumbHtml = esc(dir) + "<b>" + esc(base) + "</b>";
+    } else {
+      crumbHtml = "<b>" + esc(servedBlueprintPath) + "</b>";
+    }
+  } else {
+    crumbHtml = "<b>" + esc(name) + ".cf.yaml</b>";
+  }
   var av = doc && doc.apiVersion || "";
   var schemaV = av.indexOf("/") >= 0 ? av.split("/").pop() : av;
-  el.crumb.innerHTML += schemaV ? ' <span class="dg">' + esc(schemaV) + "</span>" : "";
+  if (schemaV) {
+    crumbHtml += ' <span class="dg">' + esc(schemaV) + "</span>";
+  }
+  el.crumb.innerHTML = crumbHtml;
+}
+
+function drawTopbar(doc) {
+  drawTopbarCrumb(doc);
   if (!el.ver.dataset.build) {
     el.ver.dataset.build = "1";
     api.getVersion().then(function (r) {
       el.ver.textContent = r.version;
       el.ver.title = "compositionfactory build " + r.version;
+      if (typeof r.blueprint === "string" && r.blueprint) {
+        servedBlueprintPath = r.blueprint;
+        drawTopbarCrumb((store && store.state && store.state.doc) || doc);
+        buildTree();
+        updateBreadcrumb();
+      }
       if (typeof r.outDir === "string") {
         outDir = r.outDir || ".";
         var btn = el.generateBtn || document.getElementById("generateBtn");
