@@ -110,13 +110,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       `compositions/<xrd plural>.<group>.yaml`.** `output.js:81` and `:617` synthesise the
       names from `metadata.name`; the served path is never fetched or shown. Show the real
       paths (relative to the workspace) or none.
-- [ ] **CF-102 — *(engine)* `cf kinds` and `cf fields` silently fall back to "every cached
-      provider" when the blueprint fails to load, and never warn when a declared source is
-      uncached, so they disagree with `cf gen` and the canvas on the same file.**
-      `cmd/cf/kinds.go:29-31`, `cmd/cf/fields.go:32-34` treat a load error as "no blueprint";
-      `cmd/cf/options.go:29-58` is the third copy of the provider-set assembly with different
-      behaviour. One loader, one warning policy.
-      Brief: `docs/tasks/CF-102-cli-loader-drift.md`.
 - [ ] **CF-116 — A mistyped provider ref in SOURCES shows `Server unavailable (HTTP 502 Bad
       Gateway): fetch "…": GET https://ghcr.io/v2/…: MANIFEST_UNKNOWN … The backend server may be
       restarting or unreachable.`** Residue of CF-059: `providers.go:193` answers 502 for a

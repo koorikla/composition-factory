@@ -1,3 +1,10 @@
+- [x] **CF-102 — *(engine)* `cf kinds` and `cf fields` silently fall back to "every cached
+      provider" when the blueprint fails to load, and never warn when a declared source is
+      uncached, so they disagree with `cf gen` and the canvas on the same file.**
+      Propagated blueprint load errors in `cmd/cf/kinds.go` and `cmd/cf/fields.go` when a blueprint
+      is present or explicitly specified, and printed standard stderr warnings when declared
+      sources are missing from cache, matching `cf serve` / `cf mcp`.
+      — completed 2026-09-10
 - [x] **CF-129 — *(engine)* After one failed source fetch, every later write answers with the
       bare document and never mentions that the declared source is still unloaded. [V]**
       Removed suppression of failed sources on mutating writes in `internal/api/blueprint.go`,
