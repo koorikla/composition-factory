@@ -32,4 +32,5 @@ coverage/
 .cf.lock
 .testrun*
 .demorun*
+.skylos/
 
