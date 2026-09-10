@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -28,6 +29,14 @@ import (
 // Diagnostics include line numbers from the rendered YAML, the resource name,
 // kind, and exact field path.
 func ValidateRendered(renderedStream []byte, crds []schema.CRD) error {
+	return ValidateRenderedWithBlueprint(renderedStream, crds, nil)
+}
+
+// ValidateRenderedWithBlueprint validates the rendered composed resources in a multi-document
+// YAML stream against the provided CRD schemas and optional blueprint.
+// If a missing required field is wired from an optional XRD parameter in the blueprint,
+// diagnostic guidance is appended to the error message.
+func ValidateRenderedWithBlueprint(renderedStream []byte, crds []schema.CRD, b *blueprint.Blueprint) error {
 	if len(bytes.TrimSpace(renderedStream)) == 0 {
 		return nil
 	}
@@ -52,7 +61,7 @@ func ValidateRendered(renderedStream []byte, crds []schema.CRD) error {
 			continue
 		}
 
-		docErrs := validateRenderedDoc(root, crds)
+		docErrs := validateRenderedDoc(root, crds, b)
 		errs = append(errs, docErrs...)
 	}
 
@@ -62,7 +71,7 @@ func ValidateRendered(renderedStream []byte, crds []schema.CRD) error {
 	return nil
 }
 
-func validateRenderedDoc(root *yaml.Node, crds []schema.CRD) []string {
+func validateRenderedDoc(root *yaml.Node, crds []schema.CRD, b *blueprint.Blueprint) []string {
 	var apiVersionNode, kindNode, metadataNode, specNode *yaml.Node
 	for i := 0; i < len(root.Content); i += 2 {
 		k := root.Content[i].Value
@@ -161,7 +170,7 @@ func validateRenderedDoc(root *yaml.Node, crds []schema.CRD) []string {
 					}
 					continue
 				}
-				errs = append(errs, validateSchemaNode(vNode, propSchema, kName, resourceName, kind, where)...)
+				errs = append(errs, validateSchemaNode(vNode, propSchema, kName, resourceName, kind, where, b)...)
 			}
 		}
 	} else {
@@ -187,14 +196,14 @@ func validateRenderedDoc(root *yaml.Node, crds []schema.CRD) []string {
 								kNode.Line, resourceName, kind, kind))
 							continue
 						}
-						errs = append(errs, validateSchemaNode(vNode, fpSchema, "spec.forProvider", resourceName, kind, where)...)
+						errs = append(errs, validateSchemaNode(vNode, fpSchema, "spec.forProvider", resourceName, kind, where, b)...)
 						continue
 					}
 
 					// Validate other spec envelope fields (providerConfigRef, deletionPolicy, initProvider, etc.)
 					if childSchema, ok := specInner[kName].(map[string]any); ok {
 						envWhere := kind + " spec." + kName
-						errs = append(errs, validateSchemaNode(vNode, childSchema, "spec."+kName, resourceName, kind, envWhere)...)
+						errs = append(errs, validateSchemaNode(vNode, childSchema, "spec."+kName, resourceName, kind, envWhere, b)...)
 					} else if specInner != nil {
 						candidates := make([]string, 0, len(specInner))
 						for k := range specInner {
@@ -285,7 +294,7 @@ func validateObjectMeta(metaNode *yaml.Node, resourceName, kind string) []string
 	return errs
 }
 
-func validateSchemaNode(valNode *yaml.Node, propSchema map[string]any, path string, resourceName, kind, where string) []string {
+func validateSchemaNode(valNode *yaml.Node, propSchema map[string]any, path string, resourceName, kind, where string, b *blueprint.Blueprint) []string {
 	if propSchema == nil {
 		return nil
 	}
@@ -422,7 +431,7 @@ func validateSchemaNode(valNode *yaml.Node, propSchema map[string]any, path stri
 		if itemsSchema != nil {
 			for idx, elemNode := range valNode.Content {
 				elemPath := fmt.Sprintf("%s[%d]", path, idx)
-				errs = append(errs, validateSchemaNode(elemNode, itemsSchema, elemPath, resourceName, kind, where)...)
+				errs = append(errs, validateSchemaNode(elemNode, itemsSchema, elemPath, resourceName, kind, where, b)...)
 			}
 		}
 
@@ -442,7 +451,7 @@ func validateSchemaNode(valNode *yaml.Node, propSchema map[string]any, path stri
 					kNode := valNode.Content[i]
 					vNode := valNode.Content[i+1]
 					childPath := fmt.Sprintf("%s[%s]", path, kNode.Value)
-					errs = append(errs, validateSchemaNode(vNode, addPropsMap, childPath, resourceName, kind, where)...)
+					errs = append(errs, validateSchemaNode(vNode, addPropsMap, childPath, resourceName, kind, where, b)...)
 				}
 			}
 			return errs
@@ -473,8 +482,9 @@ func validateSchemaNode(valNode *yaml.Node, propSchema map[string]any, path stri
 					if path != "" {
 						reqPath = path + "." + reqName
 					}
-					errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): missing required field %q in %s",
-						valNode.Line, resourceName, kind, reqPath, where))
+					hint := optionalParamHint(b, resourceName, reqPath)
+					errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): missing required field %q in %s%s",
+						valNode.Line, resourceName, kind, reqPath, where, hint))
 				}
 			}
 		}
@@ -489,7 +499,7 @@ func validateSchemaNode(valNode *yaml.Node, propSchema map[string]any, path stri
 			}
 
 			if childSchema, ok := properties[kName].(map[string]any); ok {
-				errs = append(errs, validateSchemaNode(vNode, childSchema, childPath, resourceName, kind, where)...)
+				errs = append(errs, validateSchemaNode(vNode, childSchema, childPath, resourceName, kind, where, b)...)
 			} else if properties != nil {
 				s := closestPath(kName, knownKeys)
 				if s != "" {
@@ -573,4 +583,71 @@ func isIntegerStr(s string) bool {
 func isNumberStr(s string) bool {
 	_, err := strconv.ParseFloat(s, 64)
 	return err == nil
+}
+
+func findFieldForPath(r *blueprint.Resource, reqPath string) (blueprint.Field, bool) {
+	if r == nil {
+		return blueprint.Field{}, false
+	}
+	candidates := []string{reqPath}
+	if strings.HasPrefix(reqPath, "spec.forProvider.") {
+		candidates = append(candidates, strings.TrimPrefix(reqPath, "spec.forProvider."), strings.TrimPrefix(reqPath, "spec."))
+	} else if strings.HasPrefix(reqPath, "spec.") {
+		candidates = append(candidates, strings.TrimPrefix(reqPath, "spec."))
+	}
+	for _, c := range candidates {
+		if f, ok := r.Fields[c]; ok {
+			return f, true
+		}
+		if f, ok := r.Envelope[c]; ok {
+			return f, true
+		}
+		// Also check parent segments, e.g. "a.b.c" -> "a.b", "a"
+		curr := c
+		for {
+			idx := strings.LastIndex(curr, ".")
+			if idx == -1 {
+				break
+			}
+			curr = curr[:idx]
+			if f, ok := r.Fields[curr]; ok {
+				return f, true
+			}
+			if f, ok := r.Envelope[curr]; ok {
+				return f, true
+			}
+		}
+	}
+	return blueprint.Field{}, false
+}
+
+func optionalParamHint(b *blueprint.Blueprint, resourceName, reqPath string) string {
+	if b == nil {
+		return ""
+	}
+	r := b.ResourceNamed(resourceName)
+	if r == nil {
+		return ""
+	}
+	f, ok := findFieldForPath(r, reqPath)
+	if !ok || !strings.HasPrefix(f.From, "params.") {
+		return ""
+	}
+	paramPath := strings.TrimPrefix(f.From, "params.")
+	parts := strings.Split(paramPath, ".")
+	if len(parts) == 1 {
+		p, exists := b.Spec.XRD.Parameters[parts[0]]
+		if exists && !p.Required && p.Default == "" {
+			return fmt.Sprintf(" (fed by optional parameter %s; mark parameter required in the XRD or provide a default)", f.From)
+		}
+	} else if len(parts) == 2 {
+		p, exists := b.Spec.XRD.Parameters[parts[0]]
+		if exists && p.Properties != nil {
+			prop, pExists := p.Properties[parts[1]]
+			if pExists && !prop.Required && prop.Default == "" {
+				return fmt.Sprintf(" (fed by optional parameter %s; mark parameter required in the XRD or provide a default)", f.From)
+			}
+		}
+	}
+	return ""
 }

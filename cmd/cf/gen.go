@@ -145,7 +145,7 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 			return 1, fmt.Errorf("render failed: %s", msg)
 		}
 
-		if err := emit.ValidateRendered(renderOut, crds); err != nil {
+		if err := emit.ValidateRenderedWithBlueprint(renderOut, crds, b); err != nil {
 			return 1, fmt.Errorf("render validation failed:\n%w", err)
 		}
 		fmt.Fprintln(out, "render validation ok")
