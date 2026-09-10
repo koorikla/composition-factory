@@ -1,3 +1,8 @@
+- [x] **CF-096 — While generation has failed (`error`, `0 lines`) the ARTIFACTS panel still
+      announces `6 files` with tabs for composition, definition, functions, package and rbac.**
+      Reset lastGenerate on generation error, disabled non-existent generated artifact tabs and
+      tree items, and updated the tree file count to announce only available files (1 file).
+      — completed 2026-09-10
 - [x] **CF-095 — The top bar and drawer show paths that do not exist: `blueprints/<name>.cf.yaml`
       and `compositions/<name>.yaml`, while the real files are `<served path>` and
       `compositions/<xrd plural>.<group>.yaml`.**

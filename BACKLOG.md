@@ -121,10 +121,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       and `govulncheck ./...` to `make lint-strict` so it cannot regress. Acceptance: none —
       configuration; verify with the linter's clean run and a green CI.
 
-- [ ] **CF-096 — While generation has failed (`error`, `0 lines`) the ARTIFACTS panel still
-      announces `6 files` with tabs for composition, definition, functions, package and rbac.**
-      Observed on the first load of a blueprint with an uncached source. A failed generate must
-      empty or grey the artifact list rather than list files that do not exist.
 - [ ] **CF-103 — Docs state things the tree contradicts (ports 8081/8086, Go 1.25, the `cf`
       subcommand list, `blueprints/xqueue.cf.yaml`, the "frozen" store/api contracts, `make lint`
       scope, no `[0.10.0]` changelog entry, `cf adopt` accepting directories and the `import`
