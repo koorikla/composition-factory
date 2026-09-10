@@ -24,7 +24,10 @@ module.exports = defineConfig({
   timeout: 15000,
   use: { baseURL },
   webServer: {
-    command: `sh -c "make build && rm -rf ${scratchDir} && mkdir -p ${scratchDir}/out && mkdir -p .testrun && cp tests/fixtures/pristine-doc.json ${scratchDir}/doc.cf.yaml && ./bin/cf serve --addr 127.0.0.1:${port} --blueprint ${scratchDir}/doc.cf.yaml --out ${scratchDir}/out --lock ${scratchDir}/.cf.lock"`,
+    // The e2e engine runs against its own scratch cache (${scratchDir}/cache)
+    // so specs never skip or pass based on host cache state, and test runs leave
+    // the developer's ~/Library/Caches/compositionfactory untouched.
+    command: `sh -c "make build && rm -rf ${scratchDir} && mkdir -p ${scratchDir}/out && mkdir -p ${scratchDir}/cache && mkdir -p .testrun && cp tests/fixtures/pristine-doc.json ${scratchDir}/doc.cf.yaml && ./bin/cf serve --addr 127.0.0.1:${port} --blueprint ${scratchDir}/doc.cf.yaml --out ${scratchDir}/out --lock ${scratchDir}/.cf.lock --cache-dir ${scratchDir}/cache"`,
     url: `${baseURL}/healthz`,
     reuseExistingServer: false,
   },

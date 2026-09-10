@@ -23,17 +23,18 @@ test('removing a provider the blueprint uses is refused with referencers named',
 })
 
 test('removing an unused provider deletes it and its kinds leave the palette', async ({ page, request }) => {
+  // Ensure provider-aws-s3 is installed so removing an unused provider runs unconditionally
+  const pre = await request.post(ENGINE + '/api/providers', { data: { ref: 'ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0' } })
+  expect(pre.ok()).toBeTruthy()
+
   await page.goto('/')
   await page.click('#rtabs button[data-r="src"]')
   const s3row = page.locator('#lrail .src-row', { hasText: 'provider-aws-s3' }).first()
-  test.skip(!(await s3row.count()), 's3 provider not cached')
+  await expect(s3row).toBeVisible({ timeout: 10000 })
   await s3row.click()
   page.on('dialog', d => d.accept())
   await page.click('#src-remove-btn')
   await expect(page.locator('#lrail .src-row', { hasText: 'provider-aws-s3' })).toHaveCount(0, { timeout: 10000 })
   await page.click('#rtabs button[data-r="kinds"]')
   await expect(page.locator('#lrail .kind[data-kind="Bucket"]')).toHaveCount(0)
-  // restore for other tests: add it back through the real endpoint
-  const re = await request.post(ENGINE + '/api/providers', { data: { ref: 'ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0' } })
-  expect(re.ok()).toBeTruthy()
 })
