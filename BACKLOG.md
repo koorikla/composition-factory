@@ -106,6 +106,7 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       document as if all sources were served (`GET /api/providers` still `[]`). Twice on
       `6fda5b6`, empty cache, no registry credentials. A write must report an unloaded declared
       source every time until it loads, and the memo must not suppress a retry the caller asks for.
+      Brief: `docs/tasks/CF-129-failed-source-memo-suppresses-retry.md`.
 
 - [ ] **CF-093 — In the published image Validate always answers "validation check unavailable"
       and its fix tip prescribes `curl … | sh` in a container that has no curl and runs as
