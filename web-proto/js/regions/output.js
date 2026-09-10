@@ -143,8 +143,14 @@ function buildTree() {
     });
   }
 
+  var genFailed = !store.state.lastGenerate || !!store.state.generateError;
+
   var totalFiles = 0;
-  categories.forEach(function (c) { totalFiles += c.items.length; });
+  if (genFailed) {
+    totalFiles = 1; // only the blueprint file exists/is valid
+  } else {
+    categories.forEach(function (c) { totalFiles += c.items.length; });
+  }
   if (el.treeCount) el.treeCount.textContent = totalFiles + " file" + (totalFiles === 1 ? "" : "s");
 
   var h = "";
@@ -155,7 +161,10 @@ function buildTree() {
     h += '  <div class="tree-group-items">';
     cat.items.forEach(function (it) {
       var isActive = (tab === it.key);
-      h += '    <div class="tree-item' + (isActive ? ' active' : '') + '" data-t="' + esc(it.key) + '" data-path="' + esc(it.path) + '" data-icon="' + esc(it.icon) + '">';
+      var isGenerated = (it.key !== "bp");
+      var isDisabled = genFailed && isGenerated;
+      var cls = "tree-item" + (isActive ? " active" : "") + (isDisabled ? " disabled" : "");
+      h += '    <div class="' + cls + '" data-t="' + esc(it.key) + '" data-path="' + esc(it.path) + '" data-icon="' + esc(it.icon) + '"' + (isDisabled ? ' aria-disabled="true"' : '') + '>';
       h += '      <span class="tree-item-icon">' + esc(it.icon) + '</span>';
       h += '      <span class="tree-item-name">' + esc(it.name) + '</span>';
       h += '    </div>';
@@ -181,10 +190,12 @@ function updateBreadcrumb() {
 
 function buildTabs() {
   var bpLabel = bpTabLabel(store.state.doc);
+  var genFailed = !store.state.lastGenerate || !!store.state.generateError;
+  var genDis = genFailed ? ' disabled aria-disabled="true"' : '';
   var h =
-    '<button data-t="comp" aria-pressed="' + (tab === "comp") + '">composition.yaml</button>' +
-    '<button data-t="xrd" aria-pressed="' + (tab === "xrd") + '">definition.yaml</button>' +
-    '<button data-t="fns" aria-pressed="' + (tab === "fns") + '">functions.yaml</button>' +
+    '<button data-t="comp" aria-pressed="' + (tab === "comp") + '"' + genDis + '>composition.yaml</button>' +
+    '<button data-t="xrd" aria-pressed="' + (tab === "xrd") + '"' + genDis + '>definition.yaml</button>' +
+    '<button data-t="fns" aria-pressed="' + (tab === "fns") + '"' + genDis + '>functions.yaml</button>' +
     '<button data-t="bp" aria-pressed="' + (tab === "bp") + '">' + esc(bpLabel) + '</button>';
   h += '<button data-t="pkg" aria-pressed="' + (tab === "pkg") + '">package.yaml</button>';
 
@@ -220,6 +231,11 @@ function buildTabs() {
 }
 
 function selectTab(newTab) {
+  var genFailed = !store.state.lastGenerate || !!store.state.generateError;
+  var isEngineTab = (newTab === "comp" || newTab === "xrd" || newTab === "fns" || newTab === "runtime" || newTab.indexOf("tpl:") === 0 || newTab.indexOf("pc:") === 0);
+  if (genFailed && isEngineTab) {
+    return;
+  }
   tab = newTab;
   [].forEach.call(el.tabs.children, function (c) {
     c.setAttribute("aria-pressed", String(c.getAttribute("data-t") === tab));
@@ -1108,6 +1124,10 @@ function bindOutputStoreSubscriptions() {
       isValidating = false;
       validatedRevision = -1;
       chipErr(err.message || String(err));
+      if (err.source === "generate") {
+        buildTabs();
+        render();
+      }
     }
   });
 

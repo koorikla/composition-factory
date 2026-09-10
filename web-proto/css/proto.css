@@ -334,6 +334,7 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .tabs{display:flex;gap:2px;min-width:0;overflow-x:auto}
 .tabs button{padding:2px 7px;border-radius:4px;font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
 .tabs button[aria-pressed="true"]{background:var(--sunk);color:var(--ink)}
+.tabs button:disabled, .tabs button[aria-disabled="true"]{opacity:0.4;cursor:not-allowed;pointer-events:none}
 
 /* drawer layout: tree explorer + editor content */
 .drawer-body {
@@ -457,6 +458,12 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
   color: var(--wire-xrd);
   font-weight: 600;
   border-left-color: var(--wire-xrd);
+}
+
+.tree-item.disabled, .tree-item[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .tree-item-icon {
