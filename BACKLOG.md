@@ -118,6 +118,19 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
 
 ### P3
 
+- [ ] **CF-135 — GitHub Actions workflows are not hardened: every `uses:` is a floating tag
+      (`actions/checkout@v7` …), `contents: write` is granted at workflow level in `ci.yml` and
+      `catalogue.yml`, `actions/checkout` keeps credentials persisted, `ci.yml:29` pipes
+      `curl … install.sh | sh` for the crossplane CLI, release/catalogue jobs have no
+      `timeout-minutes`, and function images are pulled by tag not digest.** Found by the skylos
+      trial ([docs/research/2026-09-10-skylos-trial.md](docs/research/2026-09-10-skylos-trial.md));
+      the only family in that run with no false positives. Contract: pin actions to commit SHAs
+      with a version comment, move write permissions to the jobs that push, set
+      `persist-credentials: false` where no push follows, download-and-verify the crossplane
+      installer (or pin its release tarball), add timeouts; then add `zizmor` (or `actionlint`)
+      and `govulncheck ./...` to `make lint-strict` so it cannot regress. Acceptance: none —
+      configuration; verify with the linter's clean run and a green CI.
+
 - [ ] **CF-096 — While generation has failed (`error`, `0 lines`) the ARTIFACTS panel still
       announces `6 files` with tabs for composition, definition, functions, package and rbac.**
       Observed on the first load of a blueprint with an uncached source. A failed generate must
