@@ -423,7 +423,9 @@ function drawSources() {
     h += '<div class="src-row" data-ref="' + esc(ref) + '" style="cursor:pointer" title="Click for details" aria-expanded="' + (expandedProvider === ref) + '">' +
       '<span class="sw" style="width:5px;height:22px;border-radius:1.5px;background:' + COLORS[fam] + '"></span>' +
       '<span style="min-width:0"><span class="nm" style="display:block">' + esc(ref.split("/").pop()) + "</span>" +
-      '<span class="dg">' + esc(meta || ref) + '</span></span><span class="sp"></span></div>';
+      '<span class="dg">' + esc(meta || ref) + '</span></span><span class="sp"></span>' +
+      (s.native ? "" : '<button class="del src-row-remove" data-remove-ref="' + esc(ref) + '" title="Remove this provider from sources">&#215;</button>') +
+      '</div>';
     if (expandedProvider === ref) {
       const hiddenList = hiddenKinds[ref] || [];
       const kindsHtml = providerKinds === null
@@ -441,10 +443,10 @@ function drawSources() {
       h += '<div class="src-detail" style="padding:4px 12px 10px 22px;display:flex;flex-direction:column;gap:3px">' +
         '<span class="dg" style="word-break:break-all" title="Full registry reference">' + esc(ref) + "</span>" +
         (s.digest ? '<span class="dg" style="word-break:break-all">' + esc(s.digest) + "</span>" : "") +
-        kindsHtml +
         (s.native ? "" :
-          '<button class="btn sm" id="src-remove-btn" style="align-self:flex-start;margin-top:4px" ' +
-          'title="Remove this provider from the cache">Remove provider</button>') + "</div>";
+          '<button class="btn sm" id="src-remove-btn" style="align-self:flex-start;margin:2px 0 4px" ' +
+          'title="Remove this provider from sources">Remove provider</button>') +
+        kindsHtml + "</div>";
     }
   });
   h += '<div style="padding:8px 10px;display:flex;gap:6px">' +
@@ -825,13 +827,16 @@ function bindPaletteEvents() {
       });
       return;
     }
-    if (e.target.closest("#src-remove-btn") && expandedProvider) {
-      const ref = expandedProvider;
-      if (!window.confirm("Remove " + ref + " from the cache?")) return;
+    function removeProviderWithConfirm(ref) {
+      if (!window.confirm("Remove " + ref + " from sources?")) return;
       providersErr = null;
       api.removeProvider(ref).then(function () {
-        expandedProvider = null; providerKinds = null;
-        loadProviders(); loadKinds();
+        if (expandedProvider === ref) {
+          expandedProvider = null;
+          providerKinds = null;
+        }
+        loadProviders();
+        loadKinds();
         return store.loadDoc();
       }).then(function () {
         store.generate(false);
@@ -839,6 +844,16 @@ function bindPaletteEvents() {
         providersErr = err && err.message || String(err);
         drawRail();
       });
+    }
+    if (e.target.closest("#src-remove-btn") && expandedProvider) {
+      removeProviderWithConfirm(expandedProvider);
+      return;
+    }
+    const rowRemove = e.target.closest(".src-row-remove, [data-remove-ref]");
+    if (rowRemove) {
+      e.stopPropagation();
+      const ref = rowRemove.getAttribute("data-remove-ref");
+      if (ref) removeProviderWithConfirm(ref);
       return;
     }
     const guideExBtn = e.target.closest("button[data-guide-example]");
