@@ -244,11 +244,15 @@ func TestDefaultPipelineStillEmitsAutoReady(t *testing.T) {
 // TestPipelineGenerateIsDeterministic: two runs over the pipelined blueprint
 // byte-compare equal, input re-encoding included.
 func TestPipelineGenerateIsDeterministic(t *testing.T) {
-	a, err := Generate(pipelineBlueprint(), testCRDs(t), "out")
+	bp1 := pipelineBlueprint()
+	bp1.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
+	a, err := Generate(bp1, testCRDs(t), "out")
 	if err != nil {
 		t.Fatalf("Generate (first run): %v", err)
 	}
-	b, err := Generate(pipelineBlueprint(), testCRDs(t), "out")
+	bp2 := pipelineBlueprint()
+	bp2.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
+	b, err := Generate(bp2, testCRDs(t), "out")
 	if err != nil {
 		t.Fatalf("Generate (second run): %v", err)
 	}

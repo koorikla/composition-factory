@@ -75,6 +75,7 @@ spec:
       provider: ghcr.io/x/provider-aws-sqs:v2.7.0
       fields:
         maxMessageSize: {from: params.maxMessageSize}
+        region: {value: "eu-west-1"}
 `
 
 // stack is one complete fixture world: an MCP client session into a server
@@ -688,6 +689,9 @@ func TestRenameResourceCollisionMatchesHTTP(t *testing.T) {
 		"resource": map[string]any{
 			"kind":     "Queue",
 			"provider": testProviderRef,
+			"fields": map[string]any{
+				"region": map[string]any{"value": "eu-west-1"},
+			},
 		},
 	})
 	s.assertToolErrorMatchesHTTP(t,
@@ -714,6 +718,9 @@ func TestDeleteResource(t *testing.T) {
 		"resource": map[string]any{
 			"kind":     "Queue",
 			"provider": testProviderRef,
+			"fields": map[string]any{
+				"region": map[string]any{"value": "eu-west-1"},
+			},
 		},
 	})
 	if s.reload(t).ResourceNamed("audit-queue") == nil {

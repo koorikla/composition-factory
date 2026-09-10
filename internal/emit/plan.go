@@ -2,6 +2,7 @@ package emit
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
@@ -120,6 +121,121 @@ func refuseGoTemplateOnlyFeatures(b *blueprint.Blueprint) error {
 		for k, ef := range r.Envelope {
 			if ef.Raw != "" && (strings.Contains(ef.Raw, "{{") || blueprint.IsBareGoTemplateExpr(ef.Raw)) {
 				return fmt.Errorf("resource %q envelope %q: raw %q contains Go-template syntax which is only supported with the go-templating engine (current engine is %q)", r.Name, k, ef.Raw, b.Engine())
+			}
+		}
+	}
+	return nil
+}
+
+// CheckRequiredFields validates that every resource in b has all CRD-required fields specified,
+// and that required fields are not wired to optional parameters without default values.
+// Native K8s resources are skipped as their schemas include fields populated by admission controllers.
+func CheckRequiredFields(b *blueprint.Blueprint, crds []schema.CRD) error {
+	wantNamespaced := b.Spec.XRD.Scope == "Namespaced"
+	for _, r := range b.Spec.Resources {
+		crd, err := resolveKind(crds, r, wantNamespaced)
+		if err != nil {
+			return err
+		}
+		if crd.Native {
+			continue
+		}
+		nodes, err := crd.FieldTree()
+		if err != nil {
+			return fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
+		}
+		if len(nodes) == 0 {
+			continue
+		}
+
+		fields, cerr := conventionFields(r, b, crd)
+		if cerr != nil {
+			return cerr
+		}
+		rc := r
+		rc.Fields = fields
+
+		reqLeaves := schema.RequiredLeaves(nodes, "")
+		reqBranches := schema.RequiredBranches(nodes, "")
+
+		var missing []string
+		for _, l := range reqLeaves {
+			found := false
+			ancestors := ancestorPaths(l.Path)
+			for p := range rc.Fields {
+				basePath, _, isMap := blueprint.ParseFieldPath(p)
+				norm := arrayIdxRE.ReplaceAllString(p, "[0]")
+				normBase := arrayIdxRE.ReplaceAllString(basePath, "[0]")
+				if norm == l.Path || normBase == l.Path || (isMap && normBase == l.Path) {
+					found = true
+					break
+				}
+				for _, anc := range ancestors {
+					if norm == anc || normBase == anc || (isMap && normBase == anc) {
+						found = true
+						break
+					}
+				}
+				if found {
+					break
+				}
+			}
+			if !found {
+				missing = append(missing, l.Path)
+			}
+		}
+
+		for _, br := range reqBranches {
+			found := false
+			for p := range rc.Fields {
+				basePath, _, _ := blueprint.ParseFieldPath(p)
+				norm := arrayIdxRE.ReplaceAllString(p, "[0]")
+				normBase := arrayIdxRE.ReplaceAllString(basePath, "[0]")
+				if norm == br.Path || normBase == br.Path ||
+					strings.HasPrefix(norm, br.Path+".") || strings.HasPrefix(normBase, br.Path+".") ||
+					strings.HasPrefix(norm, br.Path+"[") || strings.HasPrefix(normBase, br.Path+"[") {
+					found = true
+					break
+				}
+			}
+			if !found {
+				missing = append(missing, br.Path)
+			}
+		}
+
+		if len(missing) > 0 {
+			sort.Strings(missing)
+			return fmt.Errorf("resource %q: missing required field %q in %s spec.forProvider", r.Name, missing[0], crd.Kind)
+		}
+
+		// Verify that required fields are not wired to optional parameters without default values (CF-055 parity)
+		for path, fld := range rc.Fields {
+			if fld.From == "" {
+				continue
+			}
+			normPath := arrayIdxRE.ReplaceAllString(path, "[0]")
+			basePath, _, _ := blueprint.ParseFieldPath(normPath)
+			isRequired := false
+			for _, l := range reqLeaves {
+				if l.Path == normPath || l.Path == basePath {
+					isRequired = true
+					break
+				}
+			}
+			if !isRequired {
+				continue
+			}
+
+			// Check if source param is optional
+			if strings.HasPrefix(fld.From, "params.") {
+				paramName := strings.TrimPrefix(fld.From, "params.")
+				paramPath := strings.Split(paramName, ".")
+				rootParamName := paramPath[0]
+				if p, ok := b.Spec.XRD.Parameters[rootParamName]; ok {
+					if !p.Required && p.Default == "" {
+						return fmt.Errorf("resource %q: required field %q is wired to optional parameter %q without a default value", r.Name, path, rootParamName)
+					}
+				}
 			}
 		}
 	}
