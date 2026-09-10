@@ -118,14 +118,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       `compositions/<xrd plural>.<group>.yaml`.** `output.js:81` and `:617` synthesise the
       names from `metadata.name`; the served path is never fetched or shown. Show the real
       paths (relative to the workspace) or none.
-- [ ] **CF-101 — *(engine)* The Playwright suite runs against the developer's real schema cache:
-      `playwright.config.js:27` starts the engine without `--cache-dir`, so specs skip or pass
-      depending on what the host has cached and `make test-e2e` writes provider-nop into
-      `~/Library/Caches/compositionfactory`.** `tests/slice17-catalogue.spec.js:26` and
-      `slice16-provider-remove.spec.js:29` carry host-state `test.skip`s as the symptom; CI runs
-      cold and locally runs warm, which is one source of the "flaky e2e" pattern. The suite must
-      run against a scratch cache like it runs against a scratch document.
-      Brief: `docs/tasks/CF-101-e2e-suite-uses-real-schema-cache.md`.
 - [ ] **CF-102 — *(engine)* `cf kinds` and `cf fields` silently fall back to "every cached
       provider" when the blueprint fails to load, and never warn when a declared source is
       uncached, so they disagree with `cf gen` and the canvas on the same file.**

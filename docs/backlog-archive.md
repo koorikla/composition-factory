@@ -1,3 +1,11 @@
+- [x] **CF-101 — *(engine)* The Playwright suite runs against the developer's real schema cache:
+      `playwright.config.js:27` starts the engine without `--cache-dir`, so specs skip or pass
+      depending on what the host has cached and `make test-e2e` writes provider-nop into
+      `~/Library/Caches/compositionfactory`.**
+      Passed `--cache-dir ${scratchDir}/cache` in `playwright.config.js` webServer command, leaving
+      host cache untouched. Removed host-state skips in `slice16` and `slice17` and verified full
+      suite unconditionally green across multiple scratch runs.
+      — completed 2026-09-10
 - [x] **CF-110 — *(engine)* `POST /api/blueprint/resources`, `PUT /api/blueprint/resources/{name}`
       and the MCP `add_resource`/`update_resource` tools accept an unknown kind or a misspelt field
       path, answer success and persist it; `PUT /api/blueprint` on the same server rejects the
