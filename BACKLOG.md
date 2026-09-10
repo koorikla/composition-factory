@@ -110,13 +110,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       `compositions/<xrd plural>.<group>.yaml`.** `output.js:81` and `:617` synthesise the
       names from `metadata.name`; the served path is never fetched or shown. Show the real
       paths (relative to the workspace) or none.
-- [ ] **CF-116 — A mistyped provider ref in SOURCES shows `Server unavailable (HTTP 502 Bad
-      Gateway): fetch "…": GET https://ghcr.io/v2/…: MANIFEST_UNKNOWN … The backend server may be
-      restarting or unreachable.`** Residue of CF-059: `providers.go:193` answers 502 for a
-      registry lookup failure and `api.js:67-72` labels every 502 as the backend restarting, so
-      the advice is false and the raw Go error still reaches the user. Twice (J4). The message must
-      say the package was not found at that ref.
-      Brief: `docs/tasks/CF-116-provider-ref-502-guidance.md`.
 - [ ] **CF-117 — When Validate fails on a required field fed by an optional parameter, the error
       still says `missing required field "spec.forProvider.region"` and never names the parameter
       or the promote action.** Residue of CF-055: the picker badge and inspector warning exist,

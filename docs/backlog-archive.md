@@ -1,3 +1,9 @@
+- [x] **CF-116 — A mistyped provider ref in SOURCES shows `Server unavailable (HTTP 502 Bad
+      Gateway): fetch "…": GET https://ghcr.io/v2/…: MANIFEST_UNKNOWN … The backend server may be
+      restarting or unreachable.`**
+      Distinguished upstream package/registry fetch failures from backend unavailability in
+      `web-proto/js/api.js`, formatting errors with clear package-not-found / registry guidance.
+      — completed 2026-09-10
 - [x] **CF-102 — *(engine)* `cf kinds` and `cf fields` silently fall back to "every cached
       provider" when the blueprint fails to load, and never warn when a declared source is
       uncached, so they disagree with `cf gen` and the canvas on the same file.**
