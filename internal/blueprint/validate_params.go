@@ -62,8 +62,8 @@ func (b *Blueprint) validateParameters() error {
 		p, ok := x.Parameters["providerName"]
 		switch {
 		case !ok:
-			return fmt.Errorf("spec.xrd.parameters.providerName is required for a Namespaced XRD: " +
-				"run cf init (or cf serve without --blueprint) to scaffold one, or add: providerName: {type: string, required: true}")
+			return fmt.Errorf("spec.xrd.parameters.providerName is required for a Namespaced XRD with managed resources: " +
+				"add providerName: {type: string, required: true}")
 		case p.Type != "string":
 			return fmt.Errorf("spec.xrd.parameters.providerName: type must be string, got %q -- "+
 				"it is rendered into providerConfigRef.name, which is a Kubernetes object name", p.Type)
