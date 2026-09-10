@@ -1,3 +1,10 @@
+- [x] **CF-095 — The top bar and drawer show paths that do not exist: `blueprints/<name>.cf.yaml`
+      and `compositions/<name>.yaml`, while the real files are `<served path>` and
+      `compositions/<xrd plural>.<group>.yaml`.**
+      Exposed the served blueprint path via GET /api/version, formatted the top bar crumb with the
+      real served path, and updated the output drawer file explorer and breadcrumb to display
+      the real generated composition and XRD paths.
+      — completed 2026-09-10
 - [x] **CF-117 — When Validate fails on a required field fed by an optional parameter, the error
       still says `missing required field "spec.forProvider.region"` and never names the parameter
       or the promote action.**

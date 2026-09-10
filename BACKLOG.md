@@ -105,11 +105,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       one of the canvas's two headline actions non-functional and the tip is not actionable there.
       Either the image carries the `crossplane` CLI (static binary) or the canvas says the action
       is unavailable in this deployment and why.
-- [ ] **CF-095 — The top bar and drawer show paths that do not exist: `blueprints/<name>.cf.yaml`
-      and `compositions/<name>.yaml`, while the real files are `<served path>` and
-      `compositions/<xrd plural>.<group>.yaml`.** `output.js:81` and `:617` synthesise the
-      names from `metadata.name`; the served path is never fetched or shown. Show the real
-      paths (relative to the workspace) or none.
 
 ### P3
 
