@@ -2225,6 +2225,7 @@ function onBoxChange(e) {
   if (t.hasAttribute("data-pn")) {
     var oldName = t.getAttribute("data-pn"), newName = t.value.trim();
     if (!newName || newName === oldName) { render(); return; }
+    t.setAttribute("data-pn", newName);
     op(function () { return store.renameParameter(oldName, newName); })
       .then(function (r) { if (r === null) render(); });
     return;
@@ -2376,7 +2377,6 @@ export function init(rootEl, deps) {
     if (e.key === "Enter" && e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT")) {
       e.preventDefault();
       e.target.blur();
-      e.target.dispatchEvent(new Event("change", { bubbles: true }));
     }
   });
   box.addEventListener("input", function (e) {
