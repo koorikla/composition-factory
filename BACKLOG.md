@@ -62,6 +62,14 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       `blueprints/xpostgres.cf.yaml`, a path that does not exist, so the user cannot see that
       `xqueue.cf.yaml` is what changed. Undo covers the session only. The load must say which
       file it replaces, or write elsewhere.
+- [ ] **CF-107 — *(engine)* Omitting a CRD-required field (`region` on every `Bucket`) passes
+      `cf gen`, `PUT /api/blueprint` and `POST /api/generate` with exit 0 and no warning; only
+      `--validate` (a real render) catches it. [V]** `cf fields Bucket --required` already knows
+      `region string true`. Repro on `f45c2a8`, twice: delete the three `region:` lines from the
+      s3-bucket starter → gen exit 0, `grep -c region compositions/*.yaml` = 0. The API server
+      rejects the composed resource at apply time. README:10 claims strict validation at generate
+      time; generation must refuse, or at least warn, when an effective-required field has no
+      value, wire or guard. (CF-055 covered the optional-param-into-required case only.)
 - [ ] **CF-108 — *(engine)* `cf adopt <composition.yaml>` without the XRD alongside retypes every
       parameter as `string` and drops `required`, `default`, `enum` and `description` with no
       loss report; the lost `required` regenerates into an XRD that lets `region` be omitted.**

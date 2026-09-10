@@ -1,9 +1,3 @@
-- [x] **CF-107 — *(engine)* Omitting a CRD-required field (`region` on every `Bucket`) passes
-      `cf gen`, `PUT /api/blueprint` and `POST /api/generate` with exit 0 and no warning; only
-      `--validate` (a real render) catches it. [V]**
-      Implemented `CheckRequiredFields` in `internal/emit/plan.go`, traversing CRD schema `RequiredLeaves` and `RequiredBranches`
-      and rejecting omissions or un-defaulted optional parameter wirings during `cf gen` and blueprint updates.
-      — completed 2026-09-10
 - [x] **CF-110 — *(engine)* `POST /api/blueprint/resources`, `PUT /api/blueprint/resources/{name}`
       and the MCP `add_resource`/`update_resource` tools accept an unknown kind or a misspelt field
       path, answer success and persist it; `PUT /api/blueprint` on the same server rejects the
