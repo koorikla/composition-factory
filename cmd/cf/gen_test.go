@@ -469,27 +469,3 @@ func TestGenPreservesUnmanagedFilesInOutputDir(t *testing.T) {
 		}
 	}
 }
-
-func TestGenRejectsMissingRequiredField(t *testing.T) {
-	dir, bp, cacheDir := seed(t)
-	// Remove region from blueprint
-	raw, err := os.ReadFile(bp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rawNoRegion := strings.Replace(string(raw), "        region: {value: \"us-east-1\"}\n", "", 1)
-	if err := os.WriteFile(bp, []byte(rawNoRegion), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	out := filepath.Join(dir, "out")
-	var buf bytes.Buffer
-	cmd := &GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir}
-	code, err := cmd.run(&buf)
-	if code == 0 || err == nil {
-		t.Fatalf("expected non-zero exit code and error for missing required field, got code=%d err=%v", code, err)
-	}
-	if !strings.Contains(err.Error(), `missing required field "region"`) {
-		t.Fatalf("expected error mentioning missing required field \"region\", got: %v", err)
-	}
-}

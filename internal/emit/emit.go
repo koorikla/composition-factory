@@ -33,9 +33,6 @@ func Generate(b *blueprint.Blueprint, crds []schema.CRD, outDir string) ([]Outpu
 	if err := b.Validate(); err != nil {
 		return nil, err
 	}
-	if err := CheckRequiredFields(b, crds); err != nil {
-		return nil, err
-	}
 	name := b.Spec.XRD.Plural + "." + b.Spec.XRD.Group + ".yaml"
 
 	xrd, err := XRD(b)

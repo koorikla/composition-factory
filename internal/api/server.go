@@ -543,9 +543,6 @@ func (srv *server) validateBlueprintAgainstCRDs(b *blueprint.Blueprint, crds []s
 	if _, err := emit.Composition(b, crds); err != nil {
 		return err
 	}
-	if err := emit.CheckRequiredFields(b, crds); err != nil {
-		return err
-	}
 	if _, err := emit.XRD(b); err != nil {
 		return err
 	}

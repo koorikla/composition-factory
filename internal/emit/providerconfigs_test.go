@@ -246,7 +246,6 @@ func keysOf(m map[string][]byte) []string {
 
 func TestGenerateWritesOneProviderConfigPerFamily(t *testing.T) {
 	b := testBlueprint()
-	b.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
 	b.Spec.Sources = []blueprint.Source{
 		{Provider: "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"},
 	}
@@ -299,7 +298,6 @@ func TestGenerateWritesOneProviderConfigPerFamily(t *testing.T) {
 // outputs, extended to cover the sources-bearing path this feature adds.
 func TestGenerateProviderConfigsIsDeterministic(t *testing.T) {
 	b := testBlueprint()
-	b.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
 	b.Spec.Sources = []blueprint.Source{
 		{Provider: "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"},
 		{Provider: "ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0"},

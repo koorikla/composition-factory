@@ -1554,7 +1554,7 @@ func TestIfMatchRevisionControl(t *testing.T) {
 	}
 
 	// Request with matching If-Match returns 200
-	req, _ = http.NewRequest("PUT", "/api/blueprint/resources/main-queue", strings.NewReader(`{"name":"main-queue","kind":"Queue","fields":{"region":{"value":"eu-west-1"}}}`))
+	req, _ = http.NewRequest("PUT", "/api/blueprint/resources/main-queue", strings.NewReader(`{"name":"main-queue","kind":"Queue"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("If-Match", etag)
 	rec = httptest.NewRecorder()
