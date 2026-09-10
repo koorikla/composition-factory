@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 )
 
 func TestFunctionsYAMLListsBothFunctions(t *testing.T) {
@@ -27,7 +29,9 @@ func TestFunctionsYAMLListsBothFunctions(t *testing.T) {
 }
 
 func TestGenerateProducesThreeFilesAtStablePaths(t *testing.T) {
-	outs, err := Generate(testBlueprint(), testCRDs(t), "out")
+	b := testBlueprint()
+	b.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
+	outs, err := Generate(b, testCRDs(t), "out")
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -51,11 +55,15 @@ func TestGenerateIsDeterministic(t *testing.T) {
 	// Generate that failed for any reason returned nil from both calls and
 	// this test compared nothing to nothing and passed -- which is exactly
 	// what would have happened the moment Generate started validating.
-	a, err := Generate(testBlueprint(), testCRDs(t), "out")
+	b1 := testBlueprint()
+	b1.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
+	a, err := Generate(b1, testCRDs(t), "out")
 	if err != nil {
 		t.Fatalf("Generate (first run): %v", err)
 	}
-	b, err := Generate(testBlueprint(), testCRDs(t), "out")
+	b2 := testBlueprint()
+	b2.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
+	b, err := Generate(b2, testCRDs(t), "out")
 	if err != nil {
 		t.Fatalf("Generate (second run): %v", err)
 	}
@@ -79,6 +87,7 @@ func TestSourceHeaderDeterministic(t *testing.T) {
 		"",
 	} {
 		b := testBlueprint()
+		b.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
 		b.SetSourcePath(p)
 
 		outs, err := Generate(b, testCRDs(t), "out")
@@ -96,5 +105,17 @@ func TestSourceHeaderDeterministic(t *testing.T) {
 				t.Errorf("%s (sourcePath=%q): missing deterministic source header %q:\n%s", o.Path, p, want, string(o.Body))
 			}
 		}
+	}
+}
+
+func TestGenerateRejectsMissingRequiredField(t *testing.T) {
+	b := testBlueprint()
+	// testBlueprint() omits "region" on Queue, which is required by testCRDs(t)
+	_, err := Generate(b, testCRDs(t), "out")
+	if err == nil {
+		t.Fatal("expected error when required field is missing, got nil")
+	}
+	if !strings.Contains(err.Error(), `missing required field "region"`) {
+		t.Fatalf("expected error mentioning missing required field \"region\", got: %v", err)
 	}
 }
