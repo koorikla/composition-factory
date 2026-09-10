@@ -1,3 +1,8 @@
+- [x] **CF-129 — *(engine)* After one failed source fetch, every later write answers with the
+      bare document and never mentions that the declared source is still unloaded. [V]**
+      Removed suppression of failed sources on mutating writes in `internal/api/blueprint.go`,
+      guaranteeing subsequent writes continue to report missing declared sources and retry fetching.
+      — completed 2026-09-10
 - [x] **CF-101 — *(engine)* The Playwright suite runs against the developer's real schema cache:
       `playwright.config.js:27` starts the engine without `--cache-dir`, so specs skip or pass
       depending on what the host has cached and `make test-e2e` writes provider-nop into

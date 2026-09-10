@@ -98,15 +98,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       Round-Trip Rule: cf's own output must come back intact, or the loss must be named on screen.
 ### P2
 
-- [ ] **CF-129 — *(engine)* After one failed source fetch, every later write answers with the
-      bare document and never mentions that the declared source is still unloaded. [V]**
-      Residue of CF-087: `internal/api/blueprint.go:549` skips sources memoised in
-      `srv.failedSources`, so only the first `PUT /api/blueprint` reports
-      `failed to sync sources: unable to fetch source "…"`; the second and third return the
-      document as if all sources were served (`GET /api/providers` still `[]`). Twice on
-      `6fda5b6`, empty cache, no registry credentials. A write must report an unloaded declared
-      source every time until it loads, and the memo must not suppress a retry the caller asks for.
-      Brief: `docs/tasks/CF-129-failed-source-memo-suppresses-retry.md`.
 
 - [ ] **CF-093 — In the published image Validate always answers "validation check unavailable"
       and its fix tip prescribes `curl … | sh` in a container that has no curl and runs as
