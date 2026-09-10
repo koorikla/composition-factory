@@ -58,12 +58,7 @@ spec:
     name: main-queue-5
     provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
     when: ""
-  - fields:
-      region:
-        from: ""
-        raw: ""
-        template: ""
-        value: eu-north-1
+  - fields: {}
     forEach: ""
     kind: QueueRedriveAllowPolicy
     name: queue-redrive-allow-policy

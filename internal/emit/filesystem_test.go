@@ -19,7 +19,6 @@ import (
 func fsBlueprint() *blueprint.Blueprint {
 	b := testBlueprint()
 	b.Spec.Templates = map[string]string{"cf.tags": "team: platform\nxr: {{ .xr | quote }}\n"}
-	b.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-west-1"}
 	b.Spec.Resources[0].Fields["tags"] = blueprint.Field{Template: "cf.tags"}
 	b.Spec.Emit = &blueprint.Emit{TemplateSource: blueprint.TemplateSourceFileSystem}
 	return b
@@ -418,14 +417,11 @@ func TestFileSystemRefusesOversizedTemplateFile(t *testing.T) {
 // byte-identical to an absent spec.emit — the goldens already pin the
 // absent case; this pins that "Inline" is not a third shape.
 func TestInlineModeUnchangedByEmitKey(t *testing.T) {
-	b0 := testBlueprint()
-	b0.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
-	absent, err := Generate(b0, fsCRDs(t), "")
+	absent, err := Generate(testBlueprint(), fsCRDs(t), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	b := testBlueprint()
-	b.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
 	b.Spec.Emit = &blueprint.Emit{TemplateSource: blueprint.TemplateSourceInline}
 	explicit, err := Generate(b, fsCRDs(t), "")
 	if err != nil {
