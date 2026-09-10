@@ -59,6 +59,7 @@ export const store = {
     undoStack: [],
     redoStack: [],
     lastGenerate: null,
+    generateError: false,
   },
 
   /**
@@ -320,10 +321,13 @@ export const store = {
       const result = await api.generate(!!write);
       if (seq !== this._generateSeq) return result; // superseded — drop silently
       this.state.lastGenerate = result;
+      this.state.generateError = false;
       this.emit("generate", result);
       return result;
     } catch (e) {
       if (seq === this._generateSeq) {
+        this.state.lastGenerate = null;
+        this.state.generateError = true;
         this.emit("error", { status: e.status, message: e.message, source: "generate" });
       }
       return null;
