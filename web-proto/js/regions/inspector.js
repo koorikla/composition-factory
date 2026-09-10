@@ -138,6 +138,17 @@ function paramsOf(doc) {
   return doc && doc.spec && doc.spec.xrd && doc.spec.xrd.parameters || {};
 }
 
+function isParamLocked(doc, n) {
+  if (n !== "providerName") return false;
+  var xrd = doc && doc.spec && doc.spec.xrd || {};
+  var scope = xrd.scope || "Namespaced";
+  if (scope !== "Namespaced") return false;
+  var resources = doc && doc.spec && doc.spec.resources || [];
+  return resources.some(function (r) {
+    return r && r.provider !== "k8s";
+  });
+}
+
 function getKindsCached() {
   if (!kindsPromise) {
     kindsPromise = api.getKinds().catch(function (e) {
@@ -1164,7 +1175,7 @@ async function renderXRD() {
     return out;
   }
 
-  function paramDetailRow(n, p) {
+  function paramDetailRow(n, p, locked) {
     if (p.type === "object") {
       var mh = (p.properties && Object.keys(p.properties).length ? "" :
         '<div class="g" style="padding:2px 0 2px">no members \u2192 free-form map (string values); add members for a typed schema</div>');
@@ -1188,23 +1199,30 @@ async function renderXRD() {
       h += '<input class="tin" data-pe="' + esc(n) + '" value="' + esc((p.enum || []).join(",")) +
         '" placeholder="enum,values" title="Comma-separated allowed values" aria-label="Enum values" style="flex:1;min-width:60px">';
     }
-    h += '<button class="del" data-pd="' + esc(n) + '" title="Delete parameter">&#215;</button></div>';
+    h += '<button class="del" data-pd="' + esc(n) + '"' +
+      (locked ? ' disabled title="providerName is required for managed resources in Namespaced XRD" style="cursor:not-allowed;opacity:0.5"' : ' title="Delete parameter"') +
+      '>&#215;</button></div>';
     return h;
   }
 
   names.forEach(function (n) {
     var p = params[n] || {};
     var fo = fanOut(doc, n);
+    var locked = isParamLocked(doc, n);
     h += '<div class="fld"><div class="frow" style="margin-bottom:3px;gap:4px">' +
-      '<input class="tin bold" data-pn="' + esc(n) + '" value="' + esc(n) + '" aria-label="Parameter name" style="min-width:70px;flex:1 1 auto">' +
-      '<select class="tsel" data-pt="' + esc(n) + '" aria-label="Parameter type" style="flex:0 0 auto">' +
+      '<input class="tin bold" data-pn="' + esc(n) + '" value="' + esc(n) + '" aria-label="Parameter name"' +
+      (locked ? ' readonly title="providerName is required for managed resources in Namespaced XRD" style="min-width:70px;flex:1 1 auto;cursor:not-allowed;opacity:0.75"' : ' style="min-width:70px;flex:1 1 auto"') + '>' +
+      '<select class="tsel" data-pt="' + esc(n) + '" aria-label="Parameter type" style="flex:0 0 auto"' +
+      (locked ? ' disabled title="providerName type must be string" style="cursor:not-allowed"' : '') + '>' +
       PARAM_TYPES.map(function (t) {
         return "<option" + (t === p.type ? " selected" : "") + ">" + t + "</option>";
       }).join("") + "</select>" +
-      '<label class="g" style="display:inline-flex;align-items:center;gap:3px;font-size:11px;flex:0 0 auto;white-space:nowrap">' +
-      '<input type="checkbox" data-pr="' + esc(n) + '"' + (p.required ? " checked" : "") + ">req</label>" +
+      '<label class="g" style="display:inline-flex;align-items:center;gap:3px;font-size:11px;flex:0 0 auto;white-space:nowrap"' +
+      (locked ? ' title="providerName is required for managed resources in Namespaced XRD"' : '') + '>' +
+      '<input type="checkbox" data-pr="' + esc(n) + '"' + (p.required ? " checked" : "") +
+      (locked ? ' disabled style="cursor:not-allowed"' : '') + '>req</label>' +
       '<span class="fan" title="Wired into ' + fo + ' field' + (fo === 1 ? "" : "s") + '" style="flex:0 0 auto">&#215;' + fo + "</span></div>" +
-      paramDetailRow(n, p) + "</div>";
+      paramDetailRow(n, p, locked) + "</div>";
   });
   h += '<div style="padding:8px 12px 14px">' +
     '<button class="btn sm pri" id="addParamBtn">+ Add parameter</button></div>';
@@ -1826,7 +1844,9 @@ var boxClickActions = [
     selector: "[data-pd]",
     needsDoc: true,
     run: function (pd, doc) {
+      if (pd.hasAttribute("disabled")) return;
       var pn = pd.getAttribute("data-pd");
+      if (isParamLocked(doc, pn)) return;
       var fo = fanOut(doc, pn);
       if (fo > 0 && !confirm('Parameter "' + pn + '" is wired into ' + fo + " field" + (fo === 1 ? "" : "s") + ". Delete it?")) return;
       op(function () { return store.deleteParameter(pn); });
@@ -2224,6 +2244,10 @@ function onBoxChange(e) {
 
   if (t.hasAttribute("data-pn")) {
     var oldName = t.getAttribute("data-pn"), newName = t.value.trim();
+    if (t.hasAttribute("readonly") || t.hasAttribute("disabled") || isParamLocked(doc, oldName)) {
+      render();
+      return;
+    }
     if (!newName || newName === oldName) { render(); return; }
     t.setAttribute("data-pn", newName);
     op(function () { return store.renameParameter(oldName, newName); })
@@ -2277,7 +2301,12 @@ function onBoxChange(e) {
   var params = paramsOf(doc);
   for (var pAttr in paramFieldUpdaters) {
     if (t.hasAttribute(pAttr)) {
+      if (t.hasAttribute("disabled")) return;
       var paramName = t.getAttribute(pAttr);
+      if (isParamLocked(doc, paramName) && (pAttr === "data-pt" || pAttr === "data-pr")) {
+        render();
+        return;
+      }
       var patch = paramFieldUpdaters[pAttr](t);
       (function (pn, pPatch) {
         op(function () { return store.updateParameter(pn, paramFrom(params[pn], pPatch)); })

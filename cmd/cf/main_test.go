@@ -109,7 +109,7 @@ spec:
 	if err == nil {
 		t.Fatal("expected error for missing providerName, got nil")
 	}
-	if !strings.Contains(err.Error(), "cf init") {
-		t.Errorf("expected providerName error to mention 'cf init', got: %v", err)
+	if !strings.Contains(err.Error(), "add providerName") {
+		t.Errorf("expected providerName error to mention 'add providerName', got: %v", err)
 	}
 }
