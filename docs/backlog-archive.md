@@ -1,3 +1,9 @@
+- [x] **CF-117 — When Validate fails on a required field fed by an optional parameter, the error
+      still says `missing required field "spec.forProvider.region"` and never names the parameter
+      or the promote action.**
+      Enriched render validation missing required field diagnostics with the wiring parameter name,
+      noting that it is optional and suggesting marking it required or providing a default.
+      — completed 2026-09-10
 - [x] **CF-126 — "Remove provider" is reachable only ~1300 px down inside the expanded provider
       entry, after its full kind list; the row itself offers nothing on hover, click or
       right-click, and the control speaks of "the cache" for what the user sees as the blueprint's

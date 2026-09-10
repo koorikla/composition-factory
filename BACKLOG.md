@@ -110,11 +110,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       `compositions/<xrd plural>.<group>.yaml`.** `output.js:81` and `:617` synthesise the
       names from `metadata.name`; the served path is never fetched or shown. Show the real
       paths (relative to the workspace) or none.
-- [ ] **CF-117 — When Validate fails on a required field fed by an optional parameter, the error
-      still says `missing required field "spec.forProvider.region"` and never names the parameter
-      or the promote action.** Residue of CF-055: the picker badge and inspector warning exist,
-      the render-time message is unchanged (twice, J4). The message must name `params.region`,
-      say it is optional, and point at the promote action.
 
 ### P3
 
