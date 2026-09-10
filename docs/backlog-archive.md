@@ -1,3 +1,11 @@
+- [x] **CF-125 — `providerName` looks editable (name input, enabled `×`) but rename and delete
+      are reverted with `run cf serve without --blueprint to scaffold one`, a terminal instruction
+      shown in the browser.**
+      Locked `providerName` row in the XRD inspector when required for Namespaced XRD with managed
+      resources (marked name input `readonly`, disabled type, required checkbox, and delete button
+      with clear tooltip guidance), and updated `validate_params.go` error message to state requirements
+      without prescribing CLI commands in the browser.
+      — completed 2026-09-10
 - [x] **CF-124 — Every successful parameter add or rename is followed by a false error toast and
       a sticky inspector banner `rename parameter: "newParam" is not declared`.**
       Prevented duplicate parameter rename requests by removing redundant change event dispatch

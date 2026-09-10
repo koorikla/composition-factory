@@ -120,10 +120,6 @@ Earlier run reports: [docs/ux-runs/](docs/ux-runs/2026-09-04-m1-first-contact.md
       field is silently pruned …)` and the header chip sticks on `error` until the next successful
       edit.** J2 F6, twice. Output rows must not accept the drop, and a rejected write must not
       leave the chip in `error` for a document that is unchanged.
-- [ ] **CF-125 — `providerName` looks editable (name input, enabled `×`) but rename and delete
-      are reverted with `run cf serve without --blueprint to scaffold one`, a terminal instruction
-      shown in the browser.** J2 F8, three attempts. The row must read as locked and the message
-      must say why in canvas terms. (Same CLI-in-browser pattern as CF-088 and CF-091.)
 - [ ] **CF-126 — "Remove provider" is reachable only ~1300 px down inside the expanded provider
       entry, after its full kind list; the row itself offers nothing on hover, click or
       right-click, and the control speaks of "the cache" for what the user sees as the blueprint's
