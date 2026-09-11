@@ -139,12 +139,12 @@ function paramsOf(doc) {
 }
 
 function isParamLocked(doc, n) {
-  if (n !== "providerName") return false;
-  var xrd = doc && doc.spec && doc.spec.xrd || {};
+  if (!doc || !doc.spec || n !== "providerName") return false;
+  var xrd = doc.spec.xrd || {};
   var scope = xrd.scope || "Namespaced";
   if (scope !== "Namespaced") return false;
-  var resources = doc && doc.spec && doc.spec.resources || [];
-  return resources.some(function (r) {
+  var resources = doc.spec.resources || [];
+  return resources.length === 0 || resources.some(function (r) {
     return r && r.provider !== "k8s";
   });
 }
