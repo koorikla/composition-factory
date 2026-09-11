@@ -1,16 +1,34 @@
 # Oracle routines (Claude, cloud)
 
 Two routines, both claude-opus-5 in the Anthropic cloud with a fresh checkout of this
-repository and no MCP connectors (manage at https://claude.ai/code/routines):
+repository and no MCP connectors beyond the built-in GitHub one (manage at
+https://claude.ai/code/routines):
 
-| routine | schedule (UTC) | scope | cap |
-|---|---|---|---|
-| deep — `trig_015UP4NixEFmvaqUX96PTvZR` | `0 2 * * *` (05:00 Tallinn) | verify last 24 h of closes, two missions + one extra area, lint/lint-strict/test-short/govulncheck, dependabot PR/MR checks, drift spot-check | 2.5 h, ≤12 issues |
-| light — see routine list | `0 6,10,14,18,22 * * *` | verify closes of the last 5 h, lint/lint-strict/test-short, one mission to Generate, dependabot PR/MR checks | 75 min, ≤6 issues |
+| routine | schedule (UTC) | Tallinn | scope | cap |
+|---|---|---|---|---|
+| deep — `trig_015UP4NixEFmvaqUX96PTvZR` | `29 */7 * * *` → 00:29, 07:29, 14:29, 21:29 | 03:29, 10:29, 17:29, 00:29 | closes of the last 8 h, two missions + one extra area, all gates + govulncheck, Dependabot PRs, drift spot-check | 2.5 h, ≤12 issues |
+| light — `trig_01KVajeVJRv3MLTd3ed7KrQv` | `0 4,11,18 * * *` | 07:00, 14:00, 21:00 | closes of the last 4 h, lint/lint-strict/test-short, one mission to Generate | 75 min, ≤6 issues |
 
-Together they guarantee an oracle pass at least every 4 hours, so a half-fix merged by the
-hourly overnight driver is caught within one cycle. The deep run is described below; the
-light run is the same contract with the smaller scope in the table.
+Passes land at 00:29, 04:00, 07:29, 11:00, 14:29, 18:00, 21:29 UTC: never more than 3.5 h
+apart, never two at once (a deep run ends by :59+2 h, the next light starts ≥1 h later), and
+any five-hour window holds at most one deep and one light run. Mission rotation is per run
+slot (`(day*4 + hour/7) % 3`), so the four daily deep runs cover all three missions.
+
+## Constraints learned on 2026-09-11
+
+- **Quota.** Cloud runs draw on the owner's five-hour Claude session limit, shared with
+  interactive sessions. Every run on the first day died within seconds on
+  `rate_limit: rejected (five_hour)` because an interactive session had spent the window.
+  The timetable above spaces runs for that; heavy interactive work in the half hour before a
+  deep run means the routine may exit at once — that shows in the run log, not as a PR.
+- **Egress.** The cloud environment denies the ghcr.io blob CDN
+  (`pkg-containers.githubusercontent.com`), so `cf provider add` cannot fetch schemas there.
+  Missions run only as far as native kinds until a seeded schema cache is checked in
+  (CF-183, #68). Package-fetching tests and `make lint-strict`'s toolchain download fail for the
+  same reason; the prompts require a comparison with `main`'s CI before any gate is called red.
+- **Browser.** `npx playwright install` cannot download; the preinstalled Chromium under
+  `/opt/pw-browsers/` is used via `executablePath`. Docker is absent, so Validate reads
+  "unavailable" (CF-093) and missions stop at Generate.
 
 It re-verifies issues closed in the previous 24 h against real inputs, runs two rotating
 canvas missions (`.claude/skills/canvas-ux-tester/missions.md`, day-of-month % 3) with a
