@@ -1,10 +1,14 @@
 package adopt
 
 import (
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/emit"
+	"github.com/koorikla/compositionfactory/internal/schema"
 )
 
 // TestAdoptXRDlessConditionalWhen reproduces CF-168: adopting a Composition
@@ -468,5 +472,193 @@ spec:
 	}
 	if strings.Contains(imageReason, "optional") {
 		t.Errorf("image was already required, its reason must not mention optional; got: %q", imageReason)
+	}
+}
+
+// TestCF205AdoptNumberTypeFromCRDSchema tests CF-205 (#91):
+// When recovering parameter types in XRD-less adoption, check the wired target
+// fields against the loaded CRD schema store. If the field is an integer/number/boolean
+// according to the CRD schema, type the parameter as number (or boolean / integer)
+// instead of falling back to string.
+func TestCF205AdoptNumberTypeFromCRDSchema(t *testing.T) {
+	crdYAML := `
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: queues.sqs.aws.m.upbound.io
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names:
+    kind: Queue
+    plural: queues
+    categories: [managed]
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+                  maxMessageSize: {type: number}
+                  messageRetentionSeconds: {type: integer}
+                  fifoQueue: {type: boolean}
+              providerConfigRef:
+                type: object
+                required: [name]
+                properties:
+                  kind: {type: string}
+                  name: {type: string}
+          status:
+            properties:
+              atProvider:
+                properties:
+                  arn: {type: string}
+`
+	crds, err := schema.ParseCRDs([][]byte{[]byte(crdYAML)})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	providerRef := "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
+	cacheDir := t.TempDir()
+	store := cache.New(cacheDir)
+	if err := store.SaveCRDs(providerRef, "sha256:test", crds); err != nil {
+		t.Fatalf("SaveCRDs: %v", err)
+	}
+
+	goldenManifest, err := os.ReadFile("../../testdata/xqueue-pipeline.composition.golden.yaml")
+	if err != nil {
+		t.Fatalf("read golden composition: %v", err)
+	}
+
+	// 1. Adopt with schema store loaded.
+	bp, report, err := Adopt(goldenManifest, Options{
+		Store:    store,
+		CacheDir: cacheDir,
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	param, ok := bp.Spec.XRD.Parameters["maxMessageSize"]
+	if !ok {
+		t.Fatalf("parameter maxMessageSize missing from adopted blueprint")
+	}
+
+	// The wire targets Queue.forProvider.maxMessageSize, which has type "number" in the CRD schema.
+	if param.Type != "number" {
+		t.Errorf("maxMessageSize parameter type = %q, want %q", param.Type, "number")
+	}
+
+	// The loss report must NOT claim type could not be recovered.
+	for _, d := range report.Drops {
+		if d.Path == "xrd.parameters.maxMessageSize" && strings.Contains(d.Reason, "type") {
+			t.Errorf("unexpected type loss recorded for maxMessageSize: %s", d.Reason)
+		}
+	}
+
+	// Generation against the loaded CRDs must succeed without type incompatibility errors.
+	if _, err := emit.Generate(bp, crds, t.TempDir(), emit.WithDraftPreview()); err != nil {
+		t.Errorf("emit.Generate failed on adopted blueprint: %v", err)
+	}
+
+	// 2. Also test integer and boolean target fields recovery in XRD-less adoption.
+	intBoolManifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.platform.sparky.ee
+spec:
+  compositeTypeRef:
+    apiVersion: platform.sparky.ee/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          ---
+          apiVersion: sqs.aws.m.upbound.io/v1beta1
+          kind: Queue
+          metadata:
+            annotations:
+              {{ setResourceNameAnnotation "main-queue" }}
+          spec:
+            forProvider:
+              region: 'eu-north-1'
+              retention: {{ $spec.retentionPeriod }}
+              isFifo: {{ $spec.fifo }}
+            providerConfigRef:
+              kind: ClusterProviderConfig
+              name: {{ $spec.providerName }}
+`
+	// Adjust CRD for retentionPeriod and fifo fields
+	crdYAML2 := strings.Replace(crdYAML, "messageRetentionSeconds: {type: integer}", "retention: {type: integer}", 1)
+	crdYAML2 = strings.Replace(crdYAML2, "fifoQueue: {type: boolean}", "isFifo: {type: boolean}", 1)
+	crds2, err := schema.ParseCRDs([][]byte{[]byte(crdYAML2)})
+	if err != nil {
+		t.Fatalf("ParseCRDs 2: %v", err)
+	}
+	cacheDir2 := t.TempDir()
+	store2 := cache.New(cacheDir2)
+	if err := store2.SaveCRDs(providerRef, "sha256:test", crds2); err != nil {
+		t.Fatalf("SaveCRDs 2: %v", err)
+	}
+
+	bp2, report2, err := Adopt([]byte(intBoolManifest), Options{
+		Store:    store2,
+		CacheDir: cacheDir2,
+	})
+	if err != nil {
+		t.Fatalf("Adopt int/bool manifest failed: %v", err)
+	}
+
+	pRet := bp2.Spec.XRD.Parameters["retentionPeriod"]
+	if pRet.Type != "integer" {
+		t.Errorf("retentionPeriod parameter type = %q, want %q", pRet.Type, "integer")
+	}
+	pFifo := bp2.Spec.XRD.Parameters["fifo"]
+	if pFifo.Type != "boolean" {
+		t.Errorf("fifo parameter type = %q, want %q", pFifo.Type, "boolean")
+	}
+
+	for _, d := range report2.Drops {
+		if (d.Path == "xrd.parameters.retentionPeriod" || d.Path == "xrd.parameters.fifo") && strings.Contains(d.Reason, "type") {
+			t.Errorf("unexpected type loss recorded: path=%s reason=%s", d.Path, d.Reason)
+		}
+	}
+
+	// 3. Verify fallback behavior when store has no schema for the provider:
+	// falls back to string and records the loss text.
+	bpNoStore, reportNoStore, err := Adopt(goldenManifest, Options{})
+	if err != nil {
+		t.Fatalf("Adopt without store failed: %v", err)
+	}
+	pNoStore := bpNoStore.Spec.XRD.Parameters["maxMessageSize"]
+	if pNoStore.Type != "string" {
+		t.Errorf("without store, maxMessageSize type = %q, want string", pNoStore.Type)
+	}
+	foundLoss := false
+	for _, d := range reportNoStore.Drops {
+		if d.Path == "xrd.parameters.maxMessageSize" && strings.Contains(d.Reason, "type (rendered unquoted") {
+			foundLoss = true
+		}
+	}
+	if !foundLoss {
+		t.Errorf("expected type loss to be recorded when store has no schema, drops: %+v", reportNoStore.Drops)
 	}
 }

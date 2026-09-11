@@ -372,14 +372,14 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	// Rewrite status references with normalized names
 	rewriteStatusReferences(bp, nameMapping)
 
+	// 6. Deduplicate and collect provider sources
+	collectSources(bp, opts.DefaultProviderRef)
+
 	// No XRD alongside: the parameters above were inferred from their uses.
 	// Settle what the Composition proves and name the rest as lost.
 	if xrdDoc == nil {
-		applyXRDlessEvidence(bp, []map[string]any{compDoc}, synthesized, report, opts.BaseBlueprint)
+		applyXRDlessEvidence(bp, []map[string]any{compDoc}, synthesized, report, opts.BaseBlueprint, opts.Store)
 	}
-
-	// 6. Deduplicate and collect provider sources
-	collectSources(bp, opts.DefaultProviderRef)
 
 	// Ensure EnvironmentConfigs is not left declared without any environment keys
 	if len(bp.Spec.Environment) == 0 && len(bp.Spec.EnvironmentConfigs) > 0 {

@@ -319,12 +319,13 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	// 5. Rewrite status references and finalize sources
 	rewriteStatusReferences(bp, nameMapping)
 
+	collectSources(bp, defaultProvider)
+
 	// No XRD in the tree: the parameters were inferred from their uses in the
 	// Compositions. Settle what they prove and name the rest as lost.
 	if len(xrdDocs) == 0 {
-		applyXRDlessEvidence(bp, compDocs, synthesized, report, opts.BaseBlueprint)
+		applyXRDlessEvidence(bp, compDocs, synthesized, report, opts.BaseBlueprint, opts.Store)
 	}
-	collectSources(bp, defaultProvider)
 
 	if err := bp.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("validate adopted blueprint: %w", err)

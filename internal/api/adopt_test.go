@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -233,4 +234,73 @@ spec:
 	}
 
 	wg.Wait()
+}
+
+func TestCF205AdoptEndpointRecoversScalarTypeFromStore(t *testing.T) {
+	h, _ := testHandlerWithPath(t)
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-adopt-scalar
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: {{ $spec.region }}
+                maxMessageSize: {{ $spec.maxMessageSize }}
+`
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"manifest": manifest,
+		"persist":  true,
+		"provider": testProviderRef,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/blueprint/adopt", bytes.NewReader(reqBody))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var res adoptResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	param, ok := res.Blueprint.Spec.XRD.Parameters["maxMessageSize"]
+	if !ok {
+		t.Fatalf("parameter maxMessageSize missing from adopted blueprint")
+	}
+	// The CRD in testHandlerWithPath's store defines maxMessageSize as integer.
+	if param.Type != "integer" {
+		t.Errorf("parameter maxMessageSize type = %q, want integer", param.Type)
+	}
+
+	if res.LossReport != nil {
+		for _, d := range res.LossReport.Drops {
+			if d.Path == "xrd.parameters.maxMessageSize" && strings.Contains(d.Reason, "type") {
+				t.Errorf("unexpected type loss recorded: %s", d.Reason)
+			}
+		}
+	}
 }

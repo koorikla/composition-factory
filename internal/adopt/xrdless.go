@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
 // Adopting a Composition without its XRD loses the parameter schema: only the
@@ -22,24 +25,26 @@ import (
 
 // paramEvidence is what one Composition proves about one parameter.
 type paramEvidence struct {
-	refs     int  // value references (renders or patches)
-	quoted   int  // renders that are string-typed by construction
-	unquoted int  // renders that emit a bare scalar
-	guarded  bool // at least one hasKey guard or an optional patch
-	required bool // a patch with policy.fromFieldPath: Required
-	boolean  bool // bare truthiness condition (e.g. {{- if $spec.foo }})
-	integer  bool // integer repetition count (e.g. until (int $spec.foo))
+	refs       int    // value references (renders or patches)
+	quoted     int    // renders that are string-typed by construction
+	unquoted   int    // renders that emit a bare scalar
+	guarded    bool   // at least one hasKey guard or an optional patch
+	required   bool   // a patch with policy.fromFieldPath: Required
+	boolean    bool   // bare truthiness condition (e.g. {{- if $spec.foo }})
+	integer    bool   // integer repetition count (e.g. until (int $spec.foo))
+	schemaType string // CRD schema type from wired fields (e.g. "number", "integer", "boolean", "string")
 }
 
 var (
 	reEvidenceRef      = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)\s*(\|\s*quote\s*)?-?\}\}`)
 	reEvidenceGuard    = regexp.MustCompile(`hasKey\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']`)
 	reEvidenceIfSimple = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
-	reEvidenceIfEq     = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"[^"]*"\s*-?\}\}`)
+	reEvidenceIfEq     = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*"[^"]*"\s*-?\}\}`)
 	reEvidenceIfEqRev  = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+"[^"]*"\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
 	reEvidenceLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
 	reTemplateAction   = regexp.MustCompile(`\{\{-?(.*?)-?\}\}`)
 	reEvidenceAnySpec  = regexp.MustCompile(`(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)`)
+	reArrayIdx         = regexp.MustCompile(`\[\d+\]`)
 )
 
 // collectTemplateEvidence scans one go-templating template body.
@@ -187,10 +192,20 @@ func compositionEvidence(compDoc map[string]any, ev map[string]*paramEvidence) {
 // the Composition proves them and records, per parameter, what it could not
 // recover. synthesized names parameters the adopter added itself (providerName
 // for a Namespaced XRD); those are not a loss.
-func applyXRDlessEvidence(bp *blueprint.Blueprint, compDocs []map[string]any, synthesized map[string]bool, report *LossReport, baseBP *blueprint.Blueprint) {
+func applyXRDlessEvidence(bp *blueprint.Blueprint, compDocs []map[string]any, synthesized map[string]bool, report *LossReport, baseBP *blueprint.Blueprint, store *cache.Store) {
 	ev := make(map[string]*paramEvidence)
 	for _, doc := range compDocs {
 		compositionEvidence(doc, ev)
+	}
+
+	schemaTypes := inferParamSchemaTypes(bp, store)
+	for name, st := range schemaTypes {
+		e := ev[name]
+		if e == nil {
+			e = &paramEvidence{}
+			ev[name] = e
+		}
+		e.schemaType = st
 	}
 
 	names := make([]string, 0, len(bp.Spec.XRD.Parameters))
@@ -274,11 +289,23 @@ func settle(p *blueprint.Parameter, e *paramEvidence, path string, report *LossR
 		p.Type = "integer"
 	case e.quoted > 0 && e.unquoted == 0:
 		p.Type = "string"
+	case e.schemaType != "":
+		p.Type = e.schemaType
+		if baseParam != nil && isCompatibleScalar(e.schemaType, baseParam.Type) {
+			p.Type = baseParam.Type
+		}
 	case e.unquoted > 0:
-		lost = append(lost, "type (rendered unquoted, so it is not a string; written as string until the XRD or the CRD schema says which scalar it is)")
+		if baseParam != nil && (baseParam.Type == "number" || baseParam.Type == "integer" || baseParam.Type == "boolean") {
+			p.Type = baseParam.Type
+		} else {
+			p.Type = "string"
+			lost = append(lost, "type (rendered unquoted, so it is not a string; written as string until the XRD or the CRD schema says which scalar it is)")
+		}
 	default:
 		if p.Type == "boolean" || p.Type == "integer" {
 			// type was already recovered from template structure (e.g. conditional or loop bound)
+		} else if baseParam != nil && baseParam.Type != "" {
+			p.Type = baseParam.Type
 		} else {
 			p.Type = "string"
 			lost = append(lost, "type (written as string)")
@@ -287,6 +314,280 @@ func settle(p *blueprint.Parameter, e *paramEvidence, path string, report *LossR
 
 	lost = append(lost, "default", "enum", "description")
 	report.Record(path, "without the XRD, "+joinLost(lost)+" could not be recovered")
+}
+
+func walkNodes(nodes []*schema.Node, prefix string, out map[string]*schema.Node) {
+	for _, n := range nodes {
+		path := n.Name
+		if prefix != "" {
+			path = prefix + "." + n.Name
+		}
+		out[path] = n
+		if len(n.Children) == 0 {
+			continue
+		}
+		childPrefix := path
+		if n.Type == "array" {
+			childPrefix += "[0]"
+		}
+		walkNodes(n.Children, childPrefix, out)
+	}
+}
+
+func matchesProvider(group, provider string) bool {
+	if provider == "" || provider == blueprint.NativeProvider || provider == "cluster" {
+		return true
+	}
+	p := provider
+	if idx := strings.LastIndex(p, "/"); idx != -1 {
+		p = p[idx+1:]
+	}
+	if idx := strings.Index(p, ":"); idx != -1 {
+		p = p[:idx]
+	}
+	p = strings.TrimPrefix(p, "provider-")
+	parts := strings.Split(p, "-")
+	for _, part := range parts {
+		if !strings.Contains(group, part) {
+			return false
+		}
+	}
+	return true
+}
+
+func resolveResourceCRD(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) *schema.CRD {
+	objectRooted := r.Provider == blueprint.NativeProvider ||
+		strings.HasSuffix(r.Provider, ".yaml") || strings.HasSuffix(r.Provider, ".yml")
+	if objectRooted {
+		for i := range crds {
+			if crds[i].Native && crds[i].Kind == r.Kind {
+				return &crds[i]
+			}
+		}
+		return nil
+	}
+
+	var fallback *schema.CRD
+	var candidates []*schema.CRD
+	var nativeCandidate *schema.CRD
+
+	for i := range crds {
+		c := &crds[i]
+		if c.Kind != r.Kind {
+			continue
+		}
+		if c.Native {
+			if r.Provider == "cluster" && nativeCandidate == nil {
+				nativeCandidate = c
+			}
+			continue
+		}
+		if !c.IsManaged() {
+			continue
+		}
+		if c.Namespaced() == wantNamespaced {
+			candidates = append(candidates, c)
+		} else {
+			fallback = c
+		}
+	}
+
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
+	if len(candidates) > 1 {
+		for _, c := range candidates {
+			if r.Provider != "" && matchesProvider(c.Group, r.Provider) {
+				return c
+			}
+		}
+		return candidates[0]
+	}
+	if r.Provider == "cluster" && nativeCandidate != nil {
+		return nativeCandidate
+	}
+	if fallback != nil {
+		return fallback
+	}
+	return nil
+}
+
+func reconcileSchemaTypes(types []string) string {
+	if len(types) == 0 {
+		return ""
+	}
+	hasNumber := false
+	hasInteger := false
+	hasBoolean := false
+	hasString := false
+	for _, t := range types {
+		switch t {
+		case "number":
+			hasNumber = true
+		case "integer":
+			hasInteger = true
+		case "boolean":
+			hasBoolean = true
+		case "string":
+			hasString = true
+		}
+	}
+	nonStringCount := 0
+	if hasNumber || hasInteger {
+		nonStringCount++
+	}
+	if hasBoolean {
+		nonStringCount++
+	}
+	if nonStringCount > 1 {
+		return ""
+	}
+	if hasInteger {
+		return "integer"
+	}
+	if hasNumber {
+		return "number"
+	}
+	if hasBoolean {
+		return "boolean"
+	}
+	if hasString {
+		return "string"
+	}
+	return ""
+}
+
+func isCompatibleScalar(schemaType, paramType string) bool {
+	if paramType == "" {
+		return false
+	}
+	if schemaType == paramType {
+		return true
+	}
+	if schemaType == "number" && paramType == "integer" {
+		return true
+	}
+	if schemaType == "string" {
+		return paramType == "string" || paramType == "integer" || paramType == "number" || paramType == "boolean"
+	}
+	return false
+}
+
+func inferParamSchemaTypes(bp *blueprint.Blueprint, store *cache.Store) map[string]string {
+	if bp == nil {
+		return nil
+	}
+	var crds []schema.CRD
+	if store != nil {
+		for _, s := range bp.Spec.Sources {
+			if s.Provider != "" {
+				if got, err := store.Load(s.Provider); err == nil {
+					crds = append(crds, got...)
+				}
+			}
+		}
+		if len(crds) == 0 {
+			if list, err := store.List(); err == nil {
+				for _, ref := range list {
+					if got, err := store.Load(ref); err == nil {
+						crds = append(crds, got...)
+					}
+				}
+			}
+		}
+	}
+	if native, err := k8s.Kinds(); err == nil {
+		crds = append(crds, native...)
+	}
+	if len(crds) == 0 {
+		return nil
+	}
+
+	wantNamespaced := bp.Spec.XRD.Scope == "Namespaced" || bp.Spec.XRD.Scope == ""
+	paramTypes := make(map[string][]string)
+
+	for _, r := range bp.Spec.Resources {
+		crd := resolveResourceCRD(crds, r, wantNamespaced)
+		if crd == nil {
+			continue
+		}
+
+		fieldNodes, err := crd.FieldTree()
+		knownFields := make(map[string]*schema.Node)
+		if err == nil {
+			walkNodes(fieldNodes, "", knownFields)
+		}
+
+		envNodes, err := crd.Envelope()
+		knownEnvelope := make(map[string]*schema.Node)
+		if err == nil {
+			walkNodes(envNodes, "", knownEnvelope)
+		}
+
+		for p, f := range r.Fields {
+			if f.From == "" {
+				continue
+			}
+			param, member, ok := blueprint.ParamRef(f.From)
+			if !ok {
+				continue
+			}
+			fullName := param
+			if member != "" {
+				fullName = param + "." + member
+			}
+			basePath, _, isMap := blueprint.ParseFieldPath(p)
+			lookup := reArrayIdx.ReplaceAllString(p, "[0]")
+			if isMap {
+				lookup = reArrayIdx.ReplaceAllString(basePath, "[0]")
+			}
+			if isMap {
+				paramTypes[fullName] = append(paramTypes[fullName], "string")
+			} else if node := knownFields[lookup]; node != nil && node.Type != "" {
+				paramTypes[fullName] = append(paramTypes[fullName], node.Type)
+			}
+		}
+
+		for p, f := range r.Envelope {
+			if f.From == "" {
+				continue
+			}
+			param, member, ok := blueprint.ParamRef(f.From)
+			if !ok {
+				continue
+			}
+			fullName := param
+			if member != "" {
+				fullName = param + "." + member
+			}
+			if node := knownEnvelope[p]; node != nil && node.Type != "" {
+				paramTypes[fullName] = append(paramTypes[fullName], node.Type)
+			}
+		}
+
+		for _, f := range r.Annotations {
+			if f.From == "" {
+				continue
+			}
+			param, member, ok := blueprint.ParamRef(f.From)
+			if !ok {
+				continue
+			}
+			fullName := param
+			if member != "" {
+				fullName = param + "." + member
+			}
+			paramTypes[fullName] = append(paramTypes[fullName], "string")
+		}
+	}
+
+	res := make(map[string]string)
+	for name, types := range paramTypes {
+		if reconciled := reconcileSchemaTypes(types); reconciled != "" {
+			res[name] = reconciled
+		}
+	}
+	return res
 }
 
 func joinLost(items []string) string {

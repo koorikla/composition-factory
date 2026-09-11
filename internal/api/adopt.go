@@ -53,6 +53,7 @@ func (srv *server) handleAdoptBlueprint(w http.ResponseWriter, r *http.Request) 
 		BaseBlueprint:      req.BaseBlueprint,
 	}
 	if srv.Store != nil {
+		opts.Store = srv.Store
 		opts.CacheDir = srv.Store.Root
 	}
 	if opts.BaseBlueprint == nil && srv.Blueprint != "" {
