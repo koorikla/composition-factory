@@ -86,7 +86,7 @@ test('an unused environment key can be removed from the SHARED rail', async ({ p
   expect(docAfter.spec.environment?.scratch).toBeUndefined()
 })
 
-test('removing a wired environment key is refused naming the wire', async ({ page, request }) => {
+test('removing a wired environment key unwires referencers and removes it from the SHARED rail', async ({ page, request }) => {
   // Pre-seed an environment key wired to a valid resource field
   const docBefore = await (await request.get(ENGINE + '/api/blueprint')).json()
   docBefore.spec.environment = {
@@ -108,13 +108,32 @@ test('removing a wired environment key is refused naming the wire', async ({ pag
   page.on('dialog', d => d.accept())
   await page.click('[data-env-del="sharedRegion"]')
 
-  // Refusal alert naming the wire
-  const alert = page.locator('#region-palette [role="alert"]').first()
-  await expect(alert).toBeVisible()
-  const alertText = await alert.innerText()
-  expect(alertText).toMatch(/work-queue\.region/)
+  // Key is removed from rail
+  await expect(page.locator('#lrail').getByText('$env.sharedRegion')).toHaveCount(0)
 
-  // Key is preserved in doc
+  // Key is removed from blueprint and referencing wire is removed
   const docAfter = await (await request.get(ENGINE + '/api/blueprint')).json()
-  expect(docAfter.spec.environment.sharedRegion).toBeDefined()
+  expect(docAfter.spec.environment?.sharedRegion).toBeUndefined()
+  expect(docAfter.spec.resources[0].fields?.region?.from).toBeUndefined()
+})
+
+test('cancelling unwire dialog for a wired environment key keeps it', async ({ page, request }) => {
+  const docBefore = await (await request.get(ENGINE + '/api/blueprint')).json()
+  docBefore.spec.environment = {
+    sharedRegion: { type: 'string', default: 'us-east-1' },
+  }
+  docBefore.spec.resources[0].fields.region = { from: 'env.sharedRegion' }
+  const putRes = await request.put(ENGINE + '/api/blueprint', { data: docBefore })
+  expect(putRes.ok()).toBeTruthy()
+
+  await page.goto('/')
+  await page.click('#rtabs button[data-r="shared"]')
+
+  page.on('dialog', d => d.dismiss())
+  await page.click('[data-env-del="sharedRegion"]')
+
+  // Key remains in blueprint
+  const docAfter = await (await request.get(ENGINE + '/api/blueprint')).json()
+  expect(docAfter.spec.environment?.sharedRegion).toBeDefined()
+  expect(docAfter.spec.resources[0].fields?.region?.from).toBe('env.sharedRegion')
 })
