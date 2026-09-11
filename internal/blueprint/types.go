@@ -294,16 +294,19 @@ func (p *Parameter) UnmarshalJSON(data []byte) error {
 // EnvironmentKey declares one key and type in spec.environment.
 type EnvironmentKey struct {
 	Type        string `json:"type"`
+	Required    bool   `json:"required,omitempty"`
 	Description string `json:"description,omitempty"`
 	Default     string `json:"default,omitempty"`
 }
 
-// UnmarshalJSON permits scalar values (booleans, numbers, strings) for Default.
+// UnmarshalJSON permits scalar values (booleans, numbers, strings) for Default and Value.
 func (k *EnvironmentKey) UnmarshalJSON(data []byte) error {
 	type rawKey struct {
 		Type        string `json:"type"`
+		Required    bool   `json:"required,omitempty"`
 		Description string `json:"description,omitempty"`
 		Default     any    `json:"default,omitempty"`
+		Value       any    `json:"value,omitempty"`
 	}
 	var raw rawKey
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -312,9 +315,14 @@ func (k *EnvironmentKey) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	k.Type = raw.Type
+	k.Required = raw.Required
 	k.Description = raw.Description
-	if raw.Default != nil {
-		switch val := raw.Default.(type) {
+	defVal := raw.Default
+	if defVal == nil && raw.Value != nil {
+		defVal = raw.Value
+	}
+	if defVal != nil {
+		switch val := defVal.(type) {
 		case string:
 			k.Default = val
 		case bool:

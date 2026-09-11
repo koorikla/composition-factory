@@ -19,7 +19,7 @@
 import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
-import { fanOut, parseFrom } from "../wires.js";
+import { fanOut, parseFrom, listWires } from "../wires.js";
 import { mapResourceCoordinates } from "../utils.js";
 
 function isParamRequired(params, pName) {
@@ -1197,7 +1197,15 @@ async function renderXRD() {
     '<select class="tsel" id="xs" aria-label="Scope">' +
     '<option' + (xrd.scope === "Namespaced" ? " selected" : "") + ">Namespaced</option>" +
     '<option' + (xrd.scope === "Cluster" ? " selected" : "") + ">Cluster</option></select></div>" +
-    '<div class="g">' + esc((xrd.plural || "") + "." + (xrd.group || "")) + " &#183; " + esc(xrd.version) + "</div></div>" +
+    '<div class="g">' + esc((xrd.plural || "") + "." + (xrd.group || "")) + " &#183; " + esc(xrd.version) + "</div></div>";
+
+  var env = (doc && doc.spec && doc.spec.environment) || {};
+  var envKeysCount = Object.keys(env).length;
+  h += '<div class="env-summary-row" style="padding:7px 12px 6px;border-bottom:1px solid var(--rule);font-size:11px;display:flex;align-items:center;gap:6px">' +
+    '<span style="color:var(--ink)">Environment: ' + envKeysCount + ' key' + (envKeysCount === 1 ? '' : 's') + ' declared</span>' +
+    '<span class="sp" style="flex:1"></span>' +
+    '<button class="btn sm link" data-tab-switch="shared" style="color:var(--shared);font-weight:600;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font-size:11px">SHARED</button>' +
+    '</div>' +
     '<div style="padding:7px 12px 3px"><span class="lbl">Parameters (' + names.length + ")</span></div>";
 
   var MEMBER_TYPES = ["string", "integer", "number", "boolean", "object"];
@@ -1468,6 +1476,303 @@ function restoreFocusedEdit(snap) {
   }
 }
 
+/* ---------------- EnvironmentConfig inspector ---------------- */
+
+function getEnvConfigStep(doc) {
+  var steps = (doc && doc.spec && doc.spec.pipeline) || [];
+  for (var i = 0; i < steps.length; i++) {
+    if (steps[i].functionRef === "function-environment-configs" || steps[i].name === "environment-configs") {
+      return steps[i];
+    }
+  }
+  return null;
+}
+
+function parseEnvSelection(doc) {
+  var step = getEnvConfigStep(doc);
+  if (!step || !step.input) {
+    return { mode: "Reference", name: "default", labels: "" };
+  }
+  var input = step.input;
+  if (input.indexOf("type: Selector") !== -1 || input.indexOf("selector:") !== -1) {
+    var match = input.match(/matchLabels:\s*\n((?:\s+[\w./-]+:\s*.*(?:\n|$))*)/);
+    var labelsArr = [];
+    if (match && match[1]) {
+      var lines = match[1].split("\n");
+      lines.forEach(function (l) {
+        var m = l.match(/^\s*([\w./-]+):\s*(.*)$/);
+        if (m) labelsArr.push(m[1].trim() + "=" + m[2].trim());
+      });
+    }
+    return { mode: "Selector", name: "", labels: labelsArr.join(", ") };
+  }
+  var nameMatch = input.match(/name:\s*([^\s\n]+)/);
+  var name = nameMatch ? nameMatch[1].trim().replace(/^["']|["']$/g, "") : "default";
+  return { mode: "Reference", name: name, labels: "" };
+}
+
+function updateEnvSelection(mode, name, labels) {
+  return op(function () {
+    return store.replaceDoc(function (d) {
+      d.spec = d.spec || {};
+      d.spec.pipeline = d.spec.pipeline || [];
+      var step = null;
+      for (var i = 0; i < d.spec.pipeline.length; i++) {
+        if (d.spec.pipeline[i].functionRef === "function-environment-configs" || d.spec.pipeline[i].name === "environment-configs") {
+          step = d.spec.pipeline[i];
+          break;
+        }
+      }
+      if (!step) {
+        step = {
+          name: "environment-configs",
+          functionRef: "function-environment-configs",
+          package: "xpkg.crossplane.io/crossplane-contrib/function-environment-configs:v0.4.0",
+          position: "before"
+        };
+        d.spec.pipeline.unshift(step);
+      }
+      if (mode === "Selector") {
+        var labelsObj = {};
+        if (typeof labels === "string" && labels.trim()) {
+          labels.split(",").forEach(function (pair) {
+            var parts = pair.split("=");
+            if (parts.length === 2 && parts[0].trim()) {
+              labelsObj[parts[0].trim()] = parts[1].trim();
+            }
+          });
+        }
+        var lblKeys = Object.keys(labelsObj);
+        var lblLines = lblKeys.map(function (k) {
+          return "        " + k + ": " + labelsObj[k];
+        }).join("\n");
+        step.input = "apiVersion: environmentconfigs.fn.crossplane.io/v1beta1\nkind: Input\nspec:\n  environmentConfigs:\n  - type: Selector\n    selector:\n      matchLabels:\n" + (lblLines ? lblLines + "\n" : "        environment: default\n");
+      } else {
+        step.input = "apiVersion: environmentconfigs.fn.crossplane.io/v1beta1\nkind: Input\nspec:\n  environmentConfigs:\n  - type: Reference\n    ref:\n      name: " + (name.trim() || "default") + "\n";
+      }
+    });
+  }, "unable to update environment selection");
+}
+
+function setEnvKeyField(keyName, field, value) {
+  return op(function () {
+    return store.replaceDoc(function (d) {
+      d.spec = d.spec || {};
+      d.spec.environment = d.spec.environment || {};
+      var k = d.spec.environment[keyName] || { type: "string" };
+      if (field === "type") {
+        k.type = value;
+      } else if (field === "required") {
+        k.required = !!value;
+      } else if (field === "value") {
+        k.default = value;
+        delete k.value;
+      }
+      d.spec.environment[keyName] = k;
+    });
+  }, "unable to update environment key");
+}
+
+function deleteEnvKey(keyName) {
+  return op(function () {
+    return store.replaceDoc(function (d) {
+      if (d.spec && d.spec.environment) {
+        delete d.spec.environment[keyName];
+        if (Object.keys(d.spec.environment).length === 0) {
+          delete d.spec.environment;
+        }
+      }
+    });
+  }, "unable to delete environment key");
+}
+
+function addEnvKey(keyName, keyObj) {
+  return op(function () {
+    return store.replaceDoc(function (d) {
+      d.spec = d.spec || {};
+      d.spec.environment = d.spec.environment || {};
+      d.spec.environment[keyName] = keyObj || { type: "string" };
+    });
+  }, "unable to add environment key");
+}
+
+function removeWire(resName, wirePath, isEnv, isAnn) {
+  return op(function () {
+    return store.replaceDoc(function (d) {
+      var res = (d.spec && d.spec.resources || []).find(function (r) { return r.name === resName; });
+      if (!res) return;
+      if (isAnn) {
+        var key = wirePath.replace(/^annotations\./, "");
+        if (res.annotations && res.annotations[key]) {
+          delete res.annotations[key];
+          if (!Object.keys(res.annotations).length) delete res.annotations;
+        }
+      } else if (isEnv) {
+        var envPath = wirePath.replace(/^envelope\./, "");
+        if (res.envelope && res.envelope[envPath]) {
+          delete res.envelope[envPath];
+          if (!Object.keys(res.envelope).length) delete res.envelope;
+        }
+      } else {
+        if (res.fields && res.fields[wirePath]) {
+          delete res.fields[wirePath];
+        }
+      }
+    });
+  }, "unable to remove wire");
+}
+
+function countEmptyValues(doc) {
+  var env = (doc && doc.spec && doc.spec.environment) || {};
+  var emptyCount = 0;
+  Object.keys(env).forEach(function (k) {
+    var item = env[k] || {};
+    var val = item.value !== undefined && item.value !== "" ? item.value : (item.default !== undefined ? item.default : "");
+    if (val === "" || val === null || val === undefined) {
+      emptyCount++;
+    }
+  });
+  return emptyCount;
+}
+
+function generateEnvironmentConfigYAML(doc, selInfo) {
+  var env = (doc && doc.spec && doc.spec.environment) || {};
+  var keys = Object.keys(env).sort();
+  var name = (selInfo && selInfo.mode === "Reference" && selInfo.name) ? selInfo.name : "default";
+  var lines = [
+    "apiVersion: apiextensions.crossplane.io/v1beta1",
+    "kind: EnvironmentConfig",
+    "metadata:",
+    "  name: " + name
+  ];
+  if (selInfo && selInfo.mode === "Selector" && selInfo.labels) {
+    lines.push("  labels:");
+    selInfo.labels.split(",").forEach(function (pair) {
+      var parts = pair.split("=");
+      if (parts.length === 2 && parts[0].trim()) {
+        lines.push("    " + parts[0].trim() + ": " + JSON.stringify(parts[1].trim()));
+      }
+    });
+  }
+  lines.push("data:");
+  if (keys.length === 0) {
+    lines.push("  {}");
+  } else {
+    keys.forEach(function (k) {
+      var item = env[k] || {};
+      var val = item.value !== undefined && item.value !== "" ? item.value : (item.default !== undefined ? item.default : "");
+      if (item.type === "integer" || item.type === "number" || item.type === "boolean") {
+        if (val === "" || val === null || val === undefined) {
+          lines.push('  ' + k + ': ""');
+        } else {
+          lines.push('  ' + k + ': ' + val);
+        }
+      } else {
+        lines.push('  ' + k + ': ' + JSON.stringify(val || ""));
+      }
+    });
+  }
+  return lines.join("\n");
+}
+
+async function renderEnvironment() {
+  var myToken = renderToken;
+  var doc = store.state.doc;
+  if (!doc) return;
+  var env = (doc.spec && doc.spec.environment) || {};
+  var envKeys = Object.keys(env).sort();
+  var selInfo = parseEnvSelection(doc);
+  var configName = selInfo.mode === "Reference" ? (selInfo.name || "default") : (selInfo.labels || "selector");
+
+  var h = warnHtml();
+  h += '<div class="insp-t"><div class="k"><span style="color:var(--shared)">EnvironmentConfig</span>' +
+    ' <span style="color:var(--faint);font-weight:400">' + esc(configName) + '</span></div>' +
+    '<div class="g">apiextensions.crossplane.io/v1beta1</div></div>';
+
+  // Selection section
+  h += '<div style="padding:10px 12px 8px;border-bottom:1px solid var(--rule)">' +
+    '<div class="lbl" style="margin-bottom:4px">Selection</div>' +
+    '<div class="frow" style="gap:6px">' +
+    '<select class="tsel" id="envSelMode" aria-label="Selection mode" style="flex:0 0 auto">' +
+    '<option value="Reference"' + (selInfo.mode === "Reference" ? " selected" : "") + '>Reference (by name)</option>' +
+    '<option value="Selector"' + (selInfo.mode === "Selector" ? " selected" : "") + '>Selector (by labels)</option>' +
+    '</select>' +
+    (selInfo.mode === "Selector" ?
+      '<input class="tin" id="envSelLabels" data-env-selection-labels="1" value="' + esc(selInfo.labels) + '" placeholder="key=value, ..." aria-label="EnvironmentConfig matchLabels" style="flex:1">' :
+      '<input class="tin" id="envSelName" data-env-selection-name="1" value="' + esc(selInfo.name) + '" placeholder="default" aria-label="EnvironmentConfig name" style="flex:1">') +
+    '</div></div>';
+
+  // Keys section
+  h += '<div style="padding:10px 12px 4px"><span class="lbl">Keys (' + envKeys.length + ')</span></div>';
+  var allWires = listWires(doc);
+  var ENV_TYPES = ["string", "integer", "number", "boolean"];
+
+  if (envKeys.length === 0) {
+    h += '<div class="g" style="padding:8px 12px">No environment keys declared.</div>';
+  } else {
+    envKeys.forEach(function (k) {
+      var item = env[k] || {};
+      var ty = item.type || "string";
+      var req = !!item.required;
+      var val = item.value !== undefined && item.value !== "" ? item.value : (item.default !== undefined ? item.default : "");
+      var wires = allWires.filter(function (w) { return w.kind === "env" && w.envKey === k; });
+
+      h += '<div class="fld" data-env-key="' + esc(k) + '" style="padding:8px 12px;border-bottom:1px solid var(--rule)">' +
+        '<div class="frow" style="margin-bottom:4px;gap:4px">' +
+        '<input class="tin bold" data-env-name="' + esc(k) + '" value="' + esc(k) + '" readonly style="flex:1;min-width:70px" aria-label="Key name">' +
+        '<select class="tsel" data-env-type="' + esc(k) + '" aria-label="Type" style="flex:0 0 auto">' +
+        ENV_TYPES.map(function (t) {
+          return '<option value="' + t + '"' + (t === ty ? ' selected' : '') + '>' + t + '</option>';
+        }).join('') +
+        '</select>' +
+        '<label class="g" style="display:inline-flex;align-items:center;gap:3px;font-size:11px;flex:0 0 auto;white-space:nowrap">' +
+        '<input type="checkbox" data-env-req="' + esc(k) + '"' + (req ? ' checked' : '') + '>req</label>' +
+        '<input class="tin" data-env-val="' + esc(k) + '" value="' + esc(val) + '" placeholder="value" aria-label="Value" style="flex:1;min-width:60px">' +
+        '<button class="del" data-env-del-key="' + esc(k) + '" title="Delete key">&#215;</button>' +
+        '</div>';
+
+      // Used by section
+      h += '<div class="env-used-by" style="font-size:11px;padding:2px 0 2px 2px">';
+      if (wires.length === 0) {
+        h += '<span class="g">Not used by any resource</span>';
+      } else {
+        h += '<div class="g" style="margin-bottom:2px;font-weight:600">Used by:</div>';
+        wires.forEach(function (w) {
+          var wireTarget = w.resource + "." + w.path;
+          h += '<div class="env-wire-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 0">' +
+            '<span class="mono" style="color:var(--shared)">' + esc(wireTarget) + '</span>' +
+            '<button class="del" data-env-wire-del="1" data-wire-res="' + esc(w.resource) + '" data-wire-path="' + esc(w.path) + '"' +
+            (w.isEnvelope ? ' data-wire-env="1"' : '') +
+            (w.isAnnotation ? ' data-wire-ann="1"' : '') +
+            ' title="Remove wire">&#215;</button></div>';
+        });
+      }
+      h += '</div></div>';
+    });
+  }
+
+  h += '<div style="padding:8px 12px 14px">' +
+    '<button class="btn sm pri" id="envAddKeyBtn">+ Add key</button></div>';
+
+  // Generated file section
+  var emptyCount = countEmptyValues(doc);
+  var generatedYAML = generateEnvironmentConfigYAML(doc, selInfo);
+
+  h += '<div class="env-gen-file" style="margin:8px 12px 16px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--rule);border-radius:6px">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
+    '<span class="lbl" style="font-size:11px">Generated Manifest</span>' +
+    '<span class="env-empty-count" style="font-size:11px;color:' + (emptyCount > 0 ? 'var(--warn, #e67e22)' : 'var(--ok, #27ae60)') + '">' +
+    emptyCount + ' empty value' + (emptyCount === 1 ? '' : 's') + '</span>' +
+    '</div>' +
+    '<pre style="margin:0;padding:8px;background:var(--sunk, #18181b);color:var(--code-ink, #f4f4f5);border-radius:4px;font-family:var(--mono);font-size:10.5px;overflow-x:auto;line-height:1.4"><code>' + esc(generatedYAML) + '</code></pre>' +
+    '</div>';
+
+  if (myToken !== renderToken) return;
+  var __snap = snapshotFocusedEdit();
+  box.innerHTML = h;
+  restoreFocusedEdit(__snap);
+}
+
 function render() {
   if (!box) return;
   renderToken++;
@@ -1475,6 +1780,7 @@ function render() {
   if (!doc) { box.innerHTML = '<div class="empty">No blueprint loaded.</div>'; return; }
   var sel = store.state.selectedResource;
   if (!sel || sel === "xrd") { renderXRD(); return; }
+  if (sel === "environment") { renderEnvironment(); return; }
   var res = selectedResource();
   if (!res) {
     box.innerHTML = '<div class="empty">Resource "' + esc(sel) + '" not found in blueprint.</div>';
@@ -2124,6 +2430,44 @@ var boxClickActions = [
         });
       });
     }
+  },
+  {
+    selector: "[data-tab-switch]",
+    run: function (el) {
+      var target = el.getAttribute("data-tab-switch");
+      if (target === "sources") target = "src";
+      var btn = document.querySelector('#rtabs button[data-r="' + target + '"]');
+      if (btn) btn.click();
+    }
+  },
+  {
+    selector: "button[data-env-wire-del]",
+    needsDoc: true,
+    run: function (btn) {
+      var resName = btn.getAttribute("data-wire-res");
+      var wirePath = btn.getAttribute("data-wire-path");
+      var isEnv = btn.hasAttribute("data-wire-env");
+      var isAnn = btn.hasAttribute("data-wire-ann");
+      removeWire(resName, wirePath, isEnv, isAnn);
+    }
+  },
+  {
+    selector: "button[data-env-del-key]",
+    needsDoc: true,
+    run: function (btn) {
+      var keyName = btn.getAttribute("data-env-del-key");
+      deleteEnvKey(keyName);
+    }
+  },
+  {
+    selector: "#envAddKeyBtn",
+    needsDoc: true,
+    run: function (_, doc) {
+      var env = (doc && doc.spec && doc.spec.environment) || {};
+      var base = "key", nm = base + "1", i = 2;
+      while (env[nm]) { nm = base + i; i++; }
+      addEnvKey(nm, { type: "string" });
+    }
   }
 ];
 
@@ -2218,6 +2562,42 @@ function onBoxChange(e) {
   var t = e.target;
   if (!t) return;
   var doc = store.state.doc;
+  if (t.matches("#envSelName, input[data-env-selection-name]")) {
+    var envSelNameMode = (box.querySelector("#envSelMode") && box.querySelector("#envSelMode").value) || "Reference";
+    var envSelNameVal = t.value.trim() || "default";
+    updateEnvSelection(envSelNameMode, envSelNameVal, "");
+    return;
+  }
+  if (t.matches("#envSelLabels, input[data-env-selection-labels]")) {
+    var envSelLblMode = (box.querySelector("#envSelMode") && box.querySelector("#envSelMode").value) || "Selector";
+    var envSelLblVal = t.value.trim();
+    updateEnvSelection(envSelLblMode, "", envSelLblVal);
+    return;
+  }
+  if (t.matches("#envSelMode")) {
+    var envChangeMode = t.value;
+    var nameInp = box.querySelector("#envSelName");
+    var lblInp = box.querySelector("#envSelLabels");
+    var curName = nameInp ? nameInp.value.trim() : "default";
+    var curLbl = lblInp ? lblInp.value.trim() : "environment=default";
+    updateEnvSelection(envChangeMode, curName, curLbl);
+    return;
+  }
+  if (t.matches("select[data-env-type]")) {
+    var envTypeKey = t.getAttribute("data-env-type");
+    setEnvKeyField(envTypeKey, "type", t.value);
+    return;
+  }
+  if (t.matches("input[data-env-req]")) {
+    var envReqKey = t.getAttribute("data-env-req");
+    setEnvKeyField(envReqKey, "required", t.checked);
+    return;
+  }
+  if (t.matches("input[data-env-val]")) {
+    var envValKey = t.getAttribute("data-env-val");
+    setEnvKeyField(envValKey, "value", t.value.trim());
+    return;
+  }
   if (t.matches("select[data-insert-snippet], select[data-env-insert-snippet]")) {
     var isEnv = t.hasAttribute("data-env-insert-snippet");
     var path = t.getAttribute(isEnv ? "data-env-insert-snippet" : "data-insert-snippet");
@@ -2567,7 +2947,13 @@ export function init(rootEl, deps) {
   store.subscribe("doc", function () {
     var d = store.state.doc;
     var sel = store.state.selectedResource;
-    if (sel && sel !== "xrd") {
+    if (sel === "environment") {
+      var hasEnv = d && d.spec && d.spec.environment && Object.keys(d.spec.environment).length > 0;
+      if (!hasEnv) {
+        store.select(null);
+        return;
+      }
+    } else if (sel && sel !== "xrd") {
       var found = d && d.spec && d.spec.resources && d.spec.resources.some(function (r) { return r.name === sel; });
       if (!found) {
         store.select(null);

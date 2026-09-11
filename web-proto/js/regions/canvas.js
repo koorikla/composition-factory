@@ -151,9 +151,21 @@ function xrCardHTML(d, sel) {
   return h;
 }
 
+function getEnvConfigName(d) {
+  const steps = (d && d.spec && d.spec.pipeline) || [];
+  for (let i = 0; i < steps.length; i++) {
+    if (steps[i].functionRef === "function-environment-configs" || steps[i].name === "environment-configs") {
+      const input = steps[i].input || "";
+      const m = input.match(/name:\s*([^\s\n]+)/);
+      if (m) return m[1].replace(/^["']|["']$/g, "");
+    }
+  }
+  return "default";
+}
+
 function envCardHTML(d, sel) {
   const env = (d && d.spec && d.spec.environment) || {};
-  const configName = "default";
+  const configName = getEnvConfigName(d);
   const pos = S.getPosition(ENV_ID) || { x: 40, y: 240 };
   let h = '<div class="node' + (sel === ENV_ID ? " sel" : "") + '" data-id="' + esc(ENV_ID) + '" data-kind="EnvironmentConfig" data-name="' + esc(configName) + '"' +
     ' tabindex="0" role="region" aria-label="' + esc("EnvironmentConfig resource " + configName) + '"' +
