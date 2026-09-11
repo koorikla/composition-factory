@@ -172,7 +172,7 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 
 			// envelope fields (nested objects)
 			envTree := buildEnvTree(envPlan)
-			writeKCLEnvelopeNodes(&sb, specInner, envTree)
+			writeKCLEnvelopeNodes(&sb, specInner, envTree, "")
 
 			sb.WriteString(fmt.Sprintf("%s}\n", inner))
 		}
@@ -464,15 +464,98 @@ func buildEnvTree(plan []envField) []*envTreeNode {
 	return roots
 }
 
-func writeKCLEnvelopeNodes(sb *strings.Builder, indent string, nodes []*envTreeNode) {
+// envTreeAllOptional returns true if every leaf in the subtree rooted at n is optional.
+func envTreeAllOptional(n *envTreeNode) bool {
+	if len(n.children) == 0 {
+		return n.field != nil && n.field.optional
+	}
+	for _, child := range n.children {
+		if !envTreeAllOptional(child) {
+			return false
+		}
+	}
+	return true
+}
+
+func kclEnvFieldGuard(e *envField) string {
+	if e == nil || !e.optional {
+		return ""
+	}
+	if e.structured.kind == rhsParam {
+		if len(e.structured.paramSegs) > 0 {
+			return "_spec?." + strings.Join(e.structured.paramSegs, "?.") + " != None"
+		}
+		if e.structured.param != "" {
+			return translateParamAccessToKCL(e.structured.param) + " != None"
+		}
+	} else if e.structured.kind == rhsStatus {
+		return kclRawStatusAccess(e.structured) + " != None"
+	}
+	if isNested, guardExpr := kclNestedParamGuard(e.structured, e.rhs); isNested {
+		return guardExpr + " != None"
+	}
+	rhs := strings.TrimSpace(e.rhs)
+	if strings.HasPrefix(rhs, "{{") && strings.HasSuffix(rhs, "}}") {
+		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(rhs, "{{"), "}}"))
+		inner = strings.TrimSuffix(inner, "| quote")
+		inner = strings.TrimSpace(inner)
+		if strings.HasPrefix(inner, "$spec.") {
+			param := strings.TrimPrefix(inner, "$spec.")
+			return translateParamAccessToKCL(param) + " != None"
+		}
+	}
+	return ""
+}
+
+func collectKCLSubtreeGuards(n *envTreeNode, guards *[]string, seen map[string]bool) {
+	if n.field != nil {
+		if g := kclEnvFieldGuard(n.field); g != "" {
+			if !seen[g] {
+				seen[g] = true
+				*guards = append(*guards, g)
+			}
+		}
+	}
+	for _, child := range n.children {
+		collectKCLSubtreeGuards(child, guards, seen)
+	}
+}
+
+// writeKCLEnvelopeNodes recursively renders envelope fields. If an envelope node subtree
+// contains only optional leaves (no static or required fields), the entire mapping is guarded
+// with `if <cond>:` so that when all child parameters evaluate to None, no empty dictionary `{}`
+// is emitted in KCL (CF-291).
+func writeKCLEnvelopeNodes(sb *strings.Builder, indent string, nodes []*envTreeNode, inheritedGuard string) {
 	for _, n := range nodes {
 		if len(n.children) > 0 {
-			sb.WriteString(fmt.Sprintf("%s%s = {\n", indent, quoteKCLKey(n.name)))
-			writeKCLEnvelopeNodes(sb, indent+"    ", n.children)
-			sb.WriteString(fmt.Sprintf("%s}\n", indent))
+			allOptional := envTreeAllOptional(n)
+			guard := ""
+			if allOptional {
+				var guards []string
+				seen := make(map[string]bool)
+				collectKCLSubtreeGuards(n, &guards, seen)
+				guard = strings.Join(guards, " or ")
+			}
+
+			wrap := guard != "" && guard != inheritedGuard
+			curIndent := indent
+			childInheritedGuard := inheritedGuard
+			if wrap {
+				sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, guard))
+				curIndent = indent + "    "
+				childInheritedGuard = guard
+			}
+
+			sb.WriteString(fmt.Sprintf("%s%s = {\n", curIndent, quoteKCLKey(n.name)))
+			writeKCLEnvelopeNodes(sb, curIndent+"    ", n.children, childInheritedGuard)
+			sb.WriteString(fmt.Sprintf("%s}\n", curIndent))
 		} else if n.field != nil {
 			rhs := kclStructuredRHS(n.field.structured, n.field.rhs)
-			if n.field.structured.kind == rhsStatus {
+			g := kclEnvFieldGuard(n.field)
+			if g != "" && g != inheritedGuard {
+				sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, g))
+				sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.name), rhs))
+			} else if n.field.structured.kind == rhsStatus {
 				raw := kclRawStatusAccess(n.field.structured)
 				sb.WriteString(fmt.Sprintf("%sif %s != None:\n", indent, raw))
 				sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.name), rhs))

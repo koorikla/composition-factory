@@ -856,3 +856,231 @@ func TestKCLStatusWireNoneCheck(t *testing.T) {
 		t.Errorf("found bare truthiness guard %q in KCL output (must use != None):\n%s", unwantedGuard, s)
 	}
 }
+
+func TestKCLWriteConnectionSecretToRefOptionalOmitted(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xsec
+spec:
+  emit:
+    engine: kcl
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XSec
+    plural: xsecs
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+      secretName:
+        type: string
+        required: false
+  resources:
+    - name: work-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      fields:
+        region:
+          value: us-east-1
+      envelope:
+        writeConnectionSecretToRef.name:
+          from: params.secretName
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	_ = os.WriteFile(p, []byte(bpYAML), 0600)
+	b, err := blueprint.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+              writeConnectionSecretToRef:
+                type: object
+                required: [name]
+                properties: {name: {type: string}}
+`)
+	crds, err := schema.ParseCRDs([][]byte{crdDoc})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(out)
+
+	// An envelope subtree whose child parameters are optional must be guarded
+	// so that an XR omitting secretName does not emit an empty dictionary
+	// writeConnectionSecretToRef = {}, which Crossplane admission rejects (CF-291).
+	wantGuard := "if _spec?.secretName != None:"
+	if !strings.Contains(s, wantGuard) {
+		t.Errorf("expected conditional guard %q for writeConnectionSecretToRef in KCL output, got:\n%s", wantGuard, s)
+	}
+
+	// Verify that unconditional envelope mapping is NOT emitted.
+	// In KCL, writeConnectionSecretToRef must be indented inside the guard rather than
+	// emitted unconditionally as `            writeConnectionSecretToRef = {\n`.
+	unconditionalKey := "\n            writeConnectionSecretToRef = {\n"
+	if strings.Contains(s, unconditionalKey) {
+		t.Errorf("found unconditional envelope mapping in KCL output:\n%s", s)
+	}
+}
+
+func TestKCLOptionalEnvelopeGuardingVariations(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xsec-variations
+spec:
+  emit:
+    engine: kcl
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XSecVar
+    plural: xsecvars
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+      secretName:
+        type: string
+        required: false
+      secretNamespace:
+        type: string
+        required: false
+      configRefName:
+        type: string
+        required: false
+  resources:
+    - name: work-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      fields:
+        region:
+          value: us-east-1
+      envelope:
+        writeConnectionSecretToRef.name:
+          from: params.secretName
+        writeConnectionSecretToRef.namespace:
+          from: params.secretNamespace
+        publishConnectionDetailsTo.configRef.name:
+          from: params.configRefName
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	_ = os.WriteFile(p, []byte(bpYAML), 0600)
+	b, err := blueprint.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+              writeConnectionSecretToRef:
+                type: object
+                required: [name, namespace]
+                properties: {name: {type: string}, namespace: {type: string}}
+              publishConnectionDetailsTo:
+                type: object
+                properties:
+                  configRef:
+                    type: object
+                    required: [name]
+                    properties: {name: {type: string}}
+`)
+	crds, err := schema.ParseCRDs([][]byte{crdDoc})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(out)
+
+	// Multi-child envelope with all optional leaves must guard parent with disjunction
+	// and children with their own individual guards.
+	wantDisjunction := "if _spec?.secretName != None or _spec?.secretNamespace != None:"
+	if !strings.Contains(s, wantDisjunction) {
+		t.Errorf("expected disjunction guard %q for writeConnectionSecretToRef in KCL output, got:\n%s", wantDisjunction, s)
+	}
+	if !strings.Contains(s, "if _spec?.secretName != None:") || !strings.Contains(s, "name = _spec?.secretName") {
+		t.Errorf("expected child guard for secretName in KCL output, got:\n%s", s)
+	}
+	if !strings.Contains(s, "if _spec?.secretNamespace != None:") || !strings.Contains(s, "namespace = _spec?.secretNamespace") {
+		t.Errorf("expected child guard for secretNamespace in KCL output, got:\n%s", s)
+	}
+
+	// Nested envelope mapping publishConnectionDetailsTo.configRef.name must guard
+	// publishConnectionDetailsTo with configRefName check without repeating identical guard on configRef or name.
+	if !strings.Contains(s, "if _spec?.configRefName != None:") ||
+		!strings.Contains(s, "publishConnectionDetailsTo = {") ||
+		!strings.Contains(s, "configRef = {") ||
+		!strings.Contains(s, "name = _spec?.configRefName") {
+		t.Errorf("expected nested envelope structure with deduplicated guard in KCL output, got:\n%s", s)
+	}
+	// Verify configRef does NOT get a redundant duplicate guard
+	redundantGuard := "configRef = {\n                                      if _spec?.configRefName != None:"
+	if strings.Contains(s, redundantGuard) {
+		t.Errorf("found redundant duplicate guard inside configRef:\n%s", s)
+	}
+}
