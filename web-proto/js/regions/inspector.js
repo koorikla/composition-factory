@@ -57,6 +57,9 @@ var uiMode = {};                 // path -> "v"|"w"|"r" local mode override (sel
 var pendingNewParam = null;      // field path currently showing the inline new-parameter form
 var pendingNewMapEntry = null;   // map field path currently showing the inline add-key form
 var pendingFocusParam = null;    // parameter name to focus and select in XRD inspector after render
+var paramOrder = null;           // stable order of XRD parameter names while inspector is open
+var pendingRenamedParam = null;  // { from: string, to: string } to follow focus across async rename
+var lastDocName = null;
 var annDraftKey = "";            // draft annotation key being entered (CF-136)
 var annDraftRes = "";            // resource name annDraftKey belongs to (CF-136)
 var renderToken = 0;
@@ -1162,7 +1165,31 @@ async function renderXRD() {
   var doc = store.state.doc;
   var xrd = doc.spec && doc.spec.xrd || {};
   var params = paramsOf(doc);
-  var names = Object.keys(params);
+  var currentKeys = Object.keys(params);
+
+  var curDocName = doc && doc.metadata && doc.metadata.name;
+  if (curDocName !== lastDocName) {
+    paramOrder = null;
+    lastDocName = curDocName;
+  }
+
+  if (!paramOrder) {
+    paramOrder = currentKeys.slice().sort();
+  } else {
+    var missingInParams = paramOrder.filter(function (k) { return !Object.prototype.hasOwnProperty.call(params, k); });
+    var missingInOrder = currentKeys.filter(function (k) { return paramOrder.indexOf(k) === -1; });
+    if (missingInParams.length === 1 && missingInOrder.length === 1) {
+      var idx = paramOrder.indexOf(missingInParams[0]);
+      paramOrder[idx] = missingInOrder[0];
+    } else {
+      var kept = paramOrder.filter(function (k) { return Object.prototype.hasOwnProperty.call(params, k); });
+      currentKeys.forEach(function (k) {
+        if (kept.indexOf(k) === -1) kept.push(k);
+      });
+      paramOrder = kept;
+    }
+  }
+  var names = paramOrder;
 
   var h = warnHtml();
   h += '<div class="insp-t"><div class="frow">' +
@@ -1374,6 +1401,7 @@ async function renderXRD() {
   var __snap = snapshotFocusedEdit();
   box.innerHTML = h;
   restoreFocusedEdit(__snap);
+  pendingRenamedParam = null;
   if (pendingFocusParam) {
     var pInp = box.querySelector('input[data-pn="' + CSS.escape(pendingFocusParam) + '"]');
     if (pInp) {
@@ -1418,6 +1446,14 @@ function snapshotFocusedEdit() {
 function restoreFocusedEdit(snap) {
   if (!snap) return;
   var el = box.querySelector(snap.sel);
+  if (!el && pendingRenamedParam) {
+    var oldEsc = CSS.escape(pendingRenamedParam.from);
+    var newEsc = CSS.escape(pendingRenamedParam.to);
+    if (snap.sel.indexOf(oldEsc) !== -1) {
+      var translatedSel = snap.sel.split(oldEsc).join(newEsc);
+      el = box.querySelector(translatedSel);
+    }
+  }
   if (!el) return;
   if (el.type === "checkbox") el.checked = snap.checked;
   else el.value = snap.value;
@@ -1904,6 +1940,10 @@ var boxClickActions = [
       if (isParamLocked(doc, pn)) return;
       var fo = fanOut(doc, pn);
       if (fo > 0 && !confirm('Parameter "' + pn + '" is wired into ' + fo + " field" + (fo === 1 ? "" : "s") + ". Delete it?")) return;
+      if (paramOrder) {
+        var idx = paramOrder.indexOf(pn);
+        if (idx !== -1) paramOrder.splice(idx, 1);
+      }
       op(function () { return store.deleteParameter(pn); });
     }
   },
@@ -1915,6 +1955,9 @@ var boxClickActions = [
       var base = "newParam", nm = base, i = 2;
       while (params[nm]) { nm = base + i; i++; }
       pendingFocusParam = nm;
+      if (paramOrder && paramOrder.indexOf(nm) === -1) {
+        paramOrder.push(nm);
+      }
       op(function () { return store.addParameter(nm, { type: "string", required: false }); })
         .then(function (res) {
           if (res === null) {
@@ -2307,8 +2350,21 @@ function onBoxChange(e) {
     }
     if (!newName || newName === oldName) { render(); return; }
     t.setAttribute("data-pn", newName);
+    if (paramOrder) {
+      var idx = paramOrder.indexOf(oldName);
+      if (idx !== -1) paramOrder[idx] = newName;
+    }
+    pendingRenamedParam = { from: oldName, to: newName };
     op(function () { return store.renameParameter(oldName, newName); })
-      .then(function (r) { if (r === null) render(); });
+      .then(function (r) {
+        if (r === null) {
+          if (paramOrder) {
+            var idx = paramOrder.indexOf(newName);
+            if (idx !== -1) paramOrder[idx] = oldName;
+          }
+          render();
+        }
+      });
     return;
   }
 
@@ -2527,6 +2583,8 @@ export function init(rootEl, deps) {
     render();
   });
   store.subscribe("selection", function () {
+    paramOrder = null;
+    pendingRenamedParam = null;
     uiMode = {};
     pendingNewParam = null;
     pendingNewMapEntry = null;
