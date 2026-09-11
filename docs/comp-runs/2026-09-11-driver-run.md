@@ -28,6 +28,9 @@ Each issue had its acceptance tests run and verified failing before the fix, qua
 | **CF-164** (#49) | Palette kind preview performs redundant sequential network request downloading full field trees | Merged & Closed | `86a9614` | [34560256742](https://github.com/koorikla/composition-factory/actions/runs/34560256742) | `tests/cf164-palette-preview-request-dedup.spec.js` |
 | **CF-170** (#55) | ConfigurationMeta emits duplicate dependsOn entries for shared function packages and sources | Merged & Closed | `27ac948` | [34560495716](https://github.com/koorikla/composition-factory/actions/runs/34560495716) | `internal/emit/configuration_test.go:TestConfigurationMetaDeduplicatesDependsOn` |
 | **CF-163** (#48) | internal/api unit tests hit remote OCI registries on unseeded provider refs, adding ~4s to test runs | Merged & Closed | `c36297b` | [34560759428](https://github.com/koorikla/composition-factory/actions/runs/34560759428) | `internal/api/adopt_test.go`, `internal/api/import_test.go`, `internal/api/server_test.go` |
+| **CF-172** (#57) | LoadSources loads and appends duplicate CRDs for functions in both pipeline and lockfile | Merged & Closed | `861d7eb` | [34561231053](https://github.com/koorikla/composition-factory/actions/runs/34561231053) | `internal/cache/sources_test.go:TestLoadSourcesPipelineAndLockFunctions,TestLoadSourcesFunctionDeduplication` |
+| **CF-171** (#56) | AdoptTree naively appends s to XRD Kind, drifting from inferPlural and Composite metadata name | Merged & Closed | `897dcb8` | [34561492138](https://github.com/koorikla/composition-factory/actions/runs/34561492138) | `internal/adopt/tree_test.go:TestAdoptTreePluralInferenceWithoutXRD` |
+| **CF-169** (#54) | resolveKind rejects Crossplane managed resources discovered from live cluster scans | Merged & Closed | `e299429` | [34561842775](https://github.com/koorikla/composition-factory/actions/runs/34561842775) | `internal/emit/composition_test.go:TestCF169ClusterProviderResolvesManagedResource` |
 
 *Note: Issues CF-149 (#34), CF-152 (#37), CF-092 (#4), and CF-141 (#26) were closed in runs earlier in the day.*
 
@@ -57,6 +60,11 @@ Each issue had its acceptance tests run and verified failing before the fix, qua
 - **CF-164** (`web-proto/js/regions/palette.js`, `tests/cf164-palette-preview-request-dedup.spec.js`): Stored `data-fields` on kind rows from `/api/kinds` payload and resolved total fields directly, eliminating redundant second sequential `api.getKindFields` request on hover. CI run 34560256742 green.
 - **CF-170** (`internal/emit/configuration.go`, `internal/emit/configuration_test.go`): Deduplicated `spec.dependsOn` entries by package in `ConfigurationMeta`, preventing duplicate provider and function dependencies in `crossplane.yaml`. CI run 34560495716 green.
 - **CF-163** (`internal/api/adopt.go`, `internal/api/adopt_test.go`, `internal/api/import_test.go`, `internal/api/server_test.go`): Wired server cache root to `adopt.Adopt` options, updated adopt and import unit test fixtures to use seeded provider refs, and added a strict fetch guard to `testServerOptions` preventing unmocked OCI network calls (test runtime down from 4.06s to 0.025s). CI run 34560759428 green.
+
+### Wave 4
+- **CF-172** (`internal/cache/sources.go`, `internal/cache/sources_test.go`): Deduplicated function CRD loading across pipeline steps and lockfile entries in `LoadSources` using a package ref lookup set, ensuring CRDs for shared function packages are loaded only once. CI run 34561231053 green.
+- **CF-171** (`internal/adopt/tree.go`, `internal/adopt/adopt.go`, `internal/adopt/tree_test.go`): Unified plural XRD inference between single-file `Adopt` and tree `AdoptTree` via `resolveXRDPlural`, correctly inferring irregular plurals (e.g. `XPolicy` -> `xpolicies`, `XAccess` -> `xaccesses`) and compositeTypeRef overrides instead of naively appending `"s"`. CI run 34561492138 green.
+- **CF-169** (`internal/emit/composition.go`, `internal/emit/composition_test.go`): Allowed `resolveKind` to match and emit Crossplane managed resources discovered from live cluster scans under `provider: cluster`, properly formatting their bases and patches with `spec.forProvider` envelopes while retaining native resource handling. CI run 34561842775 green.
 
 ---
 
