@@ -16,6 +16,7 @@ import { startDrag } from "../../drag.js";
 import { COLORS } from "../../utils.js";
 import { XR_ID, ENV_ID } from "./layout.js";
 
+/** @type {Record<string, any>} */
 let deps = {
   store: defaultStore,
   api: defaultApi,
@@ -368,7 +369,7 @@ export function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
 
   document.body.appendChild(pop);
   pop.querySelector("#wire-picker-close").addEventListener("click", closeWirePicker);
-  const searchInput = pop.querySelector("#wire-picker-search");
+  const searchInput = /** @type {HTMLInputElement|null} */ (pop.querySelector("#wire-picker-search"));
   const listEl = pop.querySelector("#wire-picker-list");
   if (searchInput) setTimeout(function () { searchInput.focus(); }, 20);
 

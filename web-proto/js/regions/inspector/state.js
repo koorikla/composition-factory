@@ -8,6 +8,7 @@ import * as defaultApi from "../../api.js";
 
 export var PARAM_TYPES = ["string", "integer", "number", "boolean", "object"];
 
+/** @type {Record<string, any>} */
 export var state = {
   store: defaultStore,
   api: defaultApi,

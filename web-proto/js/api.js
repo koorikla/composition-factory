@@ -83,10 +83,11 @@ function formatRegistryFetchError(rawMsg) {
  * @param {string} method
  * @param {string} path   Relative path starting with /api
  * @param {*} [body]      JSON-serializable request body
- * @returns {Promise<*>}  Parsed JSON body (null for empty responses)
+ * @param {Object} [opts] Request options
+ * @returns {Promise<any>}  Parsed JSON body (null for empty responses)
  * @throws {ApiError}
  */
-async function request(method, path, body, opts) {
+async function request(method, path, body = undefined, opts = undefined) {
   const options = opts || {};
   const fetchOpts = { method, headers: {} };
   const contentType = options.contentType || (body !== undefined ? "application/json" : null);
@@ -106,7 +107,7 @@ async function request(method, path, body, opts) {
     const detail = rawMsg ? " (" + rawMsg + ")" : "";
     const msg = "Failed to connect to the Composition Factory server at " + path +
       ". Ensure 'cf serve' is running and reachable" + detail + ".";
-    const err = new Error(msg);
+    const err = /** @type {ApiError} */ (new Error(msg));
     err.status = 0;
     throw err;
   }
@@ -140,7 +141,7 @@ async function request(method, path, body, opts) {
       message = "Server returned HTTP " + statusStr + " with empty body.";
     }
     console.warn("[API ERROR]", res.status, path, message);
-    const err = new Error(message);
+    const err = /** @type {ApiError} */ (new Error(message));
     err.status = res.status;
     throw err;
   } 
@@ -186,7 +187,7 @@ export function getKind(apiVersion, kind) {
  * @param {number}  [opts.limit]        Cap the returned field count (total still
  *                                      counts the full filtered set)
  * @returns {Promise<{fields: Array<{path:string, type:string,
- *   description:string, required:boolean, depth:number}>, total: number}>}
+ *   description:string, required:boolean, depth:number, requiredChain?:boolean}>, total: number, requiredBranches?: Array<{path:string, type?:string}>}>}
  * @throws {ApiError}
  */
 export function getKindFields(apiVersion, kind, opts) {
@@ -205,7 +206,7 @@ export function getKindFields(apiVersion, kind, opts) {
 
 /**
  * GET /api/blueprint — the full blueprint document.
- * @returns {Promise<Object>} The full doc. Field forms in
+ * @returns {Promise<Blueprint>} The full doc. Field forms in
  *   spec.resources[].fields are exactly-one-of {value|from|raw}; wires live
  *   in the doc as fields with {from: "params.X"}.
  * @throws {ApiError}
@@ -216,8 +217,8 @@ export function getBlueprint() {
 
 /**
  * PUT /api/blueprint — full-document replace.
- * @param {Object} doc The complete blueprint document.
- * @returns {Promise<Object>} The full persisted blueprint.
+ * @param {Blueprint} doc The complete blueprint document.
+ * @returns {Promise<Blueprint>} The full persisted blueprint.
  * @throws {ApiError} 400 carries the server's validation message verbatim
  *   (e.g. unknown field paths are rejected with a message worth showing).
  */
@@ -274,8 +275,7 @@ export function renameParameter(name, to) {
 /**
  * POST /api/generate
  * @param {boolean} [write=false] Whether the engine writes files to disk.
- * @returns {Promise<{outputs: Array<{path:string, bytes:number, body:string}>,
- *   written: boolean}>}
+ * @returns {Promise<GenerateResponse>}
  * @throws {ApiError}
  */
 export function generate(write) {
@@ -307,7 +307,7 @@ export function addProvider(ref, replaces) {
 /**
  * Real render check: the server runs `crossplane composition render` on the
  * current blueprint against a synthesized sample XR.
- * @returns {Promise<{ok:boolean,resources:number,error:string,unavailable:string}>}
+ * @returns {Promise<RenderResponse>}
  */
 export function renderCheck() {
   return request("POST", "/api/render");
@@ -336,8 +336,21 @@ export function getCatalogue(q, type) {
 }
 
 /**
+ * GET /api/catalogue?type=function helper returning the functions list.
+ * @returns {Promise<Array<Object>>}
+ */
+export function getCatalogueFunctions() {
+  return getCatalogue("", "function").then(function (r) {
+    return (r && r.functions) || [];
+  });
+}
+
+/**
  * Rename a composed resource server-side: wires, status refs, when/forEach
  * referencers all re-point atomically; returns the full persisted blueprint.
+ * @param {string} name
+ * @param {string} to
+ * @returns {Promise<Blueprint>}
  */
 export function renameResource(name, to) {
   return request("POST", "/api/blueprint/resources/" + encodeURIComponent(name) + "/rename", { to: to });
@@ -367,6 +380,8 @@ export function syncCluster() {
 /**
  * POST /api/blueprint/import — raw blueprint YAML through the file gate;
  * returns the persisted doc. 400s carry the parse/validation error verbatim.
+ * @param {string} yamlText
+ * @returns {Promise<Blueprint>}
  */
 export function importBlueprint(yamlText) {
   return request("POST", "/api/blueprint/import", yamlText, { contentType: "application/yaml" });
@@ -380,7 +395,8 @@ export function importBlueprint(yamlText) {
  * goes through. 400s carry the parse error verbatim.
  * @param {string} yamlText
  * @param {string} [provider] Default provider ref when not inferrable.
- * @returns {Promise<{blueprint:Object, lossReport?:{drops:{path:string,reason:string}[]}, persisted:boolean}>}
+ * @param {Blueprint} [baseBlueprint]
+ * @returns {Promise<{blueprint:Blueprint, lossReport?:{drops:{path:string,reason:string}[]}, persisted:boolean}>}
  */
 export function adoptComposition(yamlText, provider, baseBlueprint) {
   const payload = { manifest: yamlText, persist: true, provider: provider || "" };
@@ -419,10 +435,15 @@ export function loadExample(id) {
  * POST /api/preview-expression — execute an expression in-process against synthetic context.
  * @param {string} expression
  * @param {string} [resource]
- * @returns {Promise<{rendered: string, error: string}>}
+ * @param {Blueprint} [blueprint]
+ * @returns {Promise<PreviewExpressionResponse>}
  */
-export function previewExpression(expression, resource) {
-  return request("POST", "/api/preview-expression", { expression: expression, resource: resource });
+export function previewExpression(expression, resource, blueprint) {
+  /** @type {PreviewExpressionRequest} */
+  const payload = { expression: expression };
+  if (resource) payload.resource = resource;
+  if (blueprint) payload.blueprint = blueprint;
+  return request("POST", "/api/preview-expression", payload);
 }
 
 

@@ -37,14 +37,18 @@ function clone(x) {
   return x === null || x === undefined ? x : structuredClone(x);
 }
 
+let opChain = Promise.resolve();
+
 /**
  * Every mutating operation runs through this chain: the doc is cloned and
  * the request fired only when the previous operation has settled, so two
  * rapid actions can never lose each other's changes (the ghost-resurrection
  * class: an edit cloned from the pre-delete doc re-PUTting the deleted
  * resource). Failures don't break the chain.
+ * @template T
+ * @param {() => Promise<T> | T} taskFn
+ * @returns {Promise<T>}
  */
-let opChain = Promise.resolve();
 function enqueue(taskFn) {
   const run = opChain.then(taskFn, taskFn);
   opChain = run.then(function () {}, function () {});
@@ -52,6 +56,7 @@ function enqueue(taskFn) {
 }
 
 export const store = {
+  /** @type {StoreState} */
   state: {
     doc: null,
     selectedResource: null,
@@ -61,13 +66,15 @@ export const store = {
     redoStack: [],
     lastGenerate: null,
     generateError: false,
+    lastAdoptReport: null,
   },
 
   /**
    * Subscribe to a topic.
-   * @param {"doc"|"selection"|"generate"|"error"} topic
-   * @param {function(*): void} fn Called with the topic payload.
-   * @returns {function(): void} Unsubscribe function.
+   * @template {keyof TopicMap} T
+   * @param {T} topic
+   * @param {(payload: TopicMap[T]) => void} fn Called with the topic payload.
+   * @returns {() => void} Unsubscribe function.
    */
   subscribe(topic, fn) {
     if (!subs[topic]) throw new Error("unknown topic: " + topic);
@@ -78,8 +85,9 @@ export const store = {
   /**
    * Emit a payload to every subscriber of a topic. Region agents normally
    * never call this directly — the store emits; regions subscribe.
-   * @param {"doc"|"selection"|"generate"|"error"} topic
-   * @param {*} payload
+   * @template {keyof TopicMap} T
+   * @param {T} topic
+   * @param {TopicMap[T]} payload
    */
   emit(topic, payload) {
     if (!subs[topic]) throw new Error("unknown topic: " + topic);
@@ -89,7 +97,7 @@ export const store = {
   /**
    * GET the full blueprint from the server into state.doc and emit "doc".
    * On failure emits "error" ({status, message, source:"loadDoc"}).
-   * @returns {Promise<Object|null>} The doc, or null on failure.
+   * @returns {Promise<Blueprint|null>} The doc, or null on failure.
    */
   async loadDoc() {
     try {
@@ -111,13 +119,13 @@ export const store = {
    *  - on 400 (or any failure): state.doc is UNCHANGED, "error" is emitted
    *    with the server's validation message verbatim
    *    ({status, message, source:"replaceDoc"}).
-   * @param {function(Object): (Object|void)} mutatorFn Receives a deep clone
+   * @param {(doc: Blueprint) => (Blueprint|void)} mutatorFn Receives a deep clone
    *   of the current doc; mutate it in place (or return a replacement doc).
-   * @returns {Promise<Object|null>} The persisted doc, or null on failure.
+   * @returns {Promise<Blueprint|null>} The persisted doc, or null on failure.
    */
   async replaceDoc(mutatorFn) {
     const self = this;
-    return enqueue(function () { return self._replaceDocNow(mutatorFn); });
+    return await enqueue(function () { return self._replaceDocNow(mutatorFn); });
   },
 
   async _replaceDocNow(mutatorFn) {
@@ -143,6 +151,7 @@ export const store = {
 
   /** Push the pre-change doc; a new change always clears the redo branch. */
   _recordHistory(prevDoc) {
+    if (!prevDoc) return;
     this.state.undoStack.push(prevDoc);
     if (this.state.undoStack.length > 50) this.state.undoStack.shift();
     this.state.redoStack.length = 0;
@@ -160,7 +169,7 @@ export const store = {
 
   async _timeTravel(from, to, source) {
     const self = this;
-    return enqueue(function () { return self._timeTravelNow(from, to, source); });
+    return await enqueue(function () { return self._timeTravelNow(from, to, source); });
   },
 
   async _timeTravelNow(from, to, source) {
@@ -331,7 +340,11 @@ export const store = {
    * @param {string} to   New name.
    * @returns {Promise<Object|null>}
    */
-  /** POST /api/blueprint/import — YAML through the file gate; one undo step. */
+  /**
+   * POST /api/blueprint/import — YAML through the file gate; one undo step.
+   * @param {string} yamlText
+   * @returns {Promise<Blueprint|null>}
+   */
   async importBlueprint(yamlText) {
     const self = this;
     return this._paramOp("importBlueprint", function () {
@@ -348,7 +361,7 @@ export const store = {
    * show before the doc is handed back to _paramOp.
    * @param {string} yamlText
    * @param {string} [provider]
-   * @returns {Promise<Object|null>}
+   * @returns {Promise<Blueprint|null>}
    */
   async adoptComposition(yamlText, provider) {
     const self = this;
@@ -359,10 +372,14 @@ export const store = {
     });
   },
 
-  /** POST /api/examples/{id}/load — load starter blueprint and import/cache its providers. */
+  /**
+   * POST /api/examples/{id}/load — load starter blueprint and import/cache its providers.
+   * @param {string} id
+   * @returns {Promise<Blueprint|null>}
+   */
   async loadExample(id) {
     const self = this;
-    return enqueue(async function () {
+    return await enqueue(async function () {
       try {
         const prev = clone(self.state.doc);
         const doc = await api.loadExample(id);
@@ -382,11 +399,22 @@ export const store = {
     });
   },
 
-  /** POST /api/blueprint/resources/{name}/rename — same contract as the parameter ops. */
+  /**
+   * POST /api/blueprint/resources/{name}/rename — same contract as the parameter ops.
+   * @param {string} name
+   * @param {string} to
+   * @returns {Promise<Blueprint|null>}
+   */
   async renameResource(name, to) {
     return this._paramOp("renameResource", function () { return api.renameResource(name, to); });
   },
 
+  /**
+   * POST /api/blueprint/parameters/{name}/rename
+   * @param {string} name
+   * @param {string} to
+   * @returns {Promise<Blueprint|null>}
+   */
   async renameParameter(name, to) {
     return this._paramOp("renameParameter", function () { return api.renameParameter(name, to); });
   },
@@ -396,7 +424,7 @@ export const store = {
    * and "generate" is emitted with the result; on failure "error" is emitted
    * ({status, message, source:"generate"}).
    * @param {boolean} [write=false]
-   * @returns {Promise<Object|null>} {outputs:[{path,bytes,body}], written}, or null.
+   * @returns {Promise<GenerateResponse|null>} {outputs:[{path,bytes,body}], written}, or null.
    */
   _generateSeq: 0,
 
@@ -424,10 +452,13 @@ export const store = {
   /**
    * @private Shared handler for parameter routes (each returns the full
    * persisted blueprint).
+   * @param {string} source
+   * @param {() => Promise<Blueprint>} requestFn
+   * @returns {Promise<Blueprint|null>}
    */
   async _paramOp(source, requestFn) {
     const self = this;
-    return enqueue(function () { return self._paramOpNow(source, requestFn); });
+    return await enqueue(function () { return self._paramOpNow(source, requestFn); });
   },
 
   async _paramOpNow(source, requestFn) {

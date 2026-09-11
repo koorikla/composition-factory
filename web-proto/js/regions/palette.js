@@ -519,7 +519,7 @@ function drawShared() {
       '</div>' +
       '<div class="card-b" style="padding:0">';
     envKeys.forEach(function (k, idx) {
-      const ek = env[k] || {};
+      const ek = /** @type {EnvironmentKey|Record<string, any>} */ (env[k] || {});
       const border = idx < envKeys.length - 1 ? "border-bottom:1px solid var(--rule);" : "";
       let lines = "type " + (ek.type || "string");
       if (ek.default !== undefined && ek.default !== "") lines += ", default " + ek.default;

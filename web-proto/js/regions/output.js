@@ -513,7 +513,7 @@ function updateNextSteps(result) {
       root.appendChild(banner);
     }
   } else if (!inner) {
-    inner = banner.querySelector("#next-steps-banner");
+    inner = banner.querySelector("div#next-steps-banner");
     if (!inner) {
       inner = document.createElement("div");
       inner.id = "next-steps-banner";

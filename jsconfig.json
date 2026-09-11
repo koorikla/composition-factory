@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "typeRoots": ["./node_modules/@types"]
+  },
+  "include": [
+    "web-proto/js/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "out",
+    "dist",
+    "test-results",
+    "playwright-report"
+  ]
+}

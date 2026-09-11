@@ -54,6 +54,7 @@ lint:
 		if [ -n "$$unformatted" ]; then echo "$$unformatted" >&2; exit 1; fi
 	go vet $$(go list ./... | grep -v /node_modules/)
 	npm run lint:js
+	npm run typecheck
 
 # Deeper analysis than vet: staticcheck's default check set, configured in
 # staticcheck.conf. Pinned and `go run` so it needs no separate install and

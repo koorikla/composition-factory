@@ -1156,7 +1156,7 @@ function deleteEnvKey(keyName) {
     if (!window.confirm(prompt)) {
       var msg = 'delete environment key "' + keyName + '": still referenced by wire ' + wires.join(", ");
       warnMsg = msg;
-      store.emit("error", { message: msg });
+      store.emit("error", { status: 400, message: msg, source: "inspector" });
       render();
       return;
     }
@@ -1186,7 +1186,7 @@ function renameEnvKey(oldKey, newKey, inputEl) {
   if (!validNameRE.test(newKey)) {
     var msg = 'Invalid environment key name "' + newKey + '": must start with a letter and contain only alphanumeric characters, underscores, or hyphens';
     warnMsg = msg;
-    store.emit("error", { message: msg });
+    store.emit("error", { status: 400, message: msg, source: "inspector" });
     if (inputEl) inputEl.value = oldKey;
     render();
     return;
@@ -1195,7 +1195,7 @@ function renameEnvKey(oldKey, newKey, inputEl) {
   if (env[newKey] && newKey !== oldKey) {
     msg = 'Environment key "' + newKey + '" already exists';
     warnMsg = msg;
-    store.emit("error", { message: msg });
+    store.emit("error", { status: 400, message: msg, source: "inspector" });
     if (inputEl) inputEl.value = oldKey;
     render();
     return;
@@ -1343,7 +1343,7 @@ async function renderEnvironment() {
     h += '<div class="g" style="padding:8px 12px">No environment keys declared.</div>';
   } else {
     envKeys.forEach(function (k) {
-      var item = env[k] || {};
+      var item = /** @type {EnvironmentKey|Record<string, any>} */ (env[k] || {});
       var ty = item.type || "string";
       var req = !!item.required;
       var val = item.value !== undefined && item.value !== "" ? item.value : (item.default !== undefined ? item.default : "");

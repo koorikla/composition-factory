@@ -46,8 +46,8 @@ const docFanOutCache = new WeakMap();
 
 /**
  * List every wire in the document.
- * @param {Object} doc The full blueprint document.
- * @returns {Array<{kind:string, param?:string, envKey?:string, srcResource?:string, srcPath?:string, resource:string, path:string, from:string}>}
+ * @param {Blueprint|Object} doc The full blueprint document.
+ * @returns {Array<{kind:string, param?:string, envKey?:string, srcResource?:string, srcPath?:string, resource:string, path:string, from:string, isEnvelope?:boolean, isAnnotation?:boolean}>}
  */
 export function listWires(doc) {
   if (!doc || typeof doc !== "object") return [];
