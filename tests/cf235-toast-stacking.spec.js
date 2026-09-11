@@ -71,11 +71,13 @@ test.describe('CF-235: Stacking and offset for concurrent toasts and import noti
       await dialog.accept();
     });
 
+    const genPromise = page.waitForResponse(resp => resp.url().includes('/api/generate') && resp.status() === 200);
     await page.setInputFiles('#importFile', {
       name: 'xqueue-pipeline-error.composition.yaml',
       mimeType: 'application/yaml',
       buffer: Buffer.from(compYaml),
     });
+    await genPromise;
 
     const warnBar = page.locator('#import-warn');
     const importToast = page.locator('#import-toast');
@@ -85,9 +87,6 @@ test.describe('CF-235: Stacking and offset for concurrent toasts and import noti
     await expect(importToast).toBeVisible({ timeout: 10000 });
 
     // In CF-249 unknown wired fields are now pruned during adopt so generate succeeds.
-    // Wait for the import's preview generation to complete so it does not clear our simulated error toast.
-    await expect(page.locator('#valid')).toContainText('preview ·', { timeout: 10000 });
-
     // Trigger an error to verify concurrent 3-way notice stacking (CF-235).
     await page.evaluate(() => {
       window.store.emit('error', { message: 'schema error: retentionDays' });
