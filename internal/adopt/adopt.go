@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -197,6 +198,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 
 	var compDoc map[string]any
 	var xrdDoc map[string]any
+	var envConfigDocs []map[string]any
 
 	for _, d := range docs {
 		kind, _ := d["kind"].(string)
@@ -205,6 +207,8 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 			compDoc = d
 		case "CompositeResourceDefinition":
 			xrdDoc = d
+		case "EnvironmentConfig":
+			envConfigDocs = append(envConfigDocs, d)
 		case "Function":
 			if meta, ok := d["metadata"].(map[string]any); ok {
 				fnName, _ := meta["name"].(string)
@@ -348,7 +352,10 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		}
 	}
 
-	// 4. Parse Pipeline or Classic Resources
+	// 4. Process EnvironmentConfig documents
+	parseEnvironmentConfigDocs(envConfigDocs, bp, report)
+
+	// 5. Parse Pipeline or Classic Resources
 	nameMapping := make(map[string]string)
 	if pipeline, ok := spec["pipeline"].([]any); ok && len(pipeline) > 0 {
 		if err := parsePipelineComposition(pipeline, bp, opts, report, nameMapping); err != nil {
@@ -371,8 +378,16 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		applyXRDlessEvidence(bp, []map[string]any{compDoc}, synthesized, report, opts.BaseBlueprint)
 	}
 
-	// 5. Deduplicate and collect provider sources
+	// 6. Deduplicate and collect provider sources
 	collectSources(bp, opts.DefaultProviderRef)
+
+	// Ensure EnvironmentConfigs is not left declared without any environment keys
+	if len(bp.Spec.Environment) == 0 && len(bp.Spec.EnvironmentConfigs) > 0 {
+		for _, cfg := range bp.Spec.EnvironmentConfigs {
+			report.Record(fmt.Sprintf("environmentConfig.%s", cfg.Name), "EnvironmentConfig declared without any environment keys")
+		}
+		bp.Spec.EnvironmentConfigs = nil
+	}
 
 	if err := bp.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("validate adopted blueprint: %w", err)
@@ -395,6 +410,214 @@ func splitYAML(data []byte) ([]map[string]any, error) {
 		}
 	}
 	return docs, nil
+}
+
+// parseEnvironmentConfigDocs ingests EnvironmentConfig documents into bp.Spec.Environment
+// and bp.Spec.EnvironmentConfigs, recording any dropped or unconvertible fields in report.
+func parseEnvironmentConfigDocs(envConfigDocs []map[string]any, bp *blueprint.Blueprint, report *LossReport) {
+	for _, envDoc := range envConfigDocs {
+		meta, _ := envDoc["metadata"].(map[string]any)
+		cfgName, _ := meta["name"].(string)
+		labels, _ := meta["labels"].(map[string]any)
+
+		prefix := "environmentConfig"
+		if cfgName != "" {
+			prefix = fmt.Sprintf("environmentConfig.%s", cfgName)
+		} else {
+			report.Record("environmentConfig.metadata.name", "missing name in EnvironmentConfig metadata")
+		}
+
+		// 1. Check unsupported top-level fields
+		topKeys := make([]string, 0, len(envDoc))
+		for k := range envDoc {
+			topKeys = append(topKeys, k)
+		}
+		sort.Strings(topKeys)
+		for _, k := range topKeys {
+			if k == "apiVersion" || k == "kind" || k == "metadata" || k == "data" {
+				continue
+			}
+			report.Record(fmt.Sprintf("%s.%s", prefix, k), fmt.Sprintf("%s is not supported in EnvironmentConfig", k))
+		}
+
+		// 2. Check metadata fields
+		if meta != nil {
+			metaKeys := make([]string, 0, len(meta))
+			for k := range meta {
+				metaKeys = append(metaKeys, k)
+			}
+			sort.Strings(metaKeys)
+			for _, k := range metaKeys {
+				if k == "name" || k == "labels" {
+					continue
+				}
+				if k == "annotations" {
+					if anns, ok := meta["annotations"].(map[string]any); ok && len(anns) > 0 {
+						annKeys := make([]string, 0, len(anns))
+						for ak := range anns {
+							annKeys = append(annKeys, ak)
+						}
+						sort.Strings(annKeys)
+						for _, ak := range annKeys {
+							report.Record(fmt.Sprintf("%s.metadata.annotations[%s]", prefix, ak), "annotations on EnvironmentConfig are not supported in blueprint")
+						}
+					}
+					continue
+				}
+				report.Record(fmt.Sprintf("%s.metadata.%s", prefix, k), fmt.Sprintf("metadata.%s on EnvironmentConfig is not supported in blueprint", k))
+			}
+		}
+
+		// 3. Process data
+		validData := make(map[string]string)
+		if rawData, hasData := envDoc["data"]; hasData && rawData != nil {
+			data, isMap := rawData.(map[string]any)
+			if !isMap {
+				report.Record(fmt.Sprintf("%s.data", prefix), "data must be a map")
+			} else if len(data) > 0 {
+				dataKeys := make([]string, 0, len(data))
+				for k := range data {
+					dataKeys = append(dataKeys, k)
+				}
+				sort.Strings(dataKeys)
+
+				for _, k := range dataKeys {
+					v := data[k]
+					if !paramNameRE.MatchString(k) || yamlKeywords[strings.ToLower(k)] {
+						report.Record(fmt.Sprintf("%s.data.%s", prefix, k), "invalid environment key name (must be camelCase and not a YAML keyword)")
+						continue
+					}
+
+					switch v.(type) {
+					case map[string]any, []any:
+						report.Record(fmt.Sprintf("%s.data.%s", prefix, k), "non-scalar environment data is not supported in blueprint")
+						continue
+					}
+
+					var strVal string
+					inferredType := "string"
+					switch val := v.(type) {
+					case bool:
+						inferredType = "boolean"
+						if val {
+							strVal = "true"
+						} else {
+							strVal = "false"
+						}
+					case int:
+						inferredType = "integer"
+						strVal = strconv.Itoa(val)
+					case int8:
+						inferredType = "integer"
+						strVal = strconv.FormatInt(int64(val), 10)
+					case int16:
+						inferredType = "integer"
+						strVal = strconv.FormatInt(int64(val), 10)
+					case int32:
+						inferredType = "integer"
+						strVal = strconv.FormatInt(int64(val), 10)
+					case int64:
+						inferredType = "integer"
+						strVal = strconv.FormatInt(val, 10)
+					case uint:
+						inferredType = "integer"
+						strVal = strconv.FormatUint(uint64(val), 10)
+					case uint8:
+						inferredType = "integer"
+						strVal = strconv.FormatUint(uint64(val), 10)
+					case uint16:
+						inferredType = "integer"
+						strVal = strconv.FormatUint(uint64(val), 10)
+					case uint32:
+						inferredType = "integer"
+						strVal = strconv.FormatUint(uint64(val), 10)
+					case uint64:
+						inferredType = "integer"
+						strVal = strconv.FormatUint(val, 10)
+					case float32:
+						if float64(val) == float64(int64(val)) {
+							inferredType = "integer"
+							strVal = strconv.FormatInt(int64(val), 10)
+						} else {
+							inferredType = "number"
+							strVal = strconv.FormatFloat(float64(val), 'f', -1, 32)
+						}
+					case float64:
+						if val == float64(int64(val)) {
+							inferredType = "integer"
+							strVal = strconv.FormatInt(int64(val), 10)
+						} else {
+							inferredType = "number"
+							strVal = strconv.FormatFloat(val, 'f', -1, 64)
+						}
+					case string:
+						inferredType = "string"
+						strVal = val
+					case nil:
+						inferredType = "string"
+						strVal = ""
+					default:
+						inferredType = "string"
+						strVal = fmt.Sprintf("%v", val)
+					}
+
+					ensureEnvDeclared(bp, k, inferredType)
+					validData[k] = strVal
+				}
+			}
+		}
+
+		// 4. Update or append bp.Spec.EnvironmentConfigs
+		if cfgName != "" {
+			var targetCfg *blueprint.EnvironmentConfig
+			for i := range bp.Spec.EnvironmentConfigs {
+				if bp.Spec.EnvironmentConfigs[i].Name == cfgName {
+					targetCfg = &bp.Spec.EnvironmentConfigs[i]
+					break
+				}
+			}
+			if targetCfg == nil {
+				var sel *blueprint.EnvironmentConfigSelector
+				if len(labels) > 0 {
+					labelKeys := make([]string, 0, len(labels))
+					for lk := range labels {
+						labelKeys = append(labelKeys, lk)
+					}
+					sort.Strings(labelKeys)
+					matchLabels := make(map[string]string, len(labels))
+					for _, lk := range labelKeys {
+						matchLabels[lk] = fmt.Sprintf("%v", labels[lk])
+					}
+					sel = &blueprint.EnvironmentConfigSelector{MatchLabels: matchLabels}
+				}
+				bp.Spec.EnvironmentConfigs = append(bp.Spec.EnvironmentConfigs, blueprint.EnvironmentConfig{
+					Name:     cfgName,
+					Selector: sel,
+				})
+				targetCfg = &bp.Spec.EnvironmentConfigs[len(bp.Spec.EnvironmentConfigs)-1]
+			} else if targetCfg.Selector == nil && len(labels) > 0 {
+				labelKeys := make([]string, 0, len(labels))
+				for lk := range labels {
+					labelKeys = append(labelKeys, lk)
+				}
+				sort.Strings(labelKeys)
+				matchLabels := make(map[string]string, len(labels))
+				for _, lk := range labelKeys {
+					matchLabels[lk] = fmt.Sprintf("%v", labels[lk])
+				}
+				targetCfg.Selector = &blueprint.EnvironmentConfigSelector{MatchLabels: matchLabels}
+			}
+
+			if len(validData) > 0 {
+				if targetCfg.Data == nil {
+					targetCfg.Data = make(map[string]string, len(validData))
+				}
+				for k, v := range validData {
+					targetCfg.Data[k] = v
+				}
+			}
+		}
+	}
 }
 
 func parseXRDDoc(xrdDoc map[string]any, bp *blueprint.Blueprint, report *LossReport) {

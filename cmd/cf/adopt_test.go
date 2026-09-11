@@ -471,3 +471,73 @@ spec:
 		t.Errorf("region must be adopted as required: true:\n%s", bpStr)
 	}
 }
+
+func TestCF196_AdoptCLI_MultiDocEnvironmentConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	manifestPath := filepath.Join(tmpDir, "manifest.yaml")
+	outBlueprintPath := filepath.Join(tmpDir, "adopted-bp.yaml")
+
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+---
+apiVersion: apiextensions.crossplane.io/v1beta1
+kind: EnvironmentConfig
+metadata:
+  name: default
+data:
+  clusterRegion: us-east-1
+`
+
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	cmd := &AdoptCmd{
+		Composition: manifestPath,
+		Out:         outBlueprintPath,
+	}
+
+	var out bytes.Buffer
+	code, err := cmd.run(&out)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+
+	bpBytes, err := os.ReadFile(outBlueprintPath)
+	if err != nil {
+		t.Fatalf("read adopted blueprint: %v", err)
+	}
+	bpStr := string(bpBytes)
+	if !strings.Contains(bpStr, "clusterRegion") {
+		t.Errorf("expected adopted blueprint to contain clusterRegion, got:\n%s", bpStr)
+	}
+	if !strings.Contains(bpStr, "environment:") {
+		t.Errorf("expected adopted blueprint to contain spec.environment, got:\n%s", bpStr)
+	}
+	if !strings.Contains(bpStr, "environmentConfigs:") {
+		t.Errorf("expected adopted blueprint to contain spec.environmentConfigs, got:\n%s", bpStr)
+	}
+}

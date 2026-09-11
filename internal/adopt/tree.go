@@ -279,53 +279,12 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 		}
 	}
 
-	for _, envDoc := range envConfigDocs {
-		meta, _ := envDoc["metadata"].(map[string]any)
-		cfgName, _ := meta["name"].(string)
-		data, _ := envDoc["data"].(map[string]any)
-		labels, _ := meta["labels"].(map[string]any)
-
-		if len(data) > 0 {
-			if bp.Spec.Environment == nil {
-				bp.Spec.Environment = make(map[string]blueprint.EnvironmentKey)
-			}
-			for k := range data {
-				if _, exists := bp.Spec.Environment[k]; !exists {
-					bp.Spec.Environment[k] = blueprint.EnvironmentKey{Type: "string"}
-				}
-			}
+	parseEnvironmentConfigDocs(envConfigDocs, bp, report)
+	if len(bp.Spec.Environment) == 0 && len(bp.Spec.EnvironmentConfigs) > 0 {
+		for _, cfg := range bp.Spec.EnvironmentConfigs {
+			report.Record(fmt.Sprintf("environmentConfig.%s", cfg.Name), "EnvironmentConfig declared without any environment keys")
 		}
-
-		var targetCfg *blueprint.EnvironmentConfig
-		for i := range bp.Spec.EnvironmentConfigs {
-			if bp.Spec.EnvironmentConfigs[i].Name == cfgName {
-				targetCfg = &bp.Spec.EnvironmentConfigs[i]
-				break
-			}
-		}
-		if targetCfg == nil && cfgName != "" {
-			var sel *blueprint.EnvironmentConfigSelector
-			if len(labels) > 0 {
-				matchLabels := make(map[string]string, len(labels))
-				for lk, lv := range labels {
-					matchLabels[lk] = fmt.Sprintf("%v", lv)
-				}
-				sel = &blueprint.EnvironmentConfigSelector{MatchLabels: matchLabels}
-			}
-			bp.Spec.EnvironmentConfigs = append(bp.Spec.EnvironmentConfigs, blueprint.EnvironmentConfig{
-				Name:     cfgName,
-				Selector: sel,
-			})
-			targetCfg = &bp.Spec.EnvironmentConfigs[len(bp.Spec.EnvironmentConfigs)-1]
-		}
-		if targetCfg != nil && len(data) > 0 {
-			if targetCfg.Data == nil {
-				targetCfg.Data = make(map[string]string, len(data))
-			}
-			for k, v := range data {
-				targetCfg.Data[k] = fmt.Sprintf("%v", v)
-			}
-		}
+		bp.Spec.EnvironmentConfigs = nil
 	}
 
 	// 4. Set defaults for any missing XRD fields
