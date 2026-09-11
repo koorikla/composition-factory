@@ -288,6 +288,13 @@ func kclStructuredRHS(s structuredRHS, fallbackRHS string) string {
 	case rhsLiteral:
 		return kclFormatLiteral(s.value, s.targetType)
 	case rhsRaw:
+		if s.targetType == "string" && isJSONComposite(s.value) {
+			b, err := json.Marshal(s.value)
+			if err == nil {
+				return string(b)
+			}
+			return fmt.Sprintf("%q", s.value)
+		}
 		return s.value
 	case rhsTemplate:
 		return fmt.Sprintf("\"${_xr}-%s\"", s.value)

@@ -806,5 +806,57 @@ func TestCF243GenRejectsMultiDocumentBlueprint(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 	})
+}
 
+func TestCF269RawJSONInStringFieldIRSA(t *testing.T) {
+	irsaPath := filepath.Join("..", "..", "testdata", "irsa.cf.yaml")
+	if _, err := os.Stat(irsaPath); err != nil {
+		t.Skipf("testdata/irsa.cf.yaml not found: %v", err)
+	}
+
+	outDir := t.TempDir()
+	var buf bytes.Buffer
+	cmd := &GenCmd{
+		Blueprint: irsaPath,
+		Out:       outDir,
+		CacheDir:  cache.DefaultRoot(),
+		Validate:  true,
+	}
+	code, err := cmd.run(&buf)
+	if code != 0 || err != nil {
+		t.Fatalf("cf gen --validate failed with code %d: %v\nOutput: %s", code, err, buf.String())
+	}
+
+	compPath := filepath.Join(outDir, "compositions", "xirsas.platform.sparky.ee.yaml")
+	compBytes, err := os.ReadFile(compPath)
+	if err != nil {
+		t.Fatalf("read composition: %v", err)
+	}
+	if strings.Contains(string(compBytes), `policy: {"Version":`) {
+		t.Errorf("composition contains unquoted policy mapping:\n%s", string(compBytes))
+	}
+
+	adoptedBPPath := filepath.Join(outDir, "adopted.yaml")
+	var adoptBuf bytes.Buffer
+	adoptCmd := &AdoptCmd{
+		Composition: compPath,
+		Out:         adoptedBPPath,
+		CacheDir:    cache.DefaultRoot(),
+	}
+	_, adoptErr := adoptCmd.run(&adoptBuf)
+	if adoptErr != nil {
+		t.Fatalf("adopt run failed: %v", adoptErr)
+	}
+	adoptOutput := adoptBuf.String()
+	if strings.Contains(adoptOutput, "unknown field pruned by schema") && strings.Contains(adoptOutput, "resource.role-policy.fields.policy") {
+		t.Errorf("adopt pruned policy field:\n%s", adoptOutput)
+	}
+
+	adoptedBytes, err := os.ReadFile(adoptedBPPath)
+	if err != nil {
+		t.Fatalf("read adopted blueprint: %v", err)
+	}
+	if !strings.Contains(string(adoptedBytes), "policy:") {
+		t.Errorf("adopted blueprint missing policy field under role-policy:\n%s", string(adoptedBytes))
+	}
 }
