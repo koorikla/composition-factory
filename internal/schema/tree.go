@@ -213,13 +213,12 @@ func buildNode(name string, raw map[string]any, required bool) *Node {
 
 	switch n.Type {
 	case "object":
-		// additionalProperties means a map of scalars: a leaf, not a branch.
-		if _, isMap := raw["additionalProperties"]; isMap {
+		if props, ok := raw["properties"].(map[string]any); ok && len(props) > 0 {
+			n.Children = BuildTree(props, stringSlice(raw["required"]))
+		} else if addProps, ok := raw["additionalProperties"]; ok && addProps != false && addProps != nil {
+			// additionalProperties without declared properties means a map of scalars: a leaf, not a branch.
 			n.Type = "map"
 			return n
-		}
-		if props, ok := raw["properties"].(map[string]any); ok {
-			n.Children = BuildTree(props, stringSlice(raw["required"]))
 		}
 	case "array":
 		if items, ok := raw["items"].(map[string]any); ok {
@@ -232,6 +231,9 @@ func buildNode(name string, raw map[string]any, required bool) *Node {
 		if props, ok := raw["properties"].(map[string]any); ok && n.Type == "" {
 			n.Type = "object"
 			n.Children = BuildTree(props, stringSlice(raw["required"]))
+		} else if addProps, ok := raw["additionalProperties"]; ok && addProps != false && addProps != nil && n.Type == "" {
+			n.Type = "map"
+			return n
 		}
 	}
 	return n

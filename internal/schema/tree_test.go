@@ -489,3 +489,81 @@ spec:
 		t.Errorf("Status = %+v, want exactly the storage version's [current]", st)
 	}
 }
+
+func TestBuildNodeAdditionalPropertiesDropsProperties(t *testing.T) {
+	props := map[string]any{
+		"strictConfig": map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"host": map[string]any{"type": "string"},
+				"port": map[string]any{"type": "integer"},
+			},
+		},
+	}
+	nodes := BuildTree(props, nil)
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	n := nodes[0]
+	if n.Type != "object" {
+		t.Errorf("strictConfig.Type = %q, want object", n.Type)
+	}
+	if len(n.Children) != 2 {
+		t.Fatalf("strictConfig.Children = %d, want 2", len(n.Children))
+	}
+	leaves := Leaves(nodes, "")
+	if len(leaves) != 2 {
+		t.Fatalf("Leaves() count = %d, want 2 (host, port)", len(leaves))
+	}
+}
+
+func TestBuildNodeAdditionalPropertiesEdgeCases(t *testing.T) {
+	props := map[string]any{
+		"emptyStrict": map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+		},
+		"freeformMap": map[string]any{
+			"type":                 "object",
+			"additionalProperties": true,
+		},
+		"extensibleObj": map[string]any{
+			"type":                 "object",
+			"additionalProperties": map[string]any{"type": "string"},
+			"properties": map[string]any{
+				"key": map[string]any{"type": "string"},
+			},
+		},
+		"untypedStrict": map[string]any{
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"val": map[string]any{"type": "string"},
+			},
+		},
+		"untypedMap": map[string]any{
+			"additionalProperties": map[string]any{"type": "string"},
+		},
+	}
+	nodes := BuildTree(props, nil)
+	byName := make(map[string]*Node)
+	for _, n := range nodes {
+		byName[n.Name] = n
+	}
+
+	if n := byName["emptyStrict"]; n == nil || n.Type != "object" || len(n.Children) != 0 {
+		t.Errorf("emptyStrict = %+v, want Type=object, Children=0", n)
+	}
+	if n := byName["freeformMap"]; n == nil || n.Type != "map" {
+		t.Errorf("freeformMap = %+v, want Type=map", n)
+	}
+	if n := byName["extensibleObj"]; n == nil || n.Type != "object" || len(n.Children) != 1 {
+		t.Errorf("extensibleObj = %+v, want Type=object, Children=1", n)
+	}
+	if n := byName["untypedStrict"]; n == nil || n.Type != "object" || len(n.Children) != 1 {
+		t.Errorf("untypedStrict = %+v, want Type=object, Children=1", n)
+	}
+	if n := byName["untypedMap"]; n == nil || n.Type != "map" {
+		t.Errorf("untypedMap = %+v, want Type=map", n)
+	}
+}
