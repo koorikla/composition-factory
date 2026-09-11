@@ -526,11 +526,11 @@ function render() {
 
 /* ---------- wires ---------- */
 
-function portPos(owner, path) {
+function portPos(owner, path, cwRect) {
   const el = canvasEl.querySelector(
     '.port[data-owner="' + CSS.escape(owner) + '"][data-path="' + CSS.escape(path) + '"] .d');
   if (!el) return null;
-  const cw = cwEl.getBoundingClientRect();
+  const cw = cwRect || (cwEl ? cwEl.getBoundingClientRect() : { left: 0, top: 0 });
   const r = el.getBoundingClientRect();
   return { x: r.left - cw.left + r.width / 2, y: r.top - cw.top + r.height / 2 };
 }
@@ -580,19 +580,20 @@ function drawWires() {
   const ws = listWires(d);
   const fans = {};
   ws.forEach(function (w) { if (w.kind === "param") fans[w.param] = (fans[w.param] || 0) + 1; });
+  const cwRect = ws.length && cwEl ? cwEl.getBoundingClientRect() : null;
   let s = "";
   let delButtons = "";
   ws.forEach(function (w, idx) {
     let a, b, cls, col, title;
     if (w.kind === "status") {
-      a = portPos(w.srcResource, "status." + w.srcPath) || portPos(w.srcResource, w.srcPath);
-      b = portPos(w.resource, w.path);
+      a = portPos(w.srcResource, "status." + w.srcPath, cwRect) || portPos(w.srcResource, w.srcPath, cwRect);
+      b = portPos(w.resource, w.path, cwRect);
       cls = "wire-status";
       col = "var(--wire-status)";
       title = esc(w.srcResource) + ".status." + esc(w.srcPath) + " \u2192 " + esc(w.resource) + "." + esc(w.path);
     } else {
-      a = portPos(XR_ID, w.param);
-      b = portPos(w.resource, w.path);
+      a = portPos(XR_ID, w.param, cwRect);
+      b = portPos(w.resource, w.path, cwRect);
       const shared = fans[w.param] > 1;
       cls = shared ? "wire-shared" : "wire-xrd";
       col = shared ? "var(--shared)" : "var(--wire-xrd)";
