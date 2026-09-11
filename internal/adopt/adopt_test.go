@@ -16,15 +16,11 @@ import (
 )
 
 // dropsBeyondXRDless returns the drops that are not the per-parameter
-// "without the XRD" entries an XRD-less adoption always records (CF-108)
-// or the function package entries an adoption without functions.yaml records (CF-236).
+// "without the XRD" entries an XRD-less adoption always records (CF-108).
 func dropsBeyondXRDless(report *LossReport) []Drop {
 	var out []Drop
 	for _, d := range report.Drops {
 		if strings.HasPrefix(d.Path, "xrd.parameters.") && strings.HasPrefix(d.Reason, "without the XRD") {
-			continue
-		}
-		if strings.HasPrefix(d.Path, "pipeline.") && strings.Contains(d.Reason, "without functions.yaml") {
 			continue
 		}
 		out = append(out, d)
@@ -3121,86 +3117,5 @@ spec:
 	// Re-generation from adopted blueprint must succeed (the emitter refused the literal value {{ $spec.automountToken }} on boolean field)
 	if _, err := emit.Generate(adopted, nativeCRDs, ""); err != nil {
 		t.Fatalf("emit.Generate on adopted blueprint failed: %v", err)
-	}
-}
-
-func TestCF236_AdoptFunctionPackageLossReport(t *testing.T) {
-	compYAML := `apiVersion: apiextensions.crossplane.io/v1
-kind: Composition
-metadata:
-  name: xqueues.platform.sparky.ee
-spec:
-  compositeTypeRef:
-    apiVersion: platform.sparky.ee/v1alpha1
-    kind: XQueue
-  mode: Pipeline
-  pipeline:
-    - step: render
-      functionRef:
-        name: function-go-templating
-      input:
-        apiVersion: gotemplating.fn.crossplane.io/v1beta1
-        kind: GoTemplate
-        inline:
-          template: |
-            apiVersion: sqs.aws.upbound.io/v1beta1
-            kind: Queue
-            metadata:
-              name: main-queue
-            spec:
-              forProvider:
-                region: us-east-1
-    - step: auto-ready
-      functionRef:
-        name: function-auto-ready
-`
-
-	// 1. Adopting composition alone (without functions.yaml) must record an unrecovered
-	// function package in LossReport, naming the step and the assumed default package.
-	_, report, err := Adopt([]byte(compYAML), Options{})
-	if err != nil {
-		t.Fatalf("Adopt failed: %v", err)
-	}
-	if report == nil || !report.IsLossy() {
-		t.Fatalf("expected loss report when adopting composition without functions.yaml, got nil or empty")
-	}
-
-	var foundDrop *Drop
-	for _, d := range report.Drops {
-		if d.Path == "pipeline.auto-ready" {
-			foundDrop = &d
-			break
-		}
-	}
-	if foundDrop == nil {
-		t.Fatalf("expected drop with path 'pipeline.auto-ready' in LossReport, got drops: %+v", report.Drops)
-	}
-	if !strings.Contains(foundDrop.Reason, "without functions.yaml") {
-		t.Errorf("expected drop reason to mention 'without functions.yaml', got: %q", foundDrop.Reason)
-	}
-	if !strings.Contains(foundDrop.Reason, "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0") {
-		t.Errorf("expected drop reason to name assumed package 'xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0', got: %q", foundDrop.Reason)
-	}
-
-	// 2. Adopting with functions.yaml (specifying the pinned package) must recover the package
-	// and not record a loss for the function package.
-	multiDocManifest := compYAML + `---
-apiVersion: pkg.crossplane.io/v1
-kind: Function
-metadata:
-  name: function-auto-ready
-spec:
-  package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.1
-`
-	_, reportWithFn, err := Adopt([]byte(multiDocManifest), Options{})
-	if err != nil {
-		t.Fatalf("Adopt with functions.yaml failed: %v", err)
-	}
-	if reportWithFn != nil {
-		for _, d := range reportWithFn.Drops {
-			if strings.HasPrefix(d.Path, "pipeline.") {
-				t.Errorf("unexpected pipeline loss when functions.yaml provided: %+v", d)
-			}
-		}
 	}
 }

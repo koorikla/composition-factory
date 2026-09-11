@@ -1323,11 +1323,7 @@ func cleanFormatString(fmtStr string) string {
 }
 
 func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
-	type parsedStep struct {
-		step       blueprint.PipelineStep
-		pkgAssumed bool
-	}
-	var otherSteps []parsedStep
+	var otherSteps []blueprint.PipelineStep
 	seenEngineStep := false
 
 	for _, stepRaw := range pipeline {
@@ -1394,9 +1390,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 					pkg = p
 				}
 			}
-			pkgAssumed := false
 			if pkg == "" {
-				pkgAssumed = true
 				if fnName == "function-auto-ready" {
 					pkg = "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0"
 				} else {
@@ -1407,21 +1401,17 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 			if !seenEngineStep {
 				pos = "before"
 			}
-			otherSteps = append(otherSteps, parsedStep{
-				step: blueprint.PipelineStep{
-					Name:        stepName,
-					FunctionRef: fnName,
-					Package:     pkg,
-					Input:       inputYAML,
-					Position:    pos,
-				},
-				pkgAssumed: pkgAssumed,
+			otherSteps = append(otherSteps, blueprint.PipelineStep{
+				Name:        stepName,
+				FunctionRef: fnName,
+				Package:     pkg,
+				Input:       inputYAML,
+				Position:    pos,
 			})
 		}
 	}
 
-	for _, ps := range otherSteps {
-		s := ps.step
+	for _, s := range otherSteps {
 		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName && len(bp.Spec.EnvironmentConfigs) == 0 && s.Input != "" {
 			type envConfigEntry struct {
 				Type string `json:"type"`
@@ -1496,8 +1486,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 	}
 
 	hasOtherCustomSteps := false
-	for _, ps := range otherSteps {
-		s := ps.step
+	for _, s := range otherSteps {
 		if isEnvConfigsStep(s) {
 			continue
 		}
@@ -1510,20 +1499,9 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 	}
 
 	var finalSteps []blueprint.PipelineStep
-	for _, ps := range otherSteps {
-		s := ps.step
+	for _, s := range otherSteps {
 		if isEnvConfigsStep(s) {
 			continue
-		}
-		if ps.pkgAssumed && report != nil {
-			stepID := s.Name
-			if stepID == "" {
-				stepID = s.FunctionRef
-			}
-			if stepID == "" {
-				stepID = "step"
-			}
-			report.Record("pipeline."+stepID, fmt.Sprintf("without functions.yaml, function package could not be recovered (assumed default %s)", s.Package))
 		}
 		if !hasOtherCustomSteps && (s.FunctionRef == "function-auto-ready" || s.Name == "auto-ready") && s.Input == "" &&
 			(s.Package == "" || s.Package == "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0") {

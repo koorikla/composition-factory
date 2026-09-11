@@ -356,14 +356,12 @@ func TestRoundTripEmittedCompositionAndXRD(t *testing.T) {
 		t.Fatalf("emit.Generate failed: %v", err)
 	}
 
-	var origComp, origXRD, origFns []byte
+	var origComp, origXRD []byte
 	for _, o := range origOutputs {
 		if strings.Contains(o.Path, "compositions") {
 			origComp = o.Body
 		} else if strings.Contains(o.Path, "xrds") {
 			origXRD = o.Body
-		} else if strings.Contains(o.Path, "functions") {
-			origFns = o.Body
 		}
 	}
 	if len(origComp) == 0 || len(origXRD) == 0 {
@@ -418,11 +416,6 @@ func TestRoundTripEmittedCompositionAndXRD(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(tmpDir, "composition.yaml"), []byte(liveComp), 0644); err != nil {
 		t.Fatalf("write composition: %v", err)
-	}
-	if len(origFns) > 0 {
-		if err := os.WriteFile(filepath.Join(tmpDir, "functions.yaml"), origFns, 0644); err != nil {
-			t.Fatalf("write functions.yaml: %v", err)
-		}
 	}
 
 	// 5. Adopt tree
@@ -484,14 +477,12 @@ func TestRoundTripK8sWorkloadExample(t *testing.T) {
 		t.Fatalf("emit.Generate failed: %v", err)
 	}
 
-	var origComp, origXRD, origFns []byte
+	var origComp, origXRD []byte
 	for _, o := range origOutputs {
 		if strings.Contains(o.Path, "compositions") {
 			origComp = o.Body
 		} else if strings.Contains(o.Path, "xrds") {
 			origXRD = o.Body
-		} else if strings.Contains(o.Path, "functions") {
-			origFns = o.Body
 		}
 	}
 	if len(origComp) == 0 || len(origXRD) == 0 {
@@ -560,11 +551,6 @@ func TestRoundTripK8sWorkloadExample(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(tmpDir, "composition.yaml"), []byte(liveComp), 0644); err != nil {
 		t.Fatalf("write composition: %v", err)
-	}
-	if len(origFns) > 0 {
-		if err := os.WriteFile(filepath.Join(tmpDir, "functions.yaml"), origFns, 0644); err != nil {
-			t.Fatalf("write functions.yaml: %v", err)
-		}
 	}
 
 	// 5. Adopt tree

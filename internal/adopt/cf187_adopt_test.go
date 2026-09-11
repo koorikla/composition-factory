@@ -56,13 +56,8 @@ spec:
 	if err != nil {
 		t.Fatalf("emit.Composition failed: %v", err)
 	}
-	fnsGen1, err := emit.Functions(bpOriginal)
-	if err != nil {
-		t.Fatalf("emit.Functions failed: %v", err)
-	}
-	manifest := string(compGen1) + "\n---\n" + string(fnsGen1)
 
-	bpAdopted, report, err := Adopt([]byte(manifest), Options{
+	bpAdopted, report, err := Adopt(compGen1, Options{
 		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-sqs:v2",
 	})
 	if err != nil {
