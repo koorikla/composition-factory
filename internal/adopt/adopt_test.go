@@ -1935,3 +1935,240 @@ spec:
 		t.Errorf("expected comment for spec.publishConnectionDetailsWithStoreConfigRef in YAML:\n%s", string(outYAML))
 	}
 }
+
+func TestAdoptPatchTransformsLossy(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  group: platform.example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - environment
+            properties:
+              environment:
+                type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: patch-and-transform
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+      - name: queue
+        base:
+          apiVersion: sqs.aws.m.upbound.io/v1beta1
+          kind: Queue
+          spec:
+            forProvider: {}
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.environment
+          toFieldPath: spec.forProvider.region
+          transforms:
+          - type: map
+            map:
+              prod: eu-west-1
+              stage: eu-central-1
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if !report.IsLossy() {
+		t.Fatalf("expected lossy report due to patch transforms")
+	}
+	if !report.HasTrueLoss() {
+		t.Fatalf("expected HasTrueLoss to be true due to patch transforms")
+	}
+
+	found := false
+	for _, d := range report.Drops {
+		if d.Path == "resource.queue.patches[0].transforms" && d.Reason == "patch transforms are not supported in blueprint" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected drop for resource.queue.patches[0].transforms, got drops: %+v", report.Drops)
+	}
+
+	outBytes, err := FormatAdoptedYAML(bp, report)
+	if err != nil {
+		t.Fatalf("FormatAdoptedYAML failed: %v", err)
+	}
+	if !strings.Contains(string(outBytes), "# adopt: dropped resource.queue.patches[0].transforms (patch transforms are not supported in blueprint)") {
+		t.Errorf("missing drop comment in output yaml:\n%s", string(outBytes))
+	}
+}
+
+func TestAdoptClassicCompositionPatchTransformsLossy(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  group: platform.example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - appName
+            properties:
+              appName:
+                type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  resources:
+  - name: bucket
+    base:
+      apiVersion: s3.aws.upbound.io/v1beta1
+      kind: Bucket
+      spec:
+        forProvider: {}
+    patches:
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.parameters.appName
+      toFieldPath: spec.forProvider.region
+      transforms:
+      - type: string
+        string:
+          fmt: "%s-bucket"
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if !report.IsLossy() {
+		t.Fatalf("expected lossy report due to patch transforms in classic composition")
+	}
+	if !report.HasTrueLoss() {
+		t.Fatalf("expected HasTrueLoss to be true due to patch transforms in classic composition")
+	}
+
+	found := false
+	for _, d := range report.Drops {
+		if d.Path == "resource.bucket.patches[0].transforms" && d.Reason == "patch transforms are not supported in blueprint" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected drop for resource.bucket.patches[0].transforms, got drops: %+v", report.Drops)
+	}
+
+	outBytes, err := FormatAdoptedYAML(bp, report)
+	if err != nil {
+		t.Fatalf("FormatAdoptedYAML failed: %v", err)
+	}
+	if !strings.Contains(string(outBytes), "# adopt: dropped resource.bucket.patches[0].transforms (patch transforms are not supported in blueprint)") {
+		t.Errorf("missing drop comment in output yaml:\n%s", string(outBytes))
+	}
+}
+
+func TestAdoptPatchWithoutTransformsNotLossy(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  group: platform.example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - environment
+            properties:
+              environment:
+                type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: patch-and-transform
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+      - name: queue
+        base:
+          apiVersion: sqs.aws.m.upbound.io/v1beta1
+          kind: Queue
+          spec:
+            forProvider: {}
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.environment
+          toFieldPath: spec.forProvider.region
+`
+	_, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.IsLossy() {
+		t.Errorf("expected non-lossy report for patch without transforms, got drops: %+v", report.Drops)
+	}
+}

@@ -1630,6 +1630,11 @@ func parseClassicComposition(resources []any, bp *blueprint.Blueprint, opts Opti
 				fromPath, _ := pMap["fromFieldPath"].(string)
 				toPath, _ := pMap["toFieldPath"].(string)
 
+				if transforms, ok := pMap["transforms"].([]any); ok && len(transforms) > 0 {
+					report.Record(fmt.Sprintf("resource.%s.patches[%d].transforms", res.Name, patchIdx),
+						"patch transforms are not supported in blueprint")
+				}
+
 				if pType == "FromCompositeFieldPath" || pType == "" {
 					var isParamPatch bool
 					var paramName string

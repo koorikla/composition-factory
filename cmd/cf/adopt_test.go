@@ -626,3 +626,105 @@ spec:
 		t.Errorf("stdout missing spec.publishConnectionDetailsWithStoreConfigRef: %s", outStr)
 	}
 }
+
+func TestAdoptPatchTransformsExitCode2(t *testing.T) {
+	tmpDir := t.TempDir()
+	compPath := filepath.Join(tmpDir, "input.yaml")
+	outBlueprintPath := filepath.Join(tmpDir, "adopted.yaml")
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  group: platform.example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - providerName
+            - environment
+            properties:
+              providerName:
+                type: string
+              environment:
+                type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: patch-and-transform
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+      - name: queue
+        base:
+          apiVersion: sqs.aws.m.upbound.io/v1beta1
+          kind: Queue
+          spec:
+            forProvider: {}
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.environment
+          toFieldPath: spec.forProvider.region
+          transforms:
+          - type: map
+            map:
+              prod: eu-west-1
+              stage: eu-central-1
+`
+	if err := os.WriteFile(compPath, []byte(manifest), 0644); err != nil {
+		t.Fatalf("write composition: %v", err)
+	}
+
+	cmd := &AdoptCmd{
+		Composition: compPath,
+		Out:         outBlueprintPath,
+	}
+
+	var out bytes.Buffer
+	code, err := cmd.run(&out)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "resource.queue.patches[0].transforms") {
+		t.Errorf("stdout missing drop path: %s", outStr)
+	}
+	if !strings.Contains(outStr, "patch transforms are not supported in blueprint") {
+		t.Errorf("stdout missing drop reason: %s", outStr)
+	}
+
+	bpBytes, err := os.ReadFile(outBlueprintPath)
+	if err != nil {
+		t.Fatalf("read output blueprint: %v", err)
+	}
+	if !strings.Contains(string(bpBytes), "# adopt: dropped resource.queue.patches[0].transforms (patch transforms are not supported in blueprint)") {
+		t.Errorf("missing drop comment in output blueprint:\n%s", string(bpBytes))
+	}
+}
