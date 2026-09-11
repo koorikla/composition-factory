@@ -1276,3 +1276,157 @@ spec:
 		t.Errorf("unexpected reason for spec.publishConnectionDetailsWithStoreConfigRef: %q", reason)
 	}
 }
+
+func TestAdoptTreeFileSystemTemplates(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	xrdYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  group: platform.example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - providerName
+            properties:
+              providerName:
+                type: string
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "definition.yaml"), []byte(xrdYAML), 0644); err != nil {
+		t.Fatalf("write definition.yaml: %v", err)
+	}
+
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: FileSystem
+      fileSystem:
+        dirPath: /templates/xapps.platform.example.org
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "composition.yaml"), []byte(compYAML), 0644); err != nil {
+		t.Fatalf("write composition.yaml: %v", err)
+	}
+
+	templatesDir := filepath.Join(tmpDir, "templates")
+	if err := os.MkdirAll(templatesDir, 0755); err != nil {
+		t.Fatalf("mkdir templates: %v", err)
+	}
+	ctxTmpl := `{{- $spec := .observed.composite.resource.spec -}}`
+	if err := os.WriteFile(filepath.Join(templatesDir, "000-context.yaml"), []byte(ctxTmpl), 0644); err != nil {
+		t.Fatalf("write 000-context.yaml: %v", err)
+	}
+
+	bp, report, err := AdoptTree(tmpDir, Options{})
+	if err != nil {
+		t.Fatalf("AdoptTree failed: %v", err)
+	}
+	if bp == nil {
+		t.Fatal("expected non-nil blueprint")
+	}
+	if bp.Spec.XRD.Kind != "XApp" {
+		t.Errorf("expected XRD kind 'XApp', got %q", bp.Spec.XRD.Kind)
+	}
+	if report.HasTrueLoss() {
+		t.Errorf("unexpected true loss: %+v", report.Drops)
+	}
+}
+
+func TestAdoptTreeGracefullyHandlesInvalidYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	xrdYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  group: platform.example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - providerName
+            properties:
+              providerName:
+                type: string
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "definition.yaml"), []byte(xrdYAML), 0644); err != nil {
+		t.Fatalf("write definition.yaml: %v", err)
+	}
+
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources: []
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "composition.yaml"), []byte(compYAML), 0644); err != nil {
+		t.Fatalf("write composition.yaml: %v", err)
+	}
+
+	invalidYAML := `: this is not valid yaml {[`
+	if err := os.WriteFile(filepath.Join(tmpDir, "invalid.yaml"), []byte(invalidYAML), 0644); err != nil {
+		t.Fatalf("write invalid.yaml: %v", err)
+	}
+
+	bp, report, err := AdoptTree(tmpDir, Options{})
+	if err != nil {
+		t.Fatalf("AdoptTree failed: %v", err)
+	}
+	if bp == nil {
+		t.Fatal("expected non-nil blueprint")
+	}
+	if bp.Spec.XRD.Kind != "XApp" {
+		t.Errorf("expected XRD kind 'XApp', got %q", bp.Spec.XRD.Kind)
+	}
+	if !report.IsLossy() {
+		t.Errorf("expected report to record skipped unparseable YAML")
+	}
+}

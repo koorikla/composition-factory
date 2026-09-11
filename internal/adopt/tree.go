@@ -35,6 +35,9 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 			if strings.HasPrefix(name, ".") && name != "." && name != ".." {
 				return filepath.SkipDir
 			}
+			if name == "templates" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
@@ -87,7 +90,8 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 		}
 		docs, err := splitYAML(data)
 		if err != nil {
-			return nil, nil, fmt.Errorf("parse yaml %s: %w", file, err)
+			report.Record(file, fmt.Sprintf("skipped unparseable YAML: %v", err))
+			continue
 		}
 		docs = unwrapListDocs(docs)
 		ScrubDocuments(docs, report)
