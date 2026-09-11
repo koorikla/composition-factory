@@ -82,14 +82,19 @@ Each issue had its acceptance tests run and verified failing before the fix, qua
 - **CF-183** (`playwright.config.js`, `tests/helpers.js`, `tests/cf183-playwright-seeded-cache.spec.js`, `tests/fixtures/cache/`): Pre-seeded isolated e2e scratch cache directory with fixture provider schemas (`provider-aws-sqs:v2.7.0` and `provider-aws-s3:v2.7.0`), eliminating startup warnings and live OCI fetches to `ghcr.io` during browser tests. CI run 34564020985 green.
 - **CF-173** (`web-proto/js/utils.js`, `web-proto/js/regions/canvas.js`, `web-proto/js/regions/palette.js`, `web-proto/js/regions/inspector.js`, `web-proto/js/regions/output.js`, `tests/cf173-unify-utils-famof.spec.js`): Consolidated `slug`, `uniqueResourceName`, `mapResourceCoordinates`, and `famOf` into shared `utils.js`, ensuring consistent multi-cloud family color classifications across palette and canvas for GCP, Azure, Helm, AWS, and K8s. CI run 34564260992 green.
 
+### Wave 7
+- **CF-182** (`cmd/cf/options.go`, `cmd/cf/kinds.go`, `cmd/cf/fields.go`, `cmd/cf/options_test.go`): Consolidated provider-set extraction into shared `AssembleProviders` helper across CLI commands and API, unifying cache warnings, deduplication, and cluster CRD loading. CI run 34565015617 green.
+- **CF-162** (`internal/adopt/adopt.go`, `internal/adopt/tree.go`, `internal/adopt/adopt_test.go`, `internal/adopt/tree_test.go`): Added memoized `Store` to `adopt.Options` and passed across all resource inferences in `Adopt` and `AdoptTree`, eliminating redundant O(R * P) disk reads and multi-megabyte JSON unmarshals. CI run 34565280631 green.
+- **CF-145** (`web-proto/js/regions/canvas.js`, `web-proto/js/regions/palette.js`, `web-proto/css/proto.css`, `tests/cf145-empty-canvas-tab-links.spec.js`): Wrapped KINDS and SOURCES in the empty canvas hint in interactive button-role elements with proper hover/focus styling and wired them to switch palette tabs upon click or keyboard Enter. CI run 34565587515 green.
+
 ---
 
 ## 3. Residues & Follow-up Items Noticed
 
 During verification and testing, the following adjacent items were noted:
-1. **CF-145**: The empty canvas hint displays `1. Drag kinds from KINDS 2. Add cloud providers in SOURCES` with bolded tab names that look interactive like links, but clicking them does nothing.
-2. **CF-136**: Empty annotation values in the inspector send an invalid schema payload rather than prompting the user or treating it as a wire target.
-3. **CF-130**: `spec.environment` has no visual management in the inspector card, only raw DSL editing.
-4. **CF-137**: Import replaces document with no confirmation, toast, or summary.
+1. **CF-136**: Empty annotation values in the inspector send an invalid schema payload rather than prompting the user or treating it as a wire target.
+2. **CF-130**: `spec.environment` has no visual management in the inspector card, only raw DSL editing.
+3. **CF-137**: Import replaces document with no confirmation, toast, or summary.
+4. **CF-155**: Renaming a parameter in the inspector moves the row immediately due to immediate key re-sorting, shifting active inputs under the cursor.
 
 These items remain tracked in GitHub Issues for future driver runs.
