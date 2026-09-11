@@ -1956,3 +1956,127 @@ spec:
 		})
 	}
 }
+
+func TestValidateParameterEnumConformance(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Blueprint)
+		wantErr string
+	}{
+		{
+			name: "integer param with non-integer enum entry",
+			mutate: func(b *Blueprint) {
+				b.Spec.XRD.Parameters["port"] = Parameter{
+					Type:     "integer",
+					Required: true,
+					Enum:     []string{"80", "not_an_int"},
+				}
+			},
+			wantErr: `spec.xrd.parameters.port: enum entry "not_an_int" is not a valid integer`,
+		},
+		{
+			name: "number param with non-number enum entry",
+			mutate: func(b *Blueprint) {
+				b.Spec.XRD.Parameters["ratio"] = Parameter{
+					Type:     "number",
+					Required: true,
+					Enum:     []string{"1.5", "abc"},
+				}
+			},
+			wantErr: `spec.xrd.parameters.ratio: enum entry "abc" is not a valid number`,
+		},
+		{
+			name: "boolean param with non-boolean enum entry",
+			mutate: func(b *Blueprint) {
+				b.Spec.XRD.Parameters["enabled"] = Parameter{
+					Type:     "boolean",
+					Required: true,
+					Enum:     []string{"true", "maybe"},
+				}
+			},
+			wantErr: `spec.xrd.parameters.enabled: enum entry "maybe" is not a valid boolean (must be "true" or "false")`,
+		},
+		{
+			name: "param default outside declared enum choices",
+			mutate: func(b *Blueprint) {
+				b.Spec.XRD.Parameters["env"] = Parameter{
+					Type:     "string",
+					Required: true,
+					Enum:     []string{"dev", "prod"},
+					Default:  "staging",
+				}
+			},
+			wantErr: `spec.xrd.parameters.env: default "staging" is not in enum [dev prod]`,
+		},
+		{
+			name: "nested object member with invalid enum entry",
+			mutate: func(b *Blueprint) {
+				b.Spec.XRD.Parameters["settings"] = Parameter{
+					Type: "object",
+					Properties: map[string]Parameter{
+						"count": {
+							Type: "integer",
+							Enum: []string{"bad_count"},
+						},
+					},
+				}
+			},
+			wantErr: `spec.xrd.parameters.settings.properties.count: enum entry "bad_count" is not a valid integer`,
+		},
+		{
+			name: "nested object member default outside enum",
+			mutate: func(b *Blueprint) {
+				b.Spec.XRD.Parameters["settings"] = Parameter{
+					Type: "object",
+					Properties: map[string]Parameter{
+						"mode": {
+							Type:    "string",
+							Enum:    []string{"fast", "slow"},
+							Default: "medium",
+						},
+					},
+				}
+			},
+			wantErr: `spec.xrd.parameters.settings.properties.mode: default "medium" is not in enum [fast slow]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b := scalarBlueprint(tc.mutate)
+			err := b.Validate()
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error containing %q", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("Validate() err = %q, want substring %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+
+	t.Run("valid conforming enums and defaults accepted", func(t *testing.T) {
+		b := scalarBlueprint(func(b *Blueprint) {
+			b.Spec.XRD.Parameters["port"] = Parameter{
+				Type:     "integer",
+				Required: true,
+				Enum:     []string{"80", "443", "8080"},
+				Default:  "443",
+			}
+			b.Spec.XRD.Parameters["ratio"] = Parameter{
+				Type:     "number",
+				Required: true,
+				Enum:     []string{"0.5", "1.0", "2.5"},
+				Default:  "1.0",
+			}
+			b.Spec.XRD.Parameters["enabled"] = Parameter{
+				Type:     "boolean",
+				Required: true,
+				Enum:     []string{"true", "false"},
+				Default:  "true",
+			}
+		})
+		if err := b.Validate(); err != nil {
+			t.Fatalf("Validate() = %v, want valid conforming enums and defaults accepted", err)
+		}
+	})
+}

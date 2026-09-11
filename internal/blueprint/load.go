@@ -8,6 +8,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -181,6 +182,32 @@ func validateParameterScalars(fieldPath string, p Parameter) error {
 			return err
 		}
 	}
+	if len(p.Enum) > 0 {
+		switch p.Type {
+		case "object", "array":
+			return fmt.Errorf("%s: enum is not valid for type %q "+
+				"(only string, integer, number and boolean enums are supported)", fieldPath, p.Type)
+		case "boolean":
+			for _, e := range p.Enum {
+				if e != "true" && e != "false" {
+					return fmt.Errorf("%s: enum entry %q is not a valid boolean "+
+						`(must be "true" or "false")`, fieldPath, e)
+				}
+			}
+		case "integer":
+			for _, e := range p.Enum {
+				if _, err := strconv.ParseInt(e, 10, 64); err != nil {
+					return fmt.Errorf("%s: enum entry %q is not a valid integer", fieldPath, e)
+				}
+			}
+		case "number":
+			for _, e := range p.Enum {
+				if _, err := strconv.ParseFloat(e, 64); err != nil {
+					return fmt.Errorf("%s: enum entry %q is not a valid number", fieldPath, e)
+				}
+			}
+		}
+	}
 	// The XRD emitter honours Default, emitting it quoted for type:
 	// string and unquoted for integer/number/boolean. It has no
 	// sensible handling for a default on type: object or array, and
@@ -206,6 +233,9 @@ func validateParameterScalars(fieldPath string, p Parameter) error {
 			if _, err := strconv.ParseFloat(p.Default, 64); err != nil {
 				return fmt.Errorf("%s: default %q is not a valid number", fieldPath, p.Default)
 			}
+		}
+		if len(p.Enum) > 0 && !slices.Contains(p.Enum, p.Default) {
+			return fmt.Errorf("%s: default %q is not in enum %v", fieldPath, p.Default, p.Enum)
 		}
 	}
 	return nil
