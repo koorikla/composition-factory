@@ -386,7 +386,11 @@ function modeButtons(path, pressed, isEnv) {
   }).join("") + "</span>";
 }
 
-function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap, isEnv, isRequired, currentFrom) {
+function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap, isEnv, isRequired, currentFrom, env) {
+  if (!env && store.state && store.state.doc && store.state.doc.spec) {
+    env = store.state.doc.spec.environment;
+  }
+  env = env || {};
   var names = [];
   function collectMemberRefs(prefix, props) {
     Object.keys(props || {}).sort().forEach(function (mn) {
@@ -426,6 +430,26 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
       var optNote = isOpt && isRequired ? " (optional \u2192 req)" : "";
       var isSel = currentFrom === ("params." + n);
       h += '<option value="params.' + esc(n) + '"' + (isSel ? " selected" : "") + '>params.' + esc(n) + esc(optNote) + "</option>";
+    });
+    h += '</optgroup>';
+  }
+
+  var envKeys = [];
+  Object.keys(env).sort().forEach(function (k) {
+    var kDef = env[k] || {};
+    var kType = (typeof kDef === "object" && kDef.type) ? kDef.type : "string";
+    if (compatible(kType, fieldType)) {
+      envKeys.push(k);
+    }
+  });
+  if (envKeys.length > 0) {
+    h += '<optgroup label="Environment">';
+    envKeys.forEach(function (k) {
+      var kDef = env[k] || {};
+      var kType = (typeof kDef === "object" && kDef.type) ? kDef.type : "string";
+      var wireVal = "env." + k;
+      var isSel = currentFrom === wireVal;
+      h += '<option value="' + esc(wireVal) + '"' + (isSel ? ' selected' : '') + '>' + esc(wireVal) + ' (' + esc(kType) + ')' + '</option>';
     });
     h += '</optgroup>';
   }
@@ -628,7 +652,7 @@ function isFieldEffectivelyRequired(f, res) {
   return true;
 }
 
-function fieldRow(res, f, params, otherResources, otherStatusMap) {
+function fieldRow(res, f, params, otherResources, otherStatusMap, env) {
   var entry = entryOf(res, f.path);
   var dm = docMode(entry);
   var m = uiMode[f.path] || dm;
@@ -652,6 +676,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
 
   var wired = m === "w" && dm === "w" && !uiMode[f.path] && entry;
   var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
+  var isEnvWire = wired && entry.from && entry.from.indexOf("env.") === 0;
   var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
     '<div class="fld-h"><span class="n" title="' + esc(f.path) + '">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
     (isReq ? '<span class="rq">req</span>' : "") +
@@ -661,16 +686,16 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
   if (isMap) {
     if (m === "w") {
       if (dm === "w" && !uiMode[f.path] && entry) {
-        const wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
-        const bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
-        h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-          '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
+        const wireCol = isStatusWire ? "var(--wire-status)" : (isEnvWire ? "var(--shared)" : "var(--wire-xrd)");
+        const bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : (isEnvWire ? ' style="background:var(--shared-soft)"' : "");
+        h += '<div class="bound' + (isEnvWire ? ' shared' : '') + '"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
+          '<span class="src' + (isEnvWire ? ' sh' : '') + '" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
           '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
         if (isReq && isOptParamWire(entry.from, params)) {
           h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
         }
       } else {
-        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false, !!isReq, entry && entry.from);
+        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false, !!isReq, entry && entry.from, env);
       }
     } else if (m === "r") {
       h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", false, res, params, otherResources, otherStatusMap);
@@ -691,6 +716,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
         var meM = uiMode[me.fullPath] || meDm;
         var meWired = meM === "w" && meDm === "w" && !uiMode[me.fullPath] && meEntry;
         var isMeStatus = meWired && meEntry.from && meEntry.from.indexOf("resources.") === 0;
+        var isMeEnv = meWired && meEntry.from && meEntry.from.indexOf("env.") === 0;
 
         h += '<div class="map-entry-card" style="padding:6px 8px;background:var(--surface-2);border-radius:4px;border:1px solid var(--rule)">' +
           '<div class="frow" style="margin-bottom:3px;align-items:center">' +
@@ -701,13 +727,13 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
 
         if (meM === "w") {
           if (meWired) {
-            var wireCol = isMeStatus ? "var(--wire-status)" : "var(--wire-xrd)";
-            var bgStyle = isMeStatus ? ' style="background:var(--wire-status-soft)"' : "";
-            h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-              '<span class="src" style="color:' + wireCol + '">' + esc(meEntry.from || "") + "</span>" +
+            var wireCol = isMeStatus ? "var(--wire-status)" : (isMeEnv ? "var(--shared)" : "var(--wire-xrd)");
+            var bgStyle = isMeStatus ? ' style="background:var(--wire-status-soft)"' : (isMeEnv ? ' style="background:var(--shared-soft)"' : "");
+            h += '<div class="bound' + (isMeEnv ? ' shared' : '') + '"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
+              '<span class="src' + (isMeEnv ? ' sh' : '') + '" style="color:' + wireCol + '">' + esc(meEntry.from || "") + "</span>" +
               '<span class="x" role="button" tabindex="0" data-unwire="' + esc(me.fullPath) + '" title="Remove wire">&#215;</span></div>';
           } else {
-            h += wireSelectHtml(me.fullPath, "string", params, otherResources, otherStatusMap, false, false, meEntry && meEntry.from);
+            h += wireSelectHtml(me.fullPath, "string", params, otherResources, otherStatusMap, false, false, meEntry && meEntry.from, env);
           }
         } else if (meM === "r") {
           h += rawEditorHtml(me.fullPath, (meDm === "r" && meEntry) ? meEntry.raw : "", false, res, params, otherResources, otherStatusMap);
@@ -730,16 +756,16 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
   } else {
     if (m === "w") {
       if (dm === "w" && !uiMode[f.path] && entry) {
-        const wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
-        const bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
-        h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-          '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
+        const wireCol = isStatusWire ? "var(--wire-status)" : (isEnvWire ? "var(--shared)" : "var(--wire-xrd)");
+        const bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : (isEnvWire ? ' style="background:var(--shared-soft)"' : "");
+        h += '<div class="bound' + (isEnvWire ? ' shared' : '') + '"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
+          '<span class="src' + (isEnvWire ? ' sh' : '') + '" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
           '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
         if (isReq && isOptParamWire(entry.from, params)) {
           h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
         }
       } else {
-        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false, !!isReq, entry && entry.from);
+        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false, !!isReq, entry && entry.from, env);
       }
     } else if (m === "r") {
       h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", false, res, params, otherResources, otherStatusMap);
@@ -758,7 +784,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
   return h + "</div>";
 }
 
-function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
+function envelopeFieldRow(res, f, params, otherResources, otherStatusMap, env) {
   var entry = envelopeEntryOf(res, f.path);
   var dm = docMode(entry, true);
   var mKey = "env:" + f.path;
@@ -768,6 +794,7 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
 
   var wired = m === "w" && dm === "w" && !uiMode[mKey] && entry;
   var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
+  var isEnvWire = wired && entry.from && entry.from.indexOf("env.") === 0;
   var isAuto = !entry && (f.path === "providerConfigRef.name" || f.path === "providerConfigRef.kind");
   var showReq = f.required && !isAuto;
   var isXr = entry && !entry.from && entry.raw === "{{ $xr }}";
@@ -780,17 +807,17 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
 
   if (m === "w") {
     if (dm === "w" && !uiMode[mKey] && entry) {
-      var wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
-      var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
+      var wireCol = isStatusWire ? "var(--wire-status)" : (isEnvWire ? "var(--shared)" : "var(--wire-xrd)");
+      var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : (isEnvWire ? ' style="background:var(--shared-soft)"' : "");
       var wireLabel = isXr ? "XR name ($xr)" : (entry.from || "");
-      h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-        '<span class="src" style="color:' + wireCol + '">' + esc(wireLabel) + "</span>" +
+      h += '<div class="bound' + (isEnvWire ? ' shared' : '') + '"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
+        '<span class="src' + (isEnvWire ? ' sh' : '') + '" style="color:' + wireCol + '">' + esc(wireLabel) + "</span>" +
         '<span class="x" role="button" tabindex="0" data-env-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
       if (showReq && !isXr && isOptParamWire(entry.from, params)) {
         h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
       }
     } else {
-      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, true, !!showReq, isXr ? "$xr" : (entry && entry.from));
+      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, true, !!showReq, isXr ? "$xr" : (entry && entry.from), env);
     }
   } else if (m === "r") {
     h += rawEditorHtml(f.path, entry ? entry.raw : "", true, res, params, otherResources, otherStatusMap);
@@ -1093,6 +1120,7 @@ async function renderResource(res) {
       '.<div class="dg" style="margin-top:4px">Run: <code>cf provider add ' + esc(provRef) + '</code></div></div>';
   } else {
     var params = paramsOf(doc);
+    var env = (doc && doc.spec && doc.spec.environment) || {};
     // Required branches (e.g. Deployment's spec.selector / spec.template):
     // must-set objects with no chain-true leaves — surfaced as rows of their
     // own so the Required view shows what a user actually has to fill.
@@ -1110,13 +1138,13 @@ async function renderResource(res) {
     h += wlHtml;
 
     var body = branchRows +
-      fields.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap); }).join("");
+      fields.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap, env); }).join("");
     h += body || '<div class="empty">No fields match this filter.</div>';
 
     // Crossplane Envelope section (if this CRD defines envelope properties)
     if (detail && detail.envelope && detail.envelope.length > 0) {
       var envRows = detail.envelope.map(function (f) {
-        return envelopeFieldRow(res, f, params, otherResources, otherStatusMap);
+        return envelopeFieldRow(res, f, params, otherResources, otherStatusMap, env);
       }).join("");
       if (envRows) {
         var envSetCount = detail.envelope.filter(function (f) { return envelopeEntryOf(res, f.path); }).length;
@@ -2708,7 +2736,7 @@ function onBoxChange(e) {
     const v = t.value;
     if (v === "__new__") { pendingNewParam = path; render(); return; }
     if (!v) return;
-    const fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
+    const fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0 || v.indexOf("env.") === 0) ? v : ("params." + v);
     if (t.getAttribute("data-fld-req") === "true" && isOptParamWire(fromVal, paramsOf(doc))) {
       const parentCard = t.closest(".bound");
       const existingWarn = parentCard && parentCard.parentElement && parentCard.parentElement.querySelector(".wire-warn");
@@ -2735,7 +2763,7 @@ function onBoxChange(e) {
         .then(function (r) { if (r !== null) { delete uiMode["env:" + path]; pendingNewParam = null; } });
       return;
     }
-    const fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
+    const fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0 || v.indexOf("env.") === 0) ? v : ("params." + v);
     if (t.getAttribute("data-fld-req") === "true" && isOptParamWire(fromVal, paramsOf(doc))) {
       const parentCard = t.closest(".bound");
       const existingWarn = parentCard && parentCard.parentElement && parentCard.parentElement.querySelector(".wire-warn");

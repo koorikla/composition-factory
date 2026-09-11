@@ -334,6 +334,8 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
   background:var(--surface);border:1px solid var(--rule-2);font-family:var(--mono);font-size:10.5px}
 .bound .src{color:var(--wire-xrd);font-weight:500}
 .bound .src.sh{color:var(--shared)}
+.bound.shared{background:var(--shared-soft)}
+.bound.shared .src{color:var(--shared)}
 .bound .x{margin-left:auto;color:var(--faint);font-size:13px;line-height:1}
 .bound .x:hover{color:var(--err)}
 .empty{padding:24px 16px;text-align:center;color:var(--faint);font-size:12px;line-height:1.5}
