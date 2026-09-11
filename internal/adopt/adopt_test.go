@@ -6166,3 +6166,146 @@ spec:
 		}
 	})
 }
+
+// CF-270 (#158): cf adopt silently drops unrecognized manifests in multi-document streams without loss reporting
+func TestCF270_AdoptUnhandledManifestLoss(t *testing.T) {
+	manifest := `
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-secret
+type: Opaque
+data:
+  token: ZXhhbXBsZQ==
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-config
+data:
+  key: value
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report == nil {
+		t.Fatalf("expected non-nil LossReport")
+	}
+
+	// 1. Verify report.Drops contains an entry identifying Secret/my-secret as an unhandled omitted manifest
+	var secretDrop *Drop
+	var configDrop *Drop
+	for i := range report.Drops {
+		if report.Drops[i].Path == "manifest.Secret/my-secret" {
+			secretDrop = &report.Drops[i]
+		}
+		if report.Drops[i].Path == "manifest.ConfigMap/my-config" {
+			configDrop = &report.Drops[i]
+		}
+	}
+	if secretDrop == nil {
+		t.Fatalf("expected drop entry for manifest.Secret/my-secret, got drops: %+v", report.Drops)
+	}
+	if !strings.Contains(secretDrop.Reason, "unhandled resource kind") {
+		t.Errorf("expected drop reason to mention unhandled resource kind, got: %q", secretDrop.Reason)
+	}
+	if configDrop == nil {
+		t.Fatalf("expected drop entry for manifest.ConfigMap/my-config, got drops: %+v", report.Drops)
+	}
+	if !strings.Contains(configDrop.Reason, "unhandled resource kind") {
+		t.Errorf("expected drop reason to mention unhandled resource kind, got: %q", configDrop.Reason)
+	}
+	if !report.HasTrueLoss() {
+		t.Errorf("expected report.HasTrueLoss() == true for unhandled manifest drop")
+	}
+
+	// 2. Verify that the adopted blueprint comments include # adopt: dropped manifest.Secret/my-secret
+	outBytes, err := FormatAdoptedYAML(bp, report)
+	if err != nil {
+		t.Fatalf("FormatAdoptedYAML failed: %v", err)
+	}
+	outStr := string(outBytes)
+	if !strings.Contains(outStr, "# adopt: dropped manifest.Secret/my-secret") {
+		t.Errorf("expected adopted blueprint comments to include '# adopt: dropped manifest.Secret/my-secret', got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "# adopt: dropped manifest.ConfigMap/my-config") {
+		t.Errorf("expected adopted blueprint comments to include '# adopt: dropped manifest.ConfigMap/my-config', got:\n%s", outStr)
+	}
+}
+
+func TestCF270_AdoptUnhandledManifestWithoutName(t *testing.T) {
+	manifest := `
+apiVersion: v1
+kind: Secret
+type: Opaque
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+`
+
+	_, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	var secretDrop *Drop
+	for i := range report.Drops {
+		if report.Drops[i].Path == "manifest.Secret" {
+			secretDrop = &report.Drops[i]
+			break
+		}
+	}
+	if secretDrop == nil {
+		t.Fatalf("expected drop entry for manifest.Secret, got drops: %+v", report.Drops)
+	}
+}

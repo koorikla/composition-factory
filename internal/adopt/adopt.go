@@ -255,13 +255,30 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 					}
 				}
 			}
+		default:
+			if len(d) == 0 {
+				continue
+			}
+			name := ""
+			if meta, ok := d["metadata"].(map[string]any); ok {
+				name, _ = meta["name"].(string)
+			}
+			target := "manifest"
+			if kind != "" && name != "" {
+				target = fmt.Sprintf("manifest.%s/%s", kind, name)
+			} else if kind != "" {
+				target = fmt.Sprintf("manifest.%s", kind)
+			} else if name != "" {
+				target = fmt.Sprintf("manifest/%s", name)
+			}
+			report.Record(target, "unhandled resource kind omitted from blueprint adoption")
 		}
 	}
 
 	if compDoc == nil {
 		if xrdDoc != nil && opts.BaseBlueprint != nil {
 			if _, ok := xrdDoc["spec"].(map[string]any); ok {
-				return adoptXRDComplement(xrdDoc, opts)
+				return adoptXRDComplement(xrdDoc, opts, report)
 			}
 		}
 		return nil, nil, fmt.Errorf("no Composition document found in manifest")
@@ -419,7 +436,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	return bp, report, nil
 }
 
-func adoptXRDComplement(xrdDoc map[string]any, opts Options) (*blueprint.Blueprint, *LossReport, error) {
+func adoptXRDComplement(xrdDoc map[string]any, opts Options, report *LossReport) (*blueprint.Blueprint, *LossReport, error) {
 	if opts.BaseBlueprint == nil {
 		return nil, nil, fmt.Errorf("no Composition document found in manifest (supply Composition and XRD together in one file or select both to adopt)")
 	}
@@ -448,7 +465,9 @@ func adoptXRDComplement(xrdDoc map[string]any, opts Options) (*blueprint.Bluepri
 		bp.Spec.XRD.Parameters = make(map[string]blueprint.Parameter)
 	}
 
-	report := &LossReport{}
+	if report == nil {
+		report = &LossReport{}
+	}
 
 	if group, ok := spec["group"].(string); ok && group != "" {
 		bp.Spec.XRD.Group = group
