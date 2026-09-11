@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+
+	"sigs.k8s.io/yaml"
 )
 
 // NativeProvider is the provider label for native Kubernetes kinds — the
@@ -70,6 +73,10 @@ type Spec struct {
 	// pipeline step and allows from: env.<key> references in fields, annotations, envelope,
 	// forEach, and when.
 	Environment map[string]EnvironmentKey `json:"environment,omitempty"`
+	// EnvironmentConfigs declares the EnvironmentConfig resources the pipeline step reads.
+	// When declared, cf gen scaffolds each config to environmentconfigs/<name>.yaml and
+	// configures function-environment-configs to select them by reference or label selector.
+	EnvironmentConfigs []EnvironmentConfig `json:"environmentConfigs,omitempty"`
 	// Templates are user-defined Go templates, name -> body. Each is emitted
 	// as a {{- define "<name>" }} block heading the Composition's template
 	// and is callable from a field via template: <name> (or applied by a
@@ -143,6 +150,7 @@ const (
 	PythonFunctionPackage = "xpkg.upbound.io/crossplane-contrib/function-python:v0.5.0"
 
 	EnvironmentKeysAnnotation         = "factory.crossplane.io/environment-keys"
+	EnvironmentConfigsAnnotation      = "factory.crossplane.io/environment-configs"
 	EnvironmentConfigsFunctionName    = "function-environment-configs"
 	EnvironmentConfigsFunctionPackage = "xpkg.crossplane.io/crossplane-contrib/function-environment-configs:v0.4.0"
 	DefaultEnvironmentConfigsInput    = "apiVersion: environmentconfigs.fn.crossplane.io/v1beta1\nkind: Input\nspec:\n  environmentConfigs:\n  - type: Reference\n    ref:\n      name: default\n"
@@ -342,6 +350,221 @@ func (k *EnvironmentKey) UnmarshalJSON(data []byte) error {
 		}
 	}
 	return nil
+}
+
+// EnvironmentConfig declares one EnvironmentConfig resource read by the pipeline.
+type EnvironmentConfig struct {
+	Name     string                     `json:"name,omitempty"`
+	Selector *EnvironmentConfigSelector `json:"selector,omitempty"`
+	Data     map[string]string          `json:"data,omitempty"`
+	Values   map[string]string          `json:"values,omitempty"`
+}
+
+// EnvironmentConfigSelector declares label matching for an EnvironmentConfig.
+type EnvironmentConfigSelector struct {
+	MatchLabels map[string]string `json:"matchLabels,omitempty"`
+}
+
+// UnmarshalJSON permits a comma-separated selector string, a bare key-value map,
+// or a standard {matchLabels: {...}} object.
+func (s *EnvironmentConfigSelector) UnmarshalJSON(data []byte) error {
+	var rawString string
+	if err := json.Unmarshal(data, &rawString); err == nil {
+		s.MatchLabels = make(map[string]string)
+		pairs := strings.Split(rawString, ",")
+		for _, pair := range pairs {
+			parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+			if len(parts) == 2 {
+				s.MatchLabels[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+			}
+		}
+		return nil
+	}
+	var rawMap map[string]any
+	if err := json.Unmarshal(data, &rawMap); err != nil {
+		return err
+	}
+	if ml, ok := rawMap["matchLabels"].(map[string]any); ok {
+		s.MatchLabels = make(map[string]string)
+		for k, v := range ml {
+			s.MatchLabels[k] = fmt.Sprintf("%v", v)
+		}
+		return nil
+	}
+	s.MatchLabels = make(map[string]string)
+	for k, v := range rawMap {
+		s.MatchLabels[k] = fmt.Sprintf("%v", v)
+	}
+	return nil
+}
+
+// UnmarshalJSON permits scalar values (booleans, numbers, strings) in Data and Values.
+func (c *EnvironmentConfig) UnmarshalJSON(data []byte) error {
+	type rawConfig struct {
+		Name        string                     `json:"name,omitempty"`
+		Selector    *EnvironmentConfigSelector `json:"selector,omitempty"`
+		MatchLabels map[string]string          `json:"matchLabels,omitempty"`
+		Data        map[string]any             `json:"data,omitempty"`
+		Values      map[string]any             `json:"values,omitempty"`
+	}
+	var raw rawConfig
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&raw); err != nil {
+		return err
+	}
+	c.Name = raw.Name
+	c.Selector = raw.Selector
+	if c.Selector == nil && len(raw.MatchLabels) > 0 {
+		c.Selector = &EnvironmentConfigSelector{
+			MatchLabels: raw.MatchLabels,
+		}
+	}
+	if len(raw.Data) > 0 {
+		c.Data = make(map[string]string, len(raw.Data))
+		for k, v := range raw.Data {
+			c.Data[k] = scalarToString(v)
+		}
+	}
+	if len(raw.Values) > 0 {
+		c.Values = make(map[string]string, len(raw.Values))
+		for k, v := range raw.Values {
+			c.Values[k] = scalarToString(v)
+		}
+	}
+	return nil
+}
+
+func scalarToString(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case float64:
+		if val == float64(int64(val)) {
+			return strconv.FormatInt(int64(val), 10)
+		}
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+// EffectiveData returns the config's data, merging values and data (data overrides values).
+func (c *EnvironmentConfig) EffectiveData() map[string]string {
+	if c == nil {
+		return nil
+	}
+	out := make(map[string]string)
+	for k, v := range c.Values {
+		out[k] = v
+	}
+	for k, v := range c.Data {
+		out[k] = v
+	}
+	return out
+}
+
+// EffectiveEnvironmentConfigs returns declared configs with defaulted names,
+// or a single default config if spec.environment is declared without spec.environmentConfigs.
+func (b *Blueprint) EffectiveEnvironmentConfigs() []EnvironmentConfig {
+	if b == nil {
+		return nil
+	}
+	if len(b.Spec.EnvironmentConfigs) > 0 {
+		res := make([]EnvironmentConfig, len(b.Spec.EnvironmentConfigs))
+		for i, cfg := range b.Spec.EnvironmentConfigs {
+			c := cfg
+			if c.Name == "" {
+				if c.Selector != nil && len(c.Selector.MatchLabels) > 0 {
+					var parts []string
+					for k, v := range c.Selector.MatchLabels {
+						parts = append(parts, fmt.Sprintf("%s-%s", k, v))
+					}
+					sort.Strings(parts)
+					c.Name = strings.Join(parts, "-")
+				} else {
+					c.Name = "default"
+				}
+			}
+			res[i] = c
+		}
+		return res
+	}
+	if len(b.Spec.Environment) > 0 {
+		return []EnvironmentConfig{{Name: "default"}}
+	}
+	return nil
+}
+
+// EnvironmentConfigsInput returns the Input YAML for function-environment-configs.
+func (b *Blueprint) EnvironmentConfigsInput() string {
+	if b == nil || len(b.Spec.EnvironmentConfigs) == 0 {
+		return DefaultEnvironmentConfigsInput
+	}
+	if len(b.Spec.EnvironmentConfigs) == 1 {
+		cfg := b.Spec.EnvironmentConfigs[0]
+		if (cfg.Selector == nil || len(cfg.Selector.MatchLabels) == 0) && (cfg.Name == "" || cfg.Name == "default") {
+			return DefaultEnvironmentConfigsInput
+		}
+	}
+
+	type configRef struct {
+		Name string `json:"name,omitempty"`
+	}
+	type configSelector struct {
+		MatchLabels map[string]string `json:"matchLabels,omitempty"`
+	}
+	type configEntry struct {
+		Selector *configSelector `json:"selector,omitempty"`
+		Ref      *configRef      `json:"ref,omitempty"`
+		Type     string          `json:"type"`
+	}
+	type inputDoc struct {
+		APIVersion string `json:"apiVersion"`
+		Kind       string `json:"kind"`
+		Spec       struct {
+			EnvironmentConfigs []configEntry `json:"environmentConfigs"`
+		} `json:"spec"`
+	}
+
+	var doc inputDoc
+	doc.APIVersion = "environmentconfigs.fn.crossplane.io/v1beta1"
+	doc.Kind = "Input"
+	doc.Spec.EnvironmentConfigs = make([]configEntry, 0, len(b.Spec.EnvironmentConfigs))
+	for _, cfg := range b.Spec.EnvironmentConfigs {
+		if cfg.Selector != nil && len(cfg.Selector.MatchLabels) > 0 {
+			doc.Spec.EnvironmentConfigs = append(doc.Spec.EnvironmentConfigs, configEntry{
+				Type: "Selector",
+				Selector: &configSelector{
+					MatchLabels: cfg.Selector.MatchLabels,
+				},
+			})
+		} else {
+			name := cfg.Name
+			if name == "" {
+				name = "default"
+			}
+			doc.Spec.EnvironmentConfigs = append(doc.Spec.EnvironmentConfigs, configEntry{
+				Type: "Reference",
+				Ref: &configRef{
+					Name: name,
+				},
+			})
+		}
+	}
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return DefaultEnvironmentConfigsInput
+	}
+	return string(out)
 }
 
 // PipelineStep is one blueprint-declared Composition pipeline step, placed

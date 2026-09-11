@@ -545,3 +545,102 @@ func TestCF180GenValidateDockerUnavailable(t *testing.T) {
 		t.Errorf("got %q: expected error to contain guidance 'Is the docker daemon running?'", err.Error())
 	}
 }
+
+func TestCF187GenEnvironmentConfigs(t *testing.T) {
+	dir, _, cacheDir := seed(t)
+	bpWithEnv := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata: {name: xqueue}
+spec:
+  sources:
+    - provider: example.org/provider-test:v2
+  xrd:
+    group: platform.sparky.ee
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+  environment:
+    cluster:
+      type: string
+      default: "prod"
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: example.org/provider-test:v2
+      fields:
+        region: {value: "us-east-1"}
+`
+	bpPath := filepath.Join(dir, "xqueue-env.cf.yaml")
+	if err := os.WriteFile(bpPath, []byte(bpWithEnv), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out")
+	var buf bytes.Buffer
+	cmd := &GenCmd{Blueprint: bpPath, Out: out, CacheDir: cacheDir}
+	if err := cmd.Run(&buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	target := filepath.Join(out, "environmentconfigs", "default.yaml")
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("environmentconfigs/default.yaml was not written by cf gen: %v", err)
+	}
+
+	// Verify --check passes when in sync
+	buf.Reset()
+	code, _ := (&GenCmd{Blueprint: bpPath, Out: out, CacheDir: cacheDir, Check: true}).run(&buf)
+	if code != 0 {
+		t.Fatalf("in-sync check code=%d, want 0", code)
+	}
+
+	// Verify drift detected if modified
+	if err := os.WriteFile(target, []byte("tampered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	code, _ = (&GenCmd{Blueprint: bpPath, Out: out, CacheDir: cacheDir, Check: true}).run(&buf)
+	if code != 2 {
+		t.Errorf("drift check code=%d, want 2", code)
+	}
+	if !strings.Contains(buf.String(), "drift: "+target) {
+		t.Errorf("expected drift message for %s, got: %s", target, buf.String())
+	}
+
+	// Verify pruning: when blueprint removes environment, cf gen removes environmentconfigs/default.yaml
+	bpNoEnv := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata: {name: xqueue}
+spec:
+  sources:
+    - provider: example.org/provider-test:v2
+  xrd:
+    group: platform.sparky.ee
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: example.org/provider-test:v2
+      fields:
+        region: {value: "us-east-1"}
+`
+	if err := os.WriteFile(bpPath, []byte(bpNoEnv), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	if err := (&GenCmd{Blueprint: bpPath, Out: out, CacheDir: cacheDir}).Run(&buf); err != nil {
+		t.Fatalf("Run after removing environment: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be pruned after removing environment, stat err: %v", target, err)
+	}
+}

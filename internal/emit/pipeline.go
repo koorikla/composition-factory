@@ -34,7 +34,7 @@ func effectivePipeline(b *blueprint.Blueprint) []blueprint.PipelineStep {
 	if len(steps) == 0 {
 		steps = defaultPipeline
 	}
-	if len(b.Spec.Environment) > 0 {
+	if len(b.Spec.Environment) > 0 || len(b.Spec.EnvironmentConfigs) > 0 {
 		hasEnvStep := false
 		for _, s := range steps {
 			if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
@@ -48,7 +48,7 @@ func effectivePipeline(b *blueprint.Blueprint) []blueprint.PipelineStep {
 				FunctionRef: blueprint.EnvironmentConfigsFunctionName,
 				Package:     blueprint.EnvironmentConfigsFunctionPackage,
 				Position:    blueprint.PositionBefore,
-				Input:       blueprint.DefaultEnvironmentConfigsInput,
+				Input:       b.EnvironmentConfigsInput(),
 			}
 			steps = append([]blueprint.PipelineStep{envStep}, steps...)
 		}

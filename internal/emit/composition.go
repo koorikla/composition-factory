@@ -43,13 +43,24 @@ func composition(b *blueprint.Blueprint, crds []schema.CRD, fsDir string) ([]byt
 	d.Line(0, "kind: Composition")
 	d.Line(0, "metadata:")
 	d.Line(1, "name: %s.%s", x.Plural, x.Group)
-	if len(b.Spec.Environment) > 0 {
-		envJSON, err := json.Marshal(b.Spec.Environment)
-		if err != nil {
-			return nil, err
-		}
+	hasEnvKeys := len(b.Spec.Environment) > 0
+	hasEnvConfigs := len(b.Spec.EnvironmentConfigs) > 0
+	if hasEnvKeys || hasEnvConfigs {
 		d.Line(1, "annotations:")
-		d.Line(2, "%s: %s", blueprint.EnvironmentKeysAnnotation, quoteYAML(string(envJSON)))
+		if hasEnvConfigs {
+			configsJSON, err := json.Marshal(b.Spec.EnvironmentConfigs)
+			if err != nil {
+				return nil, err
+			}
+			d.Line(2, "%s: %s", blueprint.EnvironmentConfigsAnnotation, quoteYAML(string(configsJSON)))
+		}
+		if hasEnvKeys {
+			envJSON, err := json.Marshal(b.Spec.Environment)
+			if err != nil {
+				return nil, err
+			}
+			d.Line(2, "%s: %s", blueprint.EnvironmentKeysAnnotation, quoteYAML(string(envJSON)))
+		}
 	}
 	d.Line(0, "spec:")
 	d.Line(1, "compositeTypeRef:")

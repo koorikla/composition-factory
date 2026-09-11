@@ -53,6 +53,7 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	var configDocs []map[string]any
 	var xrdDocs []map[string]any
 	var compDocs []map[string]any
+	var envConfigDocs []map[string]any
 
 	if opts.FunctionPackages == nil {
 		opts.FunctionPackages = make(map[string]string)
@@ -99,6 +100,8 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 				xrdDocs = append(xrdDocs, doc)
 			case "Composition":
 				compDocs = append(compDocs, doc)
+			case "EnvironmentConfig":
+				envConfigDocs = append(envConfigDocs, doc)
 			case "Function":
 				if meta, ok := doc["metadata"].(map[string]any); ok {
 					fnName, _ := meta["name"].(string)
@@ -226,6 +229,12 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 				}
 			}
 			if anns, ok := meta["annotations"].(map[string]any); ok {
+				if envConfigsRaw, ok := anns[blueprint.EnvironmentConfigsAnnotation].(string); ok && envConfigsRaw != "" {
+					var envConfigs []blueprint.EnvironmentConfig
+					if err := json.Unmarshal([]byte(envConfigsRaw), &envConfigs); err == nil && len(envConfigs) > 0 {
+						bp.Spec.EnvironmentConfigs = envConfigs
+					}
+				}
 				if envKeysRaw, ok := anns[blueprint.EnvironmentKeysAnnotation].(string); ok && envKeysRaw != "" {
 					var envKeys map[string]blueprint.EnvironmentKey
 					if err := json.Unmarshal([]byte(envKeysRaw), &envKeys); err == nil && len(envKeys) > 0 {
@@ -266,6 +275,55 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 		} else if resources, ok := spec["resources"].([]any); ok && len(resources) > 0 {
 			if err := parseClassicComposition(resources, bp, opts, report, nameMapping); err != nil {
 				return nil, nil, err
+			}
+		}
+	}
+
+	for _, envDoc := range envConfigDocs {
+		meta, _ := envDoc["metadata"].(map[string]any)
+		cfgName, _ := meta["name"].(string)
+		data, _ := envDoc["data"].(map[string]any)
+		labels, _ := meta["labels"].(map[string]any)
+
+		if len(data) > 0 {
+			if bp.Spec.Environment == nil {
+				bp.Spec.Environment = make(map[string]blueprint.EnvironmentKey)
+			}
+			for k := range data {
+				if _, exists := bp.Spec.Environment[k]; !exists {
+					bp.Spec.Environment[k] = blueprint.EnvironmentKey{Type: "string"}
+				}
+			}
+		}
+
+		var targetCfg *blueprint.EnvironmentConfig
+		for i := range bp.Spec.EnvironmentConfigs {
+			if bp.Spec.EnvironmentConfigs[i].Name == cfgName {
+				targetCfg = &bp.Spec.EnvironmentConfigs[i]
+				break
+			}
+		}
+		if targetCfg == nil && cfgName != "" {
+			var sel *blueprint.EnvironmentConfigSelector
+			if len(labels) > 0 {
+				matchLabels := make(map[string]string, len(labels))
+				for lk, lv := range labels {
+					matchLabels[lk] = fmt.Sprintf("%v", lv)
+				}
+				sel = &blueprint.EnvironmentConfigSelector{MatchLabels: matchLabels}
+			}
+			bp.Spec.EnvironmentConfigs = append(bp.Spec.EnvironmentConfigs, blueprint.EnvironmentConfig{
+				Name:     cfgName,
+				Selector: sel,
+			})
+			targetCfg = &bp.Spec.EnvironmentConfigs[len(bp.Spec.EnvironmentConfigs)-1]
+		}
+		if targetCfg != nil && len(data) > 0 {
+			if targetCfg.Data == nil {
+				targetCfg.Data = make(map[string]string, len(data))
+			}
+			for k, v := range data {
+				targetCfg.Data[k] = fmt.Sprintf("%v", v)
 			}
 		}
 	}

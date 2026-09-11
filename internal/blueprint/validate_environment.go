@@ -67,3 +67,58 @@ func (b *Blueprint) validateEnvironment() error {
 	}
 	return nil
 }
+
+// validateEnvironmentConfigs validates spec.environmentConfigs declarations.
+func (b *Blueprint) validateEnvironmentConfigs() error {
+	if len(b.Spec.EnvironmentConfigs) == 0 {
+		return nil
+	}
+	if len(b.Spec.Environment) == 0 {
+		return fmt.Errorf("spec.environmentConfigs declared without spec.environment keys: declare environment keys first")
+	}
+	seenNames := make(map[string]int)
+	for i, cfg := range b.Spec.EnvironmentConfigs {
+		if cfg.Name != "" {
+			if prev, ok := seenNames[cfg.Name]; ok {
+				return fmt.Errorf("spec.environmentConfigs[%d]: duplicate config name %q (previously defined at index %d)", i, cfg.Name, prev)
+			}
+			seenNames[cfg.Name] = i
+		}
+		if cfg.Selector != nil && len(cfg.Selector.MatchLabels) == 0 {
+			return fmt.Errorf("spec.environmentConfigs[%d]: selector declared with empty matchLabels", i)
+		}
+		data := cfg.EffectiveData()
+		keys := make([]string, 0, len(data))
+		for k := range data {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			val := data[k]
+			envKey, ok := b.Spec.Environment[k]
+			if !ok {
+				return fmt.Errorf("spec.environmentConfigs[%d]: unknown environment key %q", i, k)
+			}
+			if val != "" {
+				switch envKey.Type {
+				case "boolean":
+					switch strings.ToLower(val) {
+					case "true", "false":
+					default:
+						return fmt.Errorf("spec.environmentConfigs[%d].data.%s: value %q is not a valid boolean (use true or false)", i, k, val)
+					}
+				case "integer":
+					if _, err := strconv.ParseInt(val, 10, 64); err != nil {
+						return fmt.Errorf("spec.environmentConfigs[%d].data.%s: value %q is not a valid integer: %w", i, k, val, err)
+					}
+				case "number":
+					num, err := strconv.ParseFloat(val, 64)
+					if err != nil || math.IsNaN(num) || math.IsInf(num, 0) {
+						return fmt.Errorf("spec.environmentConfigs[%d].data.%s: value %q is not a valid number", i, k, val)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}

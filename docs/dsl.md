@@ -154,6 +154,33 @@ Environment variables can be wired directly using `from: env.<key>` across:
   - `when: env.stage != "dev"` (inequality check against literal string)
 - **`forEach` bounds**: `forEach: env.subnetCount` (requires `type: integer`)
 
+### Declaring EnvironmentConfigs (`spec.environmentConfigs`):
+By default, the auto-injected `function-environment-configs` step references a single `EnvironmentConfig` named `default`. Blueprints can declare specific `EnvironmentConfig` resources, selection strategies (by name reference or label selector), and scaffold values:
+
+```yaml
+spec:
+  environment:
+    clusterName: {type: string}
+    region: {type: string, default: "us-east-1"}
+    accountId: {type: string}
+  environmentConfigs:
+    - name: cluster-prod-eu
+      selector:
+        matchLabels:
+          cluster: prod-eu
+      data:
+        clusterName: prod-eu
+        region: eu-north-1
+    - name: default
+      data:
+        clusterName: fallback
+```
+
+When `spec.environmentConfigs` is declared:
+1. `cf gen` writes `environmentconfigs/<name>.yaml` for each declared config with every declared key (values default to empty string `""` or the key's declared default).
+2. The `function-environment-configs` pipeline step selects the declared configs in order (using `type: Selector` with `matchLabels` or `type: Reference` with `name`).
+3. `factory.crossplane.io/environment-configs` metadata annotation preserves declared configs for round-trip fidelity during `cf adopt`.
+
 *Engine Notes: In Python compositions, environment data is extracted from `req.context["apiextensions.crossplane.io/environment"]`. In KCL compositions, `spec.environment` is currently refused as KCL uses standalone schemas.*
 
 ---

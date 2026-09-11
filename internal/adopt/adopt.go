@@ -141,12 +141,13 @@ func cleanAdoptedMap(v any, isRoot bool) any {
 				}
 			}
 			if slice, ok := child.([]any); ok && len(slice) == 0 {
-				if k == "conventions" || k == "pipeline" || k == "enum" {
+				if k == "conventions" || k == "pipeline" || k == "enum" || k == "environmentConfigs" {
 					continue
 				}
 			}
 			if childMap, ok := child.(map[string]any); ok && len(childMap) == 0 {
-				if k == "templates" || k == "envelope" || k == "annotations" || k == "properties" || k == "environment" {
+				if k == "templates" || k == "envelope" || k == "annotations" || k == "properties" || k == "environment" ||
+					k == "data" || k == "values" || k == "matchLabels" || k == "selector" {
 					continue
 				}
 			}
@@ -262,11 +263,23 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	}
 
 	// 1. Metadata
+	var srcCommentRE = regexp.MustCompile(`(?m)^# Source:\s*([^\s]+)`)
+	if m := srcCommentRE.FindSubmatch(manifest); len(m) >= 2 && string(m[1]) != "blueprint" {
+		bp.Metadata.Name = string(m[1])
+	}
 	if meta, ok := compDoc["metadata"].(map[string]any); ok {
-		if name, ok := meta["name"].(string); ok {
-			bp.Metadata.Name = name
+		if bp.Metadata.Name == "" {
+			if name, ok := meta["name"].(string); ok {
+				bp.Metadata.Name = name
+			}
 		}
 		if anns, ok := meta["annotations"].(map[string]any); ok {
+			if envConfigsRaw, ok := anns[blueprint.EnvironmentConfigsAnnotation].(string); ok && envConfigsRaw != "" {
+				var envConfigs []blueprint.EnvironmentConfig
+				if err := json.Unmarshal([]byte(envConfigsRaw), &envConfigs); err == nil && len(envConfigs) > 0 {
+					bp.Spec.EnvironmentConfigs = envConfigs
+				}
+			}
 			if envKeysRaw, ok := anns[blueprint.EnvironmentKeysAnnotation].(string); ok && envKeysRaw != "" {
 				var envKeys map[string]blueprint.EnvironmentKey
 				if err := json.Unmarshal([]byte(envKeysRaw), &envKeys); err == nil && len(envKeys) > 0 {
@@ -1058,12 +1071,84 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 		}
 	}
 
+	for _, s := range otherSteps {
+		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName && len(bp.Spec.EnvironmentConfigs) == 0 && s.Input != "" {
+			type envConfigEntry struct {
+				Type string `json:"type"`
+				Ref  *struct {
+					Name string `json:"name"`
+				} `json:"ref"`
+				Selector *struct {
+					MatchLabels map[string]string `json:"matchLabels"`
+				} `json:"selector"`
+			}
+			type envConfigDoc struct {
+				Spec struct {
+					EnvironmentConfigs []envConfigEntry `json:"environmentConfigs"`
+				} `json:"spec"`
+			}
+			var doc envConfigDoc
+			if err := yaml.Unmarshal([]byte(s.Input), &doc); err == nil && len(doc.Spec.EnvironmentConfigs) > 0 {
+				isDefault := len(doc.Spec.EnvironmentConfigs) == 1 &&
+					doc.Spec.EnvironmentConfigs[0].Selector == nil &&
+					(doc.Spec.EnvironmentConfigs[0].Ref == nil || doc.Spec.EnvironmentConfigs[0].Ref.Name == "" || doc.Spec.EnvironmentConfigs[0].Ref.Name == "default")
+				if !isDefault {
+					var extracted []blueprint.EnvironmentConfig
+					for _, e := range doc.Spec.EnvironmentConfigs {
+						var cfg blueprint.EnvironmentConfig
+						if e.Selector != nil && len(e.Selector.MatchLabels) > 0 {
+							cfg.Selector = &blueprint.EnvironmentConfigSelector{
+								MatchLabels: e.Selector.MatchLabels,
+							}
+						}
+						if e.Ref != nil && e.Ref.Name != "" {
+							cfg.Name = e.Ref.Name
+						}
+						extracted = append(extracted, cfg)
+					}
+					if len(extracted) > 0 {
+						bp.Spec.EnvironmentConfigs = extracted
+					}
+				}
+			}
+		}
+	}
+
+	isEnvConfigsStep := func(s blueprint.PipelineStep) bool {
+		if s.FunctionRef != blueprint.EnvironmentConfigsFunctionName {
+			return false
+		}
+		if len(bp.Spec.Environment) == 0 && len(bp.Spec.EnvironmentConfigs) == 0 {
+			return false
+		}
+		trimmed := strings.TrimSpace(s.Input)
+		if trimmed == "" || trimmed == strings.TrimSpace(blueprint.DefaultEnvironmentConfigsInput) || trimmed == strings.TrimSpace(bp.EnvironmentConfigsInput()) {
+			return true
+		}
+		var stepDoc struct {
+			Spec struct {
+				EnvironmentConfigs []struct {
+					Type string `json:"type"`
+					Ref  *struct {
+						Name string `json:"name"`
+					} `json:"ref"`
+				} `json:"environmentConfigs"`
+			} `json:"spec"`
+		}
+		if err := yaml.Unmarshal([]byte(s.Input), &stepDoc); err == nil {
+			cfgs := stepDoc.Spec.EnvironmentConfigs
+			if len(cfgs) == 1 && (cfgs[0].Type == "Reference" || cfgs[0].Type == "") &&
+				(cfgs[0].Ref == nil || cfgs[0].Ref.Name == "" || cfgs[0].Ref.Name == "default") {
+				return true
+			}
+		}
+		return false
+	}
+
 	hasOtherCustomSteps := false
 	for _, s := range otherSteps {
-		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName && len(bp.Spec.Environment) > 0 {
-			if s.Input == "" || strings.TrimSpace(s.Input) == strings.TrimSpace(blueprint.DefaultEnvironmentConfigsInput) {
-				continue
-			}
+		if isEnvConfigsStep(s) {
+			continue
 		}
 		if (s.FunctionRef == "function-auto-ready" || s.Name == "auto-ready") && s.Input == "" &&
 			(s.Package == "" || s.Package == "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0") {
@@ -1075,10 +1160,8 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 
 	var finalSteps []blueprint.PipelineStep
 	for _, s := range otherSteps {
-		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName && len(bp.Spec.Environment) > 0 {
-			if s.Input == "" || strings.TrimSpace(s.Input) == strings.TrimSpace(blueprint.DefaultEnvironmentConfigsInput) {
-				continue
-			}
+		if isEnvConfigsStep(s) {
+			continue
 		}
 		if !hasOtherCustomSteps && (s.FunctionRef == "function-auto-ready" || s.Name == "auto-ready") && s.Input == "" &&
 			(s.Package == "" || s.Package == "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0") {

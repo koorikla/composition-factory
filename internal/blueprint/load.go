@@ -420,6 +420,9 @@ func (b *Blueprint) Validate() error {
 	if err := b.validateEnvironment(); err != nil {
 		return err
 	}
+	if err := b.validateEnvironmentConfigs(); err != nil {
+		return err
+	}
 	if err := b.validateParameters(); err != nil {
 		return err
 	}

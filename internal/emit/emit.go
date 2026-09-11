@@ -79,6 +79,13 @@ func Generate(b *blueprint.Blueprint, crds []schema.CRD, outDir string) ([]Outpu
 	for _, fam := range families {
 		out = append(out, Output{Path: filepath.Join(outDir, "providerconfigs", fam+".yaml"), Body: pcs[fam]})
 	}
+	for _, envCfg := range b.EffectiveEnvironmentConfigs() {
+		cfgBytes, err := EnvironmentConfig(b, envCfg)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Output{Path: filepath.Join(outDir, "environmentconfigs", envCfg.Name+".yaml"), Body: cfgBytes})
+	}
 
 	if b.TemplateSource() == blueprint.TemplateSourceFileSystem {
 		rt, err := RuntimeDoc(b, crds)

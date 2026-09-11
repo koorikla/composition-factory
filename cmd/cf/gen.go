@@ -189,7 +189,7 @@ func (c *GenCmd) findExistingManagedFiles() ([]string, error) {
 	cleanOut := filepath.Clean(c.Out)
 	var found []string
 
-	managedDirs := []string{"compositions", "xrds", "providerconfigs", "runtime", "templates"}
+	managedDirs := []string{"compositions", "xrds", "providerconfigs", "runtime", "templates", "environmentconfigs"}
 	for _, d := range managedDirs {
 		dir := filepath.Join(cleanOut, d)
 		if _, err := os.Stat(dir); err == nil {
