@@ -25,6 +25,9 @@ Each issue had its acceptance tests run and verified failing before the fix, qua
 | **CF-165** (#50) | Canvas wire rendering queries getBoundingClientRect per wire endpoint, triggering layout thrashing | Merged & Closed | `57cb2ca` | [34559183560](https://github.com/koorikla/composition-factory/actions/runs/34559183560) | `tests/cf165-canvas-wire-rect-cache.spec.js` |
 | **CF-161** (#46) | Store.List() deserializes full CRD trees across all cached providers just to read the provider ref | Merged & Closed | `1cefeb7` | [34559458488](https://github.com/koorikla/composition-factory/actions/runs/34559458488) | `internal/cache.TestStoreListDoesNotUnmarshalCRDs` |
 | **CF-166** (#51) | blueprint.SplitDocs allocates thousands of byte slices via bytes.Split on large YAML streams | Merged & Closed | `388512b` | [34559719397](https://github.com/koorikla/composition-factory/actions/runs/34559719397) | `internal/blueprint.TestSplitDocs`, `internal/blueprint.TestSplitDocs_StreamAllocations` |
+| **CF-164** (#49) | Palette kind preview performs redundant sequential network request downloading full field trees | Merged & Closed | `86a9614` | [34560256742](https://github.com/koorikla/composition-factory/actions/runs/34560256742) | `tests/cf164-palette-preview-request-dedup.spec.js` |
+| **CF-170** (#55) | ConfigurationMeta emits duplicate dependsOn entries for shared function packages and sources | Merged & Closed | `27ac948` | [34560495716](https://github.com/koorikla/composition-factory/actions/runs/34560495716) | `internal/emit/configuration_test.go:TestConfigurationMetaDeduplicatesDependsOn` |
+| **CF-163** (#48) | internal/api unit tests hit remote OCI registries on unseeded provider refs, adding ~4s to test runs | Merged & Closed | `c36297b` | [34560759428](https://github.com/koorikla/composition-factory/actions/runs/34560759428) | `internal/api/adopt_test.go`, `internal/api/import_test.go`, `internal/api/server_test.go` |
 
 *Note: Issues CF-149 (#34), CF-152 (#37), CF-092 (#4), and CF-141 (#26) were closed in runs earlier in the day.*
 
@@ -50,10 +53,10 @@ Each issue had its acceptance tests run and verified failing before the fix, qua
 - **CF-161** (`internal/cache/store.go`, `internal/cache/store_test.go`): Stream-scanned `crds.json` tokens in `Store.List()` to read only top-level `"ref"` without deserializing full CRD schema trees (12x faster, 80x less allocations). CI run 34559458488 green.
 - **CF-166** (`internal/blueprint/split.go`, `internal/blueprint/split_test.go`): Replaced `bytes.Split` line allocation in `SplitDocs` with column-0 YAML separator offset index scanning (1.8x faster, 2.2x less allocations on large multi-document manifests). CI run 34559719397 green.
 
-### Wave 3 (Dispatched)
-- **CF-170** (`internal/emit/configuration.go`): Deduplicate package declarations in `spec.dependsOn` so provider and function packages are emitted at most once.
-- **CF-164** (`web-proto/js/regions/palette.js`): Reuse client-side kind field counts in `showKindPreview` to avoid redundant second network fetch downloading full schema trees.
-- **CF-163** (`internal/api/`): Point unit tests to pre-seeded fixture providers so all short tests execute completely offline without OCI network roundtrips.
+### Wave 3
+- **CF-164** (`web-proto/js/regions/palette.js`, `tests/cf164-palette-preview-request-dedup.spec.js`): Stored `data-fields` on kind rows from `/api/kinds` payload and resolved total fields directly, eliminating redundant second sequential `api.getKindFields` request on hover. CI run 34560256742 green.
+- **CF-170** (`internal/emit/configuration.go`, `internal/emit/configuration_test.go`): Deduplicated `spec.dependsOn` entries by package in `ConfigurationMeta`, preventing duplicate provider and function dependencies in `crossplane.yaml`. CI run 34560495716 green.
+- **CF-163** (`internal/api/adopt.go`, `internal/api/adopt_test.go`, `internal/api/import_test.go`, `internal/api/server_test.go`): Wired server cache root to `adopt.Adopt` options, updated adopt and import unit test fixtures to use seeded provider refs, and added a strict fetch guard to `testServerOptions` preventing unmocked OCI network calls (test runtime down from 4.06s to 0.025s). CI run 34560759428 green.
 
 ---
 
