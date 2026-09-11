@@ -26,11 +26,19 @@ type paramEvidence struct {
 	unquoted int  // renders that emit a bare scalar
 	guarded  bool // at least one hasKey guard or an optional patch
 	required bool // a patch with policy.fromFieldPath: Required
+	boolean  bool // bare truthiness condition (e.g. {{- if $spec.foo }})
+	integer  bool // integer repetition count (e.g. until (int $spec.foo))
 }
 
 var (
-	reEvidenceRef   = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)\s*(\|\s*quote\s*)?-?\}\}`)
-	reEvidenceGuard = regexp.MustCompile(`hasKey\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']`)
+	reEvidenceRef      = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)\s*(\|\s*quote\s*)?-?\}\}`)
+	reEvidenceGuard    = regexp.MustCompile(`hasKey\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']`)
+	reEvidenceIfSimple = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
+	reEvidenceIfEq     = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"[^"]*"\s*-?\}\}`)
+	reEvidenceIfEqRev  = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+"[^"]*"\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
+	reEvidenceLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
+	reTemplateAction   = regexp.MustCompile(`\{\{-?(.*?)-?\}\}`)
+	reEvidenceAnySpec  = regexp.MustCompile(`(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)`)
 )
 
 // collectTemplateEvidence scans one go-templating template body.
@@ -43,10 +51,18 @@ func collectTemplateEvidence(tmpl string, ev map[string]*paramEvidence) {
 		}
 		return e
 	}
+	for _, action := range reTemplateAction.FindAllStringSubmatch(tmpl, -1) {
+		body := action[1]
+		if strings.HasPrefix(strings.TrimSpace(body), "/*") {
+			continue
+		}
+		for _, m := range reEvidenceAnySpec.FindAllStringSubmatch(body, -1) {
+			get(m[1]).refs++
+		}
+	}
 	for _, m := range reEvidenceRef.FindAllStringSubmatchIndex(tmpl, -1) {
 		name := tmpl[m[2]:m[3]]
 		e := get(name)
-		e.refs++
 		quoted := m[4] >= 0
 		if !quoted {
 			before := byte(0)
@@ -64,6 +80,18 @@ func collectTemplateEvidence(tmpl string, ev map[string]*paramEvidence) {
 		} else {
 			e.unquoted++
 		}
+	}
+	for _, m := range reEvidenceIfSimple.FindAllStringSubmatch(tmpl, -1) {
+		get(m[1]).boolean = true
+	}
+	for _, m := range reEvidenceIfEq.FindAllStringSubmatch(tmpl, -1) {
+		get(m[1]).quoted++
+	}
+	for _, m := range reEvidenceIfEqRev.FindAllStringSubmatch(tmpl, -1) {
+		get(m[1]).quoted++
+	}
+	for _, m := range reEvidenceLoop.FindAllStringSubmatch(tmpl, -1) {
+		get(m[1]).integer = true
 	}
 	for _, m := range reEvidenceGuard.FindAllStringSubmatch(tmpl, -1) {
 		get(m[1]).guarded = true
@@ -215,12 +243,21 @@ func settle(p *blueprint.Parameter, e *paramEvidence, path string, report *LossR
 	}
 
 	switch {
+	case e.boolean:
+		p.Type = "boolean"
+	case e.integer:
+		p.Type = "integer"
 	case e.quoted > 0 && e.unquoted == 0:
 		p.Type = "string"
 	case e.unquoted > 0:
 		lost = append(lost, "type (rendered unquoted, so it is not a string; written as string until the XRD or the CRD schema says which scalar it is)")
 	default:
-		lost = append(lost, "type (written as string)")
+		if p.Type == "boolean" || p.Type == "integer" {
+			// type was already recovered from template structure (e.g. conditional or loop bound)
+		} else {
+			p.Type = "string"
+			lost = append(lost, "type (written as string)")
+		}
 	}
 
 	lost = append(lost, "default", "enum", "description")

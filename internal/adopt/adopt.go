@@ -630,13 +630,13 @@ var (
 	reEnvVar             = regexp.MustCompile(`\{\{-?\s*(?:default\s+(?:"[^"]*"|\S+)\s+)?(?:\$env\.([a-zA-Z0-9_.-]+?)|\(index\s+\$env\s+"([a-zA-Z0-9_.-]+?)"\)|index\s+\$env\s+"([a-zA-Z0-9_.-]+?)")(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*(?:\(index\s+(?:\$\.?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)|(?:\$\.?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+))\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reXRResourceRef      = regexp.MustCompile(`\{\{-?\s*\$xr\s*-?\}\}-([a-zA-Z0-9-]+)`)
-	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+\$spec\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
-	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+eq\s+\$spec\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
-	reWhenIfNe           = regexp.MustCompile(`\{\{-?\s*if\s+ne\s+\$spec\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
+	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
+	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+eq\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
+	reWhenIfNe           = regexp.MustCompile(`\{\{-?\s*if\s+ne\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
 	reWhenIfEnvSimple    = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\$env\.([a-zA-Z0-9_.-]+)|default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\))\s*-?\}\}`)
 	reWhenIfEnvEq        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\(?eq\s+\$env\.([a-zA-Z0-9_.-]+)\s+"?([^"]+?)"?\)?|eq\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\s+"?([^"]+?)"?)\s*-?\}\}`)
 	reWhenIfEnvNe        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:or\s+\(not\s+\(hasKey\s+\$env\s+"[^"]+"\)\)\s+)?\(?ne\s+\$env\.([a-zA-Z0-9_.-]+)\s+"?([^"]+?)"?\)?|ne\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\s+"?([^"]+?)"?)\s*-?\}\}`)
-	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+\$spec\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
+	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
 	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$env\.([a-zA-Z0-9_.-]+)|\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\))\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
 	reDocSeparator       = regexp.MustCompile(`(?m)^\s*---\s*$`)
@@ -1152,14 +1152,14 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 			nextWhen = fmt.Sprintf("env.%s", key)
 			ensureEnvDeclared(bp, key, "boolean")
 		} else if m := reWhenIfEq.FindStringSubmatch(chunk); len(m) >= 3 {
-			nextWhen = fmt.Sprintf("params.%s == %s", m[1], m[2])
-			ensureParamDeclared(bp, m[1])
+			nextWhen = fmt.Sprintf("params.%s == %q", m[1], m[2])
+			ensureParamDeclaredTyped(bp, m[1], "string")
 		} else if m := reWhenIfNe.FindStringSubmatch(chunk); len(m) >= 3 {
-			nextWhen = fmt.Sprintf("params.%s != %s", m[1], m[2])
-			ensureParamDeclared(bp, m[1])
+			nextWhen = fmt.Sprintf("params.%s != %q", m[1], m[2])
+			ensureParamDeclaredTyped(bp, m[1], "string")
 		} else if m := reWhenIfSimple.FindStringSubmatch(chunk); len(m) >= 2 {
 			nextWhen = fmt.Sprintf("params.%s", m[1])
-			ensureParamDeclared(bp, m[1])
+			ensureParamDeclaredTyped(bp, m[1], "boolean")
 		}
 
 		if m := reForEachEnvLoop.FindStringSubmatch(chunk); len(m) >= 2 {
@@ -1171,7 +1171,7 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 			ensureEnvDeclared(bp, key, "integer")
 		} else if m := reForEachLoop.FindStringSubmatch(chunk); len(m) >= 2 {
 			nextForEach = fmt.Sprintf("params.%s", m[1])
-			ensureParamDeclared(bp, m[1])
+			ensureParamDeclaredTyped(bp, m[1], "integer")
 		}
 
 		lines := strings.Split(chunk, "\n")
@@ -1395,14 +1395,21 @@ func uniqueName(bp *blueprint.Blueprint, res *blueprint.Resource) {
 }
 
 func ensureParamDeclared(bp *blueprint.Blueprint, paramPath string) {
+	ensureParamDeclaredTyped(bp, paramPath, "string")
+}
+
+func ensureParamDeclaredTyped(bp *blueprint.Blueprint, paramPath string, typ string) {
 	parts := strings.Split(paramPath, ".")
 	root := parts[0]
 	if len(parts) == 1 {
-		if _, exists := bp.Spec.XRD.Parameters[root]; !exists {
+		if p, exists := bp.Spec.XRD.Parameters[root]; !exists {
 			bp.Spec.XRD.Parameters[root] = blueprint.Parameter{
-				Type:     "string",
+				Type:     typ,
 				Required: false,
 			}
+		} else if typ != "string" && p.Type == "string" {
+			p.Type = typ
+			bp.Spec.XRD.Parameters[root] = p
 		}
 		return
 	}
@@ -1424,10 +1431,13 @@ func ensureParamDeclared(bp *blueprint.Blueprint, paramPath string) {
 	}
 
 	member := parts[1]
-	if _, mExists := rootParam.Properties[member]; !mExists {
+	if mp, mExists := rootParam.Properties[member]; !mExists {
 		rootParam.Properties[member] = blueprint.Parameter{
-			Type: "string",
+			Type: typ,
 		}
+	} else if typ != "string" && mp.Type == "string" {
+		mp.Type = typ
+		rootParam.Properties[member] = mp
 	}
 	bp.Spec.XRD.Parameters[root] = rootParam
 }
