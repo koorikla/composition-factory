@@ -902,3 +902,134 @@ func TestResolveKindTypoSuggestion(t *testing.T) {
 		t.Errorf("error = %q, want substring %q", err.Error(), wantSubstr)
 	}
 }
+
+// TestCF169ClusterProviderResolvesManagedResource verifies that Crossplane managed resources
+// discovered from a live cluster scan (with provider: "cluster" and c.Native == false)
+// are accurately resolved and emitted by resolveKind and Composition (CF-169, #54).
+func TestCF169ClusterProviderResolvesManagedResource(t *testing.T) {
+	bp := testBlueprint()
+	bp.Spec.Resources[0].Provider = "cluster"
+
+	crds := testCRDs(t)
+	got, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+
+	s := string(got)
+	if !strings.Contains(s, "apiVersion: sqs.aws.m.upbound.io/v1beta1") {
+		t.Errorf("did not select expected apiVersion for managed resource under provider: cluster\n---\n%s", s)
+	}
+	if !strings.Contains(s, "kind: Queue") {
+		t.Errorf("did not emit expected kind: Queue\n---\n%s", s)
+	}
+	if !strings.Contains(s, "forProvider:") {
+		t.Errorf("expected managed resource forProvider block in emitted composition\n---\n%s", s)
+	}
+}
+
+// TestCF169ClusterProviderResolvesNativeResource verifies that native CRDs discovered from
+// a live cluster scan (with provider: "cluster" and c.Native == true) continue to resolve
+// and emit as object-rooted documents (CF-169, #54).
+func TestCF169ClusterProviderResolvesNativeResource(t *testing.T) {
+	issuerCRD := schema.CRD{
+		Group:  "cert-manager.io",
+		Kind:   "Issuer",
+		Plural: "issuers",
+		Scope:  "Namespaced",
+		Native: true,
+		Versions: []schema.Version{{
+			Name:    "v1",
+			Served:  true,
+			Storage: true,
+			Properties: map[string]any{
+				"apiVersion": map[string]any{"type": "string"},
+				"kind":       map[string]any{"type": "string"},
+				"metadata": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"name": map[string]any{"type": "string"}},
+				},
+				"spec": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"selfSigned": map[string]any{"type": "object"}},
+				},
+			},
+		}},
+	}
+
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xissuer"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XIssuer", Plural: "xissuers",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{{
+				Name: "ca-issuer", Kind: "Issuer", Provider: "cluster",
+			}},
+		},
+	}
+
+	got, err := Composition(bp, []schema.CRD{issuerCRD})
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+
+	s := string(got)
+	if !strings.Contains(s, "apiVersion: cert-manager.io/v1") {
+		t.Errorf("did not emit expected apiVersion for native resource under provider: cluster\n---\n%s", s)
+	}
+	if !strings.Contains(s, "kind: Issuer") {
+		t.Errorf("did not emit expected kind: Issuer\n---\n%s", s)
+	}
+	if strings.Contains(s, "forProvider:") {
+		t.Errorf("native resource must not emit a forProvider block\n---\n%s", s)
+	}
+	if !strings.Contains(s, "name: {{ $xr }}-ca-issuer") {
+		t.Errorf("expected native metadata.name line\n---\n%s", s)
+	}
+}
+
+// TestCF169ClusterProviderUnknownKind verifies that referencing an undefined kind under
+// provider: "cluster" produces the expected scanned source error (CF-169, #54).
+func TestCF169ClusterProviderUnknownKind(t *testing.T) {
+	bp := testBlueprint()
+	bp.Spec.Resources[0].Kind = "NonExistent"
+	bp.Spec.Resources[0].Provider = "cluster"
+
+	_, err := Composition(bp, testCRDs(t))
+	if err == nil {
+		t.Fatal("Composition: expected error for unknown kind under provider: cluster, got nil")
+	}
+	wantSubstr := `resource "main-queue": kind "NonExistent" not found in scanned source "cluster"; check the CRD manifest actually defines it`
+	if !strings.Contains(err.Error(), wantSubstr) {
+		t.Errorf("error = %q, want substring %q", err.Error(), wantSubstr)
+	}
+}
+
+// TestCF169ClusterProviderScopeMismatch verifies that a managed resource under provider: "cluster"
+// with the wrong scope variant still errors with the scope mismatch message (CF-169, #54).
+func TestCF169ClusterProviderScopeMismatch(t *testing.T) {
+	bp := testBlueprint() // Scope: Namespaced
+	bp.Spec.Resources[0].Provider = "cluster"
+
+	// Provide only the Cluster-scoped Queue CRD
+	crds, err := schema.ParseCRDs([][]byte{[]byte(testfixture.QueueClusterCRDYAML)})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	_, err = Composition(bp, crds)
+	if err == nil {
+		t.Fatal("Composition: expected error for scope mismatch, got nil")
+	}
+	wantSubstr := `kind "Queue": no namespaced variant found (only Cluster in sqs.aws.upbound.io); a namespaced XRD needs the matching variant`
+	if !strings.Contains(err.Error(), wantSubstr) {
+		t.Errorf("error = %q, want substring %q", err.Error(), wantSubstr)
+	}
+}

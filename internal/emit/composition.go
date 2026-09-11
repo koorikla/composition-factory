@@ -1441,13 +1441,16 @@ func formatKey(k string) string {
 // selected without provider: k8s on the resource; a bare kind that matches
 // only a native kind fails with the hint instead of being auto-upgraded.
 func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (schema.CRD, error) {
-	// Three providers name the object-rooted family: "k8s" (vendored native
-	// kinds), "cluster" (live-scan pseudo-provider, cluster.ProviderLabel),
-	// and a crds: source's file path (Validate pins those to a .yaml/.yml
+	// Two providers name the strictly object-rooted family: "k8s" (vendored native
+	// kinds) and a crds: source's file path (Validate pins those to a .yaml/.yml
 	// suffix, which no OCI package ref can carry). All of their CRDs are
 	// marked Native — the composed document IS the object.
+	//
+	// "cluster" (live-scan pseudo-provider, cluster.ProviderLabel) is NOT
+	// purely object-rooted: a live cluster can serve both native Kubernetes CRDs
+	// (c.Native == true) and Crossplane managed resources (c.IsManaged() == true).
+	// It is resolved alongside managed candidates below.
 	objectRooted := r.Provider == blueprint.NativeProvider ||
-		r.Provider == "cluster" ||
 		strings.HasSuffix(r.Provider, ".yaml") || strings.HasSuffix(r.Provider, ".yml")
 	if objectRooted {
 		for _, c := range crds {
@@ -1465,6 +1468,7 @@ func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (
 
 	var fallback *schema.CRD
 	var candidates []int
+	var nativeCandidate *schema.CRD
 	nativeExists := false
 
 	for i := range crds {
@@ -1474,6 +1478,9 @@ func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (
 		}
 		if c.Native {
 			nativeExists = true
+			if r.Provider == "cluster" && nativeCandidate == nil {
+				nativeCandidate = &crds[i]
+			}
 			continue
 		}
 		if !c.IsManaged() {
@@ -1500,6 +1507,10 @@ func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (
 		return crds[candidates[0]], nil
 	}
 
+	if r.Provider == "cluster" && nativeCandidate != nil {
+		return *nativeCandidate, nil
+	}
+
 	scope := "cluster-scoped"
 	if wantNamespaced {
 		scope = "namespaced"
@@ -1507,6 +1518,10 @@ func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (
 	if fallback != nil {
 		return schema.CRD{}, fmt.Errorf("kind %q: no %s variant found (only %s in %s); "+
 			"a %s XRD needs the matching variant", r.Kind, scope, fallback.Scope, fallback.Group, scope)
+	}
+	if r.Provider == "cluster" {
+		return schema.CRD{}, fmt.Errorf("resource %q: kind %q not found in scanned source %q; "+
+			"check the CRD manifest actually defines it", r.Name, r.Kind, r.Provider)
 	}
 	if nativeExists {
 		return schema.CRD{}, fmt.Errorf("kind %q not found in any cached provider, but a native Kubernetes "+
