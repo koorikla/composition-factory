@@ -1174,7 +1174,15 @@ function bindOutputEvents() {
             }
           }
         }
-      }).then(function () { store.generate(false); });
+      }).then(function (doc) {
+        if (doc) {
+          store.generate(false);
+        } else if (el.engineSel) {
+          var curDoc = store.state.doc;
+          var curEng = (curDoc && curDoc.spec && curDoc.spec.emit && curDoc.spec.emit.engine) || "go-templating";
+          el.engineSel.value = curEng;
+        }
+      });
     });
   }
 
@@ -1194,7 +1202,15 @@ function bindOutputEvents() {
             }
           }
         }
-      }).then(function () { store.generate(false); });
+      }).then(function (doc) {
+        if (doc) {
+          store.generate(false);
+        } else if (el.tplSource) {
+          var curDoc = store.state.doc;
+          var curMode = (curDoc && curDoc.spec && curDoc.spec.emit && curDoc.spec.emit.templateSource) || "Inline";
+          el.tplSource.value = curMode;
+        }
+      });
     });
   }
 }
