@@ -3710,3 +3710,129 @@ spec:
 		t.Errorf("replicaDot.ForEach = %v, want %q", replicaDot, wantForEach)
 	}
 }
+
+func TestAdopt_TruncatedGoTemplateRefusedOrLossReported(t *testing.T) {
+	goldenManifest, err := os.ReadFile(filepath.Join("..", "..", "testdata", "xqueue-pipeline.composition.golden.yaml"))
+	if err != nil {
+		t.Fatalf("read golden composition: %v", err)
+	}
+	if len(goldenManifest) < 700 {
+		t.Fatalf("golden manifest too short: %d bytes", len(goldenManifest))
+	}
+	truncated := goldenManifest[:700]
+
+	bp, report, err := Adopt(truncated, Options{})
+	if err == nil {
+		if report == nil || len(report.Drops) == 0 {
+			t.Fatalf("expected error or non-empty LossReport when adopting truncated go-template composition, got err=nil, drops=0, bp.resources=%d", len(bp.Spec.Resources))
+		}
+	} else {
+		if !strings.Contains(err.Error(), "malformed go template") && !strings.Contains(err.Error(), "parse go template") {
+			t.Fatalf("expected template parse error, got: %v", err)
+		}
+	}
+}
+
+func TestAdopt_MalformedGoTemplateChunkLossReported(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: valid-queue
+            spec:
+              forProvider:
+                region: us-east-1
+            ---
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              annotations:
+                {{ setResourceNameAnnotation "broken-queue" }}
+            spec:
+              forProvider:
+                invalid: [unclosed
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("unexpected fatal error: %v", err)
+	}
+	if len(bp.Spec.Resources) != 1 || bp.Spec.Resources[0].Name != "valid-queue" {
+		t.Fatalf("expected valid-queue to be adopted, got resources: %+v", bp.Spec.Resources)
+	}
+	if report == nil || !report.HasTrueLoss() {
+		t.Fatalf("expected non-empty loss report for broken chunk, got: %+v", report)
+	}
+	foundBrokenDrop := false
+	for _, d := range report.Drops {
+		if d.Path == "template.resource.broken-queue" && strings.Contains(d.Reason, "failed to parse chunk YAML") {
+			foundBrokenDrop = true
+			break
+		}
+	}
+	if !foundBrokenDrop {
+		t.Fatalf("expected drop for template.resource.broken-queue, got drops: %+v", report.Drops)
+	}
+}
+
+func TestAdopt_NonEmptyGoTemplateZeroResourcesLossReported(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            {{- $xr := .observed.composite.resource.metadata.name -}}
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("unexpected fatal error: %v", err)
+	}
+	if len(bp.Spec.Resources) != 0 {
+		t.Fatalf("expected 0 resources, got: %d", len(bp.Spec.Resources))
+	}
+	if report == nil || !report.HasTrueLoss() {
+		t.Fatalf("expected non-empty loss report when template yields zero resources, got: %+v", report)
+	}
+	foundZeroLoss := false
+	for _, d := range report.Drops {
+		if d.Path == "template.body" && strings.Contains(d.Reason, "no resources could be recovered") {
+			foundZeroLoss = true
+			break
+		}
+	}
+	if !foundZeroLoss {
+		t.Fatalf("expected drop for template.body, got drops: %+v", report.Drops)
+	}
+}

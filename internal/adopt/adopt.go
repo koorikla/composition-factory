@@ -1005,6 +1005,9 @@ var (
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
 	reDocSeparator       = regexp.MustCompile(`(?m)^\s*---\s*$`)
 	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+(?:\(printf\s+"([^"]+)"|"([^"]+)")`)
+	reChunkResNameAnn    = regexp.MustCompile(`["']crossplane\.io/composition-resource-name["']\s*:\s*["']?([a-zA-Z0-9._-]+)["']?`)
+	reChunkKind          = regexp.MustCompile(`(?m)^\s*kind:\s*["']?([a-zA-Z0-9]+)["']?`)
+	reChunkName          = regexp.MustCompile(`(?m)^\s*name:\s*["']?([a-zA-Z0-9._-]+)["']?`)
 	rePrintfFormat       = regexp.MustCompile(`printf\s+"([^"]+)"`)
 	reXRNameSuffix       = regexp.MustCompile(`\{\{-?\s*(?:\$xr|\.observed\.composite\.resource\.metadata\.name)\s*-?\}\}-([a-zA-Z0-9_-]+)`)
 	paramNameRE          = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
@@ -1518,7 +1521,53 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 	return nil
 }
 
+func identifyChunkTarget(chunk string) string {
+	if m := reSetResourceNameAnn.FindStringSubmatch(chunk); len(m) >= 2 {
+		annVal := m[1]
+		if annVal == "" && len(m) >= 3 {
+			annVal = m[2]
+		}
+		if annVal != "" {
+			return fmt.Sprintf("template.resource.%s", normalizeDNSLabel(annVal))
+		}
+	}
+	if m := reChunkResNameAnn.FindStringSubmatch(chunk); len(m) >= 2 && m[1] != "" {
+		return fmt.Sprintf("template.resource.%s", normalizeDNSLabel(m[1]))
+	}
+	if m := reChunkName.FindStringSubmatch(chunk); len(m) >= 2 && m[1] != "" {
+		return fmt.Sprintf("template.resource.%s", normalizeDNSLabel(m[1]))
+	}
+	if m := reChunkKind.FindStringSubmatch(chunk); len(m) >= 2 && m[1] != "" {
+		return fmt.Sprintf("template.resource.%s", m[1])
+	}
+	return "template.chunk"
+}
+
+func validateGoTemplate(tmpl string) error {
+	idx := 0
+	for {
+		start := strings.Index(tmpl[idx:], "{{")
+		if start == -1 {
+			break
+		}
+		start += idx
+		end := strings.Index(tmpl[start+2:], "}}")
+		if end == -1 {
+			return fmt.Errorf("unclosed template action: missing '}}'")
+		}
+		idx = start + 2 + end + 2
+	}
+	return nil
+}
+
 func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
+	// 0. Validate Go template syntax (actions must be balanced and well-formed)
+	if err := validateGoTemplate(tmpl); err != nil {
+		return fmt.Errorf("malformed go template: %w", err)
+	}
+
+	initialResourceCount := len(bp.Spec.Resources)
+
 	// 1. Extract defines
 	defines := reDefine.FindAllStringSubmatch(tmpl, -1)
 	for _, m := range defines {
@@ -1690,6 +1739,8 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 
 		docs, err := splitYAML([]byte(maskedYAML))
 		if err != nil {
+			target := identifyChunkTarget(chunk)
+			report.Record(target, fmt.Sprintf("failed to parse chunk YAML: %v", err))
 			continue
 		}
 		docs = unwrapListDocs(docs)
@@ -1697,6 +1748,11 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 			ScrubDocument(doc, "", report)
 			res := resourceFromMap(doc, opts, placeholderTable, report, nameMapping, bp)
 			if res == nil {
+				target := identifyChunkTarget(chunk)
+				if docKind, _ := doc["kind"].(string); docKind != "" {
+					target = fmt.Sprintf("template.resource.%s", docKind)
+				}
+				report.Record(target, "document could not be parsed as a resource")
 				continue
 			}
 			if when != "" {
@@ -1707,6 +1763,10 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 			}
 			bp.Spec.Resources = append(bp.Spec.Resources, *res)
 		}
+	}
+
+	if len(bp.Spec.Resources) == initialResourceCount && strings.TrimSpace(cleanTmpl) != "" {
+		report.Record("template.body", "no resources could be recovered from template")
 	}
 
 	return nil

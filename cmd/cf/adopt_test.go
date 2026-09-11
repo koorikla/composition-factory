@@ -983,3 +983,34 @@ spec:
 		}
 	})
 }
+
+func TestAdoptCLI_TruncatedOrMalformedGoTemplate(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	goldenManifest, err := os.ReadFile(filepath.Join("..", "..", "testdata", "xqueue-pipeline.composition.golden.yaml"))
+	if err != nil {
+		t.Fatalf("read golden composition: %v", err)
+	}
+	if len(goldenManifest) < 700 {
+		t.Fatalf("golden manifest too short: %d bytes", len(goldenManifest))
+	}
+	truncatedPath := filepath.Join(tmpDir, "truncated.yaml")
+	if err := os.WriteFile(truncatedPath, goldenManifest[:700], 0644); err != nil {
+		t.Fatalf("write truncated.yaml: %v", err)
+	}
+
+	cmd := &AdoptCmd{
+		Composition: truncatedPath,
+	}
+	var out bytes.Buffer
+	code, err := cmd.run(&out)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1 for unrecoverable template error", code)
+	}
+	if err == nil {
+		t.Fatalf("expected error running adopt on truncated composition, got nil")
+	}
+	if !strings.Contains(err.Error(), "malformed go template") && !strings.Contains(err.Error(), "parse go template") {
+		t.Errorf("expected error to mention template failure, got: %v", err)
+	}
+}
