@@ -21,3 +21,319 @@ test_main_moving_during_gates_is_never_undone() {
     assert_eq "$moved" "$(origin_git rev-parse main)" "main keeps the other commit and nothing else" &&
     assert_eq important "$(origin_git show main:other.txt 2>/dev/null)" "the other commit's file is still on main"
 }
+
+test_push_reported_failed_but_accepted_still_lands() {
+  land_repo
+  local real_git
+  real_git="$(command -v git)"
+  # The first push to main reaches origin, then the client reports a failure.
+  shim git <<EOF
+#!/bin/bash
+push= del=
+for a in "\$@"; do
+  case "\$a" in push) push=1 ;; --delete) del=1 ;; esac
+done
+if [ -n "\$push" ] && [ -z "\$del" ] && [ ! -e "$SANDBOX/push-misreported" ]; then
+  : > "$SANDBOX/push-misreported"
+  "$real_git" "\$@" || exit
+  echo "fatal: the remote end hung up unexpectedly" >&2
+  exit 1
+fi
+exec "$real_git" "\$@"
+EOF
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local out rc
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 0 "$rc" "a push that reached origin is watched, not parked" &&
+    assert_contains "$out" "LANDED $(origin_git rev-parse main) https://ci.example/runs/" "landing output" &&
+    assert_eq "$BASE_SHA" "$(origin_git rev-parse main~1)" "exactly one commit lands"
+}
+
+test_landing_again_after_it_landed_resumes_the_same_sha() {
+  land_repo
+  printf 'green\ngreen\n' > "$FAKE_GH_DIR/ci-results"
+  local first rc1 landed out rc
+  first="$("$LAND" 42 2>/dev/null)"; rc1=$?
+  landed="$(origin_git rev-parse main)"
+  # land.sh never edits issues: #42 still reads handed-back, as it would when a
+  # driver's report of the first run was lost.
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 0 "$rc1" "first landing" &&
+    assert_eq 0 "$rc" "landing an issue that already landed" &&
+    assert_eq "$first" "$out" "the second run reports the same sha and run" &&
+    assert_eq "$landed" "$(origin_git rev-parse main)" "main is unchanged" &&
+    assert_eq "$BASE_SHA" "$(origin_git rev-parse main~1)" "no second commit lands"
+}
+
+test_killed_after_push_resumes_watching() {
+  land_repo
+  # gh kills land.sh the first time it looks for the landing's run, after the push.
+  shim gh <<EOF
+#!/bin/bash
+if [ "\$1 \${2:-}" = "run list" ] && [ ! -e "$SANDBOX/killed" ] &&
+  [ "\$(git -C "$SANDBOX/origin.git" rev-parse main)" != "$BASE_SHA" ]; then
+  : > "$SANDBOX/killed"
+  kill -9 "\$CF_LAND_LOCKED"
+  exit 1
+fi
+exec "$TEST_DIR/fakebin/gh" "\$@"
+EOF
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local first rc1 landed out rc
+  first="$("$LAND" 42 2>/dev/null)"; rc1=$?
+  landed="$(origin_git rev-parse main)"
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 137 "$rc1" "the first run was killed" &&
+    assert_eq "" "$first" "a killed run prints no result" &&
+    assert_eq 0 "$rc" "the next run watches the pushed landing" &&
+    assert_contains "$out" "LANDED $landed https://ci.example/runs/" "the next run reports the pushed sha" &&
+    assert_eq "$landed" "$(origin_git rev-parse main)" "main is unchanged" &&
+    assert_eq "$BASE_SHA" "$(origin_git rev-parse main~1)" "no second commit lands" &&
+    assert_eq no "$(has_branch CF-900-thing)" "the topic branch is deleted after the green watch" &&
+    assert_eq no "$(has_worktree)" "the crashed run's worktree is removed"
+}
+
+test_new_work_after_an_earlier_landing_is_landed() {
+  land_repo
+  printf 'green\ngreen\n' > "$FAKE_GH_DIR/ci-results"
+  local rc1 first out rc
+  "$LAND" 42 >/dev/null 2>&1; rc1=$?
+  first="$(origin_git rev-parse main)"
+  git fetch -q origin
+  git checkout -q -b CF-900-more origin/main
+  echo three >> thing.txt
+  git commit -q -am "Teach thing a third trick"
+  git push -q origin CF-900-more
+  git checkout -q main
+  issue_fixture 42 OPEN handed-back \
+    "taking — CF-900-thing · driver d06-0300Z · lease until $(iso_at -60) · files: thing.txt" 150 \
+    "taking — CF-900-more · driver d07-0500Z · lease until $(iso_at 30) · files: thing.txt" 30
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 0 "$rc1" "first landing" &&
+    assert_eq 0 "$rc" "new work on the same issue lands" &&
+    assert_eq "$first" "$(origin_git rev-parse main~1)" "the new work lands on top of the first landing" &&
+    assert_eq "Teach thing a third trick (CF-900, #42)" "$(origin_git log -1 --format=%s main)" "new landing subject"
+}
+
+# base_run_gh VIEW...: gh ahead of the fake whose `run view <id> --json
+# status,conclusion` for main's pre-landing commit answers each VIEW in turn
+# (the last one repeats). Every other call goes to the fake gh.
+base_run_gh() {
+  local i=1 v
+  for v in "$@"; do
+    echo "$v" > "$SANDBOX/base-view.$i"
+    i=$((i + 1))
+  done
+  shim gh <<EOF
+#!/bin/bash
+D="\$FAKE_GH_DIR"
+if [ "\$1 \${2:-}" = "run view" ] && [ "\$3" = "\$(cat "\$D/runs/$BASE_SHA" 2>/dev/null)" ]; then
+  case "\$*" in
+    *status,conclusion*)
+      echo "\$*" >> "\$D/calls.log"
+      n=\$(( \$(cat "$SANDBOX/base-views" 2>/dev/null || echo 0) + 1 ))
+      echo \$n > "$SANDBOX/base-views"
+      [ \$n -lt $# ] || n=$#
+      cat "$SANDBOX/base-view.\$n"
+      exit 0
+      ;;
+  esac
+fi
+exec "$TEST_DIR/fakebin/gh" "\$@"
+EOF
+}
+
+test_red_main_is_not_landed_on() {
+  land_repo
+  base_run_gh '{"status":"completed","conclusion":"failure"}'
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local out rc
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 8 "$rc" "a red main stops the landing" &&
+    assert_contains "$out" "MAIN-RED https://ci.example/runs/" "main-red output names main's run" &&
+    assert_eq "$BASE_SHA" "$(origin_git rev-parse main)" "nothing is pushed onto a red main" &&
+    assert_eq yes "$(has_branch CF-900-thing)" "the topic branch is kept" &&
+    assert_eq no "$(has_worktree)" "no scratch worktree is left"
+}
+
+test_pending_main_is_waited_for() {
+  land_repo
+  base_run_gh '{"status":"in_progress","conclusion":""}' '{"status":"queued","conclusion":null}' \
+    '{"status":"completed","conclusion":"success"}'
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local out rc
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 0 "$rc" "lands once main's run completes green" &&
+    assert_contains "$out" "LANDED $(origin_git rev-parse main) " "landing output" &&
+    assert_eq 3 "$(cat "$SANDBOX/base-views")" "main's run is polled until it completes"
+}
+
+test_watch_that_exits_before_the_run_completes_is_rewatched() {
+  land_repo
+  # The first watch exits non-zero (a dropped connection) while the run is still
+  # in progress; the second watch goes to the fake and reads green.
+  shim gh <<EOF
+#!/bin/bash
+D="\$FAKE_GH_DIR"
+case "\$1 \${2:-}" in
+"run watch")
+  if [ ! -e "\$D/watch-1" ]; then
+    : > "\$D/watch-1"
+    echo "\$*" >> "\$D/calls.log"
+    exit 1
+  fi
+  ;;
+"run view")
+  case "\$*" in *status,conclusion*)
+    if [ -e "\$D/watch-1" ]; then
+      echo "\$*" >> "\$D/calls.log"
+      echo '{"status":"in_progress","conclusion":""}'
+      exit 0
+    fi
+    ;;
+  esac
+  ;;
+esac
+exec "$TEST_DIR/fakebin/gh" "\$@"
+EOF
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local out rc
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 0 "$rc" "a watch that ended early is not a red run" &&
+    assert_contains "$out" "LANDED $(origin_git rev-parse main) " "landing output" &&
+    assert_eq 2 "$(grep -c 'run watch' "$FAKE_GH_DIR/calls.log")" "the run is watched again" &&
+    assert_eq 0 "$(grep -c 'run rerun' "$FAKE_GH_DIR/calls.log")" "nothing is rerun"
+}
+
+test_rerun_wait_ends_when_the_attempt_moves() {
+  land_repo
+  # The landing's run fails only in e2e (attempt 1). After the rerun, run view
+  # reports attempt 2 while its job list still lags on the old failure; the
+  # watch goes green once a view has seen attempt 2.
+  shim gh <<EOF
+#!/bin/bash
+D="\$FAKE_GH_DIR"
+jobs_failed='[{"name":"test","status":"completed","conclusion":"success"},{"name":"e2e","status":"completed","conclusion":"failure"}]'
+case "\$1 \${2:-}" in
+"run rerun")
+  echo "\$*" >> "\$D/calls.log"
+  : > "\$D/reran"
+  exit 0
+  ;;
+"run view")
+  case "\$*" in *jobs*)
+    echo "\$*" >> "\$D/calls.log"
+    if [ -e "\$D/reran" ]; then
+      echo x >> "\$D/views-after-rerun"
+      echo "{\"attempt\":2,\"jobs\":\$jobs_failed}"
+    else
+      echo "{\"attempt\":1,\"jobs\":\$jobs_failed}"
+    fi
+    exit 0
+    ;;
+  esac
+  ;;
+"run watch")
+  echo "\$*" >> "\$D/calls.log"
+  [ -s "\$D/views-after-rerun" ]
+  exit
+  ;;
+esac
+exec "$TEST_DIR/fakebin/gh" "\$@"
+EOF
+  : > "$FAKE_GH_DIR/ci-results"
+  local out rc
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 0 "$rc" "the rerun lands" &&
+    assert_eq 1 "$(grep -c 'run rerun' "$FAKE_GH_DIR/calls.log")" "e2e is rerun once" &&
+    assert_eq 1 "$(($(wc -l < "$FAKE_GH_DIR/views-after-rerun")))" "one view showing attempt 2 ends the wait"
+}
+
+test_ai_attribution_never_reaches_main() {
+  land_repo
+  git checkout -q CF-900-thing
+  echo three >> thing.txt
+  printf '%s\n' "Teach thing a third trick" "" "Third body, generated by the maintainer's script." "" \
+    "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>" \
+    "🤖 Generated with [Claude Code](https://claude.com/claude-code)" \
+    "Co-authored-by: Jane Human <jane@example.com>" > "$SANDBOX/msg"
+  git commit -q -a -F "$SANDBOX/msg"
+  git push -q origin CF-900-thing
+  git checkout -q main
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local rc msg
+  "$LAND" 42 >/dev/null 2>&1; rc=$?
+  msg="$(origin_git log -1 --format=%B main)"
+  assert_eq 0 "$rc" "landing" &&
+    assert_contains "$msg" "Co-authored-by: Jane Human <jane@example.com>" "human co-authors are kept" &&
+    assert_contains "$msg" "Third body, generated by the maintainer's script." "ordinary body lines are kept" &&
+    assert_not_contains "$msg" "noreply@anthropic.com" "AI co-author trailers are dropped" &&
+    assert_not_contains "$msg" "Generated with" "generated-with lines are dropped"
+}
+
+test_claims_from_outside_the_project_are_ignored() {
+  land_repo
+  git checkout -q -b CF-901-evil main
+  echo evil > evil.txt
+  git add evil.txt
+  git commit -q -m "Something else"
+  git push -q origin CF-901-evil
+  git checkout -q main
+  local f="$FAKE_GH_DIR/issues/42.json"
+  jq --arg b "taking — CF-901-evil · driver x · lease until $(iso_at 60) · files: evil.txt" \
+    '.comments = ([.comments[] | . + {authorAssociation: "MEMBER"}]
+                  + [{body: $b, createdAt: "2026-09-11T05:59:00Z", authorAssociation: "NONE"}])' \
+    "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local rc
+  "$LAND" 42 >/dev/null 2>&1; rc=$?
+  assert_eq 0 "$rc" "landing" &&
+    assert_eq "Teach thing a second trick (CF-900, #42)" "$(origin_git log -1 --format=%s main)" "the member's claim decides the branch" &&
+    assert_eq "" "$(origin_git ls-tree --name-only main evil.txt)" "the outsider's branch is not landed" &&
+    assert_eq yes "$(has_branch CF-901-evil)" "the outsider's branch is untouched"
+}
+
+# hung_watch_gh N: gh ahead of the fake whose first N `run watch` calls hang.
+hung_watch_gh() {
+  shim gh <<EOF
+#!/bin/bash
+D="\$FAKE_GH_DIR"
+if [ "\$1 \${2:-}" = "run watch" ]; then
+  n=\$(( \$(cat "\$D/watches" 2>/dev/null || echo 0) + 1 ))
+  echo \$n > "\$D/watches"
+  if [ \$n -le $1 ]; then
+    echo "\$*" >> "\$D/calls.log"
+    sleep 30
+    exit 1
+  fi
+fi
+exec "$TEST_DIR/fakebin/gh" "\$@"
+EOF
+}
+
+test_hung_watch_times_out_and_reverts() {
+  land_repo
+  hung_watch_gh 1
+  export CF_LAND_WATCH_TIMEOUT_SEC=2
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local out rc
+  SECONDS=0
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 7 "$rc" "a landing whose watch hangs is reverted" &&
+    assert_contains "$out" "REVERTED https://ci.example/runs/" "reverted output" &&
+    assert_eq "$(origin_git rev-parse "$BASE_SHA^{tree}")" "$(origin_git rev-parse 'main^{tree}')" "main's tree is restored" &&
+    { [ "$SECONDS" -lt 20 ] || fail "the hung watch was not cut off: ${SECONDS}s"; }
+}
+
+test_hung_revert_watch_is_reverted_red() {
+  land_repo
+  hung_watch_gh 99
+  export CF_LAND_WATCH_TIMEOUT_SEC=2
+  : > "$FAKE_GH_DIR/ci-results"
+  local out rc
+  SECONDS=0
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 8 "$rc" "a revert whose watch hangs leaves main red" &&
+    assert_contains "$out" "REVERTED-RED https://ci.example/runs/" "reverted-red output" &&
+    { [ "$SECONDS" -lt 20 ] || fail "the hung watches were not cut off: ${SECONDS}s"; }
+}
