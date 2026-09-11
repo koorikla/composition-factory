@@ -2748,8 +2748,13 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 					continue
 				}
 				trimmed := strings.TrimSpace(rawStr)
+				_ = trimmed
 				if pName := matchParamVar(rawStr); pName != "" {
-					if isValidParamIdentifier(pName) {
+					if isWholeObjectParam(bp, pName) {
+						if report != nil {
+							report.Record("resource."+res.Name+".metadata.annotations."+rawK, fmt.Sprintf("unsupported whole-object parameter wire from %q; wire individual object members instead", pName))
+						}
+					} else if isValidParamIdentifier(pName) {
 						res.Annotations[rawK] = blueprint.Field{From: "params." + pName}
 					} else {
 						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "invalid parameter reference")
@@ -3017,7 +3022,11 @@ func extractEnvelopeFields(prefix string, obj map[string]any, out map[string]blu
 				continue
 			}
 			if pName := matchParamVar(rawStr); pName != "" {
-				if isValidParamIdentifier(pName) {
+				if isWholeObjectParam(bp, pName) {
+					if report != nil {
+						report.Record("resource."+resName+".spec."+path, fmt.Sprintf("unsupported whole-object parameter wire from %q; wire individual object members instead", pName))
+					}
+				} else if isValidParamIdentifier(pName) {
 					out[path] = blueprint.Field{From: "params." + pName}
 				} else if report != nil {
 					report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path), "invalid parameter reference")
@@ -3135,7 +3144,11 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 			}
 			trimmed := strings.TrimSpace(rawStr)
 			if pName := matchParamVar(rawStr); pName != "" {
-				if isValidParamIdentifier(pName) {
+				if isWholeObjectParam(bp, pName) {
+					if report != nil {
+						report.Record("resource."+resName+".spec."+path, fmt.Sprintf("unsupported whole-object parameter wire from %q; wire individual object members instead", pName))
+					}
+				} else if isValidParamIdentifier(pName) {
 					out[path] = blueprint.Field{From: "params." + pName}
 				} else {
 					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid parameter reference")
@@ -3200,7 +3213,11 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 					}
 					trimmed := strings.TrimSpace(rawStr)
 					if pName := matchParamVar(rawStr); pName != "" {
-						if isValidParamIdentifier(pName) {
+						if isWholeObjectParam(bp, pName) {
+							if report != nil {
+								report.Record("resource."+resName+".spec."+elemPath, fmt.Sprintf("unsupported whole-object parameter wire from %q; wire individual object members instead", pName))
+							}
+						} else if isValidParamIdentifier(pName) {
 							out[elemPath] = blueprint.Field{From: "params." + pName}
 						} else {
 							report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid parameter reference")

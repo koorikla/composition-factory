@@ -9189,3 +9189,125 @@ spec:
 		t.Errorf("bp.Validate() failed: %v", err)
 	}
 }
+
+func TestCF298_AdoptGoTemplateObjectParamDrop(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xtests.example.org
+spec:
+  group: example.org
+  names:
+    kind: XTest
+    plural: xtests
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                config:
+                  type: object
+                  properties:
+                    region:
+                      type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: go-templating
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              name: test-bucket
+              annotations:
+                example.com/ann: "{{ .observed.composite.resource.spec.config }}"
+            spec:
+              deletionPolicy: "{{ .observed.composite.resource.spec.config }}"
+              forProvider:
+                objectLockEnabled: "{{ .observed.composite.resource.spec.config }}"
+                region: "{{ .observed.composite.resource.spec.config.region }}"
+                items:
+                  - "{{ .observed.composite.resource.spec.config }}"
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+
+	// 1. Verify that res.Fields["objectLockEnabled"] is not wired to params.config.
+	if f, exists := res.Fields["objectLockEnabled"]; exists && f.From == "params.config" {
+		t.Errorf("expected objectLockEnabled not to be wired to params.config, got: %+v", f)
+	}
+
+	// 2. Verify that res.Fields["region"] is wired to params.config.region.
+	if got := res.Fields["region"].From; got != "params.config.region" {
+		t.Errorf("res.Fields[\"region\"].From = %q, want %q", got, "params.config.region")
+	}
+
+	// 3. Verify that res.Annotations["example.com/ann"] is not wired to params.config.
+	if a, exists := res.Annotations["example.com/ann"]; exists && a.From == "params.config" {
+		t.Errorf("expected annotation not to be wired to params.config, got: %+v", a)
+	}
+
+	// 4. Verify that res.Envelope["deletionPolicy"] is not wired to params.config.
+	if e, exists := res.Envelope["deletionPolicy"]; exists && e.From == "params.config" {
+		t.Errorf("expected envelope deletionPolicy not to be wired to params.config, got: %+v", e)
+	}
+
+	// 5. Verify that res.Fields["items[0]"] is not wired to params.config.
+	if it, exists := res.Fields["items[0]"]; exists && it.From == "params.config" {
+		t.Errorf("expected items[0] not to be wired to params.config, got: %+v", it)
+	}
+
+	// 6. Verify that report.Drops contains the recorded drops.
+	expectedDrops := map[string]string{
+		"resource.test-bucket.spec.objectLockEnabled":               `unsupported whole-object parameter wire from "config"; wire individual object members instead`,
+		"resource.test-bucket.metadata.annotations.example.com/ann": `unsupported whole-object parameter wire from "config"; wire individual object members instead`,
+		"resource.test-bucket.spec.deletionPolicy":                  `unsupported whole-object parameter wire from "config"; wire individual object members instead`,
+		"resource.test-bucket.spec.items[0]":                        `unsupported whole-object parameter wire from "config"; wire individual object members instead`,
+	}
+
+	for expectedPath, expectedReason := range expectedDrops {
+		found := false
+		for _, d := range report.Drops {
+			if d.Path == expectedPath && d.Reason == expectedReason {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected drop on %q with reason %q, got drops: %+v", expectedPath, expectedReason, report.Drops)
+		}
+	}
+
+	// 7. Verify that bp.Validate() succeeds.
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+}
