@@ -466,6 +466,12 @@ func (s *server) addResource(_ context.Context, _ *sdk.CallToolRequest, in addRe
 	if err := json.Unmarshal(rawOrNull(in.Resource), &rawMap); err != nil || rawMap == nil {
 		return s.bridge(http.MethodPost, "/api/blueprint/resources", rawOrNull(in.Resource))
 	}
+	if bodyNameRaw, exists := rawMap["name"]; exists {
+		var bodyName string
+		if err := json.Unmarshal(bodyNameRaw, &bodyName); err == nil && bodyName != "" && in.Name != "" && bodyName != in.Name {
+			return nil, nil, fmt.Errorf("resource name in body %q does not match name argument %q", bodyName, in.Name)
+		}
+	}
 	nameBytes, err := json.Marshal(in.Name)
 	if err != nil {
 		return nil, nil, fmt.Errorf("encode request: %w", err)
