@@ -400,7 +400,8 @@ func IsFetchError(err error) bool {
 	return errors.As(err, &fe)
 }
 
-func (s *Store) pinLock(lockPath, ref, digest string) error {
+// PinLock pins ref and digest into lockPath.
+func (s *Store) PinLock(lockPath, ref, digest string) error {
 	if lockPath == "" {
 		return nil
 	}
@@ -423,7 +424,7 @@ func (s *Store) pinLock(lockPath, ref, digest string) error {
 // pins the lock, and saves the package and CRDs into the cache directory.
 func (s *Store) FetchAndSave(ctx context.Context, lockPath, ref string, fetch func(string) (*xpkg.Package, error)) (*xpkg.Package, []schema.CRD, error) {
 	if entry, err := s.loadEntry(ref); err == nil {
-		if err := s.pinLock(lockPath, ref, entry.Digest); err != nil {
+		if err := s.PinLock(lockPath, ref, entry.Digest); err != nil {
 			return nil, nil, err
 		}
 		pkgRef := entry.Ref
@@ -460,7 +461,7 @@ func (s *Store) FetchAndSave(ctx context.Context, lockPath, ref string, fetch fu
 	// Load then fails loudly with its own "run: cf provider add <ref>"
 	// message — a visible, recoverable state. Do not swap this order
 	// without re-reading that tradeoff.
-	if err := s.pinLock(lockPath, ref, pkg.Digest); err != nil {
+	if err := s.PinLock(lockPath, ref, pkg.Digest); err != nil {
 		return nil, nil, err
 	}
 	if err := s.Save(pkg, crds); err != nil {
