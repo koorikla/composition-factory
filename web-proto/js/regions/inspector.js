@@ -93,9 +93,10 @@ function envelopeEntryOf(res, path) {
   return entryOf(res, path, true);
 }
 
-function docMode(entry) {
+function docMode(entry, isEnvelope) {
   if (!entry) return "v";
   if (entry.from) return "w";
+  if (isEnvelope && entry.raw === "{{ $xr }}") return "w";
   if (entry.raw) return "r";
   return "v";
 }
@@ -412,6 +413,12 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
     '<select class="tsel" ' + wireAttr + esc(path) + '"' + reqAttr + ' style="flex:1">' +
     '<option value="">wire to&#8230;</option>';
 
+  if (isEnv) {
+    h += '<optgroup label="Context">';
+    h += '<option value="$xr"' + (currentFrom === "$xr" ? ' selected' : '') + '>XR name ($xr)</option>';
+    h += '</optgroup>';
+  }
+
   if (names.length > 0) {
     h += '<optgroup label="XRD Parameters">';
     names.forEach(function (n) {
@@ -462,7 +469,9 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
       PARAM_TYPES.map(function (t) {
         return "<option" + (t === suggestedParamType(fieldType) ? " selected" : "") + ">" + t + "</option>";
       }).join("") + "</select>" +
-      '<button class="btn sm" data-npok="' + esc(npKey) + '">Add</button>' +
+      '<label style="display:flex;align-items:center;gap:3px;font-size:11px;color:var(--faint);cursor:pointer" title="Required parameter">' +
+      '<input type="checkbox" data-npreq="' + esc(npKey) + '"' + (isRequired ? ' checked' : '') + '> req</label>' +
+      '<button class="btn sm" data-npok="' + esc(npKey) + '"' + (isRequired ? ' data-npreq="true"' : '') + '>Add</button>' +
       '<button class="del" data-npcancel="' + esc(npKey) + '" title="Cancel">&#215;</button></div>';
   }
   return h;
@@ -749,7 +758,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
 
 function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
   var entry = envelopeEntryOf(res, f.path);
-  var dm = docMode(entry);
+  var dm = docMode(entry, true);
   var mKey = "env:" + f.path;
   var m = uiMode[mKey] || dm;
 
@@ -759,6 +768,7 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
   var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
   var isAuto = !entry && (f.path === "providerConfigRef.name" || f.path === "providerConfigRef.kind");
   var showReq = f.required && !isAuto;
+  var isXr = entry && !entry.from && entry.raw === "{{ $xr }}";
 
   var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + (isAuto ? " auto-defaulted" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
     '<div class="fld-h"><span class="n">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
@@ -770,17 +780,18 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
     if (dm === "w" && !uiMode[mKey] && entry) {
       var wireCol = isStatusWire ? "var(--wire-status)" : "var(--wire-xrd)";
       var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : "";
+      var wireLabel = isXr ? "XR name ($xr)" : (entry.from || "");
       h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-        '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
+        '<span class="src" style="color:' + wireCol + '">' + esc(wireLabel) + "</span>" +
         '<span class="x" role="button" tabindex="0" data-env-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
-      if (showReq && isOptParamWire(entry.from, params)) {
+      if (showReq && !isXr && isOptParamWire(entry.from, params)) {
         h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
       }
     } else {
-      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, true, !!showReq, entry && entry.from);
+      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, true, !!showReq, isXr ? "$xr" : (entry && entry.from));
     }
   } else if (m === "r") {
-    h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", true, res, params, otherResources, otherStatusMap);
+    h += rawEditorHtml(f.path, entry ? entry.raw : "", true, res, params, otherResources, otherStatusMap);
   } else if (f.type === "boolean") {
     var ebVal = (dm === "v" && entry && entry.value !== undefined && entry.value !== null) ? String(entry.value).toLowerCase() : "";
     h += '<select class="val tsel" data-env-v="' + esc(f.path) + '">' +
@@ -1989,8 +2000,10 @@ async function commitEnvelopeValue(path, kind, text) {
   var res = selectedResource();
   if (!res) return;
   var entry = envelopeEntryOf(res, path);
-  if (entry && entry.from && kind === "value") {
-    if (!confirm('This envelope field is wired from "' + entry.from + '". Overwrite the wire with a literal value?')) {
+  var isWired = entry && (entry.from || entry.raw === "{{ $xr }}");
+  if (isWired && kind === "value") {
+    var wireSrc = entry.from || "XR name ($xr)";
+    if (!confirm('This envelope field is wired from "' + wireSrc + '". Overwrite the wire with a literal value?')) {
       render();
       return;
     }
@@ -2096,8 +2109,10 @@ var boxClickActions = [
       var m = mb.getAttribute("data-m");
       var res = selectedResource();
       var entry = isEnv ? (res ? envelopeEntryOf(res, path) : null) : (res ? entryOf(res, path) : null);
-      if (entry && entry.from && (m === "v" || m === "r")) {
-        if (!confirm('This field is wired from "' + entry.from + '". Switch modes and overwrite the wire?')) return;
+      var isWired = entry && (entry.from || (isEnv && entry.raw === "{{ $xr }}"));
+      if (isWired && (m === "v" || m === "r")) {
+        var wireSrc = entry.from || "XR name ($xr)";
+        if (!confirm('This field is wired from "' + wireSrc + '". Switch modes and overwrite the wire?')) return;
       }
       var mKey = isEnv ? ("env:" + path) : path;
       uiMode[mKey] = m;
@@ -2174,10 +2189,12 @@ var boxClickActions = [
       var realPath = isEnv ? p2.slice(4) : p2;
       var nameEl = box.querySelector('[data-npname="' + CSS.escape(p2) + '"]');
       var typeEl = box.querySelector('[data-nptype="' + CSS.escape(p2) + '"]');
+      var reqEl = box.querySelector('input[type="checkbox"][data-npreq="' + CSS.escape(p2) + '"]');
+      var isReq = reqEl ? reqEl.checked : (ok.getAttribute("data-npreq") === "true");
       var name = nameEl && nameEl.value.trim();
       var type = typeEl && typeEl.value || "string";
       if (!name) return;
-      op(function () { return store.addParameter(name, { type: type, required: false }); })
+      op(function () { return store.addParameter(name, { type: type, required: isReq }); })
         .then(function (docAfter) {
           if (docAfter === null) return null;
           if (isEnv) {
@@ -2706,6 +2723,11 @@ function onBoxChange(e) {
     const v = t.value;
     if (v === "__new__") { pendingNewParam = "env:" + path; render(); return; }
     if (!v) return;
+    if (v === "$xr") {
+      setEnvelopeField(path, { from: "", value: "", raw: "{{ $xr }}" })
+        .then(function (r) { if (r !== null) { delete uiMode["env:" + path]; pendingNewParam = null; } });
+      return;
+    }
     const fromVal = (v.indexOf("params.") === 0 || v.indexOf("resources.") === 0) ? v : ("params." + v);
     if (t.getAttribute("data-fld-req") === "true" && isOptParamWire(fromVal, paramsOf(doc))) {
       const parentCard = t.closest(".bound");
@@ -2921,6 +2943,13 @@ export function init(rootEl, deps) {
       return;
     }
     if (e.key === "Enter" && (t.tagName === "INPUT" || t.tagName === "SELECT")) {
+      if (t.matches && t.matches("[data-npname]")) {
+        e.preventDefault();
+        var npKey = t.getAttribute("data-npname");
+        var npAddBtn = box.querySelector('[data-npok="' + CSS.escape(npKey) + '"]');
+        if (npAddBtn) npAddBtn.click();
+        return;
+      }
       if (t.matches && (t.matches("[data-ann-key]") || t.matches("[data-ann-value]"))) {
         e.preventDefault();
         var addBtn = box.querySelector("[data-ann-add]");
