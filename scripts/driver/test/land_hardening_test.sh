@@ -5,8 +5,8 @@
 . "$(dirname "${BASH_SOURCE[0]}")/land_fixture.sh"
 
 test_main_moving_during_gates_is_never_undone() {
-  land_repo
-  other_clone
+  land_repo || return 1
+  other_clone || return 1
   echo important > "$SANDBOX/other/other.txt"
   git -C "$SANDBOX/other" add other.txt
   git -C "$SANDBOX/other" commit -q -m "someone else's commit"
@@ -23,11 +23,11 @@ test_main_moving_during_gates_is_never_undone() {
 }
 
 test_push_reported_failed_but_accepted_still_lands() {
-  land_repo
+  land_repo || return 1
   local real_git
   real_git="$(command -v git)"
   # The first push to main reaches origin, then the client reports a failure.
-  shim git <<EOF
+  shim git <<EOF || return 1
 #!/bin/bash
 push= del=
 for a in "\$@"; do
@@ -50,7 +50,7 @@ EOF
 }
 
 test_landing_again_after_it_landed_resumes_the_same_sha() {
-  land_repo
+  land_repo || return 1
   printf 'green\ngreen\n' > "$FAKE_GH_DIR/ci-results"
   local first rc1 landed out rc
   first="$("$LAND" 42 2>/dev/null)"; rc1=$?
@@ -66,9 +66,9 @@ test_landing_again_after_it_landed_resumes_the_same_sha() {
 }
 
 test_killed_after_push_resumes_watching() {
-  land_repo
+  land_repo || return 1
   # gh kills land.sh the first time it looks for the landing's run, after the push.
-  shim gh <<EOF
+  shim gh <<EOF || return 1
 #!/bin/bash
 if [ "\$1 \${2:-}" = "run list" ] && [ ! -e "$SANDBOX/killed" ] &&
   [ "\$(git -C "$SANDBOX/origin.git" rev-parse main)" != "$BASE_SHA" ]; then
@@ -94,17 +94,18 @@ EOF
 }
 
 test_new_work_after_an_earlier_landing_is_landed() {
-  land_repo
+  land_repo || return 1
   printf 'green\ngreen\n' > "$FAKE_GH_DIR/ci-results"
   local rc1 first out rc
   "$LAND" 42 >/dev/null 2>&1; rc1=$?
   first="$(origin_git rev-parse main)"
-  git fetch -q origin
-  git checkout -q -b CF-900-more origin/main
-  echo three >> thing.txt
-  git commit -q -am "Teach thing a third trick"
-  git push -q origin CF-900-more
-  git checkout -q main
+  sandbox_guard || return 1
+  git fetch -q origin &&
+    git checkout -q -b CF-900-more origin/main &&
+    echo three >> thing.txt &&
+    git commit -q -am "Teach thing a third trick" &&
+    git push -q origin CF-900-more &&
+    git checkout -q main || return 1
   issue_fixture 42 OPEN handed-back \
     "taking — CF-900-thing · driver d06-0300Z · lease until $(iso_at -60) · files: thing.txt" 150 \
     "taking — CF-900-more · driver d07-0500Z · lease until $(iso_at 30) · files: thing.txt" 30
@@ -120,11 +121,12 @@ test_new_work_after_an_earlier_landing_is_landed() {
 # (the last one repeats). Every other call goes to the fake gh.
 base_run_gh() {
   local i=1 v
+  sandbox_dir_guard || return 1
   for v in "$@"; do
     echo "$v" > "$SANDBOX/base-view.$i"
     i=$((i + 1))
   done
-  shim gh <<EOF
+  shim gh <<EOF || return 1
 #!/bin/bash
 D="\$FAKE_GH_DIR"
 if [ "\$1 \${2:-}" = "run view" ] && [ "\$3" = "\$(cat "\$D/runs/$BASE_SHA" 2>/dev/null)" ]; then
@@ -144,8 +146,8 @@ EOF
 }
 
 test_red_main_is_not_landed_on() {
-  land_repo
-  base_run_gh '{"status":"completed","conclusion":"failure"}'
+  land_repo || return 1
+  base_run_gh '{"status":"completed","conclusion":"failure"}' || return 1
   printf 'green\n' > "$FAKE_GH_DIR/ci-results"
   local out rc
   out="$("$LAND" 42 2>/dev/null)"; rc=$?
@@ -158,9 +160,9 @@ test_red_main_is_not_landed_on() {
 }
 
 test_pending_main_is_waited_for() {
-  land_repo
+  land_repo || return 1
   base_run_gh '{"status":"in_progress","conclusion":""}' '{"status":"queued","conclusion":null}' \
-    '{"status":"completed","conclusion":"success"}'
+    '{"status":"completed","conclusion":"success"}' || return 1
   printf 'green\n' > "$FAKE_GH_DIR/ci-results"
   local out rc
   out="$("$LAND" 42 2>/dev/null)"; rc=$?
@@ -170,10 +172,10 @@ test_pending_main_is_waited_for() {
 }
 
 test_watch_that_exits_before_the_run_completes_is_rewatched() {
-  land_repo
+  land_repo || return 1
   # The first watch exits non-zero (a dropped connection) while the run is still
   # in progress; the second watch goes to the fake and reads green.
-  shim gh <<EOF
+  shim gh <<EOF || return 1
 #!/bin/bash
 D="\$FAKE_GH_DIR"
 case "\$1 \${2:-}" in
@@ -207,11 +209,11 @@ EOF
 }
 
 test_rerun_wait_ends_when_the_attempt_moves() {
-  land_repo
+  land_repo || return 1
   # The landing's run fails only in e2e (attempt 1). After the rerun, run view
   # reports attempt 2 while its job list still lags on the old failure; the
   # watch goes green once a view has seen attempt 2.
-  shim gh <<EOF
+  shim gh <<EOF || return 1
 #!/bin/bash
 D="\$FAKE_GH_DIR"
 jobs_failed='[{"name":"test","status":"completed","conclusion":"success"},{"name":"e2e","status":"completed","conclusion":"failure"}]'
@@ -251,17 +253,19 @@ EOF
 }
 
 test_ai_attribution_never_reaches_main() {
-  land_repo
-  git checkout -q CF-900-thing
-  echo three >> thing.txt
+  land_repo || return 1
+  sandbox_guard || return 1
+  git checkout -q CF-900-thing &&
+    echo three >> thing.txt || return 1
   printf '%s\n' "Teach thing a third trick" "" "Third body, generated by the maintainer's script." \
     "CRD schemas are generated by controller-gen for the Azure AI provider." "" \
     "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>" \
     "🤖 Generated with [Claude Code](https://claude.com/claude-code)" \
     "Co-authored-by: Jane Human <jane@example.com>" > "$SANDBOX/msg"
-  git commit -q -a -F "$SANDBOX/msg"
-  git push -q origin CF-900-thing
-  git checkout -q main
+  sandbox_guard || return 1
+  git commit -q -a -F "$SANDBOX/msg" &&
+    git push -q origin CF-900-thing &&
+    git checkout -q main || return 1
   printf 'green\n' > "$FAKE_GH_DIR/ci-results"
   local rc msg
   "$LAND" 42 >/dev/null 2>&1; rc=$?
@@ -275,13 +279,14 @@ test_ai_attribution_never_reaches_main() {
 }
 
 test_claims_from_outside_the_project_are_ignored() {
-  land_repo
-  git checkout -q -b CF-901-evil main
-  echo evil > evil.txt
-  git add evil.txt
-  git commit -q -m "Something else"
-  git push -q origin CF-901-evil
-  git checkout -q main
+  land_repo || return 1
+  sandbox_guard || return 1
+  git checkout -q -b CF-901-evil main &&
+    echo evil > evil.txt &&
+    git add evil.txt &&
+    git commit -q -m "Something else" &&
+    git push -q origin CF-901-evil &&
+    git checkout -q main || return 1
   local f="$FAKE_GH_DIR/issues/42.json"
   jq --arg b "taking — CF-901-evil · driver x · lease until $(iso_at 60) · files: evil.txt" \
     '.comments = ([.comments[] | . + {authorAssociation: "MEMBER"}]
@@ -298,7 +303,7 @@ test_claims_from_outside_the_project_are_ignored() {
 
 # hung_watch_gh N: gh ahead of the fake whose first N `run watch` calls hang.
 hung_watch_gh() {
-  shim gh <<EOF
+  shim gh <<EOF || return 1
 #!/bin/bash
 D="\$FAKE_GH_DIR"
 if [ "\$1 \${2:-}" = "run watch" ]; then
@@ -315,8 +320,8 @@ EOF
 }
 
 test_hung_watch_times_out_and_reverts() {
-  land_repo
-  hung_watch_gh 1
+  land_repo || return 1
+  hung_watch_gh 1 || return 1
   export CF_LAND_WATCH_TIMEOUT_SEC=2
   printf 'green\n' > "$FAKE_GH_DIR/ci-results"
   local out rc
@@ -329,8 +334,8 @@ test_hung_watch_times_out_and_reverts() {
 }
 
 test_hung_revert_watch_is_reverted_red() {
-  land_repo
-  hung_watch_gh 99
+  land_repo || return 1
+  hung_watch_gh 99 || return 1
   export CF_LAND_WATCH_TIMEOUT_SEC=2
   : > "$FAKE_GH_DIR/ci-results"
   local out rc
@@ -349,7 +354,7 @@ test_hung_revert_watch_is_reverted_red() {
 red_main_gh() {
   local attempt1="{\"attempt\":1,\"jobs\":[{\"name\":\"test\",\"status\":\"completed\",\"conclusion\":\"$2\"},{\"name\":\"e2e\",\"status\":\"completed\",\"conclusion\":\"$3\"}]}"
   local attempt2='{"attempt":2,"jobs":[{"name":"test","status":"completed","conclusion":"success"},{"name":"e2e","status":"in_progress","conclusion":""}]}'
-  shim gh <<EOF
+  shim gh <<EOF || return 1
 #!/bin/bash
 D="\$FAKE_GH_DIR"
 main_id="\$(cat "\$D/runs/$BASE_SHA" 2>/dev/null)"
@@ -380,10 +385,10 @@ EOF
 }
 
 test_p0_lands_on_red_main() {
-  land_repo
+  land_repo || return 1
   issue_fixture 42 OPEN "handed-back,severity:P0" \
     "taking — CF-900-thing · driver d06-0300Z · lease until $(iso_at 30) · files: thing.txt" 90
-  red_main_gh failure failure success red
+  red_main_gh failure failure success red || return 1
   printf 'green\n' > "$FAKE_GH_DIR/ci-results"
   local out rc
   out="$("$LAND" 42 2>/dev/null)"; rc=$?
@@ -393,8 +398,8 @@ test_p0_lands_on_red_main() {
 }
 
 test_main_red_only_in_e2e_is_rerun_once() {
-  land_repo
-  red_main_gh failure success failure green
+  land_repo || return 1
+  red_main_gh failure success failure green || return 1
   printf 'green\n' > "$FAKE_GH_DIR/ci-results"
   local out rc main_id
   out="$("$LAND" 42 2>/dev/null)"; rc=$?
@@ -406,8 +411,8 @@ test_main_red_only_in_e2e_is_rerun_once() {
 }
 
 test_main_red_in_e2e_after_its_rerun_stays_main_red() {
-  land_repo
-  red_main_gh failure success failure red
+  land_repo || return 1
+  red_main_gh failure success failure red || return 1
   printf 'green\n' > "$FAKE_GH_DIR/ci-results"
   local out rc
   out="$("$LAND" 42 2>/dev/null)"; rc=$?
@@ -418,8 +423,8 @@ test_main_red_in_e2e_after_its_rerun_stays_main_red() {
 }
 
 test_cancelled_main_is_rerun_in_full_once() {
-  land_repo
-  red_main_gh cancelled cancelled cancelled green
+  land_repo || return 1
+  red_main_gh cancelled cancelled cancelled green || return 1
   printf 'green\n' > "$FAKE_GH_DIR/ci-results"
   local out rc main_id
   out="$("$LAND" 42 2>/dev/null)"; rc=$?
@@ -430,7 +435,7 @@ test_cancelled_main_is_rerun_in_full_once() {
 }
 
 test_new_claim_after_landing_with_missing_branch_is_not_resumed() {
-  land_repo
+  land_repo || return 1
   printf 'green\ngreen\n' > "$FAKE_GH_DIR/ci-results"
   local rc1 landed after out rc f="$FAKE_GH_DIR/issues/42.json"
   "$LAND" 42 >/dev/null 2>&1; rc1=$?
@@ -447,10 +452,10 @@ test_new_claim_after_landing_with_missing_branch_is_not_resumed() {
 }
 
 test_rerun_wait_needs_the_attempt_to_move_when_gh_reports_one() {
-  land_repo
+  land_repo || return 1
   # After the rerun, the first two views still read attempt 1 but with an empty
   # job list; the watch goes green only once a view has read attempt 2.
-  shim gh <<EOF
+  shim gh <<EOF || return 1
 #!/bin/bash
 D="\$FAKE_GH_DIR"
 jobs_failed='[{"name":"test","status":"completed","conclusion":"success"},{"name":"e2e","status":"completed","conclusion":"failure"}]'
@@ -494,9 +499,9 @@ EOF
 }
 
 test_watch_ignoring_term_is_killed() {
-  land_repo
+  land_repo || return 1
   # The first watch ignores SIGTERM and outlives the deadline by far.
-  shim gh <<EOF
+  shim gh <<EOF || return 1
 #!/bin/bash
 D="\$FAKE_GH_DIR"
 if [ "\$1 \${2:-}" = "run watch" ] && [ ! -e "\$D/stubborn" ]; then
