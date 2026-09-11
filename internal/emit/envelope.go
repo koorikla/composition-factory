@@ -172,13 +172,8 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 				}
 				continue
 			}
-			rawNorm := blueprint.NormalizeRawGoTemplate(f.Raw)
-			if n.Type == "string" && isJSONComposite(f.Raw) {
-				e.rhs = quoteYAML(rawNorm)
-			} else {
-				e.rhs = rawNorm
-			}
-			e.structured = structuredRHS{kind: rhsRaw, value: f.Raw, targetType: n.Type}
+			e.rhs = blueprint.NormalizeRawGoTemplate(f.Raw)
+			e.structured = structuredRHS{kind: rhsRaw, value: f.Raw}
 		case f.Value != "":
 			rhs, err := envelopeValueRHS(n, branch, f.Value)
 			if err != nil {

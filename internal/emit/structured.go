@@ -150,12 +150,7 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 	case f.Raw != "":
 		s.kind = rhsRaw
 		s.value = f.Raw
-		rawNorm := blueprint.NormalizeRawGoTemplate(f.Raw)
-		if targetType == "string" && isJSONComposite(f.Raw) {
-			rhs = quoteYAML(rawNorm)
-		} else {
-			rhs = rawNorm
-		}
+		rhs = blueprint.NormalizeRawGoTemplate(f.Raw)
 
 	case f.Template != "":
 		if _, ok := b.Spec.Templates[f.Template]; !ok {
@@ -389,22 +384,6 @@ func isFieldTypeCompatible(targetType, paramType string, isMap bool) bool {
 	case "boolean":
 		return paramType == "boolean"
 	case "":
-		return true
-	}
-	return false
-}
-
-// isJSONComposite reports whether s is a JSON object or array literal
-// (e.g. `{"Version": ...}` or `["s3:GetObject"]`) rather than a Go-template
-// expression (such as `{{ $xr }}`). When targeted at a string-typed schema
-// field, emitting such literals unquoted causes YAML to treat them as inline
-// mappings or sequences, failing CRD schema validation.
-func isJSONComposite(s string) bool {
-	trimmed := strings.TrimSpace(s)
-	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") && !strings.HasPrefix(trimmed, "{{") {
-		return true
-	}
-	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 		return true
 	}
 	return false
