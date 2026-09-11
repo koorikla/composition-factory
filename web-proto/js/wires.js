@@ -22,6 +22,13 @@ export function parseFrom(from) {
   }
   if (from.indexOf("resources.") === 0) {
     const rest = from.slice("resources.".length);
+    if (rest.endsWith(".metadata.name")) {
+      return {
+        kind: "status",
+        resource: rest.slice(0, -".metadata.name".length),
+        statusPath: "metadata.name"
+      };
+    }
     const idx = rest.indexOf(".status.");
     if (idx !== -1) {
       return {

@@ -431,6 +431,17 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
   }
 
   if (otherResources && otherResources.length > 0) {
+    var isRefField = /Ref(\.name)?$|Refs(\[\d+\])?(\.name)?$|Selector(\.matchLabels)?$/i.test(path);
+    if (isRefField || fieldType === "string" || !fieldType) {
+      h += '<optgroup label="Resource Name (*Ref)">';
+      otherResources.forEach(function (r) {
+        var wireVal = "resources." + r.name + ".status.atProvider.id";
+        var isSel = currentFrom === wireVal || currentFrom === ("resources." + r.name + ".metadata.name");
+        h += '<option value="' + esc(wireVal) + '"' + (isSel ? " selected" : "") + '>' + esc(r.name) + ' (name / ID)</option>';
+      });
+      h += '</optgroup>';
+    }
+
     h += '<optgroup label="Resource Status">';
     otherResources.forEach(function (r) {
       var sfs = (otherStatusMap && otherStatusMap[r.name]) || [
@@ -441,21 +452,12 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
       sfs.forEach(function (sf) {
         if (!fieldType || compatible(sf.type, fieldType)) {
           var wireVal = "resources." + r.name + ".status." + sf.path;
-          h += '<option value="' + esc(wireVal) + '">' + esc(wireVal) + "</option>";
+          var isSel = currentFrom === wireVal;
+          h += '<option value="' + esc(wireVal) + '"' + (isSel ? " selected" : "") + '>' + esc(wireVal) + "</option>";
         }
       });
     });
     h += '</optgroup>';
-
-    var isRefField = /Ref(\.name)?$|Refs(\[\d+\])?(\.name)?$|Selector(\.matchLabels)?$/i.test(path);
-    if (isRefField || fieldType === "string") {
-      h += '<optgroup label="Resource Name (*Ref)">';
-      otherResources.forEach(function (r) {
-        var wireVal = "resources." + r.name + ".status.atProvider.id";
-        h += '<option value="' + esc(wireVal) + '">' + esc(r.name) + ' (name / ID)</option>';
-      });
-      h += '</optgroup>';
-    }
   }
 
   h += '<option value="__new__">+ new XRD parameter&#8230;</option></select></div>';

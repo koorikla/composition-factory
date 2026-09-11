@@ -66,6 +66,10 @@ function kindMeta(resource) {
   return (ns.length ? ns : pool)[0];
 }
 
+function isRefFieldPath(p) {
+  return /Ref(\.name)?$|Refs(\[\d+\])?(\.name)?$/i.test(p);
+}
+
 function schemaFor(resource) {
   const meta = kindMeta(resource);
   if (!meta) return null;
@@ -81,7 +85,9 @@ function schemaFor(resource) {
         // effective requiredness: a leaf is a must-set only when its whole
         // ancestor chain is required (requiredChain) — raw `required` floods
         // native kinds with conditional members (EnvVar.name etc.)
-        if (f.requiredChain) requiredPaths.push(f.path);
+        // Ref fields (e.g. bucketRef.name) are required within their ref branch and
+        // serve as canonical resource-linking inputs, so surface them on the card.
+        if (f.requiredChain || (f.required && isRefFieldPath(f.path))) requiredPaths.push(f.path);
       });
       (res.requiredBranches || []).forEach(function (b) {
         requiredPaths.push(b.path);
@@ -224,8 +230,10 @@ function resourceCardHTML(d, r, sel) {
   // Required-but-unset schema fields also get a row (prototype look: required *).
   // For kinds with hundreds of nested required schema leaves (like native Deployment),
   // only surface shallow unset fields on the card so it stays compact.
+  // Always include *Ref fields so resource-linking targets are immediately droppable.
   const extra = schema ? schema.requiredPaths.filter(function (p) {
     if (seen[p]) return false;
+    if (isRefFieldPath(p)) return true;
     const sf = schema.byPath[p];
     if (schema.requiredPaths.length <= 8) return true;
     return sf && (sf.depth !== undefined ? sf.depth <= 1 : (p.split(".").length <= 2));
@@ -331,6 +339,12 @@ function resourceCardHTML(d, r, sel) {
     statusRows.push(w.srcPath);
   });
   const schemaLeaves = statusLeavesFor(meta) || [];
+  // Ensure atProvider.id is always offered as a primary output row for resource linking
+  const idPath = (schemaLeaves.length > 0 && schemaLeaves.find(function (p) { return p === "atProvider.id" || p === "id"; })) || "atProvider.id";
+  if (!seenStatus[idPath]) {
+    seenStatus[idPath] = true;
+    statusRows.unshift(idPath);
+  }
   for (let si = 0; si < schemaLeaves.length && statusRows.length < STATUS_ROWS_SHOWN + Object.keys(seenStatus).length; si++) {
     const p = schemaLeaves[si];
     if (seenStatus[p]) continue;
@@ -341,6 +355,7 @@ function resourceCardHTML(d, r, sel) {
   if (statusRows.length) {
     h += '<div class="node-grp" style="color:var(--wire-status);text-align:right">outputs</div>';
     statusRows.forEach(function (p) {
+      const isId = p === "atProvider.id" || p === "id";
       h += portRow(r.name, "status." + p, {
         dir: "out",
         dotColor: "var(--wire-status)",
@@ -349,7 +364,7 @@ function resourceCardHTML(d, r, sel) {
         cls: "status",
         // outputs read right-aligned and short: the atProvider prefix is
         // noise at a glance, the full path lives in the title
-        label: shortPath(p.replace(/^atProvider\./, "")),
+        label: isId ? "name / id" : shortPath(p.replace(/^atProvider\./, "")),
         title: r.name + ".status." + p + " (status output \u2014 other objects can wire from this)",
       });
     });
@@ -650,7 +665,7 @@ function drawWires() {
   ws.forEach(function (w, idx) {
     let a, b, cls, col, title;
     if (w.kind === "status") {
-      a = portPos(w.srcResource, "status." + w.srcPath, cwRect) || portPos(w.srcResource, w.srcPath, cwRect);
+      a = portPos(w.srcResource, "status." + w.srcPath, cwRect) || portPos(w.srcResource, w.srcPath, cwRect) || portPos(w.srcResource, "status.atProvider.id", cwRect);
       b = portPos(w.resource, w.path, cwRect);
       cls = "wire-status";
       col = "var(--wire-status)";
@@ -1179,10 +1194,14 @@ function onResizeDown(e) {
 
 function applyWire(srcOwner, srcPath, targetRes, targetPath) {
   let fromExpr = "";
-  if (srcOwner === XR_ID) {
+  if (srcPath && (srcPath.startsWith("params.") || srcPath.startsWith("env.") || srcPath.startsWith("resources."))) {
+    fromExpr = srcPath;
+  } else if (srcOwner === XR_ID) {
     fromExpr = "params." + srcPath;
   } else if (srcOwner === ENV_ID || srcOwner === "environment") {
     fromExpr = "env." + srcPath;
+  } else if (srcPath === "metadata.name" || srcPath === "status.metadata.name") {
+    fromExpr = "resources." + srcOwner + ".metadata.name";
   } else {
     fromExpr = "resources." + srcOwner + ".status." + srcPath.replace(/^status\./, "");
   }
@@ -1284,6 +1303,8 @@ function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
   const items = [];
   const leafName = (ctx.srcPath || "").split(".").pop() || "";
   const srcTerm = leafName.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const srcOwnerTerm = (ctx.srcOwner && ctx.srcOwner !== XR_ID && ctx.srcOwner !== ENV_ID && ctx.srcOwner !== "environment")
+    ? ctx.srcOwner.toLowerCase().replace(/[^a-z0-9]/g, "") : "";
   const srcType = ctx.srcType || "string";
   const res = ctx.resource || {};
   const isSecret = res.kind === "Secret";
@@ -1311,7 +1332,8 @@ function buildFieldPickerCandidates(specFields, envelopeFields, filter, ctx) {
     const typeMatch = isFieldPickerTypeMatch(srcType, targetType);
     const isReq = !!(f.requiredChain || f.required);
     const isOptWarn = !!(isReq && ctx.srcOwner === XR_ID && !isSrcParamReq);
-    const isMatch = srcTerm && (pNorm.indexOf(srcTerm) >= 0 || srcTerm.indexOf(pNorm) >= 0);
+    const isMatch = (srcTerm && (pNorm.indexOf(srcTerm) >= 0 || srcTerm.indexOf(pNorm) >= 0)) ||
+      (srcOwnerTerm && (pNorm.indexOf(srcOwnerTerm) >= 0 || srcOwnerTerm.indexOf(pNorm) >= 0));
     let score = 20;
     if (isReq) score += 40;
     if (isSecret && (p === "stringData" || p.startsWith("stringData."))) score += 15;
