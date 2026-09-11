@@ -519,3 +519,27 @@ func TestRenderUnavailableWhenContainerMarkedForRemoval(t *testing.T) {
 		t.Errorf("response = %+v, want %+v", got, want)
 	}
 }
+
+func TestRenderReportsContainerDeployment(t *testing.T) {
+	o := testServerOptions(t)
+	o.lookPath = func(file string) (string, error) {
+		return "", &exec.Error{Name: file, Err: exec.ErrNotFound}
+	}
+	o.isContainer = func() bool { return true }
+	h, err := New(o)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rec := do(t, h, "POST", "/api/render", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	got := decodeRenderResponse(t, rec)
+	if !got.Container {
+		t.Errorf("got.Container = %v, want true", got.Container)
+	}
+	if !strings.Contains(got.Unavailable, "crossplane") {
+		t.Errorf("unavailable = %q, want it to name the missing crossplane binary", got.Unavailable)
+	}
+}

@@ -42,6 +42,7 @@ func (srv *server) handleRender(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	res.Container = srv.isContainerEnv()
 	writeJSON(w, http.StatusOK, res)
 }
 

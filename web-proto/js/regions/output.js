@@ -58,6 +58,7 @@ var editor = null;
 var editBar = null;
 var outDir = "";
 var servedBlueprintPath = "";
+var isContainerEnv = false;
 
 /* ---------- tree explorer + tabs (built live) ---------- */
 
@@ -416,15 +417,27 @@ function diagnoseError(errMsg) {
   if (!errMsg) return { isEnv: false, tip: "" };
   var str = String(errMsg).toLowerCase();
   if (str.indexOf("docker") !== -1 || str.indexOf("daemon") !== -1 || str.indexOf("docker.sock") !== -1) {
+    if (isContainerEnv) {
+      return {
+        isEnv: true,
+        tip: "Validation check requires access to a Docker daemon. In container deployments, mount the Docker socket (-v /var/run/docker.sock:/var/run/docker.sock) or run cf serve locally on your host."
+      };
+    }
     return {
       isEnv: true,
       tip: "Make sure Docker Desktop or dockerd is running and accessible."
     };
   }
   if (str.indexOf("crossplane") !== -1 && (str.indexOf("not found") !== -1 || str.indexOf("executable file") !== -1 || str.indexOf("no such file") !== -1 || str.indexOf("absent") !== -1)) {
+    if (isContainerEnv) {
+      return {
+        isEnv: true,
+        tip: "Validation check is unavailable in container deployments: the container image does not bundle the Crossplane CLI or Docker runtime. Run 'cf serve' or 'cf gen --validate' locally on a host with Crossplane CLI and Docker installed to validate compositions."
+      };
+    }
     return {
       isEnv: true,
-      tip: "Install Crossplane CLI: curl -sL https://raw.githubusercontent.com/crossplane/crossplane/master/install.sh | sh"
+      tip: "Install Crossplane CLI on host: brew install crossplane-cli (macOS) or curl -sL https://cli.crossplane.io/stable/current/install.sh | sh (validation check is unavailable in container deployments without Crossplane CLI and Docker)"
     };
   }
   if (str.indexOf("connection refused") !== -1 || str.indexOf("dial tcp") !== -1) {
@@ -742,6 +755,9 @@ function drawTopbar(doc) {
     api.getVersion().then(function (r) {
       el.ver.textContent = r.version;
       el.ver.title = "compositionfactory build " + r.version;
+      if (r && r.container) {
+        isContainerEnv = true;
+      }
       if (typeof r.blueprint === "string" && r.blueprint) {
         servedBlueprintPath = r.blueprint;
         drawTopbarCrumb((store && store.state && store.state.doc) || doc);
@@ -1121,6 +1137,9 @@ function bindOutputEvents() {
     var runRevision = docRevision;
     chipWorking("validating\u2026");
     api.renderCheck().then(function (r) {
+      if (r && r.container) {
+        isContainerEnv = true;
+      }
       if (r.ok) {
         renderOk(r);
       } else if (r.unavailable) {
@@ -1461,3 +1480,10 @@ export function toYaml(doc) {
   yamlLines(doc, 0, out);
   return out.join("\n") + "\n";
 }
+
+export function setContainerEnv(val) {
+  isContainerEnv = !!val;
+}
+
+export { diagnoseError, formatErrorMessage };
+

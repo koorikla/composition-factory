@@ -71,6 +71,10 @@ type Options struct {
 	// binary (nil means exec.LookPath).
 	render   func(ctx context.Context, xr, comp, fns, xrd string) ([]byte, error)
 	lookPath func(file string) (string, error)
+
+	// isContainer reports whether the server runs inside a container (nil
+	// uses defaultIsContainer).
+	isContainer func() bool
 }
 
 // validate reports the first incomplete field in o. New calls this so a
@@ -579,4 +583,30 @@ func (srv *server) rebuildIndexLocked(optB ...*blueprint.Blueprint) error {
 	}
 	srv.Index = idx
 	return nil
+}
+
+// isContainerEnv reports whether the server is running inside a container.
+func (srv *server) isContainerEnv() bool {
+	if srv.isContainer != nil {
+		return srv.isContainer()
+	}
+	return defaultIsContainer()
+}
+
+// defaultIsContainer reports whether the server is executing inside a container
+// or Kubernetes pod (checks CF_CONTAINER, KUBERNETES_SERVICE_HOST, /.dockerenv, /run/.containerenv).
+func defaultIsContainer() bool {
+	if os.Getenv("CF_CONTAINER") != "" {
+		return true
+	}
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		return true
+	}
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	if _, err := os.Stat("/run/.containerenv"); err == nil {
+		return true
+	}
+	return false
 }

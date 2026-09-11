@@ -47,6 +47,7 @@ EXPOSE 8080
 # native default the unauthenticated-bind guard exists to protect.
 ENV CF_ADDR=0.0.0.0:8080
 ENV CF_I_KNOW_THIS_IS_UNAUTHENTICATED=1
+ENV CF_CONTAINER=1
 
 ENTRYPOINT ["cf"]
 CMD ["serve"]

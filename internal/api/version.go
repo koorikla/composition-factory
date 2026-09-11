@@ -14,6 +14,7 @@ type versionResponse struct {
 	Engines   []string `json:"engines"`
 	OutDir    string   `json:"outDir"`
 	Blueprint string   `json:"blueprint,omitempty"`
+	Container bool     `json:"container,omitempty"`
 }
 
 func (srv *server) handleVersion(w http.ResponseWriter, r *http.Request) {
@@ -38,5 +39,6 @@ func (srv *server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		Engines:   blueprint.SupportedEngines,
 		OutDir:    srv.OutDir,
 		Blueprint: bp,
+		Container: srv.isContainerEnv(),
 	})
 }

@@ -90,3 +90,56 @@ func TestVersionResponseIncludesCleanWorkspaceRelativeBlueprint(t *testing.T) {
 		})
 	}
 }
+
+func TestVersionResponseReportsContainerDeployment(t *testing.T) {
+	tmp := t.TempDir()
+	idx, err := index.Build(map[string][]schema.CRD{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name          string
+		isContainerFn func() bool
+		wantContainer bool
+	}{
+		{
+			name:          "container environment",
+			isContainerFn: func() bool { return true },
+			wantContainer: true,
+		},
+		{
+			name:          "host environment",
+			isContainerFn: func() bool { return false },
+			wantContainer: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := Options{
+				Version:     "v1.0.0",
+				Index:       idx,
+				Store:       cache.New(tmp),
+				Blueprint:   "doc.cf.yaml",
+				OutDir:      tmp,
+				Lock:        filepath.Join(tmp, ".cf.lock"),
+				isContainer: tc.isContainerFn,
+			}
+			h, err := New(opts)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/version", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			var res versionResponse
+			if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if res.Container != tc.wantContainer {
+				t.Errorf("Container = %v, want %v", res.Container, tc.wantContainer)
+			}
+		})
+	}
+}

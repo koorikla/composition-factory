@@ -43,6 +43,7 @@ type RenderResult struct {
 	Resources        int    `json:"resources"`
 	Error            string `json:"error"`
 	Unavailable      string `json:"unavailable"`
+	Container        bool   `json:"container,omitempty"`
 	ValidationFailed bool   `json:"-"`
 }
 
