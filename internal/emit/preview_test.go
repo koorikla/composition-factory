@@ -215,3 +215,47 @@ func TestPreviewExpression_ExecutionBounds(t *testing.T) {
 		}
 	})
 }
+
+func TestPreviewExpression_FromYamlTypes(t *testing.T) {
+	bp := &blueprint.Blueprint{}
+
+	t.Run("YAML list expression", func(t *testing.T) {
+		res, err := PreviewExpression(bp, "", `{{ range (fromYaml "- a\n- b") }}{{ . }}{{ end }}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res != "ab" {
+			t.Errorf("got %q, want %q", res, "ab")
+		}
+	})
+
+	t.Run("roundtrip list toYaml fromYaml len", func(t *testing.T) {
+		res, err := PreviewExpression(bp, "", `{{ list "foo" "bar" | toYaml | fromYaml | len }}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res != "2" {
+			t.Errorf("got %q, want %q", res, "2")
+		}
+	})
+
+	t.Run("scalar", func(t *testing.T) {
+		res, err := PreviewExpression(bp, "", `{{ fromYaml "42" }}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res != "42" {
+			t.Errorf("got %q, want %q", res, "42")
+		}
+	})
+
+	t.Run("standard YAML map", func(t *testing.T) {
+		res, err := PreviewExpression(bp, "", `{{ (fromYaml "k: v").k }}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res != "v" {
+			t.Errorf("got %q, want %q", res, "v")
+		}
+	})
+}

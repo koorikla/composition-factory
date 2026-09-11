@@ -248,8 +248,8 @@ func PreviewExpressionContext(ctx context.Context, b *blueprint.Blueprint, resou
 		return string(b), nil
 	}
 
-	funcs["fromYaml"] = func(s string) (map[string]any, error) {
-		out := map[string]any{}
+	funcs["fromYaml"] = func(s string) (any, error) {
+		var out any
 		err := yaml.Unmarshal([]byte(s), &out)
 		return out, err
 	}
