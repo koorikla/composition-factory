@@ -79,6 +79,17 @@ function isRefFieldPath(p) {
   return /Ref(\.name)?$|Refs(\[\d+\])?(\.name)?$/i.test(p);
 }
 
+const STATUS_SEGMENT_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+function isValidStatusPath(p) {
+  if (!p || typeof p !== "string") return false;
+  const segs = p.split(".");
+  for (let i = 0; i < segs.length; i++) {
+    if (!STATUS_SEGMENT_RE.test(segs[i])) return false;
+  }
+  return true;
+}
+
 function schemaFor(resource) {
   const meta = kindMeta(resource);
   if (!meta) return null;
@@ -358,7 +369,7 @@ function resourceCardHTML(d, r, sel) {
   // the schema — displayed like inputs so "object depends on object" is
   // visible before any wire exists.
   const outStatusWires = listWires(d).filter(function (w) {
-    return w.kind === "status" && w.srcResource === r.name;
+    return w.kind === "status" && w.srcResource === r.name && isValidStatusPath(w.srcPath);
   });
   const seenStatus = {};
   const statusRows = [];
@@ -367,16 +378,16 @@ function resourceCardHTML(d, r, sel) {
     seenStatus[w.srcPath] = true;
     statusRows.push(w.srcPath);
   });
-  const schemaLeaves = statusLeavesFor(meta) || [];
+  const schemaLeaves = (statusLeavesFor(meta) || []).filter(isValidStatusPath);
   // Ensure atProvider.id is always offered as a primary output row for resource linking
   const idPath = (schemaLeaves.length > 0 && schemaLeaves.find(function (p) { return p === "atProvider.id" || p === "id"; })) || "atProvider.id";
-  if (!seenStatus[idPath]) {
+  if (!seenStatus[idPath] && isValidStatusPath(idPath)) {
     seenStatus[idPath] = true;
     statusRows.unshift(idPath);
   }
   for (let si = 0; si < schemaLeaves.length && statusRows.length < STATUS_ROWS_SHOWN + Object.keys(seenStatus).length; si++) {
     const p = schemaLeaves[si];
-    if (seenStatus[p]) continue;
+    if (seenStatus[p] || !isValidStatusPath(p)) continue;
     seenStatus[p] = true;
     statusRows.push(p);
     if (statusRows.length >= STATUS_ROWS_SHOWN && si >= STATUS_ROWS_SHOWN) break;
@@ -963,7 +974,8 @@ function statusLeavesFor(meta) {
   if (key in statusLeafCache) return statusLeafCache[key];
   statusLeafCache[key] = null; // in flight
   A.getKind(meta.apiVersion, meta.kind).then(function (detail) {
-    const leaves = (detail && detail.status || []).map(function (f) { return f.path; });
+    const rawLeaves = (detail && detail.status || []).map(function (f) { return f.path; });
+    const leaves = rawLeaves.filter(isValidStatusPath);
     // atProvider outputs first — they are what other objects depend on
     leaves.sort(function (a, b) {
       const pa = a.indexOf("atProvider") === 0 ? 0 : 1;

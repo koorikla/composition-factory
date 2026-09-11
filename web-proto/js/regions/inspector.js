@@ -77,6 +77,16 @@ function formatWireBinding(fromExpr, targetRes, targetPath) {
   return fromExpr + " \u2192 " + targetRes + "." + targetPath;
 }
 
+var STATUS_SEGMENT_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+function isValidStatusPath(p) {
+  if (!p || typeof p !== "string") return false;
+  var segs = p.split(".");
+  for (var i = 0; i < segs.length; i++) {
+    if (!STATUS_SEGMENT_RE.test(segs[i])) return false;
+  }
+  return true;
+}
 
 var store = defaultStore;
 var api = defaultApi;
@@ -333,11 +343,12 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
 
     h += '<optgroup label="Resource Status">';
     otherResources.forEach(function (r) {
-      var sfs = (otherStatusMap && otherStatusMap[r.name]) || [
+      var rawSfs = (otherStatusMap && otherStatusMap[r.name]) || [
         { path: "atProvider.url", type: "string" },
         { path: "atProvider.arn", type: "string" },
         { path: "atProvider.id", type: "string" },
       ];
+      var sfs = rawSfs.filter(function (sf) { return isValidStatusPath(sf.path); });
       sfs.forEach(function (sf) {
         if (!fieldType || compatible(sf.type, fieldType)) {
           var wireVal = "resources." + r.name + ".status." + sf.path;
@@ -785,7 +796,9 @@ async function renderResource(res) {
       var om = await kindMeta(or);
       if (om) {
         var od = await kindDetail(om.apiVersion, or.kind);
-        if (od && od.status) otherStatusMap[or.name] = od.status;
+        if (od && od.status) otherStatusMap[or.name] = od.status.filter(function (sf) {
+          return isValidStatusPath(sf.path);
+        });
       }
     } catch (_) {}
   }));
@@ -972,11 +985,14 @@ async function renderResource(res) {
       '<button class="btn sm" data-ann-add>Add</button></div></div>';
 
     // Status outputs section
-    if (detail && detail.status && detail.status.length > 0) {
+    var validStatus = (detail && detail.status || []).filter(function (sf) {
+      return isValidStatusPath(sf.path);
+    });
+    if (validStatus.length > 0) {
       h += '<div class="insp-sec" style="margin-top:14px;padding:8px 12px;border-top:1px solid var(--rule);background:var(--surface-2)">' +
         '<div style="font-size:11px;font-weight:600;color:var(--wire-status);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Status Outputs</div>' +
         '<div style="font-size:11px;color:var(--faint);margin-bottom:6px">Other resources can wire from this object\'s status:</div>' +
-        detail.status.slice(0, 10).map(function (sf) {
+        validStatus.slice(0, 10).map(function (sf) {
           return '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;padding:2px 0;font-size:11px;min-width:0">' +
             '<code style="color:var(--wire-status);font-family:var(--mono);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="status.' + esc(sf.path) + '">status.' + esc(sf.path) + '</code>' +
             '<span style="color:var(--faint);flex-shrink:0">' + esc(sf.type) + '</span>' +
