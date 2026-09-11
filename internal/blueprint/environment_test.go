@@ -249,3 +249,137 @@ spec:
 		t.Errorf("expected forEach env.count, got %q", bp.Spec.Resources[0].ForEach)
 	}
 }
+
+func TestValidateEnvironmentConfigs_DuplicateEffectiveNames(t *testing.T) {
+	cases := []struct {
+		name    string
+		configs string
+		wantErr string
+	}{
+		{
+			name: "two anonymous configs",
+			configs: `
+  environmentConfigs:
+    - data:
+        region: us-east-1
+    - data:
+        region: eu-west-1`,
+			wantErr: `spec.environmentConfigs[1]: duplicate config name "default" (previously defined at index 0)`,
+		},
+		{
+			name: "one anonymous config and one named default",
+			configs: `
+  environmentConfigs:
+    - name: default
+      data:
+        region: us-east-1
+    - data:
+        region: eu-west-1`,
+			wantErr: `spec.environmentConfigs[1]: duplicate config name "default" (previously defined at index 0)`,
+		},
+		{
+			name: "two anonymous configs with identical matchLabels",
+			configs: `
+  environmentConfigs:
+    - selector:
+        matchLabels:
+          stage: prod
+      data:
+        region: us-east-1
+    - selector:
+        matchLabels:
+          stage: prod
+      data:
+        region: eu-west-1`,
+			wantErr: `spec.environmentConfigs[1]: duplicate config name "stage-prod" (previously defined at index 0)`,
+		},
+		{
+			name: "one named config matching selector-derived name",
+			configs: `
+  environmentConfigs:
+    - name: stage-prod
+      data:
+        region: us-east-1
+    - selector:
+        matchLabels:
+          stage: prod
+      data:
+        region: eu-west-1`,
+			wantErr: `spec.environmentConfigs[1]: duplicate config name "stage-prod" (previously defined at index 0)`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  sources: []
+  xrd:
+    group: test.org
+    version: v1alpha1
+    kind: Test
+    plural: tests
+    scope: Namespaced
+  environment:
+    region:
+      type: string` + tc.configs
+
+			_, err := Load(write(t, manifest))
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("err = %q, want containing %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateEnvironmentConfigs_UniqueEffectiveNames(t *testing.T) {
+	manifest := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  sources: []
+  xrd:
+    group: test.org
+    version: v1alpha1
+    kind: Test
+    plural: tests
+    scope: Namespaced
+  environment:
+    region:
+      type: string
+  environmentConfigs:
+    - selector:
+        matchLabels:
+          stage: dev
+      data:
+        region: us-east-1
+    - selector:
+        matchLabels:
+          stage: prod
+      data:
+        region: eu-west-1
+    - name: custom
+      data:
+        region: ap-southeast-1
+`
+	bp, err := Load(write(t, manifest))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	eff := bp.EffectiveEnvironmentConfigs()
+	if len(eff) != 3 {
+		t.Fatalf("expected 3 effective configs, got %d", len(eff))
+	}
+	if eff[0].Name != "stage-dev" || eff[1].Name != "stage-prod" || eff[2].Name != "custom" {
+		t.Errorf("unexpected effective names: %q, %q, %q", eff[0].Name, eff[1].Name, eff[2].Name)
+	}
+}

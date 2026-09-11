@@ -728,3 +728,43 @@ spec:
 		t.Errorf("expected error to describe expected shape (mapping), got: %v", msg)
 	}
 }
+
+func TestCF195GenRejectsDuplicateAnonymousEnvironmentConfigs(t *testing.T) {
+	dir := t.TempDir()
+	bp := `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  sources: []
+  xrd:
+    group: test.org
+    version: v1alpha1
+    kind: Test
+    plural: tests
+    scope: Namespaced
+  environment:
+    region:
+      type: string
+  environmentConfigs:
+    - data:
+        region: us-east-1
+    - data:
+        region: eu-west-1
+`
+	bpPath := filepath.Join(dir, "bp.yaml")
+	if err := os.WriteFile(bpPath, []byte(bp), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	code, err := (&GenCmd{Blueprint: bpPath, Out: filepath.Join(dir, "out"), CacheDir: filepath.Join(dir, "cache")}).run(&buf)
+	if code != 1 {
+		t.Fatalf("run exit code = %d, want 1", code)
+	}
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), `duplicate config name "default"`) {
+		t.Errorf("expected error to mention duplicate config name \"default\", got: %v", err)
+	}
+}

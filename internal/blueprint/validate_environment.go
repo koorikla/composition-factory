@@ -76,17 +76,18 @@ func (b *Blueprint) validateEnvironmentConfigs() error {
 	if len(b.Spec.Environment) == 0 {
 		return fmt.Errorf("spec.environmentConfigs declared without spec.environment keys: declare environment keys first")
 	}
-	seenNames := make(map[string]int)
+	effConfigs := b.EffectiveEnvironmentConfigs()
+	seenNames := make(map[string]int, len(effConfigs))
 	for i, cfg := range b.Spec.EnvironmentConfigs {
-		if cfg.Name != "" {
-			if prev, ok := seenNames[cfg.Name]; ok {
-				return fmt.Errorf("spec.environmentConfigs[%d]: duplicate config name %q (previously defined at index %d)", i, cfg.Name, prev)
-			}
-			seenNames[cfg.Name] = i
-		}
 		if cfg.Selector != nil && len(cfg.Selector.MatchLabels) == 0 {
 			return fmt.Errorf("spec.environmentConfigs[%d]: selector declared with empty matchLabels", i)
 		}
+		effName := effConfigs[i].Name
+		if prev, ok := seenNames[effName]; ok {
+			return fmt.Errorf("spec.environmentConfigs[%d]: duplicate config name %q (previously defined at index %d)", i, effName, prev)
+		}
+		seenNames[effName] = i
+
 		data := cfg.EffectiveData()
 		keys := make([]string, 0, len(data))
 		for k := range data {
