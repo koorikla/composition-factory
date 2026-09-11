@@ -28,7 +28,7 @@ func (srv *server) handleListFunctions(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	var entries []functionEntry
+	entries := make([]functionEntry, 0, len(lock.Functions))
 	for _, f := range lock.Functions {
 		crds, _ := srv.Store.Load(f.Ref)
 		inputs := 0
