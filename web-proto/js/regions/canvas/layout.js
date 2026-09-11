@@ -34,7 +34,7 @@ export function dependencyLayers(d) {
   const deps = {};
   rs.forEach(function (r) { deps[r.name] = new Set(); });
   listWires(d).forEach(function (w) {
-    if (w.kind === "status" && deps[w.resource] && w.srcResource !== w.resource) {
+    if (w.kind === "status" && deps[w.resource] && deps[w.srcResource] && w.srcResource !== w.resource) {
       deps[w.resource].add(w.srcResource);
     }
   });
@@ -43,7 +43,9 @@ export function dependencyLayers(d) {
     if (seen[name]) return 1; // cycle guard: flat
     seen[name] = true;
     let l = 1;
-    deps[name].forEach(function (src) { l = Math.max(l, layerOf(src, seen) + 1); });
+    if (deps[name]) {
+      deps[name].forEach(function (src) { l = Math.max(l, layerOf(src, seen) + 1); });
+    }
     layers[name] = l;
     return l;
   }

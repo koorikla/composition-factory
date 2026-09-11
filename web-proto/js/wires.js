@@ -117,6 +117,23 @@ export function listWires(doc) {
         }
       });
     }
+    if (r.forEach) {
+      const forEachStr = typeof r.forEach === "string" ? r.forEach
+        : (r.forEach && typeof r.forEach === "object" && typeof r.forEach.over === "string") ? r.forEach.over : null;
+      if (forEachStr) {
+        const parsed = parseFrom(forEachStr.trim());
+        if (parsed && parsed.kind === "status") {
+          out.push({
+            kind: "status",
+            srcResource: parsed.resource,
+            srcPath: parsed.statusPath,
+            resource: r.name,
+            path: "forEach",
+            from: forEachStr
+          });
+        }
+      }
+    }
   });
   docWiresCache.set(doc, out);
   return out;
