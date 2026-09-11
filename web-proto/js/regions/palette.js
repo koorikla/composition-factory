@@ -262,12 +262,13 @@ function drawKindsEmpty(q) {
           esc(descText) + '</span>';
       }
 
-      h += '<div class="cat-row src-row" style="cursor:default" title="' + esc(c.description || c.name) + '">' +
-        '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(c.name) + '</span>' +
-        '<span class="dg">' + esc(c.ref || "no published image \u2014 publishes elsewhere") + '</span>' +
+      h += '<div class="cat-row src-row' + (isInstalled ? ' is-installed' : '') + '" style="cursor:default" title="' + esc(c.description || c.name) + '">' +
+        '<span class="cat-body" style="min-width:0;' + (isInstalled ? 'flex:1 1 100%' : 'flex:1') + '">' +
+        '<span class="nm" style="display:block">' + esc(c.name) + '</span>' +
+        '<span class="dg cat-ref" title="' + esc(c.ref || "") + '">' + esc(c.ref || "no published image \u2014 publishes elsewhere") + '</span>' +
         matchReasonHtml + '</span>' +
         (isInstalled
-          ? '<span class="pill" style="font-size:9.5px;background:var(--wire-status-soft);color:var(--wire-status);align-self:center;flex:0 0 auto">' + esc(countLabel) + '</span>'
+          ? '<span class="pill" style="font-size:9.5px;background:var(--wire-status-soft);color:var(--wire-status)">' + esc(countLabel) + '</span>'
           : (c.ref ? '<button class="btn sm cat-add" data-cat-ref="' + esc(c.ref) + '">Add</button>' : '')) +
         '</div>';
     });
@@ -675,8 +676,8 @@ function drawSources() {
     const meta = (s.digest ? s.digest.slice(0, 19) : "") + (s.kinds ? " \u00b7 " + s.kinds + " kinds" : "");
     h += '<div class="src-row" data-ref="' + esc(ref) + '" style="cursor:pointer" title="Click for details" aria-expanded="' + (expandedProvider === ref) + '">' +
       '<span class="sw" style="width:5px;height:22px;border-radius:1.5px;background:' + COLORS[fam] + '"></span>' +
-      '<span style="min-width:0"><span class="nm" style="display:block">' + esc(ref.split("/").pop()) + "</span>" +
-      '<span class="dg">' + esc(meta || ref) + '</span></span><span class="sp"></span>' +
+      '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(ref.split("/").pop()) + "</span>" +
+      '<span class="dg" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + esc(meta || ref) + '">' + esc(meta || ref) + '</span></span>' +
       (s.native ? "" : '<button class="del src-row-remove" data-remove-ref="' + esc(ref) + '" title="Remove this provider from sources">&#215;</button>') +
       '</div>';
     if (expandedProvider === ref) {
@@ -750,12 +751,13 @@ function drawSources() {
         matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(c.description || "") + '">' +
           esc(descText) + '</span>';
       }
-      h += '<div class="cat-row src-row" style="cursor:default" title="' + esc(c.description || c.name) + '">' +
-        '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(c.name) + "</span>" +
-        '<span class="dg">' + esc(c.ref || "no published image \u2014 publishes elsewhere") + "</span>" +
+      h += '<div class="cat-row src-row' + (isInstalled ? " is-installed" : "") + '" style="cursor:default" title="' + esc(c.description || c.name) + '">' +
+        '<span class="cat-body" style="min-width:0;' + (isInstalled ? 'flex:1 1 100%' : 'flex:1') + '">' +
+        '<span class="nm" style="display:block">' + esc(c.name) + "</span>" +
+        '<span class="dg cat-ref" title="' + esc(c.ref || "") + '">' + esc(c.ref || "no published image \u2014 publishes elsewhere") + "</span>" +
         matchReasonHtml + "</span>" +
         (isInstalled
-          ? '<span class="pill" style="font-size:9.5px;background:var(--wire-status-soft);color:var(--wire-status);align-self:center;flex:0 0 auto">' + esc(countLabel) + "</span>"
+          ? '<span class="pill" style="font-size:9.5px;background:var(--wire-status-soft);color:var(--wire-status)">' + esc(countLabel) + "</span>"
           : (c.ref ? '<button class="btn sm cat-add" data-cat-ref="' + esc(c.ref) + '">Add</button>' : "")) +
         "</div>";
     });

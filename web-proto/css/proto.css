@@ -189,6 +189,10 @@ html,body{height:100%;overflow:hidden}
 .src-row{display:flex;align-items:center;gap:7px;padding:5px 12px;border-bottom:1px solid var(--rule)}
 .src-row .nm{font-family:var(--mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .src-row .dg{font-family:var(--mono);font-size:9px;color:var(--faint)}
+.cat-row .dg{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cat-row.is-installed{flex-wrap:wrap;align-items:flex-start;padding:6px 12px;gap:3px}
+.cat-row.is-installed .cat-body{min-width:0;flex:1 1 100%}
+.cat-row.is-installed .pill{align-self:flex-start;margin-top:2px}
 
 /* canvas */
 .canvas-wrap{position:relative;overflow:hidden;
