@@ -1342,6 +1342,19 @@ spec:
 		t.Fatalf("write 000-context.yaml: %v", err)
 	}
 
+	appTmpl := `apiVersion: example.org/v1alpha1
+kind: App
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: app
+spec:
+  forProvider:
+    providerName: {{ $spec.providerName }}
+`
+	if err := os.WriteFile(filepath.Join(templatesDir, "001-app.yaml"), []byte(appTmpl), 0644); err != nil {
+		t.Fatalf("write 001-app.yaml: %v", err)
+	}
+
 	bp, report, err := AdoptTree(tmpDir, Options{})
 	if err != nil {
 		t.Fatalf("AdoptTree failed: %v", err)
@@ -1351,6 +1364,9 @@ spec:
 	}
 	if bp.Spec.XRD.Kind != "XApp" {
 		t.Errorf("expected XRD kind 'XApp', got %q", bp.Spec.XRD.Kind)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Errorf("expected 1 resource, got %d", len(bp.Spec.Resources))
 	}
 	if report.HasTrueLoss() {
 		t.Errorf("unexpected true loss: %+v", report.Drops)

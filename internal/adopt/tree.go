@@ -58,6 +58,9 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	var compDocs []map[string]any
 	var envConfigDocs []map[string]any
 
+	if opts.SourceDir == "" {
+		opts.SourceDir = dirPath
+	}
 	if opts.FunctionPackages == nil {
 		opts.FunctionPackages = make(map[string]string)
 	}

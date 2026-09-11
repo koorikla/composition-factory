@@ -5,6 +5,8 @@ package adopt
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -37,6 +39,8 @@ type Options struct {
 	TargetComposition string
 	// CompositionName is an alias for TargetComposition.
 	CompositionName string
+	// SourceDir is the root directory or directory of the source manifest for resolving relative paths like fileSystem templates.
+	SourceDir string
 }
 
 func (o Options) targetComposition() string {
@@ -1481,6 +1485,95 @@ func cleanFormatString(fmtStr string) string {
 	return ""
 }
 
+func loadFileSystemTemplates(fsDir string, opts Options) (string, error) {
+	var bases []string
+	if opts.SourceDir != "" {
+		bases = append(bases, opts.SourceDir)
+		parent := filepath.Dir(opts.SourceDir)
+		if parent != opts.SourceDir && parent != "." && parent != "/" {
+			bases = append(bases, parent)
+		}
+	}
+	bases = append(bases, ".")
+
+	cleanDir := filepath.Clean(strings.TrimPrefix(fsDir, "/"))
+	cleanDir = strings.TrimPrefix(cleanDir, "."+string(filepath.Separator))
+	cleanDir = strings.TrimPrefix(cleanDir, "./")
+	if cleanDir == "." || cleanDir == "/" {
+		cleanDir = "templates"
+	}
+
+	var subpaths []string
+	if cleanDir != "" {
+		subpaths = append(subpaths, cleanDir)
+		baseName := filepath.Base(cleanDir)
+		if strings.Contains(cleanDir, "/") || strings.Contains(cleanDir, string(filepath.Separator)) {
+			subpaths = append(subpaths, filepath.Join("templates", baseName))
+			subpaths = append(subpaths, baseName)
+		} else {
+			subpaths = append(subpaths, filepath.Join("templates", cleanDir))
+		}
+	}
+	subpaths = append(subpaths, "templates")
+
+	var candidates []string
+	if filepath.IsAbs(fsDir) && fsDir != "/" {
+		candidates = append(candidates, fsDir)
+	}
+	for _, base := range bases {
+		for _, sub := range subpaths {
+			candidates = append(candidates, filepath.Join(base, sub))
+		}
+	}
+
+	seen := make(map[string]bool)
+	for _, cand := range candidates {
+		cand = filepath.Clean(cand)
+		if seen[cand] {
+			continue
+		}
+		seen[cand] = true
+
+		st, err := os.Stat(cand)
+		if err != nil || !st.IsDir() {
+			continue
+		}
+
+		var files []string
+		err = filepath.Walk(cand, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if info.IsDir() {
+				if path != cand && strings.HasPrefix(info.Name(), ".") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasPrefix(info.Name(), ".") {
+				files = append(files, path)
+			}
+			return nil
+		})
+		if err != nil || len(files) == 0 {
+			continue
+		}
+
+		sort.Strings(files)
+		var bodies []string
+		for _, f := range files {
+			data, err := os.ReadFile(f)
+			if err != nil {
+				return "", fmt.Errorf("reading template file %s: %w", f, err)
+			}
+			bodies = append(bodies, string(data))
+		}
+		return strings.Join(bodies, "\n---\n"), nil
+	}
+
+	return "", os.ErrNotExist
+}
+
 func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string, hasXRD bool) error {
 	type parsedStep struct {
 		step       blueprint.PipelineStep
@@ -1509,9 +1602,43 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 			input, _ := step["input"].(map[string]any)
 			inline, _ := input["inline"].(map[string]any)
 			tmpl, _ := inline["template"].(string)
+			source, _ := input["source"].(string)
+			isFileSystem := strings.EqualFold(source, "FileSystem") || input["fileSystem"] != nil
+
+			if isFileSystem {
+				if bp.Spec.Emit == nil {
+					bp.Spec.Emit = &blueprint.Emit{}
+				}
+				bp.Spec.Emit.TemplateSource = blueprint.TemplateSourceFileSystem
+			}
+
 			if tmpl != "" {
 				if err := parseGoTemplateBody(tmpl, bp, opts, report, nameMapping); err != nil {
 					return fmt.Errorf("parse go template: %w", err)
+				}
+			} else if isFileSystem {
+				var fsDir string
+				if fsMap, ok := input["fileSystem"].(map[string]any); ok {
+					if dp, ok := fsMap["dirPath"].(string); ok && dp != "" {
+						fsDir = dp
+					} else if d, ok := fsMap["dir"].(string); ok && d != "" {
+						fsDir = d
+					}
+				} else if s, ok := input["fileSystem"].(string); ok {
+					fsDir = s
+				}
+
+				combinedTmpl, err := loadFileSystemTemplates(fsDir, opts)
+				if err != nil {
+					reason := "resources defined in fileSystem.dir could not be adopted"
+					if fsDir != "" {
+						reason = fmt.Sprintf("resources defined in fileSystem.dir could not be adopted: %s", fsDir)
+					}
+					report.Record("fileSystem.dir", reason)
+				} else {
+					if err := parseGoTemplateBody(combinedTmpl, bp, opts, report, nameMapping); err != nil {
+						return fmt.Errorf("parse go template: %w", err)
+					}
 				}
 			}
 		} else if fnName == "function-patch-and-transform" || strings.Contains(fnName, "patch-and-transform") {

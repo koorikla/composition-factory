@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/koorikla/compositionfactory/internal/adopt"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
@@ -74,11 +75,13 @@ func (c *AdoptCmd) run(out io.Writer) (int, error) {
 			return 1, fmt.Errorf("read composition: %w", err)
 		}
 		if info.IsDir() {
+			opts.SourceDir = c.Composition
 			bp, report, err = adopt.AdoptTree(c.Composition, opts)
 			if err != nil {
 				return 1, fmt.Errorf("adopt configuration tree: %w", err)
 			}
 		} else {
+			opts.SourceDir = filepath.Dir(c.Composition)
 			data, err := os.ReadFile(c.Composition)
 			if err != nil {
 				return 1, fmt.Errorf("read composition: %w", err)

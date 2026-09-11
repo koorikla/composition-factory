@@ -194,3 +194,40 @@ func TestGenRefusesBlueprintEngineWithTemplateSourceFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestAdoptFileSystemExportRoundTrip(t *testing.T) {
+	dir, bp, cacheDir := seedFileSystem(t)
+	out := filepath.Join(dir, "out")
+	genCmd := &GenCmd{Blueprint: bp, Out: out, CacheDir: cacheDir}
+	var buf bytes.Buffer
+	if err := genCmd.Run(&buf); err != nil {
+		t.Fatalf("GenCmd: %v", err)
+	}
+
+	// Adopt the generated out directory
+	adoptedPath := filepath.Join(dir, "adopted.yaml")
+	adoptCmd := &AdoptCmd{
+		Composition: out,
+		Out:         adoptedPath,
+		CacheDir:    cacheDir,
+	}
+	buf.Reset()
+	code, err := adoptCmd.run(&buf)
+	if err != nil || code != 0 {
+		t.Fatalf("AdoptCmd run failed: code=%d, err=%v\n%s", code, err, buf.String())
+	}
+
+	adoptedBytes, err := os.ReadFile(adoptedPath)
+	if err != nil {
+		t.Fatalf("read adopted blueprint: %v", err)
+	}
+	if strings.Contains(string(adoptedBytes), "# adopt: dropped") {
+		t.Errorf("unexpected drops in adopted blueprint:\n%s", string(adoptedBytes))
+	}
+	if !strings.Contains(string(adoptedBytes), "name: main-queue") {
+		t.Errorf("adopted blueprint missing main-queue resource:\n%s", string(adoptedBytes))
+	}
+	if !strings.Contains(string(adoptedBytes), "templateSource: FileSystem") {
+		t.Errorf("adopted blueprint should have templateSource: FileSystem:\n%s", string(adoptedBytes))
+	}
+}
