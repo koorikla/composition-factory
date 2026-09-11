@@ -1246,11 +1246,11 @@ function bindPaletteEvents() {
       const k = edel.getAttribute("data-env-del");
       const wires = findEnvWires(store.state.doc, k);
       if (wires.length > 0) {
-        envErr = 'delete environment key "' + k + '": still referenced by wire ' + wires.join(", ");
-        drawRail();
-        return;
+        const prompt = 'Environment key "' + k + '" is wired into ' + wires.length + " field" + (wires.length === 1 ? "" : "s") + ". Delete it and unwire all referencing fields?";
+        if (!window.confirm(prompt)) return;
+      } else {
+        if (!window.confirm("Delete environment key $env." + k + "?")) return;
       }
-      if (!window.confirm("Delete environment key $env." + k + "?")) return;
       envErr = null;
       store.replaceDoc(function (d) {
         deleteEnvKeyFromDoc(d, k);
