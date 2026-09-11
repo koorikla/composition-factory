@@ -606,6 +606,28 @@ function rawEditorHtml(path, val, isEnv, res, params, otherResources, otherStatu
   return h;
 }
 
+function isFieldEffectivelyRequired(f, res) {
+  if (!f) return false;
+  if (f.branch) return true;
+  if (!f.required && !f.requiredChain) return false;
+  if (f.requiredChain) return true;
+  var parts = f.path.split(".");
+  var resFields = (res && res.fields) || {};
+  for (var i = 1; i < parts.length; i++) {
+    var ancestor = parts.slice(0, i).join(".");
+    var hasSet = Object.keys(resFields).some(function (k) {
+      if (k === ancestor || k.startsWith(ancestor + ".") || k.startsWith(ancestor + "[")) {
+        return !!entryOf(res, k);
+      }
+      return false;
+    });
+    if (!hasSet) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function fieldRow(res, f, params, otherResources, otherStatusMap) {
   var entry = entryOf(res, f.path);
   var dm = docMode(entry);
@@ -624,14 +646,15 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
     mapEntries.sort(function (a, b) { return a.key.localeCompare(b.key); });
   }
 
-  if (filter === "req" && !(f.requiredChain || f.branch || entry || mapEntries.length)) return "";
+  var isReq = isFieldEffectivelyRequired(f, res);
+  if (filter === "req" && !(isReq || f.branch || entry || mapEntries.length)) return "";
   if (filter === "set" && !entry && !mapEntries.length) return "";
 
   var wired = m === "w" && dm === "w" && !uiMode[f.path] && entry;
   var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
   var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
     '<div class="fld-h"><span class="n">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
-    (f.required ? '<span class="rq">req</span>' : "") +
+    (isReq ? '<span class="rq">req</span>' : "") +
     modeButtons(f.path, m, false) +
     '</div>' + formatDescHtml(f.description, f.path);
 
@@ -643,11 +666,11 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
         h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
           '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
           '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
-        if (f.required && isOptParamWire(entry.from, params)) {
+        if (isReq && isOptParamWire(entry.from, params)) {
           h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
         }
       } else {
-        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false, !!f.required, entry && entry.from);
+        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false, !!isReq, entry && entry.from);
       }
     } else if (m === "r") {
       h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", false, res, params, otherResources, otherStatusMap);
@@ -712,17 +735,17 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
         h += '<div class="bound"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
           '<span class="src" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
           '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
-        if (f.required && isOptParamWire(entry.from, params)) {
+        if (isReq && isOptParamWire(entry.from, params)) {
           h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
         }
       } else {
-        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false, !!f.required, entry && entry.from);
+        h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, false, !!isReq, entry && entry.from);
       }
     } else if (m === "r") {
       h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", false, res, params, otherResources, otherStatusMap);
     } else {
       h += '<input class="val" data-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
-        '" placeholder="' + (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from output") + '">';
+        '" placeholder="' + (isReq ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from output") + '">';
     }
   }
   return h + "</div>";
@@ -970,7 +993,8 @@ async function renderResource(res) {
 
   var h = warnHtml();
   var fields = flds && flds.fields || [];
-  var reqCount = fields.filter(function (f) { return f.required; }).length;
+  var branchCount = (flds && flds.requiredBranches || []).length;
+  var reqCount = fields.filter(function (f) { return isFieldEffectivelyRequired(f, res); }).length + branchCount;
   h += '<div class="insp-t"><div class="k">' + esc(res.kind) +
     ' <span style="color:var(--faint);font-weight:400">' + esc(res.name) + "</span></div>" +
     '<div class="g">' + esc(meta ? meta.apiVersion : res.provider) +
