@@ -1956,19 +1956,35 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			report.Record(patchPath,
 				fmt.Sprintf("unsupported toFieldPath %q in patch (initProvider is not supported in blueprint)", toPath))
 		} else if strings.HasPrefix(toPath, "spec.") {
-			targetField := strings.TrimPrefix(toPath, "spec.")
-			targetField = normalizeMapFieldPath(targetField)
-			if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
-				if res.Envelope == nil {
-					res.Envelope = make(map[string]blueprint.Field)
+			if res.Provider == blueprint.NativeProvider {
+				targetField := normalizeMapFieldPath(toPath)
+				if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
+					if res.Fields == nil {
+						res.Fields = make(map[string]blueprint.Field)
+					}
+					res.Fields[targetField] = blueprint.Field{
+						From: "params." + paramName,
+					}
+					ensureParamDeclared(bp, paramName)
+				} else {
+					report.Record(patchPath,
+						fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
 				}
-				res.Envelope[targetField] = blueprint.Field{
-					From: "params." + paramName,
-				}
-				ensureParamDeclared(bp, paramName)
 			} else {
-				report.Record(patchPath,
-					fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
+				targetField := strings.TrimPrefix(toPath, "spec.")
+				targetField = normalizeMapFieldPath(targetField)
+				if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
+					if res.Envelope == nil {
+						res.Envelope = make(map[string]blueprint.Field)
+					}
+					res.Envelope[targetField] = blueprint.Field{
+						From: "params." + paramName,
+					}
+					ensureParamDeclared(bp, paramName)
+				} else {
+					report.Record(patchPath,
+						fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
+				}
 			}
 		} else if strings.HasPrefix(toPath, "metadata.annotations.") || strings.HasPrefix(toPath, "metadata.annotations[") {
 			annKey := strings.TrimPrefix(toPath, "metadata.annotations.")
@@ -2122,7 +2138,9 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 		Provider:    provider,
 		Fields:      make(map[string]blueprint.Field),
 		Annotations: make(map[string]blueprint.Field),
-		Envelope:    make(map[string]blueprint.Field),
+	}
+	if provider != blueprint.NativeProvider {
+		res.Envelope = make(map[string]blueprint.Field)
 	}
 	isNative := res.Provider == blueprint.NativeProvider
 

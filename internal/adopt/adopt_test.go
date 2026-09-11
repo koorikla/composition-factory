@@ -4687,3 +4687,159 @@ spec:
 		}
 	}
 }
+
+func TestAdoptNativeResourceSpecPatchFields(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-native-deployment
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  resources:
+    - name: deployment
+      base:
+        apiVersion: apps/v1
+        kind: Deployment
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: web
+          template:
+            metadata:
+              labels:
+                app: web
+            spec:
+              containers:
+                - name: web
+                  image: nginx:latest
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.replicas
+          toFieldPath: spec.replicas
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.image
+          toFieldPath: spec.template.spec.containers[0].image
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+	if len(res.Envelope) > 0 {
+		t.Errorf("expected Envelope to be nil or empty, got: %+v", res.Envelope)
+	}
+	if got := res.Fields["spec.replicas"].From; got != "params.replicas" {
+		t.Errorf("spec.replicas From = %q, want %q", got, "params.replicas")
+	}
+	if got := res.Fields["spec.template.spec.containers[0].image"].From; got != "params.image" {
+		t.Errorf("spec.template.spec.containers[0].image From = %q, want %q", got, "params.image")
+	}
+
+	if got := res.Fields["spec.template.spec.containers[0].name"].Value; got != "web" {
+		t.Errorf("spec.template.spec.containers[0].name Value = %q, want %q", got, "web")
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+
+	nativeCRDs, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds() failed: %v", err)
+	}
+	outputs, err := emit.Generate(bp, nativeCRDs, "")
+	if err != nil {
+		t.Fatalf("emit.Generate() failed: %v", err)
+	}
+	var compYAML []byte
+	for _, o := range outputs {
+		if strings.Contains(o.Path, "compositions") {
+			compYAML = o.Body
+			break
+		}
+	}
+	if len(compYAML) == 0 {
+		t.Fatal("emit.Generate() produced no composition output")
+	}
+	compStr := string(compYAML)
+	if !strings.Contains(compStr, "{{ $spec.replicas }}") {
+		t.Errorf("expected emitted composition to contain {{ $spec.replicas }}, got:\n%s", compStr)
+	}
+	if !strings.Contains(compStr, "{{ $spec.image | quote }}") {
+		t.Errorf("expected emitted composition to contain {{ $spec.image | quote }}, got:\n%s", compStr)
+	}
+}
+
+func TestAdoptNativeResourceSimpleSpecPatchField(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-native-scalar
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  resources:
+    - name: deployment
+      base:
+        apiVersion: apps/v1
+        kind: Deployment
+        spec:
+          replicas: 1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.replicas
+          toFieldPath: spec.replicas
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+	if len(res.Envelope) > 0 {
+		t.Errorf("expected Envelope to be nil or empty, got: %+v", res.Envelope)
+	}
+	if got := res.Fields["spec.replicas"].From; got != "params.replicas" {
+		t.Errorf("spec.replicas From = %q, want %q", got, "params.replicas")
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+
+	nativeCRDs, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds() failed: %v", err)
+	}
+	outputs, err := emit.Generate(bp, nativeCRDs, "")
+	if err != nil {
+		t.Fatalf("emit.Generate() failed: %v", err)
+	}
+	var compYAML []byte
+	for _, o := range outputs {
+		if strings.Contains(o.Path, "compositions") {
+			compYAML = o.Body
+			break
+		}
+	}
+	if len(compYAML) == 0 {
+		t.Fatal("emit.Generate() produced no composition output")
+	}
+	compStr := string(compYAML)
+	if !strings.Contains(compStr, "{{ $spec.replicas }}") {
+		t.Errorf("expected emitted composition to contain {{ $spec.replicas }}, got:\n%s", compStr)
+	}
+}
