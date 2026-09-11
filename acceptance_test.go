@@ -16,6 +16,9 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"sigs.k8s.io/yaml"
 
+	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/emit"
+	"github.com/koorikla/compositionfactory/internal/examples"
 	"github.com/koorikla/compositionfactory/internal/rendertest"
 )
 
@@ -112,6 +115,8 @@ func TestMain(m *testing.M) {
 	providers := []string{
 		providerRef,
 		"ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0",
+		"ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0",
+		"ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0",
 	}
 	for _, p := range providers {
 		out, err := exec.Command(testBin, "provider", "add", p, "--cache-dir", testCacheDir, "--lock", testLockFile).CombinedOutput()
@@ -1647,4 +1652,67 @@ func decodeComposedResources(t *testing.T, rendered []byte) map[string]map[strin
 		res[name] = doc
 	}
 	return res
+}
+
+func TestAcceptanceAllStarterExamplesRender(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	bin := testBin
+	cacheDir := testCacheDir
+	lockFile := testLockFile
+
+	for _, ex := range examples.All() {
+		t.Run(ex.ID, func(t *testing.T) {
+			b, err := blueprint.Parse([]byte(ex.YAML))
+			if err != nil {
+				t.Fatalf("parse blueprint YAML: %v", err)
+			}
+
+			bpDir := t.TempDir()
+			bpFile := filepath.Join(bpDir, "blueprint.yaml")
+			if err := os.WriteFile(bpFile, []byte(ex.YAML), 0o644); err != nil {
+				t.Fatalf("write blueprint file: %v", err)
+			}
+
+			// Copy lockfile to bpDir so cf gen can resolve locked providers
+			if lockData, err := os.ReadFile(lockFile); err == nil {
+				_ = os.WriteFile(filepath.Join(bpDir, ".cf.lock"), lockData, 0o644)
+			}
+
+			outDir := filepath.Join(bpDir, "out")
+			gen := exec.Command(bin, "gen", bpFile, "-o", outDir, "--cache-dir", cacheDir)
+			if out, err := gen.CombinedOutput(); err != nil {
+				t.Fatalf("cf gen: %v\n%s", err, out)
+			}
+
+			sampleXR, err := emit.SampleXR(b)
+			if err != nil {
+				t.Fatalf("emit.SampleXR: %v", err)
+			}
+			xrFile := filepath.Join(bpDir, "xr.yaml")
+			if err := os.WriteFile(xrFile, sampleXR, 0o644); err != nil {
+				t.Fatalf("write sample xr: %v", err)
+			}
+
+			comp := filepath.Join(outDir, "compositions", b.Spec.XRD.Plural+"."+b.Spec.XRD.Group+".yaml")
+			xrd := filepath.Join(outDir, "xrds", b.Spec.XRD.Plural+"."+b.Spec.XRD.Group+".yaml")
+			fns := filepath.Join(outDir, "functions.yaml")
+
+			rendered, err := renderComposition(t, xrFile, comp, fns, "--xrd", xrd, "--timeout", "5m")
+			if err != nil {
+				t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+			}
+
+			got := string(rendered)
+			for _, bad := range []string{"<no value>", "<nil>"} {
+				if strings.Contains(got, bad) {
+					t.Errorf("rendered output contains %q — a missing field reached a live resource shape\n---\n%s", bad, got)
+				}
+			}
+		})
+	}
 }
