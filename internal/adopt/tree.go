@@ -141,7 +141,7 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	sort.Strings(compNames)
 
 	var compDoc map[string]any
-	targetComp := opts.TargetComposition
+	targetComp := opts.targetComposition()
 	if targetComp != "" {
 		selectedIdx := -1
 		for i, cd := range compDocs {

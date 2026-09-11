@@ -1595,10 +1595,10 @@ spec:
 		t.Errorf("expected drop entry for manifest.Composition/comp-b, got drops: %+v", report.Drops)
 	}
 
-	// 2. Adopt with TargetComposition: "comp-b" (alias)
-	bpB, reportB, err := AdoptTree(tmpDir, Options{TargetComposition: "comp-b"})
+	// 2. Adopt with CompositionName: "comp-b" (alias)
+	bpB, reportB, err := AdoptTree(tmpDir, Options{CompositionName: "comp-b"})
 	if err != nil {
-		t.Fatalf("AdoptTree failed with TargetComposition: %v", err)
+		t.Fatalf("AdoptTree failed with CompositionName: %v", err)
 	}
 	if bpB.Metadata.Name != "comp-b" {
 		t.Errorf("expected bp name 'comp-b', got %q", bpB.Metadata.Name)
