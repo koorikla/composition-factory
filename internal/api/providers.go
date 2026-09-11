@@ -217,46 +217,16 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var pkgDigest string
-	if isProvider {
-		pkgDigest, _ = srv.Store.LoadDigest(req.Ref)
-	}
-	if pkgDigest == "" {
-		if _, err := srv.Store.Load(req.Ref); err == nil {
-			digest, err := srv.Store.LoadDigest(req.Ref)
-			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			pkgDigest = digest
-			if srv.Lock != "" {
-				l, err := cache.ReadLock(srv.Lock)
-				if err != nil {
-					writeJSONError(w, http.StatusInternalServerError, err.Error())
-					return
-				}
-				l.Set(req.Ref, digest)
-				if err := l.Write(srv.Lock); err != nil {
-					writeJSONError(w, http.StatusInternalServerError, err.Error())
-					return
-				}
-			}
-		}
-	}
-	if pkgDigest == "" {
-		fetch := srv.fetch
-		if fetch == nil {
-			fetch = func(ref string) (*xpkg.Package, error) {
-				return xpkg.Fetch(r.Context(), ref)
-			}
-		}
-		pkg, _, err := srv.Store.FetchAndSave(r.Context(), srv.Lock, req.Ref, fetch)
-		if err != nil {
-			writeJSONError(w, http.StatusBadGateway, err.Error())
+	pkg, _, err := srv.Store.FetchAndSave(r.Context(), srv.Lock, req.Ref, srv.fetch)
+	if err != nil {
+		if cache.IsLockError(err) {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		pkgDigest = pkg.Digest
+		writeJSONError(w, http.StatusBadGateway, err.Error())
+		return
 	}
+	pkgDigest := pkg.Digest
 	origProviders := append([]string(nil), srv.Providers...)
 	if !isProvider {
 		srv.Providers = append(srv.Providers, req.Ref)

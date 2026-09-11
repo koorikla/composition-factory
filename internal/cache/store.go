@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -361,9 +362,81 @@ func (l *Lock) Write(path string) error {
 	return os.WriteFile(path, append(body, '\n'), 0o644)
 }
 
-// FetchAndSave pulls an xpkg image, extracts its CRDs, pins the lock,
-// and saves the package and CRDs into the cache directory.
+// LockError indicates a failure reading or writing the lockfile.
+type LockError struct {
+	Err error
+}
+
+func (e *LockError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *LockError) Unwrap() error {
+	return e.Err
+}
+
+// IsLockError reports whether err was caused by a lockfile failure.
+func IsLockError(err error) bool {
+	var le *LockError
+	return errors.As(err, &le)
+}
+
+// FetchError indicates a failure retrieving a package image from a remote registry.
+type FetchError struct {
+	Err error
+}
+
+func (e *FetchError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *FetchError) Unwrap() error {
+	return e.Err
+}
+
+// IsFetchError reports whether err was caused by a remote package fetch failure.
+func IsFetchError(err error) bool {
+	var fe *FetchError
+	return errors.As(err, &fe)
+}
+
+func (s *Store) pinLock(lockPath, ref, digest string) error {
+	if lockPath == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l, err := ReadLock(lockPath)
+	if err != nil {
+		return &LockError{Err: fmt.Errorf("read lock: %w", err)}
+	}
+	l.Set(ref, digest)
+	if err := l.Write(lockPath); err != nil {
+		return &LockError{Err: fmt.Errorf("write lock: %w", err)}
+	}
+	return nil
+}
+
+// FetchAndSave ensures the package schemas for ref are cached and its digest
+// pinned to lockPath. If ref is already cached, it short-circuits without
+// invoking fetch. Otherwise, it pulls the xpkg image using fetch, extracts its CRDs,
+// pins the lock, and saves the package and CRDs into the cache directory.
 func (s *Store) FetchAndSave(ctx context.Context, lockPath, ref string, fetch func(string) (*xpkg.Package, error)) (*xpkg.Package, []schema.CRD, error) {
+	if entry, err := s.loadEntry(ref); err == nil {
+		if err := s.pinLock(lockPath, ref, entry.Digest); err != nil {
+			return nil, nil, err
+		}
+		pkgRef := entry.Ref
+		if pkgRef == "" {
+			pkgRef = ref
+		}
+		pkg := &xpkg.Package{
+			Ref:    pkgRef,
+			Digest: entry.Digest,
+		}
+		return pkg, entry.CRDs, nil
+	}
+
 	if fetch == nil {
 		fetch = func(r string) (*xpkg.Package, error) {
 			return xpkg.Fetch(ctx, r)
@@ -371,7 +444,7 @@ func (s *Store) FetchAndSave(ctx context.Context, lockPath, ref string, fetch fu
 	}
 	pkg, err := fetch(ref)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, &FetchError{Err: err}
 	}
 	crds, err := schema.ParseCRDs(pkg.Docs)
 	if err != nil {
@@ -387,18 +460,9 @@ func (s *Store) FetchAndSave(ctx context.Context, lockPath, ref string, fetch fu
 	// Load then fails loudly with its own "run: cf provider add <ref>"
 	// message — a visible, recoverable state. Do not swap this order
 	// without re-reading that tradeoff.
-	s.mu.Lock()
-	l, err := ReadLock(lockPath)
-	if err != nil {
-		s.mu.Unlock()
+	if err := s.pinLock(lockPath, ref, pkg.Digest); err != nil {
 		return nil, nil, err
 	}
-	l.Set(ref, pkg.Digest)
-	if err := l.Write(lockPath); err != nil {
-		s.mu.Unlock()
-		return nil, nil, err
-	}
-	s.mu.Unlock()
 	if err := s.Save(pkg, crds); err != nil {
 		return nil, nil, err
 	}

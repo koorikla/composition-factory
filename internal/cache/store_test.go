@@ -692,6 +692,158 @@ spec:
 	}
 }
 
+func TestFetchAndSaveShortCircuitsOnCacheHit(t *testing.T) {
+	dir := t.TempDir()
+	s := New(filepath.Join(dir, "cache"))
+	lockPath := filepath.Join(dir, ".cf.lock")
+
+	ref := "example.org/cached-provider:v1"
+	digest := "sha256:cafebabe"
+	crds := []schema.CRD{{
+		Group: "test.org", Kind: "Widget", Plural: "widgets",
+		Scope: "Namespaced", Categories: []string{"managed"},
+		Versions: []schema.Version{{
+			Name: "v1", Served: true, Storage: true,
+			Properties: map[string]any{"type": "object"},
+		}},
+	}}
+
+	// Pre-populate cache
+	if err := s.Save(&xpkg.Package{Ref: ref, Digest: digest}, crds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	fetchCalled := false
+	fetch := func(r string) (*xpkg.Package, error) {
+		fetchCalled = true
+		t.Fatalf("remote fetch invoked on cache hit for %s", r)
+		return nil, fmt.Errorf("remote fetch invoked")
+	}
+
+	pkg, gotCRDs, err := s.FetchAndSave(context.Background(), lockPath, ref, fetch)
+	if err != nil {
+		t.Fatalf("FetchAndSave failed: %v", err)
+	}
+	if fetchCalled {
+		t.Fatal("fetch was invoked despite cache hit")
+	}
+	if pkg.Ref != ref {
+		t.Errorf("pkg.Ref = %q, want %q", pkg.Ref, ref)
+	}
+	if pkg.Digest != digest {
+		t.Errorf("pkg.Digest = %q, want %q", pkg.Digest, digest)
+	}
+	if len(gotCRDs) != 1 || gotCRDs[0].Kind != "Widget" {
+		t.Errorf("unexpected CRDs: %+v", gotCRDs)
+	}
+
+	// Verify lock pinning
+	l, err := ReadLock(lockPath)
+	if err != nil {
+		t.Fatalf("ReadLock: %v", err)
+	}
+	entry, ok := l.FindProvider(ref)
+	if !ok {
+		t.Fatalf("provider %q not found in lockfile", ref)
+	}
+	if entry.Digest != digest {
+		t.Errorf("lock entry digest = %q, want %q", entry.Digest, digest)
+	}
+}
+
+func TestFetchAndSaveFunctionShortCircuitsOnCacheHit(t *testing.T) {
+	dir := t.TempDir()
+	s := New(filepath.Join(dir, "cache"))
+	lockPath := filepath.Join(dir, ".cf.lock")
+
+	ref := "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0"
+	digest := "sha256:f00dfeed"
+	crds := []schema.CRD{{
+		Group: "autoready.fn.crossplane.io", Kind: "AutoReady", Plural: "autoreadies",
+		Function: true,
+	}}
+
+	if err := s.Save(&xpkg.Package{Ref: ref, Digest: digest}, crds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// nil fetch ensures no attempt is made to call network
+	pkg, gotCRDs, err := s.FetchAndSave(context.Background(), lockPath, ref, nil)
+	if err != nil {
+		t.Fatalf("FetchAndSave failed: %v", err)
+	}
+	if pkg.Digest != digest {
+		t.Errorf("pkg.Digest = %q, want %q", pkg.Digest, digest)
+	}
+	if len(gotCRDs) != 1 || gotCRDs[0].Kind != "AutoReady" {
+		t.Errorf("unexpected CRDs: %+v", gotCRDs)
+	}
+
+	l, err := ReadLock(lockPath)
+	if err != nil {
+		t.Fatalf("ReadLock: %v", err)
+	}
+	entry, ok := l.FindFunction(ref)
+	if !ok {
+		t.Fatalf("function %q not pinned in lockfile", ref)
+	}
+	if entry.Digest != digest {
+		t.Errorf("function entry digest = %q, want %q", entry.Digest, digest)
+	}
+}
+
+func TestFetchAndSaveLockErrorPolicy(t *testing.T) {
+	dir := t.TempDir()
+	s := New(filepath.Join(dir, "cache"))
+
+	roDir := filepath.Join(dir, "ro")
+	if err := os.MkdirAll(roDir, 0o555); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0o755) })
+	unwritableLock := filepath.Join(roDir, ".cf.lock")
+
+	ref := "example.org/cached-provider:v1"
+	digest := "sha256:112233"
+	crds := []schema.CRD{{Group: "test.org", Kind: "Widget", Plural: "widgets"}}
+	if err := s.Save(&xpkg.Package{Ref: ref, Digest: digest}, crds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Cache hit with unwritable lock must fail with IsLockError
+	_, _, err := s.FetchAndSave(context.Background(), unwritableLock, ref, nil)
+	if err == nil {
+		t.Fatal("expected error on unwritable lock, got nil")
+	}
+	if !IsLockError(err) {
+		t.Errorf("expected LockError, got %T: %v", err, err)
+	}
+
+	// Cache miss with unwritable lock must also fail with IsLockError and NOT cache the new package
+	uncachedRef := "example.org/uncached-provider:v1"
+	validCRDDoc := []byte(`apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: widgets.test.org}
+spec:
+  group: test.org
+  scope: Namespaced
+  names: {kind: Widget, plural: widgets}
+  versions: [{name: v1, served: true, storage: true}]
+`)
+	_, _, err = s.FetchAndSave(context.Background(), unwritableLock, uncachedRef, func(r string) (*xpkg.Package, error) {
+		return &xpkg.Package{Ref: r, Digest: "sha256:9988", Docs: [][]byte{validCRDDoc}}, nil
+	})
+	if err == nil {
+		t.Fatal("expected error on unwritable lock during cache miss, got nil")
+	}
+	if !IsLockError(err) {
+		t.Errorf("expected LockError, got %T: %v", err, err)
+	}
+	if _, err := s.Load(uncachedRef); err == nil {
+		t.Error("package should not have been cached when lock writing failed")
+	}
+}
+
 func TestSlugEmptyFallback(t *testing.T) {
 	// ref where stripped segment is empty should fallback to "ref-<hash>"
 	res := slug("///")

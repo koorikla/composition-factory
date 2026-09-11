@@ -65,14 +65,12 @@ func (srv *server) handleAddFunction(w http.ResponseWriter, r *http.Request) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
-	fetch := srv.fetch
-	if fetch == nil {
-		fetch = func(ref string) (*xpkg.Package, error) {
-			return xpkg.Fetch(r.Context(), ref)
-		}
-	}
-	pkg, crds, err := srv.Store.FetchAndSave(r.Context(), srv.Lock, req.Ref, fetch)
+	pkg, crds, err := srv.Store.FetchAndSave(r.Context(), srv.Lock, req.Ref, srv.fetch)
 	if err != nil {
+		if cache.IsLockError(err) {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeJSONError(w, http.StatusBadGateway, err.Error())
 		return
 	}

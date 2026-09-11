@@ -740,3 +740,102 @@ func TestCF099BuildIndexErrorsOnMissingCRDsSource(t *testing.T) {
 		t.Errorf("expected error to mention 'read crds', got: %v", err)
 	}
 }
+
+const testFunctionRef = "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0"
+
+func TestAddFunctionShortCircuitsOnCacheHit(t *testing.T) {
+	h, o := testProviderServer(t, func(ref string) (*xpkg.Package, error) {
+		t.Fatalf("fetch should not be invoked on cache hit for %s", ref)
+		return nil, fmt.Errorf("remote fetch invoked")
+	})
+
+	digest := "sha256:functioncached"
+	crds := []schema.CRD{{
+		Group: "autoready.fn.crossplane.io", Kind: "AutoReady", Plural: "autoreadies",
+		Function: true,
+	}}
+	if err := o.Store.Save(&xpkg.Package{Ref: testFunctionRef, Digest: digest}, crds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	rec := do(t, h, "POST", "/api/functions", `{"ref":"`+testFunctionRef+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	var resp struct {
+		Function functionEntry `json:"function"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Function.Ref != testFunctionRef || resp.Function.Digest != digest || resp.Function.Inputs != 1 {
+		t.Errorf("unexpected function entry: %+v", resp.Function)
+	}
+
+	l, err := cache.ReadLock(o.Lock)
+	if err != nil {
+		t.Fatalf("read lock: %v", err)
+	}
+	entry, ok := l.FindFunction(testFunctionRef)
+	if !ok {
+		t.Fatalf("function not found in lock: %+v", l.Functions)
+	}
+	if entry.Digest != digest {
+		t.Errorf("digest in lock = %q, want %q", entry.Digest, digest)
+	}
+}
+
+func TestAddFunctionReportsLockWriteError(t *testing.T) {
+	_, store, _ := testHandlerWithStore(t)
+	parentDir := filepath.Join(t.TempDir(), "ro")
+	if err := os.MkdirAll(parentDir, 0o555); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parentDir, 0o755) })
+	unwritableLock := filepath.Join(parentDir, ".cf.lock")
+
+	srv := &server{
+		Store:     store,
+		Lock:      unwritableLock,
+		Blueprint: testBlueprintPath(t),
+	}
+
+	digest := "sha256:functioncached"
+	crds := []schema.CRD{{
+		Group: "autoready.fn.crossplane.io", Kind: "AutoReady", Plural: "autoreadies",
+		Function: true,
+	}}
+	if err := store.Save(&xpkg.Package{Ref: testFunctionRef, Digest: digest}, crds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/functions", strings.NewReader(`{"ref":"`+testFunctionRef+`"}`))
+	srv.handleAddFunction(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected HTTP 500 when lockfile cannot be written, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAddFunctionFetchFailureIs502(t *testing.T) {
+	const fetchErr = "fetch failed: network timeout"
+	h, _ := testProviderServer(t, func(ref string) (*xpkg.Package, error) {
+		return nil, fmt.Errorf("%s", fetchErr)
+	})
+
+	rec := do(t, h, "POST", "/api/functions", `{"ref":"`+testFunctionRef+`"}`)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502: %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if body.Error != fetchErr {
+		t.Errorf("error = %q, want %q", body.Error, fetchErr)
+	}
+}

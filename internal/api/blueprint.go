@@ -42,8 +42,6 @@ import (
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/cluster"
-	"github.com/koorikla/compositionfactory/internal/schema"
-	"github.com/koorikla/compositionfactory/internal/xpkg"
 	"sigs.k8s.io/yaml"
 )
 
@@ -556,74 +554,24 @@ func (srv *server) ensureBlueprintSourcesLoadedLocked(ctx context.Context, b *bl
 		return nil
 	}
 
-	fetch := srv.fetch
-	if fetch == nil {
-		fetch = func(ref string) (*xpkg.Package, error) {
-			return xpkg.Fetch(ctx, ref)
-		}
-	}
-
 	origProviders := append([]string(nil), srv.Providers...)
 	var fetchErrs []string
 	addedAny := false
 
 	for _, ref := range toLoad {
-		if _, err := srv.Store.Load(ref); err == nil {
-			if srv.Lock != "" {
-				digest, err := srv.Store.LoadDigest(ref)
-				if err != nil {
-					srv.Providers = origProviders
-					return fmt.Errorf("load digest %s: %w", ref, err)
-				}
-				l, err := cache.ReadLock(srv.Lock)
-				if err != nil {
-					srv.Providers = origProviders
-					return fmt.Errorf("read lock: %w", err)
-				}
-				l.Set(ref, digest)
-				if err := l.Write(srv.Lock); err != nil {
-					srv.Providers = origProviders
-					return fmt.Errorf("write lock: %w", err)
-				}
-			}
-			srv.Providers = append(srv.Providers, ref)
-			addedAny = true
-			if srv.failedSources != nil {
-				delete(srv.failedSources, ref)
-			}
-			continue
-		}
-
-		pkg, err := fetch(ref)
+		_, _, err := srv.Store.FetchAndSave(ctx, srv.Lock, ref, srv.fetch)
 		if err != nil {
-			if srv.failedSources == nil {
-				srv.failedSources = make(map[string]error)
+			if cache.IsFetchError(err) {
+				if srv.failedSources == nil {
+					srv.failedSources = make(map[string]error)
+				}
+				srv.failedSources[ref] = err
+				fmt.Fprintf(os.Stderr, "cf: warning: unable to fetch source %q: %v — continuing offline\n", ref, err)
+				fetchErrs = append(fetchErrs, fmt.Sprintf("unable to fetch source %q: %v", ref, err))
+				continue
 			}
-			srv.failedSources[ref] = err
-			fmt.Fprintf(os.Stderr, "cf: warning: unable to fetch source %q: %v — continuing offline\n", ref, err)
-			fetchErrs = append(fetchErrs, fmt.Sprintf("unable to fetch source %q: %v", ref, err))
-			continue
-		}
-		crds, err := schema.ParseCRDs(pkg.Docs)
-		if err != nil {
 			srv.Providers = origProviders
-			return fmt.Errorf("parse %s: %w", ref, err)
-		}
-		if srv.Lock != "" {
-			l, err := cache.ReadLock(srv.Lock)
-			if err != nil {
-				srv.Providers = origProviders
-				return fmt.Errorf("read lock: %w", err)
-			}
-			l.Set(ref, pkg.Digest)
-			if err := l.Write(srv.Lock); err != nil {
-				srv.Providers = origProviders
-				return fmt.Errorf("write lock: %w", err)
-			}
-		}
-		if err := srv.Store.Save(pkg, crds); err != nil {
-			srv.Providers = origProviders
-			return fmt.Errorf("save %s: %w", ref, err)
+			return err
 		}
 		srv.Providers = append(srv.Providers, ref)
 		addedAny = true
@@ -661,72 +609,22 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 			existing[s.Provider] = true
 		}
 	}
-	fetch := srv.fetch
-	if fetch == nil {
-		fetch = func(ref string) (*xpkg.Package, error) {
-			return xpkg.Fetch(ctx, ref)
-		}
-	}
-
 	origProviders := append([]string(nil), srv.Providers...)
 	var fetchErrs []string
 	for _, ref := range newProviders {
-		// If already in store cache, ensure it is pinned in lockfile and record in srv.Providers
-		if _, err := srv.Store.Load(ref); err == nil {
-			if srv.Lock != "" {
-				digest, err := srv.Store.LoadDigest(ref)
-				if err != nil {
-					srv.Providers = origProviders
-					return fmt.Errorf("load digest %s: %w", ref, err)
-				}
-				l, err := cache.ReadLock(srv.Lock)
-				if err != nil {
-					srv.Providers = origProviders
-					return fmt.Errorf("read lock: %w", err)
-				}
-				l.Set(ref, digest)
-				if err := l.Write(srv.Lock); err != nil {
-					srv.Providers = origProviders
-					return fmt.Errorf("write lock: %w", err)
-				}
-			}
-			srv.Providers = append(srv.Providers, ref)
-			if srv.failedSources != nil {
-				delete(srv.failedSources, ref)
-			}
-			continue
-		}
-		// Otherwise fetch from remote registry
-		pkg, err := fetch(ref)
+		_, _, err := srv.Store.FetchAndSave(ctx, srv.Lock, ref, srv.fetch)
 		if err != nil {
-			if srv.failedSources == nil {
-				srv.failedSources = make(map[string]error)
+			if cache.IsFetchError(err) {
+				if srv.failedSources == nil {
+					srv.failedSources = make(map[string]error)
+				}
+				srv.failedSources[ref] = err
+				fmt.Fprintf(os.Stderr, "cf: warning: unable to fetch source %q: %v — continuing offline\n", ref, err)
+				fetchErrs = append(fetchErrs, fmt.Sprintf("unable to fetch source %q: %v", ref, err))
+				continue
 			}
-			srv.failedSources[ref] = err
-			fmt.Fprintf(os.Stderr, "cf: warning: unable to fetch source %q: %v — continuing offline\n", ref, err)
-			fetchErrs = append(fetchErrs, fmt.Sprintf("unable to fetch source %q: %v", ref, err))
-			continue
-		}
-		crds, err := schema.ParseCRDs(pkg.Docs)
-		if err != nil {
 			srv.Providers = origProviders
-			return fmt.Errorf("parse %s: %w", ref, err)
-		}
-		if srv.Lock != "" {
-			l, err := cache.ReadLock(srv.Lock)
-			if err != nil {
-				srv.Providers = origProviders
-				return fmt.Errorf("read lock: %w", err)
-			}
-			l.Set(ref, pkg.Digest)
-			if err := l.Write(srv.Lock); err != nil {
-				srv.Providers = origProviders
-				return fmt.Errorf("write lock: %w", err)
-			}
-		}
-		if err := srv.Store.Save(pkg, crds); err != nil {
-			srv.Providers = origProviders
-			return fmt.Errorf("save %s: %w", ref, err)
+			return err
 		}
 		srv.Providers = append(srv.Providers, ref)
 		if srv.failedSources != nil {

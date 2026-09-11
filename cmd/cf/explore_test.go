@@ -6,18 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/koorikla/compositionfactory/internal/cache"
 )
 
 func TestKindsCommand(t *testing.T) {
 	dir := t.TempDir()
 	cacheDir := filepath.Join(dir, "cache")
-	store := cache.New(cacheDir)
-
-	// Save a test CRD
-	pkg, _ := fakeFetch("example.org/provider-test:v2")
-	_ = store.Save(pkg, nil)
 	// Add real parsed CRD
 	addCmd := &ProviderAddCmd{
 		Ref:      "example.org/provider-test:v2",
