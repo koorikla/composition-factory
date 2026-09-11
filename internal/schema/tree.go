@@ -317,10 +317,13 @@ func (c CRD) ForProvider() ([]*Node, error) {
 // kind there is no forProvider — the composed object IS the object — so the
 // tree is the object's own top-level properties minus what a composition
 // author never sets by path: apiVersion and kind (the generator emits them),
-// metadata (the generator owns the composition-resource-name annotation; the
-// nested pod-template metadata under spec.template stays fully addressable),
-// and status (server-owned). Paths therefore read exactly the way they do in
-// a manifest: spec.template.spec.containers[0].image, or data on a ConfigMap.
+// server-owned metadata leaves (creationTimestamp, deletionGracePeriodSeconds,
+// deletionTimestamp, generation, managedFields, ownerReferences, resourceVersion,
+// selfLink, uid), and status (server-owned). Settable metadata (name, namespace,
+// labels, annotations, generateName, finalizers) remains addressable; the
+// nested pod-template metadata under spec.template also stays fully addressable.
+// Paths therefore read exactly the way they do in a manifest:
+// spec.template.spec.containers[0].image, or data on a ConfigMap.
 func (c CRD) FieldTree() ([]*Node, error) {
 	if !c.Native && !c.IsFunctionInput() {
 		return c.ForProvider()
@@ -339,6 +342,9 @@ func (c CRD) FieldTree() ([]*Node, error) {
 				if c.IsFunctionInput() {
 					continue
 				}
+				if c.Native {
+					val = sanitizeNativeMetadata(val)
+				}
 			}
 			rest[k] = val
 		}
@@ -354,6 +360,43 @@ func (c CRD) FieldTree() ([]*Node, error) {
 		ComputeRequiredChain(nodes, true)
 		return nodes, nil
 	})
+}
+
+// serverOwnedMetadataFields lists ObjectMeta properties populated and managed by the
+// Kubernetes control plane that cannot be authored in a workload composition manifest.
+var serverOwnedMetadataFields = map[string]bool{
+	"creationTimestamp":          true,
+	"deletionGracePeriodSeconds": true,
+	"deletionTimestamp":          true,
+	"generation":                 true,
+	"managedFields":              true,
+	"ownerReferences":            true,
+	"resourceVersion":            true,
+	"selfLink":                   true,
+	"uid":                        true,
+}
+
+func sanitizeNativeMetadata(val any) any {
+	raw, ok := val.(map[string]any)
+	if !ok {
+		return val
+	}
+	props, ok := raw["properties"].(map[string]any)
+	if !ok {
+		return val
+	}
+	filtered := make(map[string]any, len(props))
+	for k, v := range props {
+		if !serverOwnedMetadataFields[k] {
+			filtered[k] = v
+		}
+	}
+	out := make(map[string]any, len(raw))
+	for k, v := range raw {
+		out[k] = v
+	}
+	out["properties"] = filtered
+	return out
 }
 
 // Status returns the top-level .status subtree of the preferred version's

@@ -129,6 +129,10 @@ func TestDeploymentFieldTreeReachesThePodTemplate(t *testing.T) {
 
 	for _, absent := range []string{
 		"apiVersion", "kind", "status.replicas",
+		"metadata.creationTimestamp", "metadata.deletionGracePeriodSeconds",
+		"metadata.deletionTimestamp", "metadata.generation",
+		"metadata.managedFields", "metadata.ownerReferences",
+		"metadata.resourceVersion", "metadata.selfLink", "metadata.uid",
 	} {
 		if _, ok := paths[absent]; ok {
 			t.Errorf("Deployment field tree must not offer %q", absent)
@@ -139,7 +143,7 @@ func TestDeploymentFieldTreeReachesThePodTemplate(t *testing.T) {
 	}
 	// …but the pod template's own metadata is a real, settable subtree.
 	if _, ok := paths["spec.template.metadata.annotations"]; !ok {
-		t.Error("spec.template.metadata.annotations missing: only TOP-LEVEL metadata is excluded, not the pod template's")
+		t.Error("spec.template.metadata.annotations missing: only TOP-LEVEL server-owned metadata is excluded, not the pod template's")
 	}
 
 	// The descriptions are the field help text; resolution must carry them

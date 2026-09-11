@@ -303,15 +303,24 @@ func TestFieldTreeMatchesForProviderForManagedCRDs(t *testing.T) {
 	}
 }
 
-func TestFieldTreeOfNativeKindExcludesGeneratorOwnedKeys(t *testing.T) {
+func TestFieldTreeOfNativeKindExcludesServerOwnedMetadata(t *testing.T) {
 	c := CRD{
 		Kind: "ConfigMap", Native: true,
 		Versions: []Version{{Name: "v1", Served: true, Storage: true, Properties: map[string]any{
 			"apiVersion": map[string]any{"type": "string"},
 			"kind":       map[string]any{"type": "string"},
 			"metadata": map[string]any{"type": "object", "properties": map[string]any{
-				"name":   map[string]any{"type": "string"},
-				"labels": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+				"name":                       map[string]any{"type": "string"},
+				"labels":                     map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+				"creationTimestamp":          map[string]any{"type": "string"},
+				"deletionGracePeriodSeconds": map[string]any{"type": "integer"},
+				"deletionTimestamp":          map[string]any{"type": "string"},
+				"generation":                 map[string]any{"type": "integer"},
+				"managedFields":              map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+				"ownerReferences":            map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+				"resourceVersion":            map[string]any{"type": "string"},
+				"selfLink":                   map[string]any{"type": "string"},
+				"uid":                        map[string]any{"type": "string"},
 			}},
 			"status": map[string]any{"type": "object"},
 			"data":   map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
@@ -322,20 +331,25 @@ func TestFieldTreeOfNativeKindExcludesGeneratorOwnedKeys(t *testing.T) {
 		t.Fatalf("FieldTree: %v", err)
 	}
 	leaves := Leaves(nodes, "")
-	foundData, foundName, foundLabels := false, false, false
+	paths := make(map[string]bool, len(leaves))
 	for _, l := range leaves {
-		if l.Path == "data" {
-			foundData = true
-		}
-		if l.Path == "metadata.name" {
-			foundName = true
-		}
-		if l.Path == "metadata.labels" {
-			foundLabels = true
+		paths[l.Path] = true
+	}
+	for _, wanted := range []string{"data", "metadata.name", "metadata.labels"} {
+		if !paths[wanted] {
+			t.Errorf("FieldTree missing %s", wanted)
 		}
 	}
-	if !foundData || !foundName || !foundLabels {
-		t.Errorf("native FieldTree leaves = %+v, want data, metadata.name, metadata.labels", leaves)
+	for _, excluded := range []string{
+		"apiVersion", "kind", "status",
+		"metadata.creationTimestamp", "metadata.deletionGracePeriodSeconds",
+		"metadata.deletionTimestamp", "metadata.generation", "metadata.managedFields",
+		"metadata.ownerReferences", "metadata.resourceVersion",
+		"metadata.selfLink", "metadata.uid",
+	} {
+		if paths[excluded] {
+			t.Errorf("FieldTree unexpectedly includes server-owned field %s", excluded)
+		}
 	}
 }
 
