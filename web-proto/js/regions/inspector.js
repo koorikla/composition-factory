@@ -20,7 +20,7 @@ import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
 import { fanOut, parseFrom, listWires, findEnvWires } from "../wires.js";
-import { mapResourceCoordinates, deleteEnvKeyFromDoc } from "../utils.js";
+import { mapResourceCoordinates, deleteEnvKeyFromDoc, renameEnvKeyInDoc } from "../utils.js";
 
 function isParamRequired(params, pName) {
   if (!params || !pName) return false;
@@ -59,6 +59,8 @@ var pendingNewMapEntry = null;   // map field path currently showing the inline 
 var pendingFocusParam = null;    // parameter name to focus and select in XRD inspector after render
 var paramOrder = null;           // stable order of XRD parameter names while inspector is open
 var pendingRenamedParam = null;  // { from: string, to: string } to follow focus across async rename
+var pendingFocusEnvKey = null;   // environment key name to focus and select after render
+var pendingRenamedEnvKey = null; // { from: string, to: string } to follow focus across async rename
 var lastDocName = null;
 var annDraftKey = "";            // draft annotation key being entered (CF-136)
 var annDraftRes = "";            // resource name annDraftKey belongs to (CF-136)
@@ -1606,6 +1608,14 @@ function restoreFocusedEdit(snap) {
       el = box.querySelector(translatedSel);
     }
   }
+  if (!el && pendingRenamedEnvKey) {
+    var oldEscEnv = CSS.escape(pendingRenamedEnvKey.from);
+    var newEscEnv = CSS.escape(pendingRenamedEnvKey.to);
+    if (snap.sel.indexOf(oldEscEnv) !== -1) {
+      var translatedSelEnv = snap.sel.split(oldEscEnv).join(newEscEnv);
+      el = box.querySelector(translatedSelEnv);
+    }
+  }
   if (!el) return;
   if (el.type === "checkbox") el.checked = snap.checked;
   else el.value = snap.value;
@@ -1747,6 +1757,39 @@ function addEnvKey(keyName, keyObj) {
   }, "unable to add environment key");
 }
 
+function renameEnvKey(oldKey, newKey, inputEl) {
+  var doc = store.state.doc;
+  var env = (doc && doc.spec && doc.spec.environment) || {};
+
+  var validNameRE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
+  if (!validNameRE.test(newKey)) {
+    var msg = 'Invalid environment key name "' + newKey + '": must start with a letter and contain only alphanumeric characters, underscores, or hyphens';
+    warnMsg = msg;
+    store.emit("error", { message: msg });
+    if (inputEl) inputEl.value = oldKey;
+    render();
+    return;
+  }
+
+  if (env[newKey] && newKey !== oldKey) {
+    msg = 'Environment key "' + newKey + '" already exists';
+    warnMsg = msg;
+    store.emit("error", { message: msg });
+    if (inputEl) inputEl.value = oldKey;
+    render();
+    return;
+  }
+
+  pendingRenamedEnvKey = { from: oldKey, to: newKey };
+  return op(function () {
+    return store.replaceDoc(function (d) {
+      renameEnvKeyInDoc(d, oldKey, newKey);
+    });
+  }, "unable to rename environment key").finally(function () {
+    pendingRenamedEnvKey = null;
+  });
+}
+
 function removeWire(resName, wirePath, isEnv, isAnn) {
   return op(function () {
     return store.replaceDoc(function (d) {
@@ -1870,7 +1913,7 @@ async function renderEnvironment() {
 
       h += '<div class="fld" data-env-key="' + esc(k) + '" style="padding:8px 12px;border-bottom:1px solid var(--rule)">' +
         '<div class="frow" style="margin-bottom:4px;gap:4px">' +
-        '<input class="tin bold" data-env-name="' + esc(k) + '" value="' + esc(k) + '" readonly style="flex:1;min-width:70px" aria-label="Key name">' +
+        '<input class="tin bold" data-env-name="' + esc(k) + '" value="' + esc(k) + '" style="flex:1;min-width:70px" aria-label="Key name">' +
         '<select class="tsel" data-env-type="' + esc(k) + '" aria-label="Type" style="flex:0 0 auto">' +
         ENV_TYPES.map(function (t) {
           return '<option value="' + t + '"' + (t === ty ? ' selected' : '') + '>' + t + '</option>';
@@ -1922,6 +1965,14 @@ async function renderEnvironment() {
   var __snap = snapshotFocusedEdit();
   box.innerHTML = h;
   restoreFocusedEdit(__snap);
+  if (pendingFocusEnvKey) {
+    var eInp = box.querySelector('input[data-env-name="' + CSS.escape(pendingFocusEnvKey) + '"]');
+    if (eInp) {
+      eInp.focus();
+      if (eInp.select) eInp.select();
+      pendingFocusEnvKey = null;
+    }
+  }
 }
 
 function render() {
@@ -2629,6 +2680,7 @@ var boxClickActions = [
       var env = (doc && doc.spec && doc.spec.environment) || {};
       var base = "key", nm = base + "1", i = 2;
       while (env[nm]) { nm = base + i; i++; }
+      pendingFocusEnvKey = nm;
       addEnvKey(nm, { type: "string" });
     }
   }
@@ -2744,6 +2796,16 @@ function onBoxChange(e) {
     var curName = nameInp ? nameInp.value.trim() : "default";
     var curLbl = lblInp ? lblInp.value.trim() : "environment=default";
     updateEnvSelection(envChangeMode, curName, curLbl);
+    return;
+  }
+  if (t.matches("input[data-env-name]")) {
+    var oldKey = t.getAttribute("data-env-name");
+    var newKey = t.value.trim();
+    if (!newKey || newKey === oldKey) {
+      t.value = oldKey;
+      return;
+    }
+    renameEnvKey(oldKey, newKey, t);
     return;
   }
   if (t.matches("select[data-env-type]")) {
@@ -3066,6 +3128,18 @@ export function init(rootEl, deps) {
   box.addEventListener("keydown", function (e) {
     var t = e.target;
     if (!t) return;
+    if (t.matches && t.matches("input[data-env-name]")) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        t.blur();
+        return;
+      }
+      if (e.key === "Escape") {
+        t.value = t.getAttribute("data-env-name") || "";
+        t.blur();
+        return;
+      }
+    }
     if (t.matches && t.matches("select[data-wire], select[data-env-wire]")) {
       if (e.key === "Enter") {
         delete t.dataset.keyNav;

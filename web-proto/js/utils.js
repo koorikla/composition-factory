@@ -249,4 +249,141 @@ export function deleteEnvKeyFromDoc(d, keyName) {
   }
 }
 
+/**
+ * Rename an environment key in a blueprint doc and rewrite all
+ * references to it in resources and environmentConfigs.
+ *
+ * @param {Object} d Blueprint document
+ * @param {string} oldKey Old environment key name
+ * @param {string} newKey New environment key name
+ */
+export function renameEnvKeyInDoc(d, oldKey, newKey) {
+  if (!d || !d.spec || !oldKey || !newKey || oldKey === newKey) return;
+
+  // 1. Update spec.environment while preserving order
+  if (d.spec.environment && d.spec.environment[oldKey] !== undefined) {
+    var newEnv = {};
+    Object.keys(d.spec.environment).forEach(function (k) {
+      if (k === oldKey) {
+        newEnv[newKey] = d.spec.environment[oldKey];
+      } else {
+        newEnv[k] = d.spec.environment[k];
+      }
+    });
+    d.spec.environment = newEnv;
+  }
+
+  // 2. Update spec.environmentConfigs
+  if (Array.isArray(d.spec.environmentConfigs)) {
+    d.spec.environmentConfigs.forEach(function (cfg) {
+      if (cfg && cfg.data && typeof cfg.data === "object" && cfg.data[oldKey] !== undefined) {
+        cfg.data[newKey] = cfg.data[oldKey];
+        delete cfg.data[oldKey];
+      }
+      if (cfg && cfg.values && typeof cfg.values === "object" && cfg.values[oldKey] !== undefined) {
+        cfg.values[newKey] = cfg.values[oldKey];
+        delete cfg.values[oldKey];
+      }
+    });
+  }
+
+  // 3. Helper to replace in strings/expressions
+  function replaceEnvRef(ref) {
+    if (typeof ref !== "string" || !ref) return ref;
+    if (ref === "env." + oldKey) return "env." + newKey;
+    if (ref === "$env." + oldKey) return "$env." + newKey;
+    if (ref.indexOf("env." + oldKey + ".") === 0) {
+      return "env." + newKey + ref.slice(("env." + oldKey).length);
+    }
+    if (ref.indexOf("$env." + oldKey + ".") === 0) {
+      return "$env." + newKey + ref.slice(("$env." + oldKey).length);
+    }
+    return ref;
+  }
+
+  function replaceRawEnv(raw) {
+    if (typeof raw !== "string" || !raw) return raw;
+    var escaped = oldKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    var re = new RegExp("((?:\\$env|\\.env|env)\\.)" + escaped + "((?:$|[^a-zA-Z0-9_]))", "g");
+    return raw.replace(re, "$1" + newKey + "$2");
+  }
+
+  function replaceInObject(obj) {
+    if (!obj || typeof obj !== "object") return;
+    Object.keys(obj).forEach(function (k) {
+      var v = obj[k];
+      if (typeof v === "string") {
+        var r1 = replaceEnvRef(v);
+        obj[k] = r1 !== v ? r1 : replaceRawEnv(v);
+      } else if (typeof v === "object") {
+        replaceInObject(v);
+      }
+    });
+  }
+
+  // 4. Update references in resources
+  var resources = d.spec.resources || [];
+  resources.forEach(function (r) {
+    if (r.fields) {
+      Object.keys(r.fields).forEach(function (k) {
+        var f = r.fields[k];
+        if (f) {
+          if (f.from) f.from = replaceEnvRef(f.from);
+          if (f.raw) f.raw = replaceRawEnv(f.raw);
+        }
+      });
+    }
+    if (r.envelope) {
+      Object.keys(r.envelope).forEach(function (k) {
+        var f = r.envelope[k];
+        if (f) {
+          if (f.from) f.from = replaceEnvRef(f.from);
+          if (f.raw) f.raw = replaceRawEnv(f.raw);
+        }
+      });
+    }
+    if (r.annotations) {
+      Object.keys(r.annotations).forEach(function (k) {
+        var f = r.annotations[k];
+        if (f) {
+          if (f.from) f.from = replaceEnvRef(f.from);
+          if (f.raw) f.raw = replaceRawEnv(f.raw);
+        }
+      });
+    }
+    if (r.connectionSecret) {
+      if (typeof r.connectionSecret === "string") {
+        r.connectionSecret = replaceEnvRef(r.connectionSecret);
+      } else if (typeof r.connectionSecret === "object") {
+        if (Array.isArray(r.connectionSecret.keys)) {
+          r.connectionSecret.keys.forEach(function (item, idx) {
+            if (typeof item === "string") {
+              r.connectionSecret.keys[idx] = replaceEnvRef(item);
+            } else if (item && typeof item === "object") {
+              if (item.from) item.from = replaceEnvRef(item.from);
+              if (item.raw) item.raw = replaceRawEnv(item.raw);
+              replaceInObject(item);
+            }
+          });
+        } else {
+          replaceInObject(r.connectionSecret);
+        }
+      }
+    }
+    if (r.when) {
+      if (typeof r.when === "string") {
+        r.when = replaceRawEnv(r.when);
+      } else if (typeof r.when === "object") {
+        replaceInObject(r.when);
+      }
+    }
+    if (r.forEach) {
+      if (typeof r.forEach === "string") {
+        r.forEach = replaceEnvRef(r.forEach);
+      }
+    }
+  });
+}
+
+
 
