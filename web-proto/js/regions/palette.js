@@ -278,6 +278,40 @@ function drawKindsEmpty(q) {
   return h;
 }
 
+function isNamespacedKind(k) {
+  if (!k) return false;
+  if (k.namespaced === true || k.scope === "Namespaced") return true;
+  if (/\.m\./.test(k.apiVersion || "") || /\.m\./.test(k.group || "")) return true;
+  return false;
+}
+
+function isV2Kind(k) {
+  if (!k) return false;
+  return /\.m\./.test(k.apiVersion || "") || /\.m\./.test(k.group || "");
+}
+
+function isNamespacedGroup(g, items) {
+  if (/\.m\./.test(g || "")) return true;
+  if (!items || !items.length) return false;
+  if (items.some(function (k) { return k.provider === "cluster" || /\.ya?ml$/.test(k.provider || ""); })) return false;
+  return items.every(isNamespacedKind);
+}
+
+function isV2Group(g, items) {
+  if (/\.m\./.test(g || "")) return true;
+  if (!items || !items.length) return false;
+  return items.some(isV2Kind);
+}
+
+function isClusterGroup(g, items) {
+  if (!items || !items.length) return false;
+  if (isNamespacedGroup(g, items)) return false;
+  if (items.some(function (k) { return k.provider === "cluster" || /\.ya?ml$/.test(k.provider || ""); })) return false;
+  return items.every(function (k) {
+    return k.scope === "Cluster" || k.namespaced === false || (!isNamespacedKind(k) && k.provider !== "k8s");
+  });
+}
+
 function drawKinds() {
   if (kindsError) return '<div class="empty">' + esc(kindsError) + "</div>";
   if (!kindsLoaded) return '<div class="empty">Loading kinds…</div>';
@@ -301,29 +335,54 @@ function drawKinds() {
   const xrdScope = (doc && doc.spec && doc.spec.xrd && doc.spec.xrd.scope) || "Namespaced";
   const isNamespacedXRD = xrdScope !== "Cluster";
 
+  // Rank matching groups above scope-mismatched groups
+  order.sort(function (ga, gb) {
+    const aItems = byGroup[ga] || [];
+    const bItems = byGroup[gb] || [];
+    const aMatch = isNamespacedXRD ? isNamespacedGroup(ga, aItems) : isClusterGroup(ga, aItems);
+    const bMatch = isNamespacedXRD ? isNamespacedGroup(gb, bItems) : isClusterGroup(gb, bItems);
+    if (aMatch && !bMatch) return -1;
+    if (!aMatch && bMatch) return 1;
+    return 0;
+  });
+
   let h = "";
   order.forEach(function (g) {
     const items = byGroup[g];
     items.sort(function (a, b) { return (a.kind || "").localeCompare(b.kind || ""); });
 
-    const isClusterGroup = isNamespacedXRD && items.length > 0 && items.every(function (k) {
-      if (k.namespaced === true || k.scope === "Namespaced") return false;
-      if (k.provider === "cluster" || /\.ya?ml$/.test(k.provider || "")) return false;
-      return k.scope === "Cluster" || k.namespaced === false || (!/\.m\./.test(k.apiVersion || "") && !/\.m\./.test(k.group || "") && k.provider !== "k8s");
-    });
-    const clusterTag = isClusterGroup
-      ? '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:rgba(255,255,255,0.06);color:var(--faint);border-radius:3px;margin-left:6px">cluster-scoped</span>'
-      : "";
+    const isNs = isNamespacedGroup(g, items);
+    const isV2 = isV2Group(g, items);
+    const isCluster = isClusterGroup(g, items);
+    const matchesXRD = isNamespacedXRD ? isNs : isCluster;
+    const isMismatch = isNamespacedXRD ? isCluster : isNs;
 
-    const isCollapsed = isClusterGroup && collapsedGroups[g] !== false && !q;
-    const arrow = isClusterGroup
+    let scopeTag = "";
+    if (isNs) {
+      const scopeLabel = isV2 ? "namespaced (v2)" : "namespaced";
+      const tagText = matchesXRD ? scopeLabel + " \u00b7 matches XRD" : scopeLabel;
+      const bg = matchesXRD ? "rgba(34,197,94,0.12)" : "rgba(255,255,255,0.06)";
+      const color = matchesXRD ? "var(--ok)" : "var(--faint)";
+      const title = matchesXRD ? "Matches composition XRD scope" : "Does not match composition XRD scope";
+      scopeTag = '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:' + bg + ';color:' + color + ';border-radius:3px;margin-left:6px" title="' + title + '">' + esc(tagText) + '</span>';
+    } else if (isCluster) {
+      const tagText = matchesXRD ? "cluster-scoped \u00b7 matches XRD" : "cluster-scoped";
+      const bg = matchesXRD ? "rgba(34,197,94,0.12)" : "rgba(255,255,255,0.06)";
+      const color = matchesXRD ? "var(--ok)" : "var(--faint)";
+      const title = matchesXRD ? "Matches composition XRD scope" : "Does not match composition XRD scope";
+      scopeTag = '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:' + bg + ';color:' + color + ';border-radius:3px;margin-left:6px" title="' + title + '">' + esc(tagText) + '</span>';
+    }
+
+    const isCollapsible = isMismatch && items.length > 0;
+    const isCollapsed = isCollapsible && collapsedGroups[g] !== false && !q;
+    const arrow = isCollapsible
       ? '<span class="grp-toggle" style="font-size:9px;color:var(--faint);margin-right:4px;user-select:none">' + (isCollapsed ? '▶' : '▼') + '</span>'
       : '';
-    const cursorStyle = isClusterGroup ? 'cursor:pointer;' : '';
+    const cursorStyle = isCollapsible ? 'cursor:pointer;' : '';
 
-    h += '<div class="grp' + (isClusterGroup ? ' grp-cluster' : '') + '"' +
-      (isClusterGroup ? ' data-grp-toggle="' + esc(g) + '"' : '') +
-      ' style="' + cursorStyle + '">' + arrow + '<span class="lbl">' + esc(g) + '</span>' + clusterTag + '<span class="n">' + items.length + "</span></div>";
+    h += '<div class="grp' + (isCluster ? ' grp-cluster' : '') + '"' +
+      (isCollapsible ? ' data-grp-toggle="' + esc(g) + '"' : '') +
+      ' style="' + cursorStyle + '">' + arrow + '<span class="lbl">' + esc(g) + '</span>' + scopeTag + '<span class="n">' + items.length + "</span></div>";
 
     if (!isCollapsed) {
       items.forEach(function (k) {
@@ -331,6 +390,21 @@ function drawKinds() {
         const kClusterTag = k.provider === "cluster"
           ? '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:rgba(6,182,212,0.12);color:#06b6d4;border-radius:3px;margin-right:4px">cluster</span>'
           : "";
+        const isNsK = isNamespacedKind(k);
+        const isV2K = isV2Kind(k);
+        const isClusterK = !isNsK || k.scope === "Cluster" || k.namespaced === false;
+        const kMatchesXRD = isNamespacedXRD ? isNsK : isClusterK;
+
+        let kScopeTag = "";
+        if (k.provider !== "cluster" && !/\.ya?ml$/.test(k.provider || "")) {
+          if (isNsK) {
+            const kScopeLabel = isV2K ? "namespaced (v2)" : "namespaced";
+            kScopeTag = '<span class="pill" style="font-size:9px;padding:0 4px;border-radius:3px;margin-right:4px;background:' + (kMatchesXRD ? 'rgba(34,197,94,0.12);color:var(--ok)' : 'rgba(255,255,255,0.06);color:var(--faint)') + '" title="' + (kMatchesXRD ? 'Matches XRD scope' : 'Does not match XRD scope') + '">' + esc(kScopeLabel) + '</span>';
+          } else if (isClusterK) {
+            kScopeTag = '<span class="pill" style="font-size:9px;padding:0 4px;border-radius:3px;margin-right:4px;background:' + (kMatchesXRD ? 'rgba(34,197,94,0.12);color:var(--ok)' : 'rgba(255,255,255,0.06);color:var(--faint)') + '" title="' + (kMatchesXRD ? 'Matches XRD scope' : 'Does not match XRD scope') + '">cluster-scoped</span>';
+          }
+        }
+
         const fullTitle = k.kind +
           (k.apiVersion ? " \u00b7 " + k.apiVersion : "") +
           (k.provider ? " (" + k.provider + ")" : "");
@@ -341,10 +415,12 @@ function drawKinds() {
           ' data-av="' + esc(k.apiVersion) + '"' +
           ' data-provider="' + esc(k.provider || "") + '"' +
           ' data-fam="' + esc(fam) + '"' +
-          ' data-fields="' + (k.fields || 0) + '">' +
+          ' data-fields="' + (k.fields || 0) + '"' +
+          ' data-scope="' + (isNsK ? "Namespaced" : "Cluster") + '">' +
           '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
           '<span class="nm" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(fullTitle) + '">' + esc(k.kind) + '</span>' +
           kClusterTag +
+          kScopeTag +
           '<span class="req">' + (k.required | 0) + " req</span></div>";
       });
     }
@@ -817,7 +893,7 @@ function showKindPreview(row) {
     const r = row.getBoundingClientRect();
     el.style.left = (r.right + 8) + "px";
     el.style.top = Math.min(r.top, innerHeight - 180) + "px";
-    const scope = /\.m\./.test(av) || row.getAttribute("data-provider") === "k8s" ? "Namespaced" : "Cluster";
+    const scope = row.getAttribute("data-scope") || (/\.m\./.test(av) || row.getAttribute("data-provider") === "k8s" ? "Namespaced" : "Cluster");
     const prov = row.getAttribute("data-provider");
     let h = '<div style="font-family:var(--mono);font-size:12px;font-weight:600">' + esc(kind) + "</div>" +
       '<div class="dg" style="margin:1px 0 6px">' + esc(av) + " \u00b7 " + scope + (prov ? " \u00b7 " + esc(prov) : "") + "</div>";
