@@ -7015,3 +7015,262 @@ spec:
 		t.Fatalf("bp.Validate() failed: %v", err)
 	}
 }
+
+func TestAdoptGoTemplate_ConditionalResources_EmptyStringComparison(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- if ne $spec.customDomain "" }}
+          ---
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: custom-cert
+          spec:
+            dnsNames:
+              - example.com
+          {{- end }}
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+	if res.When != `params.customDomain != ""` {
+		t.Errorf("res.When = %q, want %q", res.When, `params.customDomain != ""`)
+	}
+}
+
+func TestAdoptGoTemplate_ConditionalResources_EmptyStringComparison_AllVariants(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition string
+		wantWhen  string
+	}{
+		{
+			name:      "param eq empty string",
+			condition: `eq $spec.customDomain ""`,
+			wantWhen:  `params.customDomain == ""`,
+		},
+		{
+			name:      "param ne empty string",
+			condition: `ne $spec.customDomain ""`,
+			wantWhen:  `params.customDomain != ""`,
+		},
+		{
+			name:      "env eq empty string bare",
+			condition: `eq $env.stage ""`,
+			wantWhen:  `env.stage == ""`,
+		},
+		{
+			name:      "env eq empty string hasKey",
+			condition: `and (hasKey $env "stage") (eq $env.stage "")`,
+			wantWhen:  `env.stage == ""`,
+		},
+		{
+			name:      "env eq empty string index default",
+			condition: `eq (default "" (index $env "stage")) ""`,
+			wantWhen:  `env.stage == ""`,
+		},
+		{
+			name:      "env ne empty string bare",
+			condition: `ne $env.stage ""`,
+			wantWhen:  `env.stage != ""`,
+		},
+		{
+			name:      "env ne empty string hasKey",
+			condition: `or (not (hasKey $env "stage")) (ne $env.stage "")`,
+			wantWhen:  `env.stage != ""`,
+		},
+		{
+			name:      "env ne empty string index default",
+			condition: `ne (default "" (index $env "stage")) ""`,
+			wantWhen:  `env.stage != ""`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- if %s }}
+          ---
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: custom-cert
+          spec:
+            dnsNames:
+              - example.com
+          {{- end }}
+`, tc.condition)
+
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 1 {
+				t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+			}
+			res := bp.Spec.Resources[0]
+			if res.When != tc.wantWhen {
+				t.Errorf("res.When = %q, want %q", res.When, tc.wantWhen)
+			}
+			if err := bp.Validate(); err != nil {
+				t.Errorf("bp.Validate() failed: %v", err)
+			}
+		})
+	}
+}
+
+func TestAdoptGoTemplate_ConditionalResources_EmptyStringComparison_RoundTrip(t *testing.T) {
+	nativeCRDs, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+	origBP := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata: blueprint.Metadata{
+			Name: "test-when-roundtrip",
+		},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"customDomain": {Type: "string", Required: true},
+					"tier":         {Type: "string", Required: true},
+				},
+			},
+			Environment: map[string]blueprint.EnvironmentKey{
+				"stage":  {Type: "string"},
+				"region": {Type: "string", Default: "us-east-1"},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "cm-domain",
+					Kind:     "ConfigMap",
+					Provider: blueprint.NativeProvider,
+					When:     `params.customDomain != ""`,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {Value: "domain-cm"},
+					},
+				},
+				{
+					Name:     "cm-tier",
+					Kind:     "ConfigMap",
+					Provider: blueprint.NativeProvider,
+					When:     `params.tier == ""`,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {Value: "tier-cm"},
+					},
+				},
+				{
+					Name:     "cm-stage",
+					Kind:     "ConfigMap",
+					Provider: blueprint.NativeProvider,
+					When:     `env.stage != ""`,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {Value: "stage-cm"},
+					},
+				},
+				{
+					Name:     "cm-region",
+					Kind:     "ConfigMap",
+					Provider: blueprint.NativeProvider,
+					When:     `env.region == ""`,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {Value: "region-cm"},
+					},
+				},
+			},
+		},
+	}
+
+	outputs, err := emit.Generate(origBP, nativeCRDs, "")
+	if err != nil {
+		t.Fatalf("emit.Generate failed: %v", err)
+	}
+
+	var compYAML []byte
+	for _, o := range outputs {
+		if strings.Contains(o.Path, "compositions") {
+			compYAML = o.Body
+			break
+		}
+	}
+	if len(compYAML) == 0 {
+		t.Fatal("emit.Generate produced no composition output")
+	}
+
+	adoptedBP, _, err := Adopt(compYAML, Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(adoptedBP.Spec.Resources) != len(origBP.Spec.Resources) {
+		t.Fatalf("expected %d resources, got %d", len(origBP.Spec.Resources), len(adoptedBP.Spec.Resources))
+	}
+
+	wantWhens := map[string]string{
+		"cm-domain": `params.customDomain != ""`,
+		"cm-tier":   `params.tier == ""`,
+		"cm-stage":  `env.stage != ""`,
+		"cm-region": `env.region == ""`,
+	}
+
+	for _, r := range adoptedBP.Spec.Resources {
+		want, ok := wantWhens[r.Name]
+		if !ok {
+			t.Errorf("unexpected resource %q", r.Name)
+			continue
+		}
+		if r.When != want {
+			t.Errorf("resource %q: When = %q, want %q", r.Name, r.When, want)
+		}
+	}
+}
