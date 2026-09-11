@@ -91,12 +91,16 @@ store.subscribe("error", function (err) {
   }
 });
 
-// The toast must not outlive the next successful action (CF-136)
+// The toast must not outlive the next successful action (CF-136, CF-147)
 store.subscribe("doc", function () {
   clearErrorToast();
 });
 
 store.subscribe("generate", function () {
+  clearErrorToast();
+});
+
+store.subscribe("selection", function () {
   clearErrorToast();
 });
 

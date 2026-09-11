@@ -134,6 +134,10 @@ function showToast(html, onLinkClick) {
 export function switchTab(r) {
   if (r === "sources") r = "src";
   rail = r;
+  providersErr = null;
+  paramErr = null;
+  envErr = null;
+  clusterErr = null;
   if (tabsEl) {
     [].forEach.call(tabsEl.children, function (c) {
       c.setAttribute("aria-pressed", String(c.getAttribute("data-r") === rail));
@@ -806,6 +810,8 @@ function drawRail() {
     if (el) kept[id] = {
       v: el.type === "checkbox" ? el.checked : el.value,
       focus: document.activeElement === el,
+      selStart: el.selectionStart,
+      selEnd: el.selectionEnd,
     };
   });
   railEl.innerHTML = h;
@@ -813,7 +819,12 @@ function drawRail() {
     var st = kept[id], el = railEl.querySelector("#" + id);
     if (!st || !el) return;
     if (el.type === "checkbox") el.checked = st.v; else el.value = st.v;
-    if (st.focus) el.focus();
+    if (st.focus) {
+      el.focus();
+      if (typeof st.selStart === "number" && typeof st.selEnd === "number") {
+        try { el.setSelectionRange(st.selStart, st.selEnd); } catch (_) {}
+      }
+    }
   });
   if (hintEl) hintEl.innerHTML = hint;
 }
@@ -1351,6 +1362,28 @@ function bindPaletteEvents() {
       }, 200);
       return;
     }
+    var wb;
+    if (e.target.id === "cat-search" || e.target.id === "src-add-ref") {
+      if (providersErr) {
+        providersErr = null;
+        wb = railEl.querySelector('.warnbar[role="alert"]');
+        if (wb) wb.remove();
+      }
+    }
+    if (e.target.id === "param-add-name" || e.target.id === "param-add-default") {
+      if (paramErr) {
+        paramErr = null;
+        wb = railEl.querySelector('.warnbar[role="alert"]');
+        if (wb) wb.remove();
+      }
+    }
+    if (e.target.id === "env-add-name" || e.target.id === "env-add-default") {
+      if (envErr) {
+        envErr = null;
+        wb = railEl.querySelector('.warnbar[role="alert"]');
+        if (wb) wb.remove();
+      }
+    }
     if (e.target.id !== "cat-search") return;
     const q = e.target.value.trim();
     clearTimeout(catTimer);
@@ -1425,6 +1458,12 @@ function bindPaletteStoreSubscriptions() {
   });
 
   store.subscribe("doc", function () {
+    // Errors attached to actions on the prior document state must not outlive the document (CF-147)
+    providersErr = null;
+    paramErr = null;
+    envErr = null;
+    clusterErr = null;
+
     // Sources and kinds only change when a new doc has different sources (providers).
     const d = store.state.doc;
     const sig = ((d && d.spec && d.spec.sources) || [])

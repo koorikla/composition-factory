@@ -3181,6 +3181,11 @@ export function init(rootEl, deps) {
     }
   });
   box.addEventListener("input", function (e) {
+    if (warnMsg) {
+      warnMsg = null;
+      var wb = box.querySelector(".warnbar");
+      if (wb) wb.remove();
+    }
     var t = e.target;
     if (t && t.matches && t.matches("[data-ann-key]")) {
       annDraftKey = t.value;
@@ -3194,6 +3199,7 @@ export function init(rootEl, deps) {
 
   var lastSourcesSig = "";
   store.subscribe("doc", function () {
+    warnMsg = null;
     var d = store.state.doc;
     var sel = store.state.selectedResource;
     if (sel === "environment") {
@@ -3226,6 +3232,12 @@ export function init(rootEl, deps) {
     pendingFocusParam = null;
     warnMsg = null;
     render();
+  });
+  store.subscribe("generate", function () {
+    if (warnMsg) {
+      warnMsg = null;
+      render();
+    }
   });
 
   render();
