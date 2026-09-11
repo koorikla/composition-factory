@@ -338,8 +338,9 @@ conventions:
     template: standard-tags
 ```
 
-- `match` performs a case-sensitive suffix match against field paths (e.g., `tags` matches `tags` and `spec.tags`).
-- Conventions apply to managed provider resources only. A convention whose `match` matches any settable field of a native Kubernetes kind (`provider: k8s`) — at any depth, so `match: replicas` against a Deployment's `spec.replicas` as much as `match: immutable` against a Secret's top-level `immutable` — is refused with `resource "<name>": conventions cannot match native Kubernetes kind`, naming the match and the field. Setting that field explicitly in `fields:` is the override; a convention that matches no field of the native object skips it.
+- `match` performs a case-sensitive suffix match against top-level `spec.forProvider` field names (e.g., `tags` matches `tags`, `name` matches `queueName`).
+- Conventions apply to top-level `forProvider` leaves of managed provider resources only. A convention that matches an un-overridden nested field of a managed resource is refused with `resource "<name>": conventions apply to top-level forProvider fields only (match "<match>" names <kind> field "<path>")`. Setting that field explicitly in `fields:` is the override; a convention that matches no field of the managed object skips it.
+- Native Kubernetes kinds (`provider: k8s`) do not support conventions. A convention whose `match` matches any settable field of a native kind — at any depth, so `match: replicas` against a Deployment's `spec.replicas` as much as `match: immutable` against a Secret's top-level `immutable` — is refused with `resource "<name>": conventions cannot match native Kubernetes kind (match "<match>" names <kind> field "<path>")`. Setting that field explicitly in `fields:` is the override; a convention that matches no field of the native object skips it.
 - Conventions are supported only with the `go-templating` engine.
 
 ---

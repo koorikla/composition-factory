@@ -598,3 +598,65 @@ func TestCF149ConventionExplicitNestedOverrideOnNativeKindAllowed(t *testing.T) 
 		t.Error("a convention template call leaked into the native Deployment document")
 	}
 }
+
+// CF-176: conventions apply to top-level forProvider leaves only (no dots,
+// no array indices). A convention whose match names a nested leaf of a managed
+// kind (and does not match a top-level field) must not be silently ignored:
+// it is refused loudly unless explicitly overridden.
+func TestCF176ConventionMatchingNestedManagedFieldIsRefused(t *testing.T) {
+	crds := conventionCRDs(t)
+
+	b := conventionTestBlueprint()
+	// conventionCRDs has Queue with:
+	// - region (top)
+	// - name (top)
+	// - tags (top)
+	// - endpoint.hostname (nested)
+	// Add a convention matching only the nested endpoint.hostname leaf:
+	b.Spec.Conventions = append(b.Spec.Conventions, blueprint.Convention{
+		Match:    "hostname",
+		Template: "cf.name",
+	})
+
+	_, err := Composition(b, crds)
+	if err == nil {
+		t.Fatal("Composition accepted a convention matching nested Queue field endpoint.hostname; want refusal")
+	}
+	wantMsg := `resource "queue-a": conventions apply to top-level forProvider fields only`
+	if !strings.Contains(err.Error(), wantMsg) {
+		t.Fatalf("expected error containing %q, got: %v", wantMsg, err)
+	}
+	if !strings.Contains(err.Error(), "endpoint.hostname") {
+		t.Errorf("error %q does not name the matched field endpoint.hostname", err)
+	}
+}
+
+// The override mechanism holds for nested managed fields too: if the blueprint
+// sets the nested field explicitly (or sets its parent object), the refusal does
+// not trigger, and the convention template does not leak into the nested field.
+func TestCF176ConventionExplicitNestedOverrideOnManagedKindAllowed(t *testing.T) {
+	crds := conventionCRDs(t)
+
+	b := conventionTestBlueprint()
+	b.Spec.Conventions = append(b.Spec.Conventions, blueprint.Convention{
+		Match:    "hostname",
+		Template: "cf.name",
+	})
+	// queue-a and queue-b are in conventionTestBlueprint. Explicitly override
+	// endpoint.hostname on both:
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Fields == nil {
+			b.Spec.Resources[i].Fields = make(map[string]blueprint.Field)
+		}
+		b.Spec.Resources[i].Fields["endpoint.hostname"] = blueprint.Field{Value: "custom.endpoint"}
+	}
+
+	comp, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v, want explicit endpoint.hostname to override the convention", err)
+	}
+	doc := string(comp)
+	if strings.Contains(doc, `include "cf.name" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-a" "field" "endpoint.hostname")`) {
+		t.Error("convention template call leaked into endpoint.hostname")
+	}
+}

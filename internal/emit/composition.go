@@ -549,6 +549,8 @@ func templateCallRHS(name, resource, field string) string {
 // rather than a special case anywhere else. The receiver's Fields map is
 // never mutated. A native Kubernetes kind receives no merge at all: a
 // convention matching any of its un-overridden fields is refused (below).
+// Similarly, a convention matching an un-overridden nested leaf of a managed
+// resource is refused: conventions apply to top-level forProvider fields only.
 func conventionFields(r blueprint.Resource, b *blueprint.Blueprint, crd schema.CRD) (map[string]blueprint.Field, error) {
 	if len(b.Spec.Conventions) == 0 {
 		return r.Fields, nil
@@ -590,9 +592,16 @@ func conventionFields(r blueprint.Resource, b *blueprint.Blueprint, crd schema.C
 	for k, v := range r.Fields {
 		merged[k] = v
 	}
+	topLevelMatches := make(map[string]bool, len(b.Spec.Conventions))
 	for _, n := range nodes {
 		if len(n.Children) > 0 {
 			continue // a branch is a subtree, not a settable field
+		}
+		for _, c := range b.Spec.Conventions {
+			if strings.HasSuffix(n.Name, c.Match) {
+				topLevelMatches[c.Match] = true
+				break
+			}
 		}
 		hasExplicit := false
 		for k := range merged {
@@ -612,6 +621,28 @@ func conventionFields(r blueprint.Resource, b *blueprint.Blueprint, crd schema.C
 			}
 		}
 	}
+
+	// Conventions apply to top-level forProvider fields only. A convention that
+	// matches an un-overridden nested leaf (and targets no top-level field on
+	// this resource) is refused loudly rather than silently ignored.
+	for _, leaf := range schema.Leaves(nodes, "") {
+		if !strings.Contains(leaf.Path, ".") && !strings.Contains(leaf.Path, "[") {
+			continue // top-level leaf was handled above
+		}
+		if explicitlySet(r.Fields, leaf.Path) {
+			continue // explicit wins: that IS the override
+		}
+		for _, c := range b.Spec.Conventions {
+			if topLevelMatches[c.Match] {
+				continue // convention targets a top-level field on this resource
+			}
+			if strings.HasSuffix(leaf.Path, c.Match) {
+				return nil, fmt.Errorf("resource %q: conventions apply to top-level forProvider fields only (match %q names %s field %q)",
+					r.Name, c.Match, r.Kind, leaf.Path)
+			}
+		}
+	}
+
 	return merged, nil
 }
 
