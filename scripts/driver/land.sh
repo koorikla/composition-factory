@@ -24,10 +24,17 @@
 # a deadline on each watched run.
 #
 # Resuming: when main's last 200 first-parent commits hold this issue's landing
-# `… (CF-NNN, #<issue>)` with no newer `Revert "…"` of it, and the claimed branch
-# is gone or its content is exactly that landing, land.sh does not land again: it
-# watches that commit (a run killed after its push, or a lost report).
-# Before landing new work it checks main's own CI run and refuses a red main.
+# `… (CF-NNN, #<issue>)` with no newer `Revert "…"` of it, and the claimed branch's
+# content is exactly that landing (or the branch is gone and the claim is older
+# than the landing), land.sh does not land again: it watches that commit (a run
+# killed after its push, or a lost report).
+#
+# Before landing new work it reads main's own CI run and refuses a red main, with
+# two ways out so a red main never blocks its own fix:
+# - an issue labelled `severity:P0` lands anyway; its own CI decides;
+# - a main run that failed only in e2e is rerun once (`gh run rerun <id> --failed`),
+#   a cancelled one is rerun in full once (`gh run rerun <id>`), and the landing
+#   goes ahead if that rerun is green.
 #
 # Callers decide by the stdout line (exactly one; everything else is stderr):
 #   0  LANDED <sha> <run-url>            CI green; topic branch deleted
@@ -40,7 +47,9 @@
 #                                        revert could not be pushed: main is red
 #   8  REVERTED-RED push-unknown         the push failed and origin could not be
 #                                        read: main's state is unknown
-#   8  MAIN-RED <run-url>                main's CI was already red; nothing pushed
+#   8  MAIN-RED <run-url>                main's CI is red (after its one rerun, when
+#                                        allowed) and the issue is not severity:P0;
+#                                        nothing pushed
 #  64  usage error, a bad environment value, or no member's claim naming a
 #      CF-<digits> branch (stderr only, empty stdout)
 #  70  gh, git or jq failed, the branch is missing, or it has nothing to land,
@@ -126,9 +135,12 @@ g() {
 # Step 1: the issue must be handed back, before anything is fetched.
 issue_json="$(gh issue view "$issue" --json number,title,state,labels,comments,updatedAt)" ||
   die "gh issue view $issue failed"
-handed="$(printf '%s\n' "$issue_json" | jq -r 'if any(.labels[]?; .name == "handed-back") then 1 else 0 end')" ||
-  die "could not read issue $issue"
-if [ "$handed" != 1 ]; then
+labels="$(printf '%s\n' "$issue_json" | jq -r '
+  "\(if any(.labels[]?; .name == "handed-back") then 1 else 0 end)\(if any(.labels[]?; .name == "severity:P0") then 1 else 0 end)"
+')" || die "could not read issue $issue"
+p0=
+[ "${labels#?}" != 1 ] || p0=1
+if [ "${labels%?}" != 1 ]; then
   echo "NOT-HANDED-BACK"
   exit 5
 fi
@@ -141,17 +153,20 @@ claim="$(printf '%s\n' "$issue_json" | jq -r '
   | [$all[] | select(.authorAssociation == null or .authorAssociation == "OWNER"
                      or .authorAssociation == "MEMBER" or .authorAssociation == "COLLABORATOR")] as $trusted
   | ($trusted | last) as $c
-  | "\(($all | length) - ($trusted | length))\t" +
-    (if $c == null then "\t"
+  | def orblank: if . == null or . == "" then "-" else tostring end;
+  "\(($all | length) - ($trusted | length))\t" +
+    (if $c == null then "-\t-\t-"
      else ([$c.body | split("\n")[0] | capture("^taking —\\s+(?<b>\\S+)") | .b] | first // "") as $b
        | ([$b | capture("^(?<cf>CF-[0-9]+)") | .cf] | first // "") as $cf
-       | "\($b)\t\($cf)"
+       | (try ($c.createdAt | fromdateiso8601) catch null) as $at
+       | "\($b | orblank)\t\($cf | orblank)\t\($at | orblank)"
      end)
 ')" || die "could not read the claim on issue $issue"
-ignored="${claim%%$'\t'*}"
-claim="${claim#*$'\t'}"
-branch="${claim%%$'\t'*}"
-cf="${claim#*$'\t'}"
+# Fields are never empty ("-" stands for none): read would merge adjacent tabs.
+IFS=$'\t' read -r ignored branch cf claim_at <<<"$claim"
+[ "$branch" != - ] || branch=""
+[ "$cf" != - ] || cf=""
+case "$claim_at" in '' | *[!0-9]*) claim_at="" ;; esac
 [ "$ignored" = 0 ] || say "ignoring $ignored claim comment(s) on issue $issue from outside the project"
 if [ -z "$branch" ]; then
   say "issue $issue has no \`taking — <branch>\` claim comment from a project member"
@@ -232,6 +247,105 @@ push_main() {
   return 1
 }
 
+# timed_watch ID DEADLINE: `gh run watch` in the background, killed at DEADLINE
+# (in $SECONDS): SIGTERM, then SIGKILL after 5s. 0 green; 1 not green; 124
+# deadline passed.
+timed_watch() {
+  local pid rc grace
+  gh run watch "$1" --exit-status </dev/null >&2 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$2" ]; then
+      pkill -TERM -P "$pid" 2>/dev/null
+      kill -TERM "$pid" 2>/dev/null
+      grace=0
+      while kill -0 "$pid" 2>/dev/null && [ "$grace" -lt 25 ]; do
+        sleep 0.2
+        grace=$((grace + 1))
+      done
+      if kill -0 "$pid" 2>/dev/null; then
+        pkill -KILL -P "$pid" 2>/dev/null
+        kill -KILL "$pid" 2>/dev/null
+      fi
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
+    sleep 0.2
+  done
+  wait "$pid"
+  rc=$?
+  [ "$rc" -ne 124 ] || rc=1
+  return "$rc"
+}
+
+# watch_run ID: 0 green; 1 red; 124 past CF_LAND_WATCH_TIMEOUT_SEC. A watch that
+# exits non-zero while the run still reads in progress (a dropped connection) is
+# repeated, up to WATCH_TRIES, within the same deadline.
+watch_run() {
+  local deadline=$((SECONDS + watch_timeout)) try=1 rc state status
+  while :; do
+    timed_watch "$1" "$deadline"
+    rc=$?
+    case "$rc" in 0 | 124) return "$rc" ;; esac
+    [ "$try" -lt "$WATCH_TRIES" ] || return 1
+    if ! state="$(run_state "$1")"; then
+      sleep "$poll"
+      state="$(run_state "$1")" || return 1
+    fi
+    status="${state%%$'\t'*}"
+    if [ -z "$status" ] || [ "$status" = completed ]; then
+      return 1
+    fi
+    say "gh run watch $1 ended while the run is $status; watching again"
+    try=$((try + 1))
+    sleep "$poll"
+  done
+}
+
+# e2e_flake ID: the run's only non-passing job is e2e, and it failed. Sets
+# flake_attempt to the run's attempt number, when gh reports one.
+e2e_flake() {
+  local json
+  flake_attempt=""
+  json="$(gh run view "$1" --json attempt,jobs)" || return 1
+  flake_attempt="$(printf '%s\n' "$json" | jq -r 'if (.attempt | type) == "number" then .attempt else empty end')" ||
+    flake_attempt=""
+  printf '%s\n' "$json" | jq -e '
+    [.jobs[]? | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral")] as $bad
+    | ($bad | length) == 1 and $bad[0].name == "e2e" and $bad[0].conclusion == "failure"
+  ' >/dev/null
+}
+
+# await_rerun ID ATTEMPT: poll `gh run view` until the run shows a new attempt:
+# an attempt number above ATTEMPT; or, only when gh reports no attempt number,
+# no longer the old attempt's jobs (e2e completed with failure). The rerun
+# endpoint is asynchronous, and `gh run watch --exit-status` on a run that still
+# reads completed exits at once with the old conclusion. Queued or running jobs carry an empty or null conclusion and a
+# status other than completed; an empty job list is a new attempt with no jobs
+# yet. Gives up after RERUN_POLLS and lets the watch decide.
+await_rerun() {
+  local i=0 json state before="$2"
+  case "$before" in *[!0-9]*) before="" ;; esac
+  while [ "$i" -lt "$RERUN_POLLS" ]; do
+    [ "$i" -eq 0 ] || sleep "$poll"
+    i=$((i + 1))
+    json="$(gh run view "$1" --json attempt,jobs)" || continue
+    state="$(printf '%s\n' "$json" | jq -r --arg before "$before" '
+      if $before != "" and (.attempt | type) == "number" then
+        (if .attempt > ($before | tonumber) then "started" else "old" end)
+      elif any(.jobs[]?; .name == "e2e" and (.conclusion // "") == "failure"
+                         and ((.status // "completed") == "completed")) then "old"
+      else "started" end
+    ')" || {
+      say "could not read run $1 while waiting for its rerun"
+      continue
+    }
+    [ "$state" != started ] || return 0
+  done
+  say "run $1 still reads as the failed attempt after $RERUN_POLLS polls; watching anyway"
+  return 1
+}
+
 # Resume: this issue's newest landing within HISTORY first-parent commits of
 # base, unless a revert of it is newer.
 history="$(g -C "$top" log --first-parent -n "$HISTORY" --format='%H %s' "$base")" ||
@@ -253,23 +367,38 @@ if [ -n "$landed" ] && [ -n "$branch_sha" ]; then
     say "issue #$issue landed before as $landed; $branch carries new work"
     landed=""
   fi
+elif [ -n "$landed" ]; then
+  # The branch is gone: resume only if the claim predates the landing; a newer
+  # claim is new work whose branch was never pushed.
+  landed_at="$(g -C "$top" log -1 --format=%ct "$landed")" || landed_at=""
+  if [ -z "$claim_at" ] || [ -z "$landed_at" ] || [ "$claim_at" -ge "$landed_at" ]; then
+    say "issue #$issue landed before as $landed, but its claim of $branch is not older than that landing"
+    landed=""
+  fi
 fi
 
 if [ -n "$landed" ]; then
   say "issue #$issue already landed as $landed; watching it instead of landing again"
+  trap '' HUP # a closed terminal must not kill land.sh while it watches main
   g -C "$top" worktree add --detach "$wt" "$base" >&2 || die "could not add worktree $wt on $base"
   sha="$landed"
 else
   [ -n "$branch_sha" ] || die "branch $branch is not on origin"
 
-  # Main must not already be red. No run, or no status fields: proceed.
+  # Main must not already be red. No run, or no status fields: proceed. A P0
+  # lands anyway; an e2e-only failure or a cancelled run gets one rerun first.
   json="$(gh run list --workflow ci --branch main --commit "$base" --json databaseId,url)" || json='[]'
   row="$(printf '%s\n' "$json" | jq -r '[.[] | "\(.databaseId)\t\(.url)"] | first // empty' 2>/dev/null)"
   if [ -n "$row" ]; then
     main_id="${row%%$'\t'*}"
     main_url="${row#*$'\t'}"
     i=0
-    while state="$(run_state "$main_id")"; do
+    main_reran=
+    while :; do
+      if ! state="$(run_state "$main_id")"; then
+        say "warning: could not read main's CI run $main_url; landing without its verdict"
+        break
+      fi
       status="${state%%$'\t'*}"
       conclusion="${state#*$'\t'}"
       if [ -n "$status" ] && [ "$status" != completed ]; then
@@ -281,15 +410,39 @@ else
         sleep "$poll"
         continue
       fi
-      case "$conclusion" in
-        '' | success | neutral | skipped) ;;
-        *)
-          say "main's CI run $main_url concluded $conclusion; not landing on a red main"
-          echo "MAIN-RED $main_url"
-          exit 8
-          ;;
-      esac
-      break
+      case "$conclusion" in '' | success | neutral | skipped) break ;; esac
+      if [ -n "$p0" ]; then
+        say "main's CI run $main_url concluded $conclusion, but issue #$issue is severity:P0; landing it"
+        break
+      fi
+      if [ -z "$main_reran" ]; then
+        main_reran=1
+        e2e_flake "$main_id"
+        flaky=$?
+        rerun_args=""
+        if [ "$conclusion" = cancelled ]; then
+          rerun_args="$main_id"
+        elif [ "$flaky" -eq 0 ]; then
+          rerun_args="$main_id --failed"
+        fi
+        if [ -n "$rerun_args" ]; then
+          say "main's CI run $main_url concluded $conclusion; rerunning it once (gh run rerun $rerun_args)"
+          # shellcheck disable=SC2086 # rerun_args is "<id>" or "<id> --failed"
+          if gh run rerun $rerun_args >&2; then
+            await_rerun "$main_id" "$flake_attempt"
+            if watch_run "$main_id"; then
+              say "main's rerun of $main_url is green"
+              break
+            fi
+            say "main's rerun of $main_url is not green"
+          else
+            say "gh run rerun $rerun_args failed"
+          fi
+        fi
+      fi
+      say "main's CI run $main_url is red ($conclusion); not landing on a red main"
+      echo "MAIN-RED $main_url"
+      exit 8
     done
   fi
 
@@ -340,7 +493,7 @@ else
   strip_ai() {
     LC_ALL=C grep -v -i -E \
       -e '^[[:space:]]*co-authored-by:.*(claude|anthropic|openai|gemini|google|antigravity|copilot|cursor|noreply@anthropic\.com)' \
-      -e 'generated (with|by) .*(claude|anthropic|openai|gemini|copilot|codex|cursor|antigravity|(^|[^a-z])ai([^a-z]|$))'
+      -e '^[^[:alnum:]]*generated (with|by) .*(claude|anthropic|openai|gemini|copilot|codex|cursor|antigravity|(^|[^a-z])ai([^a-z]|$))'
     [ $? -le 1 ]
   }
   subject="$(g -C "$wt" log -1 --format=%s HEAD)" || die "could not read the branch's newest subject"
@@ -379,91 +532,6 @@ $body" ;; esac
   esac
   say "pushed $sha to main"
 fi
-
-# timed_watch ID DEADLINE: `gh run watch` in the background, killed at DEADLINE
-# (in $SECONDS). 0 green; 1 not green; 124 deadline passed.
-timed_watch() {
-  local pid rc
-  gh run watch "$1" --exit-status </dev/null >&2 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
-  pid=$!
-  while kill -0 "$pid" 2>/dev/null; do
-    if [ "$SECONDS" -ge "$2" ]; then
-      pkill -TERM -P "$pid" 2>/dev/null
-      kill -TERM "$pid" 2>/dev/null
-      wait "$pid" 2>/dev/null
-      return 124
-    fi
-    sleep 0.2
-  done
-  wait "$pid"
-  rc=$?
-  [ "$rc" -ne 124 ] || rc=1
-  return "$rc"
-}
-
-# watch_run ID: 0 green; 1 red; 124 past CF_LAND_WATCH_TIMEOUT_SEC. A watch that
-# exits non-zero while the run still reads in progress (a dropped connection) is
-# repeated, up to WATCH_TRIES, within the same deadline.
-watch_run() {
-  local deadline=$((SECONDS + watch_timeout)) try=1 rc state status
-  while :; do
-    timed_watch "$1" "$deadline"
-    rc=$?
-    case "$rc" in 0 | 124) return "$rc" ;; esac
-    [ "$try" -lt "$WATCH_TRIES" ] || return 1
-    state="$(run_state "$1")" || return 1
-    status="${state%%$'\t'*}"
-    if [ -z "$status" ] || [ "$status" = completed ]; then
-      return 1
-    fi
-    say "gh run watch $1 ended while the run is $status; watching again"
-    try=$((try + 1))
-    sleep "$poll"
-  done
-}
-
-# e2e_flake ID: the run's only non-passing job is e2e, and it failed. Sets
-# flake_attempt to the run's attempt number, when gh reports one.
-e2e_flake() {
-  local json
-  flake_attempt=""
-  json="$(gh run view "$1" --json attempt,jobs)" || return 1
-  flake_attempt="$(printf '%s\n' "$json" | jq -r 'if (.attempt | type) == "number" then .attempt else empty end')" ||
-    flake_attempt=""
-  printf '%s\n' "$json" | jq -e '
-    [.jobs[]? | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral")] as $bad
-    | ($bad | length) == 1 and $bad[0].name == "e2e" and $bad[0].conclusion == "failure"
-  ' >/dev/null
-}
-
-# await_rerun ID ATTEMPT: poll `gh run view` until the run shows a new attempt:
-# an attempt number above ATTEMPT, or no longer the old attempt's jobs (e2e
-# completed with failure). The rerun endpoint is asynchronous, and `gh run watch
-# --exit-status` on a run that still reads completed exits at once with the old
-# conclusion. Queued or running jobs carry an empty or null conclusion and a
-# status other than completed; an empty job list is a new attempt with no jobs
-# yet. Gives up after RERUN_POLLS and lets the watch decide.
-await_rerun() {
-  local i=0 json state before="$2"
-  case "$before" in *[!0-9]*) before="" ;; esac
-  while [ "$i" -lt "$RERUN_POLLS" ]; do
-    [ "$i" -eq 0 ] || sleep "$poll"
-    i=$((i + 1))
-    json="$(gh run view "$1" --json attempt,jobs)" || continue
-    state="$(printf '%s\n' "$json" | jq -r --arg before "$before" '
-      if $before != "" and (.attempt | type) == "number" and .attempt > ($before | tonumber) then "started"
-      elif any(.jobs[]?; .name == "e2e" and (.conclusion // "") == "failure"
-                         and ((.status // "completed") == "completed")) then "old"
-      else "started" end
-    ')" || {
-      say "could not read run $1 while waiting for its rerun"
-      continue
-    }
-    [ "$state" != started ] || return 0
-  done
-  say "run $1 still reads as the failed attempt after $RERUN_POLLS polls; watching anyway"
-  return 1
-}
 
 # Step 6: watch, with at most one e2e rerun.
 green=
