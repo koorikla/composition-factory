@@ -88,7 +88,10 @@ To prevent regressions and collisions between concurrent automation agents:
   worktree isolation, port allocation, the test-first loop, the gates, and the handover.
   The authoring side of that loop is `.claude/skills/backlog-authoring/`.
 
-- **One-Driver Rule**: Exactly one driver merges to `main`. All other agents work in isolated topic branch worktrees and hand over PRs or clean branches.
+- **One-Driver Rule**: Exactly one driver merges to `main`. The scheduled driver is described in
+  [`docs/routines/issue-driver.md`](docs/routines/issue-driver.md) (selection, parallel waves by
+  disjoint file sets, merge-then-CI-then-close, the 5-hour budget); the scheduled oracle that
+  files and re-verifies issues is [`docs/routines/oracle.md`](docs/routines/oracle.md). All other agents work in isolated topic branch worktrees and hand over PRs or clean branches.
 - **Pre-Merge Synchronization**: Always run `git fetch && git log main..origin/main` before any merge to ensure no stale assumptions.
 - **Post-Merge CI Check**: The driver that merges to `main` must watch the resulting `ci` run to completion (`gh run watch <id> --exit-status`) and fix or revert what it broke — a merge is not done until CI is green. Two of the five jobs (`cluster`, `e2e`) exercise a real kind cluster and a browser and cannot be reproduced by unit tests, so a locally-green tree says nothing about them. If `e2e` fails, rerun it once before treating it as a regression: its canvas drag tests are flaky in CI. Subagents working in topic-branch worktrees are exempt — they hand over branches and the driver owns the merge and its CI.
 - **Test-First Backlog Ticking**: Never tick a backlog item without an automated test that fails without the change.
