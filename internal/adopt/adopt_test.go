@@ -5397,3 +5397,275 @@ spec:
 		t.Fatalf("bp.Validate() failed: %v", err)
 	}
 }
+
+func TestCF277_AdoptDotSpecDotObservedSyntax(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- if $.spec.enabled }}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: conditioned
+          spec:
+            forProvider:
+              region: us-east-1
+          {{- end }}
+          {{- range $i := until (int $.spec.count) }}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: replicated
+          spec:
+            forProvider:
+              region: us-east-1
+          {{- end }}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: wired
+          spec:
+            forProvider:
+              region: "{{ $.spec.region }}"
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	var conditioned, replicated, wired *blueprint.Resource
+	for i := range bp.Spec.Resources {
+		switch bp.Spec.Resources[i].Name {
+		case "conditioned":
+			conditioned = &bp.Spec.Resources[i]
+		case "replicated":
+			replicated = &bp.Spec.Resources[i]
+		case "wired":
+			wired = &bp.Spec.Resources[i]
+		}
+	}
+
+	if conditioned == nil {
+		t.Fatalf("conditioned resource not found in adopted blueprint: %+v", bp.Spec.Resources)
+	}
+	if conditioned.When != "params.enabled" {
+		t.Errorf("conditioned.When = %q, want %q", conditioned.When, "params.enabled")
+	}
+
+	if replicated == nil {
+		t.Fatalf("replicated resource not found in adopted blueprint: %+v", bp.Spec.Resources)
+	}
+	if replicated.ForEach != "params.count" {
+		t.Errorf("replicated.ForEach = %q, want %q", replicated.ForEach, "params.count")
+	}
+
+	if wired == nil {
+		t.Fatalf("wired resource not found in adopted blueprint: %+v", bp.Spec.Resources)
+	}
+	if got := wired.Fields["region"].From; got != "params.region" {
+		t.Errorf("wired.Fields[\"region\"].From = %q, want %q (field: %+v)", got, "params.region", wired.Fields["region"])
+	}
+
+	for _, p := range []string{"enabled", "count", "region"} {
+		if _, ok := bp.Spec.XRD.Parameters[p]; !ok {
+			t.Errorf("expected parameter %q in bp.Spec.XRD.Parameters, got: %+v (report drops: %+v)", p, bp.Spec.XRD.Parameters, report.Drops)
+		}
+	}
+
+	manifestObs := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp-obs
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- if $.observed.composite.resource.spec.enabled }}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: conditioned
+          spec:
+            forProvider:
+              region: us-east-1
+          {{- end }}
+          {{- range $i := until (int $.observed.composite.resource.spec.count) }}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: replicated
+          spec:
+            forProvider:
+              region: us-east-1
+          {{- end }}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: wired
+          spec:
+            forProvider:
+              region: "{{ $.observed.composite.resource.spec.region }}"
+`
+
+	bpObs, reportObs, err := Adopt([]byte(manifestObs), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	var conditionedObs, replicatedObs, wiredObs *blueprint.Resource
+	for i := range bpObs.Spec.Resources {
+		switch bpObs.Spec.Resources[i].Name {
+		case "conditioned":
+			conditionedObs = &bpObs.Spec.Resources[i]
+		case "replicated":
+			replicatedObs = &bpObs.Spec.Resources[i]
+		case "wired":
+			wiredObs = &bpObs.Spec.Resources[i]
+		}
+	}
+
+	if conditionedObs == nil {
+		t.Fatalf("conditioned resource not found in adopted blueprint: %+v", bpObs.Spec.Resources)
+	}
+	if conditionedObs.When != "params.enabled" {
+		t.Errorf("conditionedObs.When = %q, want %q", conditionedObs.When, "params.enabled")
+	}
+
+	if replicatedObs == nil {
+		t.Fatalf("replicated resource not found in adopted blueprint: %+v", bpObs.Spec.Resources)
+	}
+	if replicatedObs.ForEach != "params.count" {
+		t.Errorf("replicatedObs.ForEach = %q, want %q", replicatedObs.ForEach, "params.count")
+	}
+
+	if wiredObs == nil {
+		t.Fatalf("wired resource not found in adopted blueprint: %+v", bpObs.Spec.Resources)
+	}
+	if got := wiredObs.Fields["region"].From; got != "params.region" {
+		t.Errorf("wiredObs.Fields[\"region\"].From = %q, want %q (field: %+v)", got, "params.region", wiredObs.Fields["region"])
+	}
+
+	for _, p := range []string{"enabled", "count", "region"} {
+		if _, ok := bpObs.Spec.XRD.Parameters[p]; !ok {
+			t.Errorf("expected parameter %q in bpObs.Spec.XRD.Parameters, got: %+v (report drops: %+v)", p, bpObs.Spec.XRD.Parameters, reportObs.Drops)
+		}
+	}
+}
+
+func TestCF277_AdoptDotSpecEqualityGuards(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp-eq
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- if eq $.spec.tier "pro" }}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: pro-bucket
+          spec:
+            forProvider:
+              region: us-east-1
+          {{- end }}
+          {{- if ne $.observed.composite.resource.spec.tier "basic" }}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: nonbasic-bucket
+          spec:
+            forProvider:
+              region: us-east-1
+          {{- end }}
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	var proBucket, nonbasicBucket *blueprint.Resource
+	for i := range bp.Spec.Resources {
+		switch bp.Spec.Resources[i].Name {
+		case "pro-bucket":
+			proBucket = &bp.Spec.Resources[i]
+		case "nonbasic-bucket":
+			nonbasicBucket = &bp.Spec.Resources[i]
+		}
+	}
+
+	if proBucket == nil {
+		t.Fatalf("pro-bucket resource not found: %+v", bp.Spec.Resources)
+	}
+	if proBucket.When != "params.tier == \"pro\"" {
+		t.Errorf("proBucket.When = %q, want %q", proBucket.When, "params.tier == \"pro\"")
+	}
+
+	if nonbasicBucket == nil {
+		t.Fatalf("nonbasic-bucket resource not found: %+v", bp.Spec.Resources)
+	}
+	if nonbasicBucket.When != "params.tier != \"basic\"" {
+		t.Errorf("nonbasicBucket.When = %q, want %q", nonbasicBucket.When, "params.tier != \"basic\"")
+	}
+
+	if _, ok := bp.Spec.XRD.Parameters["tier"]; !ok {
+		t.Errorf("expected parameter 'tier' in XRD parameters, got: %+v (drops: %+v)", bp.Spec.XRD.Parameters, report.Drops)
+	}
+}

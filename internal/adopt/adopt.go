@@ -991,17 +991,17 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 
 var (
 	reDefine             = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
-	reParamVar           = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reParamVar           = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reEnvVar             = regexp.MustCompile(`\{\{-?\s*(?:default\s+(?:"[^"]*"|\S+)\s+)?(?:\$env\.([a-zA-Z0-9_.-]+?)|\(index\s+\$env\s+"([a-zA-Z0-9_.-]+?)"\)|index\s+\$env\s+"([a-zA-Z0-9_.-]+?)")(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*(?:\(index\s+(?:\$\.?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)|(?:\$\.?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+))\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reXRResourceRef      = regexp.MustCompile(`\{\{-?\s*\$xr\s*-?\}\}-([a-zA-Z0-9-]+)`)
-	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
-	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+eq\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
-	reWhenIfNe           = regexp.MustCompile(`\{\{-?\s*if\s+ne\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
+	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
+	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+eq\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
+	reWhenIfNe           = regexp.MustCompile(`\{\{-?\s*if\s+ne\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
 	reWhenIfEnvSimple    = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\$env\.([a-zA-Z0-9_.-]+)|default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\))\s*-?\}\}`)
 	reWhenIfEnvEq        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\(?eq\s+\$env\.([a-zA-Z0-9_.-]+)\s+"?([^"]+?)"?\)?|eq\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\s+"?([^"]+?)"?)\s*-?\}\}`)
 	reWhenIfEnvNe        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:or\s+\(not\s+\(hasKey\s+\$env\s+"[^"]+"\)\)\s+)?\(?ne\s+\$env\.([a-zA-Z0-9_.-]+)\s+"?([^"]+?)"?\)?|ne\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\s+"?([^"]+?)"?)\s*-?\}\}`)
-	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
+	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
 	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$env\.([a-zA-Z0-9_.-]+)|\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\))\)\s*-?\}\}`)
 	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(index\s+\$?[.]observed\.resources\s+"([^"]+)"\)\.resource\.status\.([a-zA-Z0-9_.-]+)|\$?[.]observed\.resources\.([a-zA-Z0-9_-]+)\.resource\.status\.([a-zA-Z0-9_.-]+))\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
@@ -3029,7 +3029,7 @@ func matchesParamRef(s string, paramName, memberName string) bool {
 
 	// 1. Direct or descendant reference to fullPath:
 	// e.g. $spec.network.vpc.id or params.network.vpc.id (or $spec.network.vpc if memberName is "vpc")
-	reMember := regexp.MustCompile(`(?:\$spec|\.spec|params)\.` + regexp.QuoteMeta(fullPath) + `\b`)
+	reMember := regexp.MustCompile(`(?:\$spec|\$?[.]spec|params|\$?[.]observed\.composite\.resource\.spec)\.` + regexp.QuoteMeta(fullPath) + `\b`)
 	if reMember.MatchString(s) {
 		return true
 	}
@@ -3041,7 +3041,7 @@ func matchesParamRef(s string, paramName, memberName string) bool {
 	if len(parts) > 1 {
 		for i := 1; i < len(parts); i++ {
 			ancestor := strings.Join(parts[:i], ".")
-			reAncestor := regexp.MustCompile(`(?:\$spec|\.spec|params)\.` + regexp.QuoteMeta(ancestor) + `\b`)
+			reAncestor := regexp.MustCompile(`(?:\$spec|\$?[.]spec|params|\$?[.]observed\.composite\.resource\.spec)\.` + regexp.QuoteMeta(ancestor) + `\b`)
 			locs := reAncestor.FindAllStringIndex(s, -1)
 			for _, loc := range locs {
 				end := loc[1]
