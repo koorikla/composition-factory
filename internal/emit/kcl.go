@@ -343,6 +343,21 @@ func translateObservedAccessToKCL(expr string) string {
 
 func translateWhenToKCL(when string) string {
 	when = strings.TrimSpace(when)
+	source, name, op, literal, err := blueprint.ParseWhen(when)
+	if err == nil {
+		target := "_spec?."
+		if source == "env" {
+			target = "_env?."
+		}
+		switch op {
+		case "":
+			return fmt.Sprintf("%s%s", target, name)
+		case "==":
+			return fmt.Sprintf("%s%s == %q", target, name, literal)
+		case "!=":
+			return fmt.Sprintf("%s%s != %q", target, name, literal)
+		}
+	}
 	when = strings.ReplaceAll(when, "params.", "_spec?.")
 	when = kclBoolTrueRE.ReplaceAllString(when, "True")
 	when = kclBoolFalseRE.ReplaceAllString(when, "False")

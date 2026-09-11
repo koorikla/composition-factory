@@ -179,6 +179,73 @@ func TestTranslateWhenToPython_BooleanSubstrings(t *testing.T) {
 	}
 }
 
+func TestTranslateWhenToPython_StringComparisons(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{
+			in:   `params.version == "1.0"`,
+			want: `spec.get("version") == "1.0"`,
+		},
+		{
+			in:   `params.code == "123"`,
+			want: `spec.get("code") == "123"`,
+		},
+		{
+			in:   `params.flag == "false"`,
+			want: `spec.get("flag") == "false"`,
+		},
+		{
+			in:   `params.flag == "true"`,
+			want: `spec.get("flag") == "true"`,
+		},
+		{
+			in:   "params.enabled",
+			want: `bool(spec.get("enabled"))`,
+		},
+	}
+
+	for _, tc := range cases {
+		got := translateWhenToPython(tc.in)
+		if got != tc.want {
+			t.Errorf("translateWhenToPython(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestPythonCompositionWhenCondition(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	b.Spec.XRD.Parameters["version"] = blueprint.Parameter{Type: "string", Default: "1.0"}
+	b.Spec.XRD.Parameters["flag"] = blueprint.Parameter{Type: "string", Default: "false"}
+	b.Spec.Resources = append(b.Spec.Resources,
+		blueprint.Resource{
+			Name:   "queue-v1",
+			Kind:   "Queue",
+			When:   `params.version == "1.0"`,
+			Fields: map[string]blueprint.Field{"region": {Value: "eu-north-1"}},
+		},
+		blueprint.Resource{
+			Name:   "queue-flag",
+			Kind:   "Queue",
+			When:   `params.flag == "false"`,
+			Fields: map[string]blueprint.Field{"region": {Value: "eu-north-1"}},
+		},
+	)
+	out, err := Composition(b, testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `if spec.get("version") == "1.0":`) {
+		t.Errorf("expected python composition to contain 'if spec.get(\"version\") == \"1.0\":', got:\n%s", s)
+	}
+	if !strings.Contains(s, `if spec.get("flag") == "false":`) {
+		t.Errorf("expected python composition to contain 'if spec.get(\"flag\") == \"false\":', got:\n%s", s)
+	}
+}
+
 func TestPythonStatusWireWalksResourceStatus(t *testing.T) {
 	got := pythonStructuredRHS(structuredRHS{kind: rhsStatus, resource: "role", statusPath: "atProvider.arn"}, "")
 	want := `ocds.get("role", {}).get("resource", {}).get("status", {}).get("atProvider", {}).get("arn")`

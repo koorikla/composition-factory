@@ -352,21 +352,9 @@ func translateWhenToPython(when string) string {
 		case "":
 			return fmt.Sprintf("bool(%s.get(%q))", targetDict, name)
 		case "==":
-			if literal == "true" {
-				return fmt.Sprintf("bool(%s.get(%q)) is True", targetDict, name)
-			}
-			if literal == "false" {
-				return fmt.Sprintf("bool(%s.get(%q)) is False", targetDict, name)
-			}
-			return fmt.Sprintf("%s.get(%q) == %s", targetDict, name, pythonFormatLiteral(literal, ""))
+			return fmt.Sprintf("%s.get(%q) == %s", targetDict, name, pythonFormatLiteral(literal, "string"))
 		case "!=":
-			if literal == "true" {
-				return fmt.Sprintf("bool(%s.get(%q)) is not True", targetDict, name)
-			}
-			if literal == "false" {
-				return fmt.Sprintf("bool(%s.get(%q)) is not False", targetDict, name)
-			}
-			return fmt.Sprintf("%s.get(%q) != %s", targetDict, name, pythonFormatLiteral(literal, ""))
+			return fmt.Sprintf("%s.get(%q) != %s", targetDict, name, pythonFormatLiteral(literal, "string"))
 		}
 	}
 	for _, op := range []string{"==", "!="} {
