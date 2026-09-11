@@ -17,11 +17,12 @@ import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
 import { startDrag } from "../drag.js";
-import { listWires, fanOut, parseFrom } from "../wires.js";
+import { listWires, fanOut, envFanOut, parseFrom } from "../wires.js";
 import { famOf, uniqueResourceName, COLORS } from "../utils.js";
 import { switchTab } from "./palette.js";
 
 const XR_ID = "xrd"; // store.selectedResource / positions key for the composite node
+const ENV_ID = "environment"; // store.selectedResource / positions key for EnvironmentConfig node
 
 let S = defaultStore;
 let A = defaultApi;
@@ -150,6 +151,36 @@ function xrCardHTML(d, sel) {
   return h;
 }
 
+function envCardHTML(d, sel) {
+  const env = (d && d.spec && d.spec.environment) || {};
+  const configName = "default";
+  const pos = S.getPosition(ENV_ID) || { x: 40, y: 240 };
+  let h = '<div class="node' + (sel === ENV_ID ? " sel" : "") + '" data-id="' + esc(ENV_ID) + '" data-kind="EnvironmentConfig" data-name="' + esc(configName) + '"' +
+    ' tabindex="0" role="region" aria-label="' + esc("EnvironmentConfig resource " + configName) + '"' +
+    ' style="left:' + pos.x + 'px;top:' + pos.y + 'px">' +
+    '<div class="node-h" style="background:var(--shared-soft)">' +
+    '<span class="sw" style="background:var(--shared)"></span>' +
+    '<span class="k">EnvironmentConfig</span>' +
+    '<span class="nm">' + esc(configName) + '</span></div>' +
+    '<div class="node-grp">apiextensions.crossplane.io/v1beta1</div>' +
+    '<div class="ports">';
+  Object.keys(env).sort().forEach(function (name) {
+    const k = env[name] || {};
+    const n = envFanOut(d, name);
+    h += portRow(ENV_ID, name, {
+      dir: "out",
+      dotColor: "var(--shared)",
+      req: !!k.required,
+      ty: k.type || "",
+      label: name,
+      title: name + (k.description ? " — " + k.description : ""),
+      fan: n > 1 ? '<span class="fan" style="pointer-events:none">×' + n + '</span>' : "",
+    });
+  });
+  h += '</div></div>';
+  return h;
+}
+
 function resourceCardHTML(d, r, sel) {
   const pos = S.getPosition(r.name) || { x: 330, y: 40 };
   const fam = famOf(r.provider);
@@ -199,6 +230,8 @@ function resourceCardHTML(d, r, sel) {
         dot = fanOut(d, parsed.param) > 1 ? "var(--shared)" : COLORS.xrd;
       } else if (parsed.kind === "status") {
         dot = "var(--wire-status)";
+      } else if (parsed.kind === "env") {
+        dot = "var(--shared)";
       }
     }
     const isFieldReq = !!(sf && (sf.required || sf.requiredChain));
@@ -238,6 +271,8 @@ function resourceCardHTML(d, r, sel) {
         dot = fanOut(d, parsed.param) > 1 ? "var(--shared)" : COLORS.xrd;
       } else if (parsed.kind === "status") {
         dot = "var(--wire-status)";
+      } else if (parsed.kind === "env") {
+        dot = "var(--shared)";
       }
     }
     h += portRow(r.name, "envelope." + p, {
@@ -261,7 +296,7 @@ function resourceCardHTML(d, r, sel) {
       const wired = f && typeof f.from === "string";
       h += portRow(r.name, "annotations." + k, {
         dir: "in",
-        dotColor: wired && f.from.indexOf("resources.") === 0 ? "var(--wire-status)" : "var(--wire-xrd)",
+        dotColor: wired && f.from.indexOf("resources.") === 0 ? "var(--wire-status)" : (wired && f.from.indexOf("env.") === 0 ? "var(--shared)" : "var(--wire-xrd)"),
         req: false,
         ty: wired ? "" : (f && f.raw !== undefined && f.raw !== "" ? "raw" : "value"),
         label: shortPath(k),
@@ -379,7 +414,14 @@ function applyDependencyLayout(onlyUnplaced) {
     const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(id) + '"]');
     return el ? el.offsetHeight : 160;
   }
-  let x = X0 + width(XR_ID) + GX; // layer 1 starts right of the XR card
+  const hasEnv = !!(d.spec && d.spec.environment && Object.keys(d.spec.environment).length > 0);
+  let sourceW = width(XR_ID);
+  if (hasEnv) {
+    sourceW = Math.max(sourceW, width(ENV_ID));
+    const envY = Y0 + height(XR_ID) + GY;
+    if (!S.getPosition(ENV_ID) || !onlyUnplaced) S.setPosition(ENV_ID, { x: X0, y: envY });
+  }
+  let x = X0 + sourceW + GX; // layer 1 starts right of the source cards
   if (!S.getPosition(XR_ID) || !onlyUnplaced) S.setPosition(XR_ID, { x: X0, y: Y0 });
   Object.keys(byLayer).map(Number).sort(function (a, b) { return a - b; }).forEach(function (L) {
     let y = Y0;
@@ -439,7 +481,11 @@ function render() {
   const d = doc();
   if (!d) { canvasEl.innerHTML = ""; wiresEl.innerHTML = ""; return; }
   const sel = S.state.selectedResource;
+  const hasEnv = !!(d.spec && d.spec.environment && Object.keys(d.spec.environment).length > 0);
   const desired = [{ id: XR_ID, html: xrCardHTML(d, sel) }];
+  if (hasEnv) {
+    desired.push({ id: ENV_ID, html: envCardHTML(d, sel) });
+  }
   (d.spec.resources || []).forEach(function (r) {
     desired.push({ id: r.name, html: resourceCardHTML(d, r, sel) });
   });
@@ -504,7 +550,7 @@ function render() {
   });
   // measured layout pass for cards that have no stored position
   const freshCards = (d.spec.resources || []).some(function (r) { return !S.getPosition(r.name); }) ||
-    !S.getPosition(XR_ID);
+    !S.getPosition(XR_ID) || (hasEnv && !S.getPosition(ENV_ID));
   let sig = "";
   if (freshCards || autoPlaced.size > 0) {
     canvasEl.querySelectorAll(".node").forEach(function (el) {
@@ -546,7 +592,7 @@ let selectedWire = null;
 
 function wireKey(w) {
   if (!w) return "";
-  return (w.kind || "") + ":" + (w.srcResource || "") + ":" + (w.srcPath || "") + ":" + (w.param || "") + ":" + (w.resource || "") + ":" + (w.path || "");
+  return (w.kind || "") + ":" + (w.srcResource || "") + ":" + (w.srcPath || "") + ":" + (w.param || "") + ":" + (w.envKey || "") + ":" + (w.resource || "") + ":" + (w.path || "");
 }
 
 function deleteWire(w) {
@@ -597,6 +643,12 @@ function drawWires() {
       cls = "wire-status";
       col = "var(--wire-status)";
       title = esc(w.srcResource) + ".status." + esc(w.srcPath) + " \u2192 " + esc(w.resource) + "." + esc(w.path);
+    } else if (w.kind === "env") {
+      a = portPos(ENV_ID, w.envKey, cwRect);
+      b = portPos(w.resource, w.path, cwRect);
+      cls = "wire-shared";
+      col = "var(--shared)";
+      title = "env." + esc(w.envKey) + " \u2192 " + esc(w.resource) + "." + esc(w.path);
     } else {
       a = portPos(XR_ID, w.param, cwRect);
       b = portPos(w.resource, w.path, cwRect);
@@ -868,7 +920,7 @@ function onContextMenu(e) {
   }
 
   const n = e.target.closest(".node");
-  if (!n || n.getAttribute("data-id") === XR_ID) return; // native browser menu elsewhere
+  if (!n || n.getAttribute("data-id") === XR_ID || n.getAttribute("data-id") === ENV_ID) return; // native browser menu elsewhere
   e.preventDefault();
   const name = n.getAttribute("data-id");
   S.select(name);
@@ -995,7 +1047,7 @@ function onKeyDown(e) {
   }
 
   const sel = S.state.selectedResource;
-  if (!sel || sel === XR_ID) return;
+  if (!sel || sel === XR_ID || sel === ENV_ID) return;
   const d = doc();
   const res = d && (d.spec.resources || []).find(function (r) { return r.name === sel; });
   const mod = e.metaKey || e.ctrlKey;
@@ -1117,6 +1169,8 @@ function applyWire(srcOwner, srcPath, targetRes, targetPath) {
   let fromExpr = "";
   if (srcOwner === XR_ID) {
     fromExpr = "params." + srcPath;
+  } else if (srcOwner === ENV_ID || srcOwner === "environment") {
+    fromExpr = "env." + srcPath;
   } else {
     fromExpr = "resources." + srcOwner + ".status." + srcPath.replace(/^status\./, "");
   }
@@ -1396,10 +1450,11 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
   pop.style.left = Math.max(10, left) + "px";
   pop.style.top = Math.max(10, top) + "px";
 
-  const srcLabel = srcOwner === XR_ID ? "$" + srcPath : srcOwner + "." + srcPath.replace(/^status\./, "");
+  const isEnv = srcOwner === ENV_ID || srcOwner === "environment";
+  const srcLabel = srcOwner === XR_ID ? "$" + srcPath : (isEnv ? "env." + srcPath : srcOwner + "." + srcPath.replace(/^status\./, ""));
   pop.innerHTML =
     '<div class="wire-picker-h">' +
-    '<span>Wire <span style="color:var(--wire-xrd)">' + esc(srcLabel) + '</span> \u2192 ' + esc(targetRes) + '</span>' +
+    '<span>Wire <span style="color:' + (isEnv ? 'var(--shared)' : 'var(--wire-xrd)') + '">' + esc(srcLabel) + '</span> \u2192 ' + esc(targetRes) + '</span>' +
     '<button class="del" id="wire-picker-close" style="margin-left:auto;cursor:pointer">\u00d7</button></div>' +
     '<div style="padding:6px 10px;border-bottom:1px solid var(--rule)">' +
     '<input id="wire-picker-search" class="search" style="width:100%" placeholder="Search fields, envelope, annotations\u2026" autofocus>' +
@@ -1420,6 +1475,9 @@ function openFieldPicker(x, y, srcOwner, srcPath, targetRes) {
   if (srcOwner === XR_ID) {
     paramObj = (d.spec.xrd && d.spec.xrd.parameters && d.spec.xrd.parameters[srcPath]) || {};
     srcType = paramObj.type || "string";
+  } else if (isEnv) {
+    const envObj = (d.spec && d.spec.environment && d.spec.environment[srcPath]) || {};
+    srcType = envObj.type || "string";
   }
 
   const pickerContext = {
@@ -1548,7 +1606,8 @@ function onWireDragDown(e, portEl) {
 
   let previewPath = null;
   const isStatus = path.indexOf("status.") === 0;
-  const strokeColor = owner === XR_ID ? COLORS.xrd : (isStatus ? "var(--wire-status)" : COLORS.xrd);
+  const isEnv = owner === ENV_ID || owner === "environment";
+  const strokeColor = owner === XR_ID ? COLORS.xrd : (isEnv ? "var(--shared)" : (isStatus ? "var(--wire-status)" : COLORS.xrd));
 
   let lastHoverNode = null;
   let lastHoverPort = null;
@@ -1564,12 +1623,12 @@ function onWireDragDown(e, portEl) {
     const tPath = targetPortEl.getAttribute("data-path");
     if (!tOwner || tOwner === owner) return false;
     if (dir === "out") {
-      if (tOwner === XR_ID) return false;
+      if (tOwner === XR_ID || tOwner === ENV_ID || tOwner === "environment") return false;
       if (tPath.startsWith("status.") || tPath.indexOf("status.") === 0) return false;
       return true;
     }
     if (dir === "in") {
-      return tOwner === XR_ID || tPath.startsWith("status.") || tPath.indexOf("status.") === 0;
+      return tOwner === XR_ID || tOwner === ENV_ID || tOwner === "environment" || tPath.startsWith("status.") || tPath.indexOf("status.") === 0;
     }
     return false;
   }
@@ -1612,7 +1671,7 @@ function onWireDragDown(e, portEl) {
       lastHoverPort = p;
       p.classList.add("wire-target-hover");
     } else if (n && n.getAttribute("data-id") !== owner) {
-      if (dir === "out" && n.getAttribute("data-id") !== XR_ID) {
+      if (dir === "out" && n.getAttribute("data-id") !== XR_ID && n.getAttribute("data-id") !== ENV_ID && n.getAttribute("data-id") !== "environment") {
         lastHoverNode = n;
         n.classList.add("wire-target-hover");
       }
@@ -1643,9 +1702,9 @@ function onWireDragDown(e, portEl) {
     if (targetPort) {
       const tOwner = targetPort.getAttribute("data-owner");
       const tPath = targetPort.getAttribute("data-path");
-      if (dir === "out" && tOwner !== XR_ID) {
+      if (dir === "out" && tOwner !== XR_ID && tOwner !== ENV_ID && tOwner !== "environment") {
         applyWire(owner, path, tOwner, tPath);
-      } else if (dir === "in" && (tOwner === XR_ID || tPath.indexOf("status.") === 0)) {
+      } else if (dir === "in" && (tOwner === XR_ID || tOwner === ENV_ID || tOwner === "environment" || tPath.indexOf("status.") === 0)) {
         applyWire(tOwner, tPath, owner, path);
       }
       return;
@@ -1654,7 +1713,7 @@ function onWireDragDown(e, portEl) {
     if (targetNode) {
       const tId = targetNode.getAttribute("data-id");
       if (tId && tId !== owner) {
-        if (dir === "out" && tId !== XR_ID) {
+        if (dir === "out" && tId !== XR_ID && tId !== ENV_ID && tId !== "environment") {
           openFieldPicker(ev.clientX, ev.clientY, owner, path, tId);
         }
       }

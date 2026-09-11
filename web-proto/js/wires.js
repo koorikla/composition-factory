@@ -10,12 +10,15 @@
 /**
  * Parse a from: expression into its wire descriptor.
  * @param {string} from
- * @returns {{kind: "param", param: string}|{kind: "status", resource: string, statusPath: string}|null}
+ * @returns {{kind: "param", param: string}|{kind: "env", key: string}|{kind: "status", resource: string, statusPath: string}|null}
  */
 export function parseFrom(from) {
   if (typeof from !== "string") return null;
   if (from.indexOf("params.") === 0) {
     return { kind: "param", param: from.slice("params.".length) };
+  }
+  if (from.indexOf("env.") === 0) {
+    return { kind: "env", key: from.slice("env.".length) };
   }
   if (from.indexOf("resources.") === 0) {
     const rest = from.slice("resources.".length);
@@ -37,7 +40,7 @@ const docFanOutCache = new WeakMap();
 /**
  * List every wire in the document.
  * @param {Object} doc The full blueprint document.
- * @returns {Array<{kind:string, param?:string, srcResource?:string, srcPath?:string, resource:string, path:string, from:string}>}
+ * @returns {Array<{kind:string, param?:string, envKey?:string, srcResource?:string, srcPath?:string, resource:string, path:string, from:string}>}
  */
 export function listWires(doc) {
   if (!doc || typeof doc !== "object") return [];
@@ -58,6 +61,15 @@ export function listWires(doc) {
           out.push({
             kind: "param",
             param: parsed.param,
+            resource: r.name,
+            path: isEnv ? ("envelope." + path) : path,
+            from: f.from,
+            isEnvelope: !!isEnv
+          });
+        } else if (parsed.kind === "env") {
+          out.push({
+            kind: "env",
+            envKey: parsed.key,
             resource: r.name,
             path: isEnv ? ("envelope." + path) : path,
             from: f.from,
@@ -89,6 +101,9 @@ export function listWires(doc) {
         if (parsed.kind === "param") {
           out.push({ kind: "param", param: parsed.param, resource: r.name,
             path: "annotations." + key, from: f.from, isAnnotation: true });
+        } else if (parsed.kind === "env") {
+          out.push({ kind: "env", envKey: parsed.key, resource: r.name,
+            path: "annotations." + key, from: f.from, isAnnotation: true });
         } else if (parsed.kind === "status") {
           out.push({ kind: "status", srcResource: parsed.resource, srcPath: parsed.statusPath,
             resource: r.name, path: "annotations." + key, from: f.from, isAnnotation: true });
@@ -116,6 +131,8 @@ export function fanOutMap(doc) {
     const w = wires[i];
     if (w.kind === "param" && w.param) {
       map[w.param] = (map[w.param] || 0) + 1;
+    } else if (w.kind === "env" && w.envKey) {
+      map["env." + w.envKey] = (map["env." + w.envKey] || 0) + 1;
     }
   }
   docFanOutCache.set(doc, map);
@@ -131,4 +148,15 @@ export function fanOutMap(doc) {
 export function fanOut(doc, param) {
   if (!doc) return 0;
   return fanOutMap(doc)[param] || 0;
+}
+
+/**
+ * Fan-out of one environment key: how many fields it is wired into.
+ * @param {Object} doc The full blueprint document.
+ * @param {string} key Environment key name (without the "env." prefix).
+ * @returns {number}
+ */
+export function envFanOut(doc, key) {
+  if (!doc) return 0;
+  return fanOutMap(doc)["env." + key] || 0;
 }
