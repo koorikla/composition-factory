@@ -67,6 +67,7 @@ let providersErr = null;     // verbatim server error from the last add/list
 let replaceRef = null;       // failed source the add field is replacing (CF-152), or null
 let catRows = null;          // catalogue search results, null = untouched
 let catTimer = null;
+let catQuery = "";           // active search query for catalogue
 let fnRows = null;           // functions catalogue search results, null = untouched
 let fnTimer = null;
 let srcSubTab = "prov";      // "prov" | "fn" | "cls"
@@ -230,10 +231,21 @@ function drawKindsEmpty(q) {
     const doc = store && store.state && store.state.doc;
     const docSources = (doc && doc.spec && doc.spec.sources) || [];
     const installed = providers !== null ? providers : docSources;
+    const qLower = (q || "").toLowerCase();
+    const rankedCat = kindsCatMatches.slice();
+    if (qLower) {
+      rankedCat.sort(function (a, b) {
+        const aMatch = (a.name || "").toLowerCase().indexOf(qLower) !== -1;
+        const bMatch = (b.name || "").toLowerCase().indexOf(qLower) !== -1;
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        return 0;
+      });
+    }
 
     h += '<div style="margin-top:12px;text-align:left;border:1px solid var(--rule);border-radius:6px;background:var(--surface);overflow:hidden">';
     h += '<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted);background:var(--sunk);border-bottom:1px solid var(--rule);text-transform:uppercase;letter-spacing:0.5px">Matching Catalogue Providers</div>';
-    kindsCatMatches.slice(0, 5).forEach(function (c) {
+    rankedCat.slice(0, 5).forEach(function (c) {
       const isInstalled = (installed || []).some(function (s) {
         if (s.error) return false;
         const sp = (s.provider || "").split(":")[0];
@@ -242,10 +254,18 @@ function drawKindsEmpty(q) {
       });
       const instInfo = (providers || []).find(function (p) { return p.ref === c.ref; });
       const countLabel = instInfo && instInfo.kinds ? 'Installed \u00b7 ' + instInfo.kinds + ' kinds' : 'Installed';
+      const isNameMatch = !qLower || (c.name || "").toLowerCase().indexOf(qLower) !== -1;
+      let matchReasonHtml = "";
+      if (qLower && !isNameMatch) {
+        const descText = c.description ? "Matches description: " + c.description : "Matched on description";
+        matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(c.description || "") + '">' +
+          esc(descText) + '</span>';
+      }
 
       h += '<div class="cat-row src-row" style="cursor:default" title="' + esc(c.description || c.name) + '">' +
         '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(c.name) + '</span>' +
-        '<span class="dg">' + esc(c.ref || "no published image \u2014 publishes elsewhere") + '</span></span>' +
+        '<span class="dg">' + esc(c.ref || "no published image \u2014 publishes elsewhere") + '</span>' +
+        matchReasonHtml + '</span>' +
         (isInstalled
           ? '<span class="pill" style="font-size:9.5px;background:var(--wire-status-soft);color:var(--wire-status);align-self:center;flex:0 0 auto">' + esc(countLabel) + '</span>'
           : (c.ref ? '<button class="btn sm cat-add" data-cat-ref="' + esc(c.ref) + '">Add</button>' : '')) +
@@ -625,7 +645,20 @@ function drawSources() {
   } else if (!catRows.length) {
     h += '<div class="empty">No catalogue matches.</div>';
   } else {
-    catRows.slice(0, 20).forEach(function (c) {
+    var curSearch = railEl && railEl.querySelector ? railEl.querySelector("#cat-search") : null;
+    var activeQ = catQuery || (curSearch && curSearch.value ? curSearch.value.trim() : "");
+    var qLower = activeQ.toLowerCase();
+    var ranked = catRows.slice();
+    if (qLower) {
+      ranked.sort(function (a, b) {
+        var aMatch = (a.name || "").toLowerCase().indexOf(qLower) !== -1;
+        var bMatch = (b.name || "").toLowerCase().indexOf(qLower) !== -1;
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        return 0;
+      });
+    }
+    ranked.slice(0, 20).forEach(function (c) {
       var isInstalled = (sources || []).some(function (s) {
         if (s.error) return false;            // a failed source serves nothing
         var sp = (s.provider || "").split(":")[0];
@@ -634,9 +667,17 @@ function drawSources() {
       });
       var instInfo = (providers || []).find(function (p) { return p.ref === c.ref; });
       var countLabel = instInfo && instInfo.kinds ? "Installed \u00b7 " + instInfo.kinds + " kinds" : "Installed";
+      var isNameMatch = !qLower || (c.name || "").toLowerCase().indexOf(qLower) !== -1;
+      var matchReasonHtml = "";
+      if (qLower && !isNameMatch) {
+        var descText = c.description ? "Matches description: " + c.description : "Matched on description";
+        matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(c.description || "") + '">' +
+          esc(descText) + '</span>';
+      }
       h += '<div class="cat-row src-row" style="cursor:default" title="' + esc(c.description || c.name) + '">' +
         '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(c.name) + "</span>" +
-        '<span class="dg">' + esc(c.ref || "no published image \u2014 publishes elsewhere") + "</span></span>" +
+        '<span class="dg">' + esc(c.ref || "no published image \u2014 publishes elsewhere") + "</span>" +
+        matchReasonHtml + "</span>" +
         (isInstalled
           ? '<span class="pill" style="font-size:9.5px;background:var(--wire-status-soft);color:var(--wire-status);align-self:center;flex:0 0 auto">' + esc(countLabel) + "</span>"
           : (c.ref ? '<button class="btn sm cat-add" data-cat-ref="' + esc(c.ref) + '">Add</button>' : "")) +
@@ -1277,11 +1318,12 @@ function bindPaletteEvents() {
     const q = e.target.value.trim();
     clearTimeout(catTimer);
     catTimer = setTimeout(function () {
-      if (!q) { catRows = null; drawRail(); return; }
+      if (!q) { catRows = null; catQuery = ""; drawRail(); return; }
       api.getCatalogue(q).then(function (r) {
+        catQuery = q;
         catRows = r.providers || [];
         if (rail === "src") drawRail();
-      }).catch(function () { catRows = []; if (rail === "src") drawRail(); });
+      }).catch(function () { catQuery = q; catRows = []; if (rail === "src") drawRail(); });
     }, 200);
   });
 
