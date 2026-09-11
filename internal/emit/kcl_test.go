@@ -692,3 +692,64 @@ func TestEmitKCLNativeMetadataLabels(t *testing.T) {
 		t.Errorf("KCL missing metadata.labels:\n%s", s)
 	}
 }
+
+func TestKCLTypedObjectMemberWiresEmitConditionalGuards(t *testing.T) {
+	b, err := blueprint.Load("../../testdata/xqueue-typedobj.cf.yaml")
+	if err != nil {
+		t.Fatalf("blueprint.Load: %v", err)
+	}
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+                  maxMessageSize: {type: integer}
+                  messageRetentionSeconds: {type: integer}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+
+	crds, err := schema.ParseCRDs([][]byte{crdDoc})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	compBytes, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(compBytes)
+
+	// Nested typed-object member wires must be conditionally guarded so that
+	// an XR omitting the optional object does not serialise null fields (CF-231).
+	wantMaxSize := "if _spec?.tuning?.maxSize != None:\n"
+	wantRetention := "if _spec?.tuning?.retention != None:\n"
+
+	if !strings.Contains(s, wantMaxSize) {
+		t.Errorf("KCL missing conditional guard for tuning.maxSize, got:\n%s", s)
+	}
+	if !strings.Contains(s, wantRetention) {
+		t.Errorf("KCL missing conditional guard for tuning.retention, got:\n%s", s)
+	}
+}

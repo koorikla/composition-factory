@@ -1753,6 +1753,18 @@ func TestAcceptanceAlternativeEnginesRender(t *testing.T) {
 				"containerPort: 8080",
 			},
 		},
+		{
+			name:      "xqueue-typedobj-absent",
+			blueprint: "testdata/xqueue-typedobj.cf.yaml",
+			xr:        "testdata/xr-typedobj-absent.yaml",
+			compRel:   filepath.Join("compositions", "xtunedqueues.platform.hooli.tech.yaml"),
+			xrdRel:    filepath.Join("xrds", "xtunedqueues.platform.hooli.tech.yaml"),
+			wantOutput: []string{
+				"apiVersion: sqs.aws.m.upbound.io/v1beta1",
+				"kind: Queue",
+				"region: eu-north-1",
+			},
+		},
 	}
 
 	for _, tc := range cases {

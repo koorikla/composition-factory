@@ -85,6 +85,9 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 					raw := kclRawStatusAccess(metaName.structured)
 					sb.WriteString(fmt.Sprintf("%sif %s:\n", metaInner, raw))
 					sb.WriteString(fmt.Sprintf("%s    name = %s\n", metaInner, rhs))
+				} else if isNested, guardExpr := kclNestedParamGuard(metaName.structured, metaName.rhs); isNested {
+					sb.WriteString(fmt.Sprintf("%sif %s != None:\n", metaInner, guardExpr))
+					sb.WriteString(fmt.Sprintf("%s    name = %s\n", metaInner, rhs))
 				} else {
 					sb.WriteString(fmt.Sprintf("%sname = %s\n", metaInner, rhs))
 				}
@@ -108,6 +111,9 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 			if ann.structured.kind == rhsStatus {
 				raw := kclRawStatusAccess(ann.structured)
 				sb.WriteString(fmt.Sprintf("%sif %s:\n", annInner, raw))
+				sb.WriteString(fmt.Sprintf("%s    %q = %s\n", annInner, ann.path, rhs))
+			} else if isNested, guardExpr := kclNestedParamGuard(ann.structured, ann.rhs); isNested {
+				sb.WriteString(fmt.Sprintf("%sif %s != None:\n", annInner, guardExpr))
 				sb.WriteString(fmt.Sprintf("%s    %q = %s\n", annInner, ann.path, rhs))
 			} else {
 				sb.WriteString(fmt.Sprintf("%s%q = %s\n", annInner, ann.path, rhs))
@@ -210,12 +216,40 @@ func writeKCLNodes(sb *strings.Builder, indent string, nodes []*nativeNode) {
 	}
 }
 
+func kclNestedParamGuard(s structuredRHS, fallbackRHS string) (bool, string) {
+	if s.kind == rhsParam {
+		if len(s.paramSegs) > 1 {
+			return true, "_spec?." + strings.Join(s.paramSegs, "?.")
+		}
+		if len(s.paramSegs) == 0 && strings.Contains(s.param, ".") {
+			return true, translateParamAccessToKCL(s.param)
+		}
+	} else if s.kind == rhsUnset {
+		rhs := strings.TrimSpace(fallbackRHS)
+		if strings.HasPrefix(rhs, "{{") && strings.HasSuffix(rhs, "}}") {
+			inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(rhs, "{{"), "}}"))
+			inner = strings.TrimSuffix(inner, "| quote")
+			inner = strings.TrimSpace(inner)
+			if strings.HasPrefix(inner, "$spec.") {
+				param := strings.TrimPrefix(inner, "$spec.")
+				if strings.Contains(param, ".") {
+					return true, translateParamAccessToKCL(param)
+				}
+			}
+		}
+	}
+	return false, ""
+}
+
 func writeKCLNode(sb *strings.Builder, indent string, n *nativeNode) {
 	if n.leaf != nil {
 		rhs := kclStructuredRHS(n.leaf.structured, n.leaf.rhs)
 		if n.leaf.structured.kind == rhsStatus {
 			raw := kclRawStatusAccess(n.leaf.structured)
 			sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, raw))
+			sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.seg), rhs))
+		} else if isNested, guardExpr := kclNestedParamGuard(n.leaf.structured, n.leaf.rhs); isNested {
+			sb.WriteString(fmt.Sprintf("%sif %s != None:\n", indent, guardExpr))
 			sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.seg), rhs))
 		} else {
 			sb.WriteString(fmt.Sprintf("%s%s = %s\n", indent, quoteKCLKey(n.seg), rhs))
@@ -426,6 +460,9 @@ func writeKCLEnvelopeNodes(sb *strings.Builder, indent string, nodes []*envTreeN
 			if n.field.structured.kind == rhsStatus {
 				raw := kclRawStatusAccess(n.field.structured)
 				sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, raw))
+				sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.name), rhs))
+			} else if isNested, guardExpr := kclNestedParamGuard(n.field.structured, n.field.rhs); isNested {
+				sb.WriteString(fmt.Sprintf("%sif %s != None:\n", indent, guardExpr))
 				sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.name), rhs))
 			} else {
 				sb.WriteString(fmt.Sprintf("%s%s = %s\n", indent, quoteKCLKey(n.name), rhs))
