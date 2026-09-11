@@ -5080,3 +5080,320 @@ spec:
 		t.Fatalf("adopted blueprint failed validation: %v", err)
 	}
 }
+
+func TestCF274_AdoptWholeObjectParamDrop(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-obj-patch
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.config
+          toFieldPath: spec.forProvider.objectLockEnabled
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.config.region
+          toFieldPath: spec.forProvider.region
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+
+	// 3. Verify that res.Fields["objectLockEnabled"] is not wired to params.config.
+	if f, exists := res.Fields["objectLockEnabled"]; exists && f.From == "params.config" {
+		t.Errorf("expected objectLockEnabled not to be wired to params.config, got: %+v", f)
+	}
+
+	// 4. Verify that res.Fields["region"] is wired to params.config.region.
+	if got := res.Fields["region"].From; got != "params.config.region" {
+		t.Errorf("res.Fields[\"region\"].From = %q, want %q", got, "params.config.region")
+	}
+
+	// 5. Verify that report.Drops contains an entry recording the whole-object patch drop.
+	foundDrop := false
+	expectedReason := `unsupported whole-object parameter wire from "spec.parameters.config" to "spec.forProvider.objectLockEnabled"; wire individual object members instead`
+	for _, d := range report.Drops {
+		if d.Path == "resource.bucket.patches[0]" && d.Reason == expectedReason {
+			foundDrop = true
+			break
+		}
+	}
+	if !foundDrop {
+		t.Errorf("expected drop on resource.bucket.patches[0] with reason %q, got drops: %+v", expectedReason, report.Drops)
+	}
+
+	// 6. Verify that bp.Validate() succeeds.
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+}
+
+func TestCF274_AdoptWholeObjectParamDrop_WithXRD(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.example.org
+spec:
+  group: example.org
+  names:
+    kind: XApp
+    plural: xapps
+  claimNames:
+    kind: App
+    plural: apps
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    config:
+                      type: object
+                      properties:
+                        region:
+                          type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-obj-patch
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.config
+          toFieldPath: spec.forProvider.objectLockEnabled
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+
+	if f, exists := res.Fields["objectLockEnabled"]; exists && f.From == "params.config" {
+		t.Errorf("expected objectLockEnabled not to be wired to params.config, got: %+v", f)
+	}
+
+	foundDrop := false
+	expectedReason := `unsupported whole-object parameter wire from "spec.parameters.config" to "spec.forProvider.objectLockEnabled"; wire individual object members instead`
+	for _, d := range report.Drops {
+		if d.Path == "resource.bucket.patches[0]" && d.Reason == expectedReason {
+			foundDrop = true
+			break
+		}
+	}
+	if !foundDrop {
+		t.Errorf("expected drop on resource.bucket.patches[0] with reason %q, got drops: %+v", expectedReason, report.Drops)
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+}
+
+func TestCF274_AdoptWholeObjectParamDrop_PatchSetAndEnvelopeAndAnnotations(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-patchset-obj
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  patchSets:
+    - name: common-patches
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.config
+          toFieldPath: spec.forProvider.objectLockEnabled
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.config
+          toFieldPath: spec.providerConfigRef.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.config
+          toFieldPath: metadata.annotations["example.com/config"]
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.config.tier
+          toFieldPath: spec.forProvider.tier
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: PatchSet
+          patchSetName: common-patches
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+
+	if f, exists := res.Fields["objectLockEnabled"]; exists && f.From == "params.config" {
+		t.Errorf("expected objectLockEnabled not to be wired to params.config, got: %+v", f)
+	}
+	if f, exists := res.Envelope["providerConfigRef.name"]; exists && f.From == "params.config" {
+		t.Errorf("expected providerConfigRef.name not to be wired to params.config, got: %+v", f)
+	}
+	if f, exists := res.Annotations["example.com/config"]; exists && f.From == "params.config" {
+		t.Errorf("expected example.com/config annotation not to be wired to params.config, got: %+v", f)
+	}
+	if got := res.Fields["tier"].From; got != "params.config.tier" {
+		t.Errorf("res.Fields[\"tier\"].From = %q, want %q", got, "params.config.tier")
+	}
+
+	if len(report.Drops) < 3 {
+		t.Errorf("expected at least 3 drops, got %d: %+v", len(report.Drops), report.Drops)
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+}
+
+func TestCF274_AdoptWholeObjectParamDrop_ReverseOrder(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-obj-patch-rev
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.config.region
+          toFieldPath: spec.forProvider.region
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.config
+          toFieldPath: spec.forProvider.objectLockEnabled
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+
+	if f, exists := res.Fields["objectLockEnabled"]; exists && f.From == "params.config" {
+		t.Errorf("expected objectLockEnabled not to be wired to params.config, got: %+v", f)
+	}
+	if got := res.Fields["region"].From; got != "params.config.region" {
+		t.Errorf("res.Fields[\"region\"].From = %q, want %q", got, "params.config.region")
+	}
+
+	foundDrop := false
+	expectedReason := `unsupported whole-object parameter wire from "spec.parameters.config" to "spec.forProvider.objectLockEnabled"; wire individual object members instead`
+	for _, d := range report.Drops {
+		if d.Path == "resource.bucket.patches[1]" && d.Reason == expectedReason {
+			foundDrop = true
+			break
+		}
+	}
+	if !foundDrop {
+		t.Errorf("expected drop on resource.bucket.patches[1] with reason %q, got drops: %+v", expectedReason, report.Drops)
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+}
+
+func TestCF274_AdoptScalarParameter_NotDropped(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-scalar-patch
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.region
+          toFieldPath: spec.forProvider.region
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+
+	if got := res.Fields["region"].From; got != "params.region" {
+		t.Errorf("res.Fields[\"region\"].From = %q, want %q", got, "params.region")
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+}

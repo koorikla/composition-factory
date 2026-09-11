@@ -1831,6 +1831,66 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 	return nil
 }
 
+func discoverObjectParamsFromPatches(resources []any, patchSetsMap map[string][]any, bp *blueprint.Blueprint) {
+	scanPatch := func(pRaw any) {
+		pMap, ok := pRaw.(map[string]any)
+		if !ok {
+			return
+		}
+		pType, _ := pMap["type"].(string)
+		if pType != "FromCompositeFieldPath" && pType != "" {
+			return
+		}
+		fromPath, _ := pMap["fromFieldPath"].(string)
+		var paramName string
+		if strings.HasPrefix(fromPath, "spec.parameters.") {
+			paramName = strings.TrimPrefix(fromPath, "spec.parameters.")
+		} else if strings.HasPrefix(fromPath, "spec.") {
+			paramName = strings.TrimPrefix(fromPath, "spec.")
+		}
+		if paramName != "" && strings.Contains(paramName, ".") && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
+			ensureParamDeclared(bp, paramName)
+		}
+	}
+
+	for _, psPatches := range patchSetsMap {
+		for _, pRaw := range psPatches {
+			scanPatch(pRaw)
+		}
+	}
+
+	for _, resRaw := range resources {
+		resMap, ok := resRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if patches, ok := resMap["patches"].([]any); ok {
+			for _, pRaw := range patches {
+				scanPatch(pRaw)
+			}
+		}
+	}
+}
+
+func isWholeObjectParam(bp *blueprint.Blueprint, paramName string) bool {
+	if bp == nil || bp.Spec.XRD.Parameters == nil || paramName == "" {
+		return false
+	}
+	parts := strings.Split(paramName, ".")
+	p, exists := bp.Spec.XRD.Parameters[parts[0]]
+	if !exists {
+		return false
+	}
+	for i := 1; i < len(parts); i++ {
+		next, ok := p.Properties[parts[i]]
+		if !ok {
+			return false
+		}
+		p = next
+	}
+	return p.Type == "object" || len(p.Properties) > 0
+}
+
 func parseClassicComposition(resources []any, patchSets []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
 	patchSetsMap := make(map[string][]any)
 	for _, psRaw := range patchSets {
@@ -1844,6 +1904,8 @@ func parseClassicComposition(resources []any, patchSets []any, bp *blueprint.Blu
 			}
 		}
 	}
+
+	discoverObjectParamsFromPatches(resources, patchSetsMap, bp)
 
 	for resIdx, resRaw := range resources {
 		resMap, ok := resRaw.(map[string]any)
@@ -1940,7 +2002,10 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 		if strings.HasPrefix(toPath, "spec.forProvider.") {
 			targetField := strings.TrimPrefix(toPath, "spec.forProvider.")
 			targetField = normalizeMapFieldPath(targetField)
-			if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
+			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+				report.Record(patchPath,
+					fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
+			} else if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
 				if res.Fields == nil {
 					res.Fields = make(map[string]blueprint.Field)
 				}
@@ -1958,7 +2023,10 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 		} else if strings.HasPrefix(toPath, "spec.") {
 			if res.Provider == blueprint.NativeProvider {
 				targetField := normalizeMapFieldPath(toPath)
-				if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
+				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+					report.Record(patchPath,
+						fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
+				} else if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
 					if res.Fields == nil {
 						res.Fields = make(map[string]blueprint.Field)
 					}
@@ -1973,7 +2041,10 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			} else {
 				targetField := strings.TrimPrefix(toPath, "spec.")
 				targetField = normalizeMapFieldPath(targetField)
-				if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) {
+				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+					report.Record(patchPath,
+						fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
+				} else if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) {
 					if res.Envelope == nil {
 						res.Envelope = make(map[string]blueprint.Field)
 					}
@@ -1991,7 +2062,10 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			if strings.HasPrefix(toPath, "metadata.annotations[") {
 				annKey = strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.annotations["), "]")
 			}
-			if isParamPatch && paramName != "" && annKey != "" && isValidParamIdentifier(paramName) {
+			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+				report.Record(patchPath,
+					fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
+			} else if isParamPatch && paramName != "" && annKey != "" && isValidParamIdentifier(paramName) {
 				if res.Annotations == nil {
 					res.Annotations = make(map[string]blueprint.Field)
 				}
@@ -2013,7 +2087,10 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 					labelKey := strings.TrimPrefix(toPath, "metadata.labels.")
 					targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
 				}
-				if isParamPatch && paramName != "" && isValidParamIdentifier(paramName) {
+				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+					report.Record(patchPath,
+						fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
+				} else if isParamPatch && paramName != "" && isValidParamIdentifier(paramName) {
 					if res.Fields == nil {
 						res.Fields = make(map[string]blueprint.Field)
 					}
