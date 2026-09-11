@@ -21,6 +21,7 @@ import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
 import { fanOut, envFanOut, findEnvWires } from "../wires.js";
 import { famOf, uniqueResourceName, COLORS, deleteEnvKeyFromDoc } from "../utils.js";
+import { cleanParamRefs } from "./inspector/xrd.js";
 
 const HINT_KINDS =
   'Drag a kind onto the canvas. Schemas load per-kind — <span class="mono">4.5 KB</span> median.';
@@ -1222,6 +1223,19 @@ function bindPaletteEvents() {
     const pdel = e.target.closest("[data-param-del]");
     if (pdel) {
       const n = pdel.getAttribute("data-param-del");
+      const doc = store.state.doc;
+      const fo = doc ? fanOut(doc, n) : 0;
+      if (fo > 0) {
+        if (!window.confirm('Parameter "' + n + '" is wired into ' + fo + " field" + (fo === 1 ? "" : "s") + ". Delete it and unwire all referencing fields?")) return;
+        paramErr = null;
+        const draft = JSON.parse(JSON.stringify(doc));
+        if (draft.spec && draft.spec.xrd && draft.spec.xrd.parameters) {
+          delete draft.spec.xrd.parameters[n];
+        }
+        cleanParamRefs(draft, n);
+        store.replaceDoc(draft);
+        return;
+      }
       if (!window.confirm("Delete parameter $" + n + "?")) return;
       paramErr = null;
       store.deleteParameter(n);   // failure surfaces via the error topic below
