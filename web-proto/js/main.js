@@ -458,13 +458,18 @@ store.subscribe("error", function (err) {
       // the import gate unchanged, and a real Crossplane Composition is adopted
       // into one. Routing on the manifest's own `kind:` means the user does not
       // have to know which of cf's two front doors their file belongs to.
-      var op = isCompositionManifest(text)
+      var isComp = isCompositionManifest(text);
+      var op = isComp
         ? store.adoptComposition(text)
         : store.importBlueprint(text);
       op.then(function (doc) {
         if (!doc) return; // failures surface through the store's error topic
         store.select(null);
-        reportAdoptLoss();
+        if (isComp) {
+          reportAdoptLoss();
+        } else {
+          clearNotice();
+        }
       });
     };
     reader.readAsText(f);
@@ -503,7 +508,10 @@ store.subscribe("error", function (err) {
    */
   function reportAdoptLoss() {
     var r = store.state.lastAdoptReport;
-    if (!r || !r.drops || !r.drops.length) return;
+    if (!r || !r.drops || !r.drops.length) {
+      clearNotice();
+      return;
+    }
     var head = "adopted with " + r.drops.length + " dropped item" +
       (r.drops.length === 1 ? "" : "s") + ": ";
     notice(head + r.drops.map(function (d) { return d.path + " (" + d.reason + ")"; }).join("; "), false, true);
@@ -511,6 +519,17 @@ store.subscribe("error", function (err) {
 })();
 
 var noticeTimer = null;
+
+function clearNotice() {
+  if (noticeTimer) {
+    clearTimeout(noticeTimer);
+    noticeTimer = null;
+  }
+  var bar = document.getElementById("import-warn");
+  if (bar) {
+    bar.hidden = true;
+  }
+}
 
 /** Shared warn bar under the topbar; isError picks the alert role; persistent prevents auto-hiding. */
 function notice(text, isError, persistent) {

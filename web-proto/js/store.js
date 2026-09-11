@@ -252,7 +252,11 @@ export const store = {
    */
   /** POST /api/blueprint/import — YAML through the file gate; one undo step. */
   async importBlueprint(yamlText) {
-    return this._paramOp("importBlueprint", function () { return api.importBlueprint(yamlText); });
+    const self = this;
+    return this._paramOp("importBlueprint", function () {
+      self.state.lastAdoptReport = null;
+      return api.importBlueprint(yamlText);
+    });
   },
 
   /**
@@ -284,6 +288,7 @@ export const store = {
         if (!doc) {
           throw new Error("server returned no blueprint");
         }
+        self.state.lastAdoptReport = null;
         self._recordHistory(prev);
         self.state.doc = doc;
         self.emit("doc", doc);
