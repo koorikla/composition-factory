@@ -1619,6 +1619,70 @@ func validateGoTemplate(tmpl string) error {
 	return nil
 }
 
+func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
+	if text == "" {
+		return ""
+	}
+	if m := reWhenIfEnvEq.FindStringSubmatch(text); len(m) >= 3 {
+		key, lit := m[1], m[2]
+		if key == "" && len(m) >= 5 {
+			key, lit = m[3], m[4]
+		}
+		ensureEnvDeclared(bp, key, "string")
+		return fmt.Sprintf("env.%s == %s", key, lit)
+	} else if m := reWhenIfEnvNe.FindStringSubmatch(text); len(m) >= 3 {
+		key, lit := m[1], m[2]
+		if key == "" && len(m) >= 5 {
+			key, lit = m[3], m[4]
+		}
+		ensureEnvDeclared(bp, key, "string")
+		return fmt.Sprintf("env.%s != %s", key, lit)
+	} else if m := reWhenIfEnvSimple.FindStringSubmatch(text); len(m) >= 2 {
+		key := m[1]
+		if key == "" && len(m) >= 3 {
+			key = m[2]
+		}
+		ensureEnvDeclared(bp, key, "boolean")
+		return fmt.Sprintf("env.%s", key)
+	} else if m := reWhenIfEq.FindStringSubmatch(text); len(m) >= 3 {
+		ensureParamDeclaredTyped(bp, m[1], "string")
+		return fmt.Sprintf("params.%s == %q", m[1], m[2])
+	} else if m := reWhenIfNe.FindStringSubmatch(text); len(m) >= 3 {
+		ensureParamDeclaredTyped(bp, m[1], "string")
+		return fmt.Sprintf("params.%s != %q", m[1], m[2])
+	} else if m := reWhenIfSimple.FindStringSubmatch(text); len(m) >= 2 {
+		ensureParamDeclaredTyped(bp, m[1], "boolean")
+		return fmt.Sprintf("params.%s", m[1])
+	}
+	return ""
+}
+
+func extractForEachGuard(text string, bp *blueprint.Blueprint) string {
+	if text == "" {
+		return ""
+	}
+	if m := reForEachEnvLoop.FindStringSubmatch(text); len(m) >= 2 {
+		key := m[1]
+		if key == "" && len(m) >= 3 {
+			key = m[2]
+		}
+		ensureEnvDeclared(bp, key, "integer")
+		return fmt.Sprintf("env.%s", key)
+	} else if m := reForEachStatusLoop.FindStringSubmatch(text); len(m) >= 3 {
+		resName := m[1]
+		statusPath := m[2]
+		if resName == "" && len(m) >= 5 {
+			resName = m[3]
+			statusPath = m[4]
+		}
+		return fmt.Sprintf("resources.%s.status.%s", resName, statusPath)
+	} else if m := reForEachLoop.FindStringSubmatch(text); len(m) >= 2 {
+		ensureParamDeclaredTyped(bp, m[1], "integer")
+		return fmt.Sprintf("params.%s", m[1])
+	}
+	return ""
+}
+
 func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
 	// 0. Validate Go template syntax (actions must be balanced and well-formed)
 	if err := validateGoTemplate(tmpl); err != nil {
@@ -1689,67 +1753,12 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 			continue
 		}
 
-		when := nextWhen
-		forEach := nextForEach
-		nextWhen = ""
-		nextForEach = ""
-
-		if m := reWhenIfEnvEq.FindStringSubmatch(chunk); len(m) >= 3 {
-			key, lit := m[1], m[2]
-			if key == "" && len(m) >= 5 {
-				key, lit = m[3], m[4]
-			}
-			nextWhen = fmt.Sprintf("env.%s == %s", key, lit)
-			ensureEnvDeclared(bp, key, "string")
-		} else if m := reWhenIfEnvNe.FindStringSubmatch(chunk); len(m) >= 3 {
-			key, lit := m[1], m[2]
-			if key == "" && len(m) >= 5 {
-				key, lit = m[3], m[4]
-			}
-			nextWhen = fmt.Sprintf("env.%s != %s", key, lit)
-			ensureEnvDeclared(bp, key, "string")
-		} else if m := reWhenIfEnvSimple.FindStringSubmatch(chunk); len(m) >= 2 {
-			key := m[1]
-			if key == "" && len(m) >= 3 {
-				key = m[2]
-			}
-			nextWhen = fmt.Sprintf("env.%s", key)
-			ensureEnvDeclared(bp, key, "boolean")
-		} else if m := reWhenIfEq.FindStringSubmatch(chunk); len(m) >= 3 {
-			nextWhen = fmt.Sprintf("params.%s == %q", m[1], m[2])
-			ensureParamDeclaredTyped(bp, m[1], "string")
-		} else if m := reWhenIfNe.FindStringSubmatch(chunk); len(m) >= 3 {
-			nextWhen = fmt.Sprintf("params.%s != %q", m[1], m[2])
-			ensureParamDeclaredTyped(bp, m[1], "string")
-		} else if m := reWhenIfSimple.FindStringSubmatch(chunk); len(m) >= 2 {
-			nextWhen = fmt.Sprintf("params.%s", m[1])
-			ensureParamDeclaredTyped(bp, m[1], "boolean")
-		}
-
-		if m := reForEachEnvLoop.FindStringSubmatch(chunk); len(m) >= 2 {
-			key := m[1]
-			if key == "" && len(m) >= 3 {
-				key = m[2]
-			}
-			nextForEach = fmt.Sprintf("env.%s", key)
-			ensureEnvDeclared(bp, key, "integer")
-		} else if m := reForEachStatusLoop.FindStringSubmatch(chunk); len(m) >= 3 {
-			resName := m[1]
-			statusPath := m[2]
-			if resName == "" && len(m) >= 5 {
-				resName = m[3]
-				statusPath = m[4]
-			}
-			nextForEach = fmt.Sprintf("resources.%s.status.%s", resName, statusPath)
-		} else if m := reForEachLoop.FindStringSubmatch(chunk); len(m) >= 2 {
-			nextForEach = fmt.Sprintf("params.%s", m[1])
-			ensureParamDeclaredTyped(bp, m[1], "integer")
-		}
-
 		lines := strings.Split(chunk, "\n")
 		var filteredLines []string
+		firstYAMLLine := -1
+		lastYAMLLine := -1
 		skipNextEmptyBlock := false
-		for _, line := range lines {
+		for i, line := range lines {
 			trimmed := strings.TrimSpace(line)
 			if m := reSetResourceNameAnn.FindStringSubmatch(trimmed); len(m) >= 2 {
 				annVal := m[1]
@@ -1757,6 +1766,10 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 					annVal = m[2]
 				}
 				filteredLines = append(filteredLines, strings.Replace(line, trimmed, fmt.Sprintf(`"crossplane.io/composition-resource-name": "%s"`, annVal), 1))
+				if firstYAMLLine == -1 {
+					firstYAMLLine = i
+				}
+				lastYAMLLine = i
 				continue
 			}
 			if strings.HasPrefix(trimmed, "{{") && strings.HasSuffix(trimmed, "}}") {
@@ -1783,7 +1796,46 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 			}
 			skipNextEmptyBlock = false
 			filteredLines = append(filteredLines, line)
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				if firstYAMLLine == -1 {
+					firstYAMLLine = i
+				}
+				lastYAMLLine = i
+			}
 		}
+
+		if firstYAMLLine == -1 {
+			if w := extractWhenGuard(chunk, bp); w != "" {
+				nextWhen = w
+			}
+			if f := extractForEachGuard(chunk, bp); f != "" {
+				nextForEach = f
+			}
+			continue
+		}
+
+		headText := strings.Join(lines[:firstYAMLLine], "\n")
+		tailText := strings.Join(lines[lastYAMLLine+1:], "\n")
+
+		when := nextWhen
+		nextWhen = ""
+		if w := extractWhenGuard(headText, bp); w != "" {
+			when = w
+		}
+
+		forEach := nextForEach
+		nextForEach = ""
+		if f := extractForEachGuard(headText, bp); f != "" {
+			forEach = f
+		}
+
+		if w := extractWhenGuard(tailText, bp); w != "" {
+			nextWhen = w
+		}
+		if f := extractForEachGuard(tailText, bp); f != "" {
+			nextForEach = f
+		}
+
 		cleanYAML := strings.Join(filteredLines, "\n")
 		if strings.TrimSpace(cleanYAML) == "" {
 			continue

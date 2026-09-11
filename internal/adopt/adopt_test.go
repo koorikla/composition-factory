@@ -5669,3 +5669,263 @@ spec:
 		t.Errorf("expected parameter 'tier' in XRD parameters, got: %+v (drops: %+v)", bp.Spec.XRD.Parameters, report.Drops)
 	}
 }
+
+func TestAdoptGoTemplate_GuardSplitting(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          ---
+          {{- if $spec.enableCache }}
+          apiVersion: redis.aws.upbound.io/v1beta1
+          kind: Cluster
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: cache
+          spec:
+            forProvider:
+              engine: redis
+          {{- end }}
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: deployment
+          spec:
+            replicas: 1
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	var cache, deployment *blueprint.Resource
+	for i := range bp.Spec.Resources {
+		switch bp.Spec.Resources[i].Name {
+		case "cache":
+			cache = &bp.Spec.Resources[i]
+		case "deployment":
+			deployment = &bp.Spec.Resources[i]
+		}
+	}
+
+	if cache == nil {
+		t.Fatalf("cache resource not found in adopted blueprint: %+v", bp.Spec.Resources)
+	}
+	if cache.When != "params.enableCache" {
+		t.Errorf("cache.When = %q, want %q", cache.When, "params.enableCache")
+	}
+
+	if deployment == nil {
+		t.Fatalf("deployment resource not found in adopted blueprint: %+v", bp.Spec.Resources)
+	}
+	if deployment.When != "" {
+		t.Errorf("deployment.When = %q, want empty string", deployment.When)
+	}
+
+	if _, ok := bp.Spec.XRD.Parameters["enableCache"]; !ok {
+		t.Errorf("expected parameter 'enableCache' in bp.Spec.XRD.Parameters, got: %+v (drops: %+v)", bp.Spec.XRD.Parameters, report.Drops)
+	}
+
+	manifestSingle := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-single
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          ---
+          {{- if $spec.enableCache }}
+          apiVersion: redis.aws.upbound.io/v1beta1
+          kind: Cluster
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: cache
+          spec:
+            forProvider:
+              engine: redis
+          {{- end }}
+`
+
+	bpSingle, reportSingle, err := Adopt([]byte(manifestSingle), Options{})
+	if err != nil {
+		t.Fatalf("Adopt single failed: %v", err)
+	}
+
+	var cacheSingle *blueprint.Resource
+	for i := range bpSingle.Spec.Resources {
+		if bpSingle.Spec.Resources[i].Name == "cache" {
+			cacheSingle = &bpSingle.Spec.Resources[i]
+			break
+		}
+	}
+	if cacheSingle == nil {
+		t.Fatalf("cacheSingle not found in adopted blueprint: %+v", bpSingle.Spec.Resources)
+	}
+	if cacheSingle.When != "params.enableCache" {
+		t.Errorf("cacheSingle.When = %q, want %q", cacheSingle.When, "params.enableCache")
+	}
+	if _, ok := bpSingle.Spec.XRD.Parameters["enableCache"]; !ok {
+		t.Errorf("expected parameter 'enableCache' in bpSingle.Spec.XRD.Parameters, got: %+v (drops: %+v)", bpSingle.Spec.XRD.Parameters, reportSingle.Drops)
+	}
+
+	manifestForEach := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp-foreach
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          ---
+          {{- range $i := until (int $spec.count) }}
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: replicated
+          spec:
+            forProvider:
+              region: us-east-1
+          {{- end }}
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: deployment
+          spec:
+            replicas: 1
+`
+
+	bpForEach, reportForEach, err := Adopt([]byte(manifestForEach), Options{})
+	if err != nil {
+		t.Fatalf("Adopt forEach failed: %v", err)
+	}
+
+	var replicated, deployment2 *blueprint.Resource
+	for i := range bpForEach.Spec.Resources {
+		switch bpForEach.Spec.Resources[i].Name {
+		case "replicated":
+			replicated = &bpForEach.Spec.Resources[i]
+		case "deployment":
+			deployment2 = &bpForEach.Spec.Resources[i]
+		}
+	}
+
+	if replicated == nil {
+		t.Fatalf("replicated resource not found in adopted blueprint: %+v", bpForEach.Spec.Resources)
+	}
+	if replicated.ForEach != "params.count" {
+		t.Errorf("replicated.ForEach = %q, want %q", replicated.ForEach, "params.count")
+	}
+
+	if deployment2 == nil {
+		t.Fatalf("deployment resource not found in adopted blueprint: %+v", bpForEach.Spec.Resources)
+	}
+	if deployment2.ForEach != "" {
+		t.Errorf("deployment2.ForEach = %q, want empty string", deployment2.ForEach)
+	}
+
+	if _, ok := bpForEach.Spec.XRD.Parameters["count"]; !ok {
+		t.Errorf("expected parameter 'count' in bpForEach.Spec.XRD.Parameters, got: %+v (drops: %+v)", bpForEach.Spec.XRD.Parameters, reportForEach.Drops)
+	}
+
+	manifestForEachSingle := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-single-foreach
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          ---
+          {{- range $i := until (int $spec.count) }}
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: replicated
+          spec:
+            forProvider:
+              region: us-east-1
+          {{- end }}
+`
+
+	bpForEachSingle, reportForEachSingle, err := Adopt([]byte(manifestForEachSingle), Options{})
+	if err != nil {
+		t.Fatalf("Adopt forEach single failed: %v", err)
+	}
+
+	var replicatedSingle *blueprint.Resource
+	for i := range bpForEachSingle.Spec.Resources {
+		if bpForEachSingle.Spec.Resources[i].Name == "replicated" {
+			replicatedSingle = &bpForEachSingle.Spec.Resources[i]
+			break
+		}
+	}
+	if replicatedSingle == nil {
+		t.Fatalf("replicatedSingle not found in adopted blueprint: %+v", bpForEachSingle.Spec.Resources)
+	}
+	if replicatedSingle.ForEach != "params.count" {
+		t.Errorf("replicatedSingle.ForEach = %q, want %q", replicatedSingle.ForEach, "params.count")
+	}
+	if _, ok := bpForEachSingle.Spec.XRD.Parameters["count"]; !ok {
+		t.Errorf("expected parameter 'count' in bpForEachSingle.Spec.XRD.Parameters, got: %+v (drops: %+v)", bpForEachSingle.Spec.XRD.Parameters, reportForEachSingle.Drops)
+	}
+}
