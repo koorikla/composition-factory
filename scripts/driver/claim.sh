@@ -81,7 +81,8 @@ case "$lease_min" in '' | *[!0-9]*) echo "claim.sh: CF_LEASE_MIN must be whole m
 
 # lease: from the issue's newest `taking —` comment by a project member. The
 # repo is public, so a comment whose authorAssociation is present and not
-# OWNER, MEMBER or COLLABORATOR is ignored (as in land.sh); one without the
+# OWNER, MEMBER or COLLABORATOR is ignored (as in land.sh), and reported on
+# stderr for the claimed issue and every candidate holder; one without the
 # field is trusted. A missing or unparseable `lease until` is a legacy lease
 # from the comment time; no such comment, a legacy lease from updatedAt.
 # Yields {driver, expiry (epoch), until (iso), files, live}.
@@ -90,6 +91,9 @@ JQ_LEASE='
 def labelled($l): any(.labels[]?; .name == $l);
 def trusted: .authorAssociation as $a
   | $a == null or $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR";
+def ignored_note:
+  ([.comments[]? | select((.body // "") | startswith("taking —")) | select(trusted | not)] | length) as $k
+  | if $k > 0 then "claim.sh: ignored \($k) claim comment(s) from outside the project on #\(.number)" else empty end;
 def legacy($at; $min): {driver: "legacy", expiry: (($at | fromdateiso8601) + $min * 60), files: []};
 def lease($now; $min):
   ([.comments[]? | select((.body // "") | startswith("taking —")) | select(trusted)] | last) as $c
@@ -111,6 +115,8 @@ def lease($now; $min):
 
 issue_json="$(gh issue view "$issue" --json number,title,state,labels,comments,updatedAt)" ||
   die "gh issue view $issue failed"
+printf '%s\n' "$issue_json" | jq -r "$JQ_LEASE"' ignored_note' >&2 ||
+  die "could not read issue $issue"
 
 # Steps 1 and 2: "refused\t<why>", "taken\t<driver> until <iso>" or
 # "ok\t<parked 0|1>\t<driver whose expired lease is taken over, or empty>".
@@ -153,14 +159,21 @@ for m in $reread; do
 " || die "gh issue view $m failed"
 done
 
-overlap="$(printf '%s\n%s' "$open_json" "$fresh" |
-  jq -rs --argjson now "$now" --argjson min "$lease_min" --argjson n "$issue" "$JQ_LEASE"'
-    (.[1:] | map({key: (.number | tostring), value: .}) | from_entries) as $fresh
-    | [ .[0][] | ($fresh[.number | tostring] // .)
-        | select(.number != $n)
-        | select((.state // "OPEN") | ascii_downcase == "open")
-        | select(labelled("in-progress") or labelled("handed-back"))
-        | lease($now; $min) as $l
+# Candidate holders: the listed issues, re-read ones replaced by their re-read,
+# still open and labelled in-progress or handed-back.
+candidates="$(printf '%s\n%s' "$open_json" "$fresh" | jq -cs --argjson n "$issue" "$JQ_LEASE"'
+  (.[1:] | map({key: (.number | tostring), value: .}) | from_entries) as $fresh
+  | [ .[0][] | ($fresh[.number | tostring] // .)
+      | select(.number != $n)
+      | select((.state // "OPEN") | ascii_downcase == "open")
+      | select(labelled("in-progress") or labelled("handed-back")) ]
+')" || die "could not read the open issue list"
+printf '%s\n' "$candidates" | jq -r "$JQ_LEASE"' .[] | ignored_note' >&2 ||
+  die "could not read the open issue list"
+
+overlap="$(printf '%s\n' "$candidates" |
+  jq -r --argjson now "$now" --argjson min "$lease_min" "$JQ_LEASE"'
+    [ .[] | lease($now; $min) as $l
         | select(labelled("handed-back") or $l.live)
         | {number, files: $l.files} ]
     | unique_by(.number) as $holders
