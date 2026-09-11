@@ -2144,7 +2144,7 @@ func discoverObjectParamsFromPatches(resources []any, patchSetsMap map[string][]
 		} else if strings.HasPrefix(fromPath, "spec.") {
 			paramName = strings.TrimPrefix(fromPath, "spec.")
 		}
-		if paramName != "" && strings.Contains(paramName, ".") && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
+		if paramName != "" && strings.Contains(paramName, ".") && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
 			ensureParamDeclared(bp, paramName)
 		}
 	}

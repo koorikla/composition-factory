@@ -6951,3 +6951,67 @@ spec:
 		t.Errorf("expected 0 dropped fields, got %v", report.Drops)
 	}
 }
+
+func TestCF297_AdoptNestedObjectParams(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-nested-obj-patch
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.network.vpc
+          toFieldPath: spec.forProvider.objectLockEnabled
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.network.vpc.id
+          toFieldPath: spec.forProvider.vpcId
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+
+	// 1. Verify that res.Fields["objectLockEnabled"] is not wired to params.network.vpc.
+	if f, exists := res.Fields["objectLockEnabled"]; exists && f.From == "params.network.vpc" {
+		t.Errorf("expected objectLockEnabled not to be wired to params.network.vpc, got: %+v", f)
+	}
+
+	// 2. Verify that res.Fields["vpcId"] is wired to params.network.vpc.id.
+	if got := res.Fields["vpcId"].From; got != "params.network.vpc.id" {
+		t.Errorf("res.Fields[\"vpcId\"].From = %q, want %q", got, "params.network.vpc.id")
+	}
+
+	// 3. Verify that report.Drops contains an entry recording the whole-object patch drop.
+	foundDrop := false
+	expectedReason := `unsupported whole-object parameter wire from "spec.parameters.network.vpc" to "spec.forProvider.objectLockEnabled"; wire individual object members instead`
+	for _, d := range report.Drops {
+		if d.Path == "resource.bucket.patches[0]" && d.Reason == expectedReason {
+			foundDrop = true
+			break
+		}
+	}
+	if !foundDrop {
+		t.Errorf("expected drop on resource.bucket.patches[0] with reason %q, got drops: %+v", expectedReason, report.Drops)
+	}
+
+	// 4. Verify that bp.Validate() succeeds.
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+}
