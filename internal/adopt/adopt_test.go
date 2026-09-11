@@ -4272,3 +4272,83 @@ spec:
 		}
 	})
 }
+
+func TestAdopt_InitProvider(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-initprovider
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+  - step: patch-and-transform
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+      - name: bucket
+        base:
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          spec:
+            forProvider:
+              region: us-east-1
+            initProvider:
+              tags:
+                Environment: dev
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.tags
+          toFieldPath: spec.initProvider.tags
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+
+	// res.Envelope must NOT contain initProvider or initProvider.tags
+	for k := range res.Envelope {
+		if strings.HasPrefix(k, "initProvider") {
+			t.Errorf("res.Envelope contains unexpected initProvider entry: %q", k)
+		}
+	}
+
+	// report must have true loss
+	if !report.HasTrueLoss() {
+		t.Error("expected report.HasTrueLoss() to be true")
+	}
+
+	// report must record the dropped base initProvider field and the unsupported patch
+	var droppedBase, droppedPatch bool
+	for _, d := range report.Drops {
+		if d.Path == "resource.bucket.initProvider.tags" {
+			droppedBase = true
+		}
+		if strings.Contains(d.Path, "spec.initProvider") || strings.Contains(d.Reason, "initProvider") {
+			droppedPatch = true
+		}
+	}
+	if !droppedBase {
+		t.Errorf("expected drop for resource.bucket.initProvider.tags in report, got: %+v", report.Drops)
+	}
+	if !droppedPatch {
+		t.Errorf("expected drop for initProvider patch in report, got: %+v", report.Drops)
+	}
+
+	// Validate blueprint
+	if err := bp.Validate(); err != nil {
+		t.Errorf("bp.Validate() failed: %v", err)
+	}
+}
