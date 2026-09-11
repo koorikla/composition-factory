@@ -1,4 +1,4 @@
-.PHONY: build test test-race test-docker test-e2e lint lint-strict serve clean cluster cluster-down deploy undeploy test-cluster
+.PHONY: build test test-race test-docker test-e2e test-driver lint lint-strict serve clean cluster cluster-down deploy undeploy test-cluster
 
 BIN       := bin/cf
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -24,6 +24,10 @@ test-docker:
 # on a workspace-derived port with a scratch blueprint (see playwright.config.js).
 test-e2e:
 	npx playwright test
+
+# Driver coordination scripts (scripts/driver). Lock tests need lockf, so they skip on Linux.
+test-driver:
+	./scripts/driver/test/run.sh
 
 # Lane C: in-cluster verification using kind, Crossplane, and workspace isolation.
 test-cluster: build

@@ -1,0 +1,83 @@
+#!/bin/bash
+# Fake gh for scripts/driver tests. State lives in $FAKE_GH_DIR:
+#   issues/<n>.json  full issue objects: number, title, state, updatedAt, labels, comments
+#   ci-results       one line per `run watch`, consumed in order: green | red | e2e-red
+#   calls.log        every invocation, one line each
+# It honours only the invocations the driver scripts are contracted to make,
+# ignores --json field lists (it always returns the whole object), and does not
+# implement --jq: the scripts parse with jq.
+set -u
+D="${FAKE_GH_DIR:?FAKE_GH_DIR is not set}"
+echo "$*" >> "$D/calls.log"
+
+now_iso() { jq -nr --argjson t "${CF_NOW:-0}" '$t | strftime("%Y-%m-%dT%H:%M:%SZ")'; }
+rewrite() { jq "$@" > "$f.tmp" && mv "$f.tmp" "$f"; }
+
+case "$1 ${2:-}" in
+"issue view")
+  cat "$D/issues/$3.json"
+  ;;
+"issue list")
+  shift 2
+  state=open
+  labels=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --state) state="$2"; shift 2 ;;
+      --label) labels="$labels,$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  cat "$D"/issues/*.json | jq -s --arg state "$state" --arg labels "$labels" '
+    ($labels | split(",") | map(select(. != ""))) as $want
+    | [ .[]
+        | select($state == "all" or (.state | ascii_downcase) == $state)
+        | select([.labels[].name] as $have | all($want[]; . as $w | any($have[]; . == $w))) ]'
+  ;;
+"issue edit")
+  f="$D/issues/$3.json"
+  shift 3
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --add-label)    rewrite --arg l "$2" '.labels = (.labels + [{name: $l}] | unique_by(.name))' "$f"; shift 2 ;;
+      --remove-label) rewrite --arg l "$2" '.labels = [.labels[] | select(.name != $l)]' "$f"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  ;;
+"issue comment")
+  f="$D/issues/$3.json"
+  [ "${4:-}" = "--body" ] || { echo "fake gh: issue comment wants --body as its 4th argument" >&2; exit 2; }
+  rewrite --arg b "$5" --arg at "$(now_iso)" '.comments += [{body: $b, createdAt: $at}]' "$f"
+  ;;
+"run list")
+  shift 2
+  sha=""
+  while [ $# -gt 0 ]; do
+    case "$1" in --commit) sha="$2"; shift 2 ;; *) shift ;; esac
+  done
+  [ -f "$D/runs/$sha" ] || echo $(( $(ls "$D/runs" | wc -l) + 1000 )) > "$D/runs/$sha"
+  id="$(cat "$D/runs/$sha")"
+  printf '[{"databaseId":%s,"url":"https://ci.example/runs/%s"}]\n' "$id" "$id"
+  ;;
+"run watch")
+  result="$(head -n 1 "$D/ci-results")"
+  tail -n +2 "$D/ci-results" > "$D/ci-results.tmp" && mv "$D/ci-results.tmp" "$D/ci-results"
+  echo "$result" > "$D/last-result-$3"
+  [ "$result" = green ]
+  ;;
+"run view")
+  case "$(cat "$D/last-result-$3" 2>/dev/null)" in
+    green)   echo '{"jobs":[{"name":"test","conclusion":"success"},{"name":"e2e","conclusion":"success"}]}' ;;
+    e2e-red) echo '{"jobs":[{"name":"test","conclusion":"success"},{"name":"e2e","conclusion":"failure"}]}' ;;
+    *)       echo '{"jobs":[{"name":"test","conclusion":"failure"},{"name":"e2e","conclusion":"success"}]}' ;;
+  esac
+  ;;
+"run rerun")
+  :
+  ;;
+*)
+  echo "fake gh: unsupported invocation: $*" >&2
+  exit 2
+  ;;
+esac
