@@ -1,11 +1,14 @@
 package adopt
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/emit"
+	"github.com/koorikla/compositionfactory/internal/schema"
 )
 
 // dropsBeyondXRDless returns the drops that are not the per-parameter
@@ -94,9 +97,9 @@ spec:
 		t.Errorf("expected template cf.tags in Spec.Templates")
 	}
 
-	// Pipeline
-	if len(bp.Spec.Pipeline) != 1 || bp.Spec.Pipeline[0].Name != "auto-ready" {
-		t.Errorf("Pipeline = %+v, want [auto-ready]", bp.Spec.Pipeline)
+	// Pipeline: inferred default auto-ready step must not be adopted as a custom pipeline step (CF-119)
+	if len(bp.Spec.Pipeline) != 0 {
+		t.Errorf("Pipeline = %+v, want empty (inferred default auto-ready must not become a custom step)", bp.Spec.Pipeline)
 	}
 
 	// Resources
@@ -222,9 +225,9 @@ spec:
 		t.Errorf("bucket name field = %+v, want From: params.bucketName", res.Fields["name"])
 	}
 
-	// Verify function-patch-and-transform is not kept in pipeline, but auto-ready is
-	if len(bp.Spec.Pipeline) != 1 || bp.Spec.Pipeline[0].Name != "auto-ready" {
-		t.Errorf("pipeline = %+v, want only auto-ready step", bp.Spec.Pipeline)
+	// Verify function-patch-and-transform and default auto-ready are not kept in pipeline (CF-119)
+	if len(bp.Spec.Pipeline) != 0 {
+		t.Errorf("pipeline = %+v, want empty pipeline (default inferred auto-ready dropped)", bp.Spec.Pipeline)
 	}
 }
 
@@ -1434,5 +1437,171 @@ spec:
 		if !strings.Contains(out, "xrd.parameters."+name) {
 			t.Errorf("report.String() must name xrd.parameters.%s:\n%s", name, out)
 		}
+	}
+}
+
+// CF-119 (#7): Importing the Composition that Generate just wrote comes back
+// with the inferred auto-ready step turned into a custom pipeline step whose
+// kind 404s, and parameters' required flag lost.
+// When adopting a Composition whose pipeline contains only the default inferred
+// function-auto-ready step, cf must not adopt it as an explicit custom pipeline step.
+func TestCF119ImportGeneratedCompositionRoundTrip(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata: blueprint.Metadata{
+			Name: "xdatabases.platform.example.org",
+		},
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{
+				{Provider: "xpkg.upbound.io/upbound/provider-aws-rds:v1.14.0"},
+			},
+			XRD: blueprint.XRD{
+				Group:   "platform.example.org",
+				Version: "v1alpha1",
+				Kind:    "XDatabase",
+				Plural:  "xdatabases",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {
+						Type:     "string",
+						Required: true,
+					},
+					"region": {
+						Type:     "string",
+						Required: true,
+						Default:  "eu-north-1",
+					},
+					"dbName": {
+						Type:     "string",
+						Required: true,
+					},
+					"instanceClass": {
+						Type:     "string",
+						Required: true,
+					},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "db",
+					Kind:     "Instance",
+					Provider: "xpkg.upbound.io/upbound/provider-aws-rds:v1.14.0",
+					Fields: map[string]blueprint.Field{
+						"region":            {From: "params.region"},
+						"dbSubnetGroupName": {From: "params.dbName"},
+						"instanceClass":     {From: "params.instanceClass"},
+					},
+				},
+			},
+		},
+	}
+
+	crdDoc := `
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: instances.rds.aws.upbound.io
+spec:
+  group: rds.aws.upbound.io
+  names:
+    kind: Instance
+    plural: instances
+    categories: [managed]
+  scope: Namespaced
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              required: [forProvider]
+              properties:
+                forProvider:
+                  type: object
+                  required: [region, instanceClass]
+                  properties:
+                    region: {type: string}
+                    instanceClass: {type: string}
+                    dbSubnetGroupName: {type: string}
+                providerConfigRef:
+                  type: object
+                  properties: {name: {type: string}}
+`
+	crds, err := schema.ParseCRDs(blueprint.SplitDocs([]byte(crdDoc)))
+	if err != nil {
+		t.Fatalf("parse CRD: %v", err)
+	}
+	outputs, err := emit.Generate(b, crds, "")
+	if err != nil {
+		t.Fatalf("emit.Generate: %v", err)
+	}
+	var compYAML []byte
+	for _, o := range outputs {
+		if strings.Contains(o.Path, "compositions") {
+			compYAML = o.Body
+			break
+		}
+	}
+	if len(compYAML) == 0 {
+		t.Fatalf("no composition generated")
+	}
+
+	adoptedBP, report, err := Adopt(compYAML, Options{
+		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-rds:v1.14.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	// The inferred auto-ready step in the default pipeline must NOT be
+	// adopted as an explicit custom pipeline step.
+	if len(adoptedBP.Spec.Pipeline) != 0 {
+		t.Errorf("adopted pipeline = %+v, want empty (inferred default auto-ready must not become a custom step)", adoptedBP.Spec.Pipeline)
+	}
+
+	// Every parameter's required flag must survive if proven by the Composition.
+	for _, name := range []string{"providerName", "region", "dbName", "instanceClass"} {
+		p, ok := adoptedBP.Spec.XRD.Parameters[name]
+		if !ok {
+			t.Errorf("parameter %q missing from adopted blueprint", name)
+			continue
+		}
+		if !p.Required {
+			t.Errorf("parameter %q came back with required=false, want required=true", name)
+		}
+	}
+
+	// Losses without the XRD must be accurately reported
+	if !report.HasTrueLoss() {
+		t.Fatalf("expected true loss report for XRD-less adoption")
+	}
+	reasons := map[string]string{}
+	for _, d := range report.Drops {
+		if strings.HasPrefix(d.Path, "xrd.parameters.") {
+			reasons[strings.TrimPrefix(d.Path, "xrd.parameters.")] = d.Reason
+		}
+	}
+	if !strings.Contains(reasons["region"], "default") {
+		t.Errorf("expected loss of default for region to be reported, got %q", reasons["region"])
+	}
+
+	// Round-trip emission must be reproducible
+	reOutputs, err := emit.Generate(adoptedBP, crds, "")
+	if err != nil {
+		t.Fatalf("emit.Generate on adopted blueprint: %v", err)
+	}
+	var reComp []byte
+	for _, o := range reOutputs {
+		if strings.Contains(o.Path, "compositions") {
+			reComp = o.Body
+			break
+		}
+	}
+	if !bytes.Equal(compYAML, reComp) {
+		t.Errorf("re-emitted composition differs:\n--- Orig ---\n%s\n--- Re-emitted ---\n%s", string(compYAML), string(reComp))
 	}
 }
