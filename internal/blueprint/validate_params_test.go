@@ -25,3 +25,37 @@ func TestValidateParametersYAMLKeywordResilience(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateObjectParameterMembersYAMLKeywordResilience(t *testing.T) {
+	for _, name := range []string{"n", "y", "yes", "no", "on", "off"} {
+		t.Run(name, func(t *testing.T) {
+			bp := validParamBlueprint("settings")
+			bp.Spec.XRD.Parameters["settings"] = Parameter{
+				Type: "object",
+				Properties: map[string]Parameter{
+					name: {Type: "string"},
+				},
+			}
+			if err := bp.Validate(); err != nil {
+				t.Fatalf("Validate rejected valid object member name %q: %v", name, err)
+			}
+		})
+	}
+}
+
+func TestValidateObjectParameterMembersReservedKeywordsRejected(t *testing.T) {
+	for _, name := range []string{"true", "false", "null"} {
+		t.Run(name, func(t *testing.T) {
+			bp := validParamBlueprint("settings")
+			bp.Spec.XRD.Parameters["settings"] = Parameter{
+				Type: "object",
+				Properties: map[string]Parameter{
+					name: {Type: "string"},
+				},
+			}
+			if err := bp.Validate(); err == nil {
+				t.Fatalf("Validate accepted boolean/null keyword %q as object member name", name)
+			}
+		})
+	}
+}

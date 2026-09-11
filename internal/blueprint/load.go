@@ -255,7 +255,7 @@ func validateParameterMembers(paramPath string, p Parameter) error {
 	sort.Strings(names)
 	for _, m := range names {
 		mPath := paramPath + ".properties." + m
-		if !paramNameRE.MatchString(m) || yamlKeywords[strings.ToLower(m)] {
+		if !paramNameRE.MatchString(m) || yamlParamKeywords[strings.ToLower(m)] {
 			return fmt.Errorf("%s: invalid member name "+
 				"(must be camelCase, e.g. maxMessageSize, and not a YAML keyword like yes/no/true/false)", mPath)
 		}
