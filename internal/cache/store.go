@@ -430,18 +430,91 @@ func (s *Store) List() ([]string, error) {
 			continue
 		}
 		path := filepath.Join(s.Root, d.Name(), "crds.json")
-		body, err := os.ReadFile(path)
+		ref, err := readProviderRef(path)
 		if err != nil {
 			continue
 		}
-		var entry Entry
-		if err := json.Unmarshal(body, &entry); err != nil {
-			continue
-		}
-		if entry.Ref != "" {
-			refs = append(refs, entry.Ref)
+		if ref != "" {
+			refs = append(refs, ref)
 		}
 	}
 	sort.Strings(refs)
 	return refs, nil
+}
+
+// readProviderRef extracts the provider "ref" string from a cached crds.json
+// file without deserializing the CRDs schema array or buffering the full file
+// into memory.
+func readProviderRef(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	tok, err := dec.Token()
+	if err != nil {
+		return "", err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok || delim != '{' {
+		return "", fmt.Errorf("expected opening '{', got %v", tok)
+	}
+
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return "", err
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return "", fmt.Errorf("expected string key, got %v", tok)
+		}
+		if key == "ref" {
+			tok, err := dec.Token()
+			if err != nil {
+				return "", err
+			}
+			ref, ok := tok.(string)
+			if !ok {
+				return "", fmt.Errorf("expected string value for ref, got %v", tok)
+			}
+			return ref, nil
+		}
+		if err := skipJSONTokenValue(dec); err != nil {
+			return "", err
+		}
+	}
+	return "", nil
+}
+
+func skipJSONTokenValue(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return nil
+	}
+	if delim != '{' && delim != '[' {
+		return fmt.Errorf("unexpected delimiter %v", delim)
+	}
+	depth := 1
+	for depth > 0 {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		if d, ok := tok.(json.Delim); ok {
+			switch d {
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+			}
+		}
+	}
+	return nil
 }

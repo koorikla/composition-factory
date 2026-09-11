@@ -305,6 +305,144 @@ func TestStoreList(t *testing.T) {
 	}
 }
 
+// TestStoreListDoesNotUnmarshalCRDs verifies that Store.List extracts provider
+// refs without deserializing the CRD schema slice. If Store.List unmarshals
+// into the full Entry struct, invalid/unsupported CRD schema payloads cause
+// unmarshaling to fail and the provider ref to be silently dropped.
+func TestStoreListDoesNotUnmarshalCRDs(t *testing.T) {
+	s := New(t.TempDir())
+
+	// Provider 1: crds field contains non-CRD data (array of strings instead of schema.CRD objects).
+	// Provider 2: crds field contains a string instead of array.
+	// Both are valid JSON and contain a valid "ref" field.
+	p1 := filepath.Join(s.Root, "provider-one")
+	if err := os.MkdirAll(p1, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content1 := `{
+  "ref": "example.org/provider-one:v1",
+  "digest": "sha256:111",
+  "crds": ["not-a-crd-schema-object"]
+}`
+	if err := os.WriteFile(filepath.Join(p1, "crds.json"), []byte(content1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p2 := filepath.Join(s.Root, "provider-two")
+	if err := os.MkdirAll(p2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content2 := `{
+  "ref": "example.org/provider-two:v1",
+  "digest": "sha256:222",
+  "crds": "not-an-array"
+}`
+	if err := os.WriteFile(filepath.Join(p2, "crds.json"), []byte(content2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Provider 3: ref comes AFTER nested objects and arrays.
+	p3 := filepath.Join(s.Root, "provider-three")
+	if err := os.MkdirAll(p3, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content3 := `{
+  "meta": {
+    "tags": ["alpha", "beta"],
+    "nested": {"key": 123}
+  },
+  "digest": "sha256:333",
+  "ref": "example.org/provider-three:v1",
+  "crds": []
+}`
+	if err := os.WriteFile(filepath.Join(p3, "crds.json"), []byte(content3), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Provider 4: ref is not a string (should be skipped).
+	p4 := filepath.Join(s.Root, "provider-four")
+	if err := os.MkdirAll(p4, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content4 := `{
+  "ref": 12345,
+  "crds": []
+}`
+	if err := os.WriteFile(filepath.Join(p4, "crds.json"), []byte(content4), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Provider 5: ref is empty string (should be skipped).
+	p5 := filepath.Join(s.Root, "provider-five")
+	if err := os.MkdirAll(p5, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content5 := `{
+  "ref": "",
+  "crds": []
+}`
+	if err := os.WriteFile(filepath.Join(p5, "crds.json"), []byte(content5), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	refs, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	want := []string{"example.org/provider-one:v1", "example.org/provider-three:v1", "example.org/provider-two:v1"}
+	if diff := cmp.Diff(want, refs); diff != "" {
+		t.Fatalf("List mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func BenchmarkStoreList(b *testing.B) {
+	s := New(b.TempDir())
+
+	// Create 10 cached providers, each with multiple CRDs containing realistic schema property trees.
+	crds := make([]schema.CRD, 20)
+	for i := range crds {
+		crds[i] = schema.CRD{
+			Group: fmt.Sprintf("group%d.example.org", i),
+			Kind:  fmt.Sprintf("Kind%d", i),
+			Versions: []schema.Version{{
+				Name:   "v1beta1",
+				Served: true,
+				Properties: map[string]any{
+					"spec": map[string]any{
+						"forProvider": map[string]any{
+							"propA": map[string]any{"type": "string"},
+							"propB": map[string]any{"type": "integer"},
+							"nested": map[string]any{
+								"field1": map[string]any{"type": "string"},
+								"field2": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+							},
+						},
+					},
+				},
+			}},
+		}
+	}
+
+	for i := 0; i < 10; i++ {
+		ref := fmt.Sprintf("example.org/provider-%02d:v1", i)
+		if err := s.SaveCRDs(ref, fmt.Sprintf("sha256:%02d", i), crds); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		refs, err := s.List()
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(refs) != 10 {
+			b.Fatalf("got %d refs, want 10", len(refs))
+		}
+	}
+}
+
 func TestLockFunctionsSupport(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), ".cf.lock")
 	l, err := ReadLock(tmp)
