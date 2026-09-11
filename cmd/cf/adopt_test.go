@@ -825,3 +825,161 @@ spec:
 		t.Fatalf("gen on adopted blueprint failed: %v\noutput:\n%s", err, genOut.String())
 	}
 }
+
+func TestCF241_AdoptBaseBlueprintError(t *testing.T) {
+	tmpDir := t.TempDir()
+	compPath := filepath.Join(tmpDir, "composition.yaml")
+
+	compContent := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+`
+	if err := os.WriteFile(compPath, []byte(compContent), 0644); err != nil {
+		t.Fatalf("write composition: %v", err)
+	}
+
+	t.Run("nonexistent base blueprint returns exit 1 with read base blueprint error", func(t *testing.T) {
+		nonexistentPath := filepath.Join(tmpDir, "nonexistent.yaml")
+		cmd := &AdoptCmd{
+			Composition: compPath,
+			Blueprint:   nonexistentPath,
+		}
+		var out bytes.Buffer
+		code, err := cmd.run(&out)
+		if code != 1 {
+			t.Errorf("exit code = %d, want 1", code)
+		}
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "read base blueprint") {
+			t.Errorf("expected error to mention 'read base blueprint', got: %v", err)
+		}
+	})
+
+	t.Run("broken base blueprint returns exit 1 with parse base blueprint error", func(t *testing.T) {
+		brokenPath := filepath.Join(tmpDir, "broken.yaml")
+		if err := os.WriteFile(brokenPath, []byte("garbage: [\n"), 0644); err != nil {
+			t.Fatalf("write broken blueprint: %v", err)
+		}
+		cmd := &AdoptCmd{
+			Composition: compPath,
+			Blueprint:   brokenPath,
+		}
+		var out bytes.Buffer
+		code, err := cmd.run(&out)
+		if code != 1 {
+			t.Errorf("exit code = %d, want 1", code)
+		}
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "parse base blueprint") {
+			t.Errorf("expected error to mention 'parse base blueprint', got: %v", err)
+		}
+	})
+
+	t.Run("cli via parser also fails with appropriate error", func(t *testing.T) {
+		nonexistentPath := filepath.Join(tmpDir, "nonexistent2.yaml")
+		var cli CLI
+		opts := append(kongOptions(), kong.Exit(func(int) {}))
+		parser, err := kong.New(&cli, opts...)
+		if err != nil {
+			t.Fatalf("kong.New: %v", err)
+		}
+		ctx, err := parser.Parse([]string{"adopt", compPath, "-b", nonexistentPath})
+		if err != nil {
+			t.Fatalf("parse adopt cmd: %v", err)
+		}
+		var out bytes.Buffer
+		ctx.BindTo(&out, (*io.Writer)(nil))
+		err = ctx.Run()
+		if err == nil {
+			t.Fatalf("expected error running adopt with nonexistent -b, got nil")
+		}
+		if !strings.Contains(err.Error(), "read base blueprint") {
+			t.Errorf("expected error to mention 'read base blueprint', got: %v", err)
+		}
+	})
+
+	t.Run("xrd-only import with nonexistent base blueprint returns read base blueprint error instead of misleading composition error", func(t *testing.T) {
+		xrdPath := filepath.Join(tmpDir, "xrd.yaml")
+		xrdContent := `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  group: aws.example.org
+  names:
+    kind: XQueue
+    plural: xqueues
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+`
+		if err := os.WriteFile(xrdPath, []byte(xrdContent), 0644); err != nil {
+			t.Fatalf("write xrd: %v", err)
+		}
+		cmd := &AdoptCmd{
+			Composition: xrdPath,
+			Blueprint:   filepath.Join(tmpDir, "does-not-exist.yaml"),
+		}
+		var out bytes.Buffer
+		code, err := cmd.run(&out)
+		if code != 1 {
+			t.Errorf("exit code = %d, want 1", code)
+		}
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "read base blueprint") {
+			t.Errorf("expected error to mention 'read base blueprint', got: %v", err)
+		}
+		if strings.Contains(err.Error(), "no Composition document found") {
+			t.Errorf("expected error to fail on base blueprint before composition search, got: %v", err)
+		}
+	})
+
+	t.Run("fallback c.Out does not fail if nonexistent or unparseable", func(t *testing.T) {
+		unparseableOut := filepath.Join(tmpDir, "unparseable-out.yaml")
+		if err := os.WriteFile(unparseableOut, []byte("garbage: [\n"), 0644); err != nil {
+			t.Fatalf("write unparseable out: %v", err)
+		}
+		cmd := &AdoptCmd{
+			Composition: compPath,
+			Out:         unparseableOut,
+		}
+		var out bytes.Buffer
+		code, err := cmd.run(&out)
+		if err != nil {
+			t.Fatalf("run failed unexpectedly: %v", err)
+		}
+		// Succeeded in adopting and overwriting unparseableOut (exit 0)
+		if code != 0 {
+			t.Errorf("exit code = %d, want 0", code)
+		}
+	})
+}
