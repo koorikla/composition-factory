@@ -239,3 +239,17 @@ func TestValidateRef(t *testing.T) {
 		}
 	}
 }
+
+func TestFetchOfflineInvalidRegistry(t *testing.T) {
+	ref := "offline.invalid/crossplane-contrib/provider-aws-sqs:v9.9.9"
+	pkg, err := Fetch(context.Background(), ref)
+	if pkg != nil {
+		t.Fatalf("expected nil package, got %+v", pkg)
+	}
+	if err == nil {
+		t.Fatal("expected error for .invalid registry, got nil")
+	}
+	if !strings.Contains(err.Error(), "offline invalid registry") {
+		t.Errorf("error = %q, want it to mention offline invalid registry", err.Error())
+	}
+}

@@ -53,6 +53,10 @@ func Fetch(ctx context.Context, ref string) (*Package, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse reference %q: %w", ref, err)
 	}
+	reg := r.Context().RegistryStr()
+	if strings.HasSuffix(reg, ".invalid") || reg == "invalid" {
+		return nil, fmt.Errorf("fetch %q: offline invalid registry %q", ref, reg)
+	}
 	desc, err := remote.Get(r,
 		remote.WithContext(ctx),
 		remote.WithAuthFromKeychain(authn.DefaultKeychain),

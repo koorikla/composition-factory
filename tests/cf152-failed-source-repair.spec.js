@@ -13,12 +13,8 @@ const pristine = require('./fixtures/pristine-doc.json')
 guardPageErrors()
 
 const GOOD = 'ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0'
-const BAD = 'ghcr.io/crossplane-contrib/provider-aws-sqs:v9.9.9'
+const BAD = 'offline.invalid/crossplane-contrib/provider-aws-sqs:v9.9.9'
 const REPLACEMENT = 'ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0'
-
-// The failed-source fetch attempt and the replacement pull both go to the
-// registry, so give each test more than the config's 15s.
-test.setTimeout(60000)
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)
