@@ -6496,3 +6496,315 @@ spec:
 		t.Errorf("expected error to mention 'comp-c', got: %v", err)
 	}
 }
+
+func TestCF290_AdoptMultiXRDStreamMatchingAndLossReport(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xdatabases.example.org
+spec:
+  group: example.org
+  names:
+    kind: XDatabase
+    plural: xdatabases
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              parameters:
+                type: object
+                properties:
+                  dbStorage:
+                    type: integer
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xothers.example.org
+spec:
+  group: example.org
+  names:
+    kind: XOther
+    plural: xothers
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              parameters:
+                type: object
+                properties:
+                  unrelatedKey:
+                    type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: comp-database
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XDatabase
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-auto-ready
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	// 1. Verify blueprint binds XDatabase's parameter (dbStorage) and plural (xdatabases)
+	if bp.Spec.XRD.Kind != "XDatabase" {
+		t.Errorf("expected XRD kind XDatabase, got %q", bp.Spec.XRD.Kind)
+	}
+	if bp.Spec.XRD.Plural != "xdatabases" {
+		t.Errorf("expected XRD plural xdatabases, got %q", bp.Spec.XRD.Plural)
+	}
+	if _, ok := bp.Spec.XRD.Parameters["dbStorage"]; !ok {
+		t.Errorf("expected parameter dbStorage from XDatabase XRD to be bound")
+	}
+
+	// 2. Verify unrelatedKey and xothers from XOther XRD are NOT bound
+	if _, ok := bp.Spec.XRD.Parameters["unrelatedKey"]; ok {
+		t.Errorf("unrelatedKey from non-matching XRD must not be bound")
+	}
+	if bp.Spec.XRD.Plural == "xothers" {
+		t.Errorf("plural xothers from non-matching XRD must not be bound")
+	}
+
+	// 3. Verify LossReport records the dropped/unmatched XRD
+	if report == nil {
+		t.Fatalf("expected non-nil LossReport")
+	}
+	var foundOtherDrop bool
+	for _, d := range report.Drops {
+		if d.Path == "manifest.CompositeResourceDefinition/xothers.example.org" || d.Path == "CompositeResourceDefinition/xothers.example.org" {
+			foundOtherDrop = true
+			if !strings.Contains(d.Reason, "unmatched XRD") && !strings.Contains(d.Reason, "omitted") {
+				t.Errorf("expected drop reason to indicate unmatched/omitted XRD, got %q", d.Reason)
+			}
+			break
+		}
+	}
+	if !foundOtherDrop {
+		t.Errorf("expected drop entry for manifest.CompositeResourceDefinition/xothers.example.org in LossReport, got drops: %+v", report.Drops)
+	}
+
+	// Verify XDatabase was NOT dropped
+	for _, d := range report.Drops {
+		if strings.Contains(d.Path, "xdatabases.example.org") {
+			t.Errorf("matching XRD xdatabases.example.org must not be recorded as dropped, got drop: %+v", d)
+		}
+	}
+
+	outYAML, err := FormatAdoptedYAML(bp, report)
+	if err != nil {
+		t.Fatalf("FormatAdoptedYAML failed: %v", err)
+	}
+	if !strings.Contains(string(outYAML), "# adopt: dropped manifest.CompositeResourceDefinition/xothers.example.org") {
+		t.Errorf("expected output YAML to contain comment '# adopt: dropped manifest.CompositeResourceDefinition/xothers.example.org', got:\n%s", string(outYAML))
+	}
+}
+
+func TestCF290_AdoptMultiXRDStreamReverseOrder(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xothers.example.org
+spec:
+  group: example.org
+  names:
+    kind: XOther
+    plural: xothers
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              parameters:
+                type: object
+                properties:
+                  unrelatedKey:
+                    type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xdatabases.example.org
+spec:
+  group: example.org
+  names:
+    kind: XDatabase
+    plural: xdatabases
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              parameters:
+                type: object
+                properties:
+                  dbStorage:
+                    type: integer
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: comp-database
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XDatabase
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-auto-ready
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if bp.Spec.XRD.Kind != "XDatabase" {
+		t.Errorf("expected XRD kind XDatabase, got %q", bp.Spec.XRD.Kind)
+	}
+	if bp.Spec.XRD.Plural != "xdatabases" {
+		t.Errorf("expected XRD plural xdatabases, got %q", bp.Spec.XRD.Plural)
+	}
+	if _, ok := bp.Spec.XRD.Parameters["dbStorage"]; !ok {
+		t.Errorf("expected parameter dbStorage from XDatabase XRD to be bound")
+	}
+	if _, ok := bp.Spec.XRD.Parameters["unrelatedKey"]; ok {
+		t.Errorf("unrelatedKey from non-matching XRD must not be bound")
+	}
+
+	if report == nil {
+		t.Fatalf("expected non-nil LossReport")
+	}
+	var foundOtherDrop bool
+	for _, d := range report.Drops {
+		if d.Path == "manifest.CompositeResourceDefinition/xothers.example.org" || d.Path == "CompositeResourceDefinition/xothers.example.org" {
+			foundOtherDrop = true
+			break
+		}
+	}
+	if !foundOtherDrop {
+		t.Errorf("expected drop entry for manifest.CompositeResourceDefinition/xothers.example.org in LossReport, got drops: %+v", report.Drops)
+	}
+}
+
+func TestCF290_AdoptNonMatchingXRDOnlyInStream(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xothers.example.org
+spec:
+  group: example.org
+  names:
+    kind: XOther
+    plural: xothers
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              parameters:
+                type: object
+                properties:
+                  unrelatedKey:
+                    type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: comp-database
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XDatabase
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-auto-ready
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	// 1. Verify non-matching XRD is NOT bound to bp.Spec.XRD
+	if bp.Spec.XRD.Kind != "XDatabase" {
+		t.Errorf("expected XRD kind XDatabase, got %q", bp.Spec.XRD.Kind)
+	}
+	if bp.Spec.XRD.Plural == "xothers" {
+		t.Errorf("plural xothers from non-matching XRD must not be bound")
+	}
+	if _, ok := bp.Spec.XRD.Parameters["unrelatedKey"]; ok {
+		t.Errorf("unrelatedKey from non-matching XRD must not be bound")
+	}
+
+	// 2. Verify LossReport records the dropped non-matching XRD
+	if report == nil {
+		t.Fatalf("expected non-nil LossReport")
+	}
+	var foundOtherDrop bool
+	for _, d := range report.Drops {
+		if d.Path == "manifest.CompositeResourceDefinition/xothers.example.org" || d.Path == "CompositeResourceDefinition/xothers.example.org" {
+			foundOtherDrop = true
+			if !strings.Contains(d.Reason, "unmatched XRD") && !strings.Contains(d.Reason, "omitted") {
+				t.Errorf("expected drop reason to indicate unmatched/omitted XRD, got %q", d.Reason)
+			}
+			break
+		}
+	}
+	if !foundOtherDrop {
+		t.Errorf("expected drop entry for manifest.CompositeResourceDefinition/xothers.example.org in LossReport, got drops: %+v", report.Drops)
+	}
+
+	outYAML, err := FormatAdoptedYAML(bp, report)
+	if err != nil {
+		t.Fatalf("FormatAdoptedYAML failed: %v", err)
+	}
+	if !strings.Contains(string(outYAML), "# adopt: dropped manifest.CompositeResourceDefinition/xothers.example.org") {
+		t.Errorf("expected output YAML to contain comment '# adopt: dropped manifest.CompositeResourceDefinition/xothers.example.org', got:\n%s", string(outYAML))
+	}
+}

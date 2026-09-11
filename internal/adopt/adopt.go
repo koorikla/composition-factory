@@ -421,24 +421,32 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		}
 	}
 
-	// 3. If XRD document is present, parse parameters & metadata
+	// 3. Match CompositeResourceDefinition documents against the Composition's kind
 	var xrdDoc map[string]any
-	if len(xrdDocs) == 1 {
-		xrdDoc = xrdDocs[0]
-	} else if len(xrdDocs) > 1 {
-		for _, xd := range xrdDocs {
-			if xSpec, ok := xd["spec"].(map[string]any); ok {
-				if names, ok := xSpec["names"].(map[string]any); ok {
-					if k, _ := names["kind"].(string); k != "" && k == bp.Spec.XRD.Kind {
-						xrdDoc = xd
-						break
-					}
-				}
+	var unmatchedXRDs []map[string]any
+	for _, xd := range xrdDocs {
+		var xrdKind string
+		if xSpec, ok := xd["spec"].(map[string]any); ok {
+			if names, ok := xSpec["names"].(map[string]any); ok {
+				xrdKind, _ = names["kind"].(string)
 			}
 		}
-		if xrdDoc == nil && len(xrdDocs) > 0 {
-			xrdDoc = xrdDocs[0]
+		if xrdDoc == nil && xrdKind != "" && bp.Spec.XRD.Kind != "" && (xrdKind == bp.Spec.XRD.Kind || strings.EqualFold(xrdKind, bp.Spec.XRD.Kind)) {
+			xrdDoc = xd
+		} else {
+			unmatchedXRDs = append(unmatchedXRDs, xd)
 		}
+	}
+	for _, xd := range unmatchedXRDs {
+		name := ""
+		if meta, ok := xd["metadata"].(map[string]any); ok {
+			name, _ = meta["name"].(string)
+		}
+		target := "manifest.CompositeResourceDefinition"
+		if name != "" {
+			target = fmt.Sprintf("manifest.CompositeResourceDefinition/%s", name)
+		}
+		report.Record(target, "unmatched XRD omitted from blueprint adoption")
 	}
 	if xrdDoc != nil {
 		parseXRDDoc(xrdDoc, bp, report)
@@ -868,16 +876,21 @@ func parseXRDDoc(xrdDoc map[string]any, bp *blueprint.Blueprint, report *LossRep
 	if !ok {
 		return
 	}
-	if group, ok := spec["group"].(string); ok && bp.Spec.XRD.Group == "" {
-		bp.Spec.XRD.Group = group
-	}
 	if names, ok := spec["names"].(map[string]any); ok {
-		if k, ok := names["kind"].(string); ok && bp.Spec.XRD.Kind == "" {
-			bp.Spec.XRD.Kind = k
+		if k, ok := names["kind"].(string); ok && k != "" {
+			if bp.Spec.XRD.Kind != "" && !strings.EqualFold(k, bp.Spec.XRD.Kind) {
+				return
+			}
+			if bp.Spec.XRD.Kind == "" {
+				bp.Spec.XRD.Kind = k
+			}
 		}
 		if p, ok := names["plural"].(string); ok && bp.Spec.XRD.Plural == "" {
 			bp.Spec.XRD.Plural = p
 		}
+	}
+	if group, ok := spec["group"].(string); ok && bp.Spec.XRD.Group == "" {
+		bp.Spec.XRD.Group = group
 	}
 	if scope, ok := spec["scope"].(string); ok && bp.Spec.XRD.Scope == "" {
 		bp.Spec.XRD.Scope = scope
