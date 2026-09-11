@@ -4352,3 +4352,80 @@ spec:
 		t.Errorf("bp.Validate() failed: %v", err)
 	}
 }
+
+func TestAdopt_HelmSourceComment(t *testing.T) {
+	manifest := `# Source: mychart/templates/composition.yaml
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: my-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if bp.Metadata.Name != "my-comp" {
+		t.Errorf("expected Metadata.Name to be 'my-comp', got %q", bp.Metadata.Name)
+	}
+	if err := bp.Validate(); err != nil {
+		t.Errorf("bp.Validate() failed: %v", err)
+	}
+
+	// Also verify that a valid DNS subdomain in # Source: is accepted
+	manifestValid := `# Source: valid-bp-name
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: comp-name
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+`
+	bpValid, _, err := Adopt([]byte(manifestValid), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if bpValid.Metadata.Name != "valid-bp-name" {
+		t.Errorf("expected Metadata.Name to be 'valid-bp-name', got %q", bpValid.Metadata.Name)
+	}
+}
+
