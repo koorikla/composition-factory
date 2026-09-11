@@ -956,6 +956,59 @@ func TestPutBlueprintInvalidDocumentIs400VerbatimAndFileUntouched(t *testing.T) 
 	}
 }
 
+func TestPutBlueprintRejectsInvalidMetadataName(t *testing.T) {
+	cases := []struct {
+		name    string
+		meta    string
+		wantMsg string
+	}{
+		{"empty", "", "metadata.name is required"},
+		{"spaces and uppercase", "My Blueprint", `metadata.name: "My Blueprint" is not a valid DNS subdomain name`},
+		{"all uppercase", "UPPER", `metadata.name: "UPPER" is not a valid DNS subdomain name`},
+		{"keyword", "true", `metadata.name: "true" is not a valid DNS subdomain name`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, path := testHandlerWithPath(t)
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+
+			current := mustLoadBlueprint(t, path)
+			bp := *current
+			bp.Metadata.Name = tc.meta
+
+			body, err := json.Marshal(bp)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+
+			rec := do(t, h, "PUT", "/api/blueprint", string(body))
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+			}
+
+			var errBody errorBody
+			if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+				t.Fatalf("error response not JSON: %v (%s)", err, rec.Body)
+			}
+			if !strings.Contains(errBody.Error, tc.wantMsg) {
+				t.Errorf("error body %q does not contain %q", errBody.Error, tc.wantMsg)
+			}
+
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read file after rejected PUT: %v", err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Errorf("the blueprint file changed despite a rejected PUT with metadata.name=%q", tc.meta)
+			}
+		})
+	}
+}
+
 // TestPutBlueprintMalformedJSONIs400 is the malformed-body counterpart: a
 // body that does not even parse as JSON must be a 400, and must not touch
 // the file (there is nothing to validate yet, so no write is even attempted).
