@@ -644,6 +644,10 @@ function countRaws(doc) {
 }
 
 function drawWarn(doc) {
+  if (editor && !editor.hidden) {
+    if (el.warn) el.warn.hidden = true;
+    return;
+  }
   var raws = countRaws(doc);
   if (raws) {
     el.warn.hidden = false;
@@ -848,6 +852,9 @@ function hideEditor() {
   if (editor) editor.hidden = true;
   if (editBar) editBar.hidden = true;
   if (el.code) el.code.hidden = false;
+  var subbar = document.getElementById("editor-subbar");
+  if (subbar) subbar.hidden = false;
+  drawWarn(store && store.state && store.state.doc);
 }
 
 function initBlueprintEditor() {
@@ -877,12 +884,19 @@ function initBlueprintEditor() {
   editor.parentNode.insertBefore(editBar, editor.nextSibling);
 
   editBtn.addEventListener("click", function () {
+    if (typeof isDrawerCollapsed === "function" && isDrawerCollapsed()) {
+      expandDrawer(200);
+    }
     editor.value = currentText();
     el.code.hidden = true;
+    var subbar = document.getElementById("editor-subbar");
+    if (subbar) subbar.hidden = true;
+    if (el.warn) el.warn.hidden = true;
     editor.hidden = false;
     editBar.hidden = false;
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(0, 0);
     editor.scrollTop = 0;
-    editor.focus();
   });
 
   editBar.addEventListener("click", function (e) {
