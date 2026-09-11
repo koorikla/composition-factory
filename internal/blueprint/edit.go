@@ -483,8 +483,8 @@ func (b *Blueprint) RenameParameter(from, to string) error {
 		}
 		// Annotation froms too, for exactly the same reason.
 		for key, f := range r.Annotations {
-			if f.From == oldRef {
-				f.From = newRef
+			if rewritten, changed := renameParamRef(f.From, oldRef, newRef); changed {
+				f.From = rewritten
 				cp.Spec.Resources[i].Annotations[key] = f
 			}
 			if f.Raw != "" && rawReferencesParam(f.Raw, from) {
