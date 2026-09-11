@@ -469,3 +469,34 @@ func TestGenPreservesUnmanagedFilesInOutputDir(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckRequiredFieldsOnRealCRD(t *testing.T) {
+	// Load s3-bucket starter YAML, strip the region wire:
+	// "region: {from: params.region}"
+	// Attempt emit.Generate or cf gen.
+	// Must fail with an error stating that required field "spec.forProvider.region" (or "region") on resource "Bucket" is missing.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "examples", "s3-bucket.cf.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile s3-bucket: %v", err)
+	}
+	stripped := strings.ReplaceAll(string(raw), "        region: {from: params.region}\n", "")
+	dir := t.TempDir()
+	bpPath := filepath.Join(dir, "s3-bucket.cf.yaml")
+	if err := os.WriteFile(bpPath, []byte(stripped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	cmd := &GenCmd{
+		Blueprint: bpPath,
+		Out:       filepath.Join(dir, "out"),
+		CacheDir:  cache.DefaultRoot(),
+	}
+	code, err := cmd.run(&buf)
+	if code == 0 && err == nil {
+		t.Fatalf("expected error stating that required field \"region\" on resource \"Bucket\" is missing, got exit 0")
+	}
+	if err == nil || !strings.Contains(err.Error(), "region") || !strings.Contains(strings.ToLower(err.Error()), "bucket") {
+		t.Fatalf("expected error mentioning required field \"region\" and resource \"bucket\", got: %v", err)
+	}
+}
