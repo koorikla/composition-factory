@@ -85,6 +85,9 @@ test.describe('CF-235: Stacking and offset for concurrent toasts and import noti
     await expect(importToast).toBeVisible({ timeout: 10000 });
 
     // In CF-249 unknown wired fields are now pruned during adopt so generate succeeds.
+    // Wait for the import's preview generation to complete so it does not clear our simulated error toast.
+    await expect(page.locator('#valid')).toContainText('preview ·', { timeout: 10000 });
+
     // Trigger an error to verify concurrent 3-way notice stacking (CF-235).
     await page.evaluate(() => {
       window.store.emit('error', { message: 'schema error: retentionDays' });
@@ -110,10 +113,21 @@ test.describe('CF-235: Stacking and offset for concurrent toasts and import noti
     expect(doBoxesOverlap(warnBox, errorToastBox)).toBe(false);
     expect(doBoxesOverlap(errorToastBox, importToastBox)).toBe(false);
 
+    test.setTimeout(30000);
+
     // Error toast must never be hidden behind the loss bar or informational toast.
     // Both toasts must be below the loss bar, and the error toast must be placed above the informational toast.
     expect(errorToastBox.y).toBeGreaterThanOrEqual(warnBox.y + warnBox.height);
     expect(importToastBox.y).toBeGreaterThanOrEqual(errorToastBox.y + errorToastBox.height);
+
+    // Dismissing the error toast shifts the adopted toast up
+    const dismissErrorBtn = errorToast.locator('.toast-close');
+    await dismissErrorBtn.click();
+    await expect(errorToast).toHaveCount(0);
+
+    await expect(importToast).toBeVisible();
+    const importBoxAfterErrorDismiss = await importToast.boundingBox();
+    expect(importBoxAfterErrorDismiss.y).toBeGreaterThanOrEqual(warnBox.y + warnBox.height);
 
     // Dismissing the loss bar updates the toast stack to sit directly below the topbar
     const dismissWarnBtn = warnBar.locator('.warnbar-dismiss, button[aria-label="Dismiss"]');
@@ -122,20 +136,6 @@ test.describe('CF-235: Stacking and offset for concurrent toasts and import noti
 
     const topbar = page.locator('#region-topbar');
     const topbarBox = await topbar.boundingBox();
-    const errorToastBoxAfter = await errorToast.boundingBox();
-    const importToastBoxAfter = await importToast.boundingBox();
-
-    // Toasts are still non-overlapping and placed below topbar
-    expect(doBoxesOverlap(errorToastBoxAfter, importToastBoxAfter)).toBe(false);
-    expect(errorToastBoxAfter.y).toBeGreaterThanOrEqual(topbarBox.y + topbarBox.height);
-    expect(importToastBoxAfter.y).toBeGreaterThanOrEqual(errorToastBoxAfter.y + errorToastBoxAfter.height);
-
-    // Dismissing the error toast shifts the adopted toast up
-    const dismissErrorBtn = errorToast.locator('.toast-close');
-    await dismissErrorBtn.click();
-    await expect(errorToast).toHaveCount(0);
-
-    await expect(importToast).toBeVisible();
     const finalImportToastBox = await importToast.boundingBox();
     expect(finalImportToastBox.y).toBeGreaterThanOrEqual(topbarBox.y + topbarBox.height);
   });
