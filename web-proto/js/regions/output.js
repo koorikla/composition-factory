@@ -1,4 +1,5 @@
 import { esc } from "../dom.js";
+import { mapResourceCoordinates } from "../utils.js";
 /**
  * Region: OUTPUT + TOPBAR behavior.
  *
@@ -419,21 +420,7 @@ function diagnoseError(errMsg) {
   return { isEnv: false, tip: "" };
 }
 
-function mapResourceCoordinates(msg) {
-  if (!msg || typeof msg !== "string") return msg;
-  return msg.replace(/spec\.resources\[(\d+)\]/g, function (match, indexStr) {
-    var idx = parseInt(indexStr, 10);
-    var doc = store && store.state && store.state.doc;
-    var resList = doc && doc.spec && doc.spec.resources;
-    if (resList && resList[idx]) {
-      var name = resList[idx].name || resList[idx].kind;
-      if (name) {
-        return "resource '" + name + "' (" + match + ")";
-      }
-    }
-    return match;
-  });
-}
+
 
 function formatErrorMessage(errMsg) {
   if (!errMsg) return "";

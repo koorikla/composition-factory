@@ -20,6 +20,7 @@ import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
 import { fanOut, parseFrom } from "../wires.js";
+import { mapResourceCoordinates } from "../utils.js";
 
 function isParamRequired(params, pName) {
   if (!params || !pName) return false;
@@ -316,21 +317,7 @@ function setPathVal(obj, path, val) {
   }
 }
 
-export function mapResourceCoordinates(msg) {
-  if (!msg || typeof msg !== "string") return msg;
-  return msg.replace(/spec\.resources\[(\d+)\]/g, function (match, indexStr) {
-    var idx = parseInt(indexStr, 10);
-    var doc = store && store.state && store.state.doc;
-    var resList = doc && doc.spec && doc.spec.resources;
-    if (resList && resList[idx]) {
-      var name = resList[idx].name || resList[idx].kind;
-      if (name) {
-        return "resource '" + name + "' (" + match + ")";
-      }
-    }
-    return match;
-  });
-}
+export { mapResourceCoordinates };
 
 /**
  * Run a store operation, capturing the "error" the store emits for it so the

@@ -20,9 +20,7 @@ import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
 import { fanOut } from "../wires.js";
-
-/* Node color families, exactly as the prototype's COLORS map. */
-const COLORS = { aws: "var(--wire-ref)", k8s: "var(--wire-status)", cluster: "#06b6d4" };
+import { famOf, uniqueResourceName, COLORS } from "../utils.js";
 
 const HINT_KINDS =
   'Drag a kind onto the canvas. Schemas load per-kind — <span class="mono">4.5 KB</span> median.';
@@ -81,12 +79,7 @@ let lastSourcesSig = "";
 
 /* ---------------- helpers & persistence ---------------- */
 
-/** Color family for a live kind row (heuristic: provider/group naming). */
-function famOf(k) {
-  if (k && k.provider === "cluster") return "cluster";
-  const g = (k && k.group || "") + " " + (k && k.provider || "");
-  return /(^|[^a-z])aws|upbound\.io/.test(g) ? "aws" : "k8s";
-}
+
 
 function loadHiddenKinds() {
   try {
@@ -492,7 +485,7 @@ function drawSources() {
         '</div>';
       return;
     }
-    const fam = /aws/.test(ref) ? "aws" : "k8s";
+    const fam = famOf(ref);
     const meta = (s.digest ? s.digest.slice(0, 19) : "") + (s.kinds ? " \u00b7 " + s.kinds + " kinds" : "");
     h += '<div class="src-row" data-ref="' + esc(ref) + '" style="cursor:pointer" title="Click for details" aria-expanded="' + (expandedProvider === ref) + '">' +
       '<span class="sw" style="width:5px;height:22px;border-radius:1.5px;background:' + COLORS[fam] + '"></span>' +
@@ -740,19 +733,7 @@ function showKindPreview(row) {
 
 /* ---------------- kind placement (CF-050) ---------------- */
 
-function slug(k) {
-  return String(k).replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
-}
 
-function uniqueResourceName(d, kind) {
-  const base = slug(kind);
-  const names = {};
-  ((d && d.spec && d.spec.resources) || []).forEach(function (r) { names[r.name] = true; });
-  if (!names[base]) return base;
-  let i = 2;
-  while (names[base + "-" + i]) i++;
-  return base + "-" + i;
-}
 
 function nextCardPosition(d) {
   const positions = store.state.positions || {};

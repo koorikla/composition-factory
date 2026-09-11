@@ -18,6 +18,7 @@ import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
 import { startDrag } from "../drag.js";
 import { listWires, fanOut, parseFrom } from "../wires.js";
+import { famOf, uniqueResourceName, COLORS } from "../utils.js";
 
 const XR_ID = "xrd"; // store.selectedResource / positions key for the composite node
 
@@ -38,30 +39,6 @@ let rafWires = 0;
 function shortPath(p) {
   const seg = String(p).split(".");
   return seg.length <= 2 ? p : "…" + seg.slice(-2).join(".");
-}
-
-/** Provider family for the prototype's color scheme. */
-function famOf(provider) {
-  if (!provider) return "k8s";
-  const p = String(provider).toLowerCase();
-  if (p.indexOf("kubernetes") >= 0 || p === "k8s") return "k8s";
-  if (p.indexOf("azure") >= 0) return "azure";
-  if (p.indexOf("gcp") >= 0 || p.indexOf("google") >= 0) return "gcp";
-  if (p.indexOf("helm") >= 0) return "helm";
-  return "aws";
-}
-const COLORS = {
-  aws: "var(--wire-ref)",
-  k8s: "var(--wire-status)",
-  xrd: "var(--wire-xrd)",
-  azure: "#0078d4",
-  gcp: "#ea4335",
-  helm: "#0f1689",
-};
-
-/** Prototype slug: CamelCase -> camel-case. */
-function slug(k) {
-  return String(k).replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 }
 
 function doc() { return S.state.doc; }
@@ -871,15 +848,7 @@ function onContextMenu(e) {
 
 /* ---------- interactions ---------- */
 
-function uniqueResourceName(d, kind) {
-  const base = slug(kind);
-  const names = {};
-  (d.spec.resources || []).forEach(function (r) { names[r.name] = true; });
-  if (!names[base]) return base;
-  let i = 2;
-  while (names[base + "-" + i]) i++;
-  return base + "-" + i;
-}
+
 
 /* ---------- duplicate / remove (slice 4) ---------- */
 
