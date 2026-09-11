@@ -582,7 +582,9 @@ function ensureBp() {
           changes.push("parameter $" + p + " type changed (" + pp.type + " \u2192 " + np.type + ")");
         }
         if (Boolean(pp.required) !== Boolean(np.required)) {
-          changes.push("parameter $" + p + " required changed");
+          var oldFlag = pp.required ? "required" : "optional";
+          var newFlag = np.required ? "required" : "optional";
+          changes.push("parameter $" + p + " required changed (" + oldFlag + " \u2192 " + newFlag + ")");
         }
       }
     });

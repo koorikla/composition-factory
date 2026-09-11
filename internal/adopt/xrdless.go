@@ -1,6 +1,7 @@
 package adopt
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -186,7 +187,7 @@ func compositionEvidence(compDoc map[string]any, ev map[string]*paramEvidence) {
 // the Composition proves them and records, per parameter, what it could not
 // recover. synthesized names parameters the adopter added itself (providerName
 // for a Namespaced XRD); those are not a loss.
-func applyXRDlessEvidence(bp *blueprint.Blueprint, compDocs []map[string]any, synthesized map[string]bool, report *LossReport) {
+func applyXRDlessEvidence(bp *blueprint.Blueprint, compDocs []map[string]any, synthesized map[string]bool, report *LossReport, baseBP *blueprint.Blueprint) {
 	ev := make(map[string]*paramEvidence)
 	for _, doc := range compDocs {
 		compositionEvidence(doc, ev)
@@ -211,20 +212,34 @@ func applyXRDlessEvidence(bp *blueprint.Blueprint, compDocs []map[string]any, sy
 			sort.Strings(members)
 			for _, m := range members {
 				mp := p.Properties[m]
-				settle(&mp, ev[name+"."+m], "xrd.parameters."+name+".properties."+m, report)
+				var baseMember *blueprint.Parameter
+				if baseBP != nil {
+					if bpParent, ok := baseBP.Spec.XRD.Parameters[name]; ok && bpParent.Properties != nil {
+						if bmp, ok := bpParent.Properties[m]; ok {
+							baseMember = &bmp
+						}
+					}
+				}
+				settle(&mp, ev[name+"."+m], "xrd.parameters."+name+".properties."+m, report, baseMember)
 				p.Properties[m] = mp
 			}
 			report.Record("xrd.parameters."+name, "without the XRD, description could not be recovered")
 			bp.Spec.XRD.Parameters[name] = p
 			continue
 		}
-		settle(&p, ev[name], "xrd.parameters."+name, report)
+		var baseParam *blueprint.Parameter
+		if baseBP != nil {
+			if bpParam, ok := baseBP.Spec.XRD.Parameters[name]; ok {
+				baseParam = &bpParam
+			}
+		}
+		settle(&p, ev[name], "xrd.parameters."+name, report, baseParam)
 		bp.Spec.XRD.Parameters[name] = p
 	}
 }
 
 // settle applies the evidence for one parameter and records what is lost.
-func settle(p *blueprint.Parameter, e *paramEvidence, path string, report *LossReport) {
+func settle(p *blueprint.Parameter, e *paramEvidence, path string, report *LossReport, baseParam *blueprint.Parameter) {
 	if e == nil {
 		e = &paramEvidence{}
 	}
@@ -240,6 +255,16 @@ func settle(p *blueprint.Parameter, e *paramEvidence, path string, report *LossR
 		p.Required = true
 	default:
 		lost = append(lost, "required")
+	}
+
+	if baseParam != nil && baseParam.Required != p.Required {
+		oldFlag := "optional"
+		newFlag := "required"
+		if baseParam.Required {
+			oldFlag = "required"
+			newFlag = "optional"
+		}
+		lost = append(lost, fmt.Sprintf("required (changed from %s to %s)", oldFlag, newFlag))
 	}
 
 	switch {

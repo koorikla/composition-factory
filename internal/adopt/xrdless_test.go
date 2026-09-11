@@ -3,6 +3,8 @@ package adopt
 import (
 	"strings"
 	"testing"
+
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 )
 
 // TestAdoptXRDlessConditionalWhen reproduces CF-168: adopting a Composition
@@ -322,5 +324,149 @@ spec:
 	}
 	if repParam.Type != "integer" {
 		t.Errorf("replicas parameter must have type integer, got Type: %q", repParam.Type)
+	}
+}
+
+// TestCF190AdoptLossReportRequiredParamChange tests CF-190 (#76):
+// When adopting a Composition without its XRD turns an optional parameter into a
+// required parameter to keep the document renderable, that change must appear in
+// the loss/change report, naming the parameter and the old and new flag.
+func TestCF190AdoptLossReportRequiredParamChange(t *testing.T) {
+	compYAML := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xworkloads.workloads.sparky.ee
+spec:
+  compositeTypeRef:
+    apiVersion: workloads.sparky.ee/v1alpha1
+    kind: XWorkload
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            ---
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: app
+            spec:
+              template:
+                spec:
+                  containers:
+                    - image: {{ $spec.image | quote }}
+                      name: app
+            {{- if $spec.enableService }}
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: svc
+            spec:
+              ports:
+                - port: 80
+            {{- end }}
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+
+	baseBP := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata: blueprint.Metadata{
+			Name: "k8s-workload",
+		},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "workloads.sparky.ee",
+				Version: "v1alpha1",
+				Kind:    "XWorkload",
+				Plural:  "xworkloads",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {
+						Type:     "string",
+						Required: true,
+					},
+					"image": {
+						Type:        "string",
+						Required:    true,
+						Description: "Container image repository and tag.",
+					},
+					"enableService": {
+						Type:        "boolean",
+						Required:    false,
+						Default:     "true",
+						Description: "Whether to expose the deployment via a Kubernetes Service.",
+					},
+				},
+			},
+		},
+	}
+
+	adoptedBP, report, err := Adopt([]byte(compYAML), Options{
+		DefaultProviderRef: "xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.11.0",
+		BaseBlueprint:      baseBP,
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	// enableService must be flipped to required true to keep document renderable
+	p, ok := adoptedBP.Spec.XRD.Parameters["enableService"]
+	if !ok {
+		t.Fatalf("enableService missing from adopted parameters")
+	}
+	if !p.Required {
+		t.Errorf("enableService must be required=true to keep document renderable without schema default")
+	}
+
+	// Loss report must report true loss
+	if !report.HasTrueLoss() {
+		t.Fatalf("expected true loss report")
+	}
+
+	reasons := map[string]string{}
+	for _, d := range report.Drops {
+		if strings.HasPrefix(d.Path, "xrd.parameters.") {
+			reasons[strings.TrimPrefix(d.Path, "xrd.parameters.")] = d.Reason
+		}
+	}
+
+	reason, ok := reasons["enableService"]
+	if !ok {
+		t.Fatalf("no loss entry for xrd.parameters.enableService; drops: %+v", report.Drops)
+	}
+
+	// Must name the old and new flag ("optional" and "required")
+	if !strings.Contains(reason, "required") {
+		t.Errorf("xrd.parameters.enableService reason must use the word 'required'; got: %q", reason)
+	}
+	if !strings.Contains(reason, "optional") {
+		t.Errorf("xrd.parameters.enableService reason must name the old flag 'optional'; got: %q", reason)
+	}
+
+	// Must also name unrecovered facets (default, enum, description)
+	for _, facet := range []string{"default", "enum", "description"} {
+		if !strings.Contains(reason, facet) {
+			t.Errorf("xrd.parameters.enableService reason must name %s as unrecovered; got: %q", facet, reason)
+		}
+	}
+
+	// image was already required in baseBP: must NOT claim its required flag changed
+	imageReason, ok := reasons["image"]
+	if !ok {
+		t.Fatalf("no loss entry for xrd.parameters.image; drops: %+v", report.Drops)
+	}
+	if strings.Contains(imageReason, "optional") {
+		t.Errorf("image was already required, its reason must not mention optional; got: %q", imageReason)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/adopt"
@@ -11,9 +12,10 @@ import (
 )
 
 type adoptRequest struct {
-	Manifest string `json:"manifest"`
-	Persist  bool   `json:"persist"`
-	Provider string `json:"provider"`
+	Manifest      string               `json:"manifest"`
+	Persist       bool                 `json:"persist"`
+	Provider      string               `json:"provider"`
+	BaseBlueprint *blueprint.Blueprint `json:"baseBlueprint,omitempty"`
 }
 
 type adoptResponse struct {
@@ -48,9 +50,17 @@ func (srv *server) handleAdoptBlueprint(w http.ResponseWriter, r *http.Request) 
 
 	opts := adopt.Options{
 		DefaultProviderRef: req.Provider,
+		BaseBlueprint:      req.BaseBlueprint,
 	}
 	if srv.Store != nil {
 		opts.CacheDir = srv.Store.Root
+	}
+	if opts.BaseBlueprint == nil && srv.Blueprint != "" {
+		if data, err := os.ReadFile(srv.Blueprint); err == nil {
+			if existingBP, err := blueprint.Parse(data); err == nil {
+				opts.BaseBlueprint = existingBP
+			}
+		}
 	}
 	bp, report, err := adopt.Adopt([]byte(req.Manifest), opts)
 	if err != nil {

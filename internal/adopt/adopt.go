@@ -29,6 +29,8 @@ type Options struct {
 	Store *cache.Store
 	// FunctionPackages maps function names to pinned package references.
 	FunctionPackages map[string]string
+	// BaseBlueprint is the optional pre-existing blueprint being replaced or updated.
+	BaseBlueprint *blueprint.Blueprint
 }
 
 // LossReport records any dropped fields, unsupported patches, or schema discrepancies.
@@ -366,7 +368,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	// No XRD alongside: the parameters above were inferred from their uses.
 	// Settle what the Composition proves and name the rest as lost.
 	if xrdDoc == nil {
-		applyXRDlessEvidence(bp, []map[string]any{compDoc}, synthesized, report)
+		applyXRDlessEvidence(bp, []map[string]any{compDoc}, synthesized, report, opts.BaseBlueprint)
 	}
 
 	// 5. Deduplicate and collect provider sources

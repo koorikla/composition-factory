@@ -15,6 +15,7 @@ type AdoptCmd struct {
 	Out         string `short:"o" help:"Output file to write the blueprint to (defaults to stdout)."`
 	Provider    string `help:"Default provider package reference when not inferrable from CRDs."`
 	CacheDir    string `help:"Schema cache directory." default:"${cachedir}"`
+	Blueprint   string `short:"b" help:"Existing blueprint to compare against for parameter contract changes."`
 }
 
 func (c *AdoptCmd) Run(out io.Writer) error {
@@ -36,6 +37,20 @@ func (c *AdoptCmd) run(out io.Writer) (int, error) {
 	opts := adopt.Options{
 		DefaultProviderRef: c.Provider,
 		CacheDir:           c.CacheDir,
+	}
+
+	bpPath := c.Blueprint
+	if bpPath == "" && c.Out != "" {
+		if _, err := os.Stat(c.Out); err == nil {
+			bpPath = c.Out
+		}
+	}
+	if bpPath != "" {
+		if data, err := os.ReadFile(bpPath); err == nil {
+			if baseBP, err := blueprint.Parse(data); err == nil {
+				opts.BaseBlueprint = baseBP
+			}
+		}
 	}
 
 	if c.Composition == "-" {
