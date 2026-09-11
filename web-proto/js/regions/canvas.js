@@ -18,7 +18,7 @@ import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
 import { startDrag } from "../drag.js";
 import { listWires, fanOut, envFanOut, parseFrom } from "../wires.js";
-import { famOf, uniqueResourceName, COLORS } from "../utils.js";
+import { famOf, uniqueResourceName, COLORS, getEnvConfigName } from "../utils.js";
 import { switchTab } from "./palette.js";
 import {
   XR_ID,
@@ -163,18 +163,6 @@ function xrCardHTML(d, sel) {
   }
   h += '</div>';
   return h;
-}
-
-function getEnvConfigName(d) {
-  const steps = (d && d.spec && d.spec.pipeline) || [];
-  for (let i = 0; i < steps.length; i++) {
-    if (steps[i].functionRef === "function-environment-configs" || steps[i].name === "environment-configs") {
-      const input = steps[i].input || "";
-      const m = input.match(/name:\s*([^\s\n]+)/);
-      if (m) return m[1].replace(/^["']|["']$/g, "");
-    }
-  }
-  return "default";
 }
 
 function envCardHTML(d, sel) {
@@ -501,7 +489,7 @@ function render() {
   const d = doc();
   if (!d) { canvasEl.innerHTML = ""; wiresEl.innerHTML = ""; return; }
   const sel = S.state.selectedResource;
-  const hasEnv = !!(d.spec && d.spec.environment && Object.keys(d.spec.environment).length > 0);
+  const hasEnv = !!(d.spec && ((d.spec.environment && Object.keys(d.spec.environment).length > 0) || (Array.isArray(d.spec.environmentConfigs) && d.spec.environmentConfigs.length > 0)));
   const desired = [{ id: XR_ID, html: xrCardHTML(d, sel) }];
   if (hasEnv) {
     desired.push({ id: ENV_ID, html: envCardHTML(d, sel) });

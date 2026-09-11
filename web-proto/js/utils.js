@@ -385,5 +385,67 @@ export function renameEnvKeyInDoc(d, oldKey, newKey) {
   });
 }
 
+/**
+ * Resolves the active EnvironmentConfig selection (mode, name, labels) from a blueprint doc.
+ * Prioritizes canonical spec.environmentConfigs; falls back to spec.pipeline step input,
+ * and defaults to Reference mode with "default".
+ *
+ * @param {Object} doc Blueprint document
+ * @returns {{ mode: "Reference"|"Selector", name: string, labels: string }}
+ */
+export function parseEnvSelection(doc) {
+  if (doc && doc.spec && Array.isArray(doc.spec.environmentConfigs) && doc.spec.environmentConfigs.length > 0) {
+    var cfg = doc.spec.environmentConfigs[0];
+    if (cfg) {
+      if (cfg.selector) {
+        var labels = "";
+        if (typeof cfg.selector === "string") {
+          labels = cfg.selector.trim();
+        } else if (cfg.selector.matchLabels && typeof cfg.selector.matchLabels === "object") {
+          labels = Object.keys(cfg.selector.matchLabels).sort().map(function (k) {
+            return k + "=" + cfg.selector.matchLabels[k];
+          }).join(", ");
+        } else if (typeof cfg.selector === "object") {
+          labels = Object.keys(cfg.selector).sort().map(function (k) {
+            return k + "=" + cfg.selector[k];
+          }).join(", ");
+        }
+        return { mode: "Selector", name: cfg.name || "", labels: labels };
+      }
+      return { mode: "Reference", name: cfg.name || "default", labels: "" };
+    }
+  }
+  var steps = (doc && doc.spec && doc.spec.pipeline) || [];
+  for (var i = 0; i < steps.length; i++) {
+    if (steps[i].functionRef === "function-environment-configs" || steps[i].name === "environment-configs") {
+      var input = steps[i].input || "";
+      if (input.indexOf("type: Selector") !== -1 || input.indexOf("selector:") !== -1) {
+        var match = input.match(/matchLabels:\s*\n((?:\s+[\w./-]+:\s*.*(?:\n|$))*)/);
+        var labelsArr = [];
+        if (match && match[1]) {
+          var lines = match[1].split("\n");
+          lines.forEach(function (l) {
+            var m = l.match(/^\s*([\w./-]+):\s*(.*)$/);
+            if (m) labelsArr.push(m[1].trim() + "=" + m[2].trim());
+          });
+        }
+        return { mode: "Selector", name: "", labels: labelsArr.join(", ") };
+      }
+      var nameMatch = input.match(/name:\s*([^\s\n]+)/);
+      var name = nameMatch ? nameMatch[1].trim().replace(/^["']|["']$/g, "") : "default";
+      return { mode: "Reference", name: name, labels: "" };
+    }
+  }
+  return { mode: "Reference", name: "default", labels: "" };
+}
 
-
+/**
+ * Returns the display name or label selector for the EnvironmentConfig card/header.
+ *
+ * @param {Object} doc Blueprint document
+ * @returns {string}
+ */
+export function getEnvConfigName(doc) {
+  var sel = parseEnvSelection(doc);
+  return sel.mode === "Reference" ? (sel.name || "default") : (sel.labels || "selector");
+}

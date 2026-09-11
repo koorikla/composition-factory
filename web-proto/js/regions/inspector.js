@@ -10,7 +10,7 @@ import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
 import { parseFrom, findEnvWires, listWires } from "../wires.js";
-import { mapResourceCoordinates, deleteEnvKeyFromDoc, renameEnvKeyInDoc } from "../utils.js";
+import { mapResourceCoordinates, deleteEnvKeyFromDoc, renameEnvKeyInDoc, parseEnvSelection } from "../utils.js";
 
 import { state, PARAM_TYPES } from "./inspector/state.js";
 import {
@@ -1022,39 +1022,6 @@ function restoreFocusedEdit(snap) {
 
 /* ---------------- EnvironmentConfig inspector ---------------- */
 
-function getEnvConfigStep(doc) {
-  var steps = (doc && doc.spec && doc.spec.pipeline) || [];
-  for (var i = 0; i < steps.length; i++) {
-    if (steps[i].functionRef === "function-environment-configs" || steps[i].name === "environment-configs") {
-      return steps[i];
-    }
-  }
-  return null;
-}
-
-function parseEnvSelection(doc) {
-  var step = getEnvConfigStep(doc);
-  if (!step || !step.input) {
-    return { mode: "Reference", name: "default", labels: "" };
-  }
-  var input = step.input;
-  if (input.indexOf("type: Selector") !== -1 || input.indexOf("selector:") !== -1) {
-    var match = input.match(/matchLabels:\s*\n((?:\s+[\w./-]+:\s*.*(?:\n|$))*)/);
-    var labelsArr = [];
-    if (match && match[1]) {
-      var lines = match[1].split("\n");
-      lines.forEach(function (l) {
-        var m = l.match(/^\s*([\w./-]+):\s*(.*)$/);
-        if (m) labelsArr.push(m[1].trim() + "=" + m[2].trim());
-      });
-    }
-    return { mode: "Selector", name: "", labels: labelsArr.join(", ") };
-  }
-  var nameMatch = input.match(/name:\s*([^\s\n]+)/);
-  var name = nameMatch ? nameMatch[1].trim().replace(/^["']|["']$/g, "") : "default";
-  return { mode: "Reference", name: name, labels: "" };
-}
-
 function updateEnvSelection(mode, name, labels) {
   return op(function () {
     return store.replaceDoc(function (d) {
@@ -1076,6 +1043,10 @@ function updateEnvSelection(mode, name, labels) {
         };
         d.spec.pipeline.unshift(step);
       }
+
+      var hasEnv = d.spec.environment && Object.keys(d.spec.environment).length > 0;
+      var cfg = (d.spec.environmentConfigs && d.spec.environmentConfigs[0]) ? d.spec.environmentConfigs[0] : {};
+
       if (mode === "Selector") {
         var labelsObj = {};
         if (typeof labels === "string" && labels.trim()) {
@@ -1087,12 +1058,37 @@ function updateEnvSelection(mode, name, labels) {
           });
         }
         var lblKeys = Object.keys(labelsObj);
+        if (lblKeys.length === 0) {
+          labelsObj = { environment: "default" };
+          lblKeys = ["environment"];
+        }
         var lblLines = lblKeys.map(function (k) {
           return "        " + k + ": " + labelsObj[k];
         }).join("\n");
         step.input = "apiVersion: environmentconfigs.fn.crossplane.io/v1beta1\nkind: Input\nspec:\n  environmentConfigs:\n  - type: Selector\n    selector:\n      matchLabels:\n" + (lblLines ? lblLines + "\n" : "        environment: default\n");
+
+        if (hasEnv || (d.spec.environmentConfigs && d.spec.environmentConfigs.length > 0)) {
+          delete cfg.name;
+          cfg.selector = { matchLabels: labelsObj };
+          if (!Array.isArray(d.spec.environmentConfigs) || d.spec.environmentConfigs.length === 0) {
+            d.spec.environmentConfigs = [cfg];
+          } else {
+            d.spec.environmentConfigs[0] = cfg;
+          }
+        }
       } else {
-        step.input = "apiVersion: environmentconfigs.fn.crossplane.io/v1beta1\nkind: Input\nspec:\n  environmentConfigs:\n  - type: Reference\n    ref:\n      name: " + (name.trim() || "default") + "\n";
+        var refName = (name && name.trim()) || "default";
+        step.input = "apiVersion: environmentconfigs.fn.crossplane.io/v1beta1\nkind: Input\nspec:\n  environmentConfigs:\n  - type: Reference\n    ref:\n      name: " + refName + "\n";
+
+        if (hasEnv || (d.spec.environmentConfigs && d.spec.environmentConfigs.length > 0)) {
+          delete cfg.selector;
+          cfg.name = refName;
+          if (!Array.isArray(d.spec.environmentConfigs) || d.spec.environmentConfigs.length === 0) {
+            d.spec.environmentConfigs = [cfg];
+          } else {
+            d.spec.environmentConfigs[0] = cfg;
+          }
+        }
       }
     });
   }, "unable to update environment selection");
@@ -1222,7 +1218,24 @@ function countEmptyValues(doc) {
 function generateEnvironmentConfigYAML(doc, selInfo) {
   var env = (doc && doc.spec && doc.spec.environment) || {};
   var keys = Object.keys(env).sort();
-  var name = (selInfo && selInfo.mode === "Reference" && selInfo.name) ? selInfo.name : "default";
+  var name = "default";
+  if (selInfo && selInfo.mode === "Reference") {
+    name = selInfo.name || "default";
+  } else if (selInfo && selInfo.mode === "Selector") {
+    if (selInfo.name) {
+      name = selInfo.name;
+    } else if (selInfo.labels) {
+      var parts = [];
+      selInfo.labels.split(",").forEach(function (pair) {
+        var kv = pair.split("=");
+        if (kv.length === 2 && kv[0].trim()) {
+          parts.push(kv[0].trim() + "-" + kv[1].trim());
+        }
+      });
+      parts.sort();
+      name = parts.join("-") || "default";
+    }
+  }
   var lines = [
     "apiVersion: apiextensions.crossplane.io/v1beta1",
     "kind: EnvironmentConfig",
