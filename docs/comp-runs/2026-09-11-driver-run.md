@@ -1,8 +1,8 @@
 # Driver run report — 2026-09-11
 
-T0 recorded: `2026-09-11 02:07:42 UTC`
-Driver run end: `2026-09-11 03:35:00 UTC`
-Total elapsed time: 1 hour 27 minutes (well under 5-hour hard budget; merge cap at T0 + 4:00 adhered to).
+T0 recorded: `2026-09-11 03:08:11 UTC`
+Driver run end: `2026-09-11 06:05:00 UTC`
+Total elapsed time: 2 hours 57 minutes (well under 5-hour hard budget; merge cap at T0 + 4:00 adhered to).
 
 ---
 
@@ -37,6 +37,14 @@ Each issue had its acceptance tests run and verified failing before the fix, qua
 | **CF-167** (#52) | adopt decomposes slice envelope fields into indexed keys rejected by validateResourceEnvelope | Merged & Closed | `badbe7f` | [34563746934](https://github.com/koorikla/composition-factory/actions/runs/34563746934) | `internal/adopt/adopt_test.go:TestAdoptSliceEnvelopeFields` |
 | **CF-183** (#68) | Playwright e2e harness boots with unseeded cache, triggering live OCI fetches and startup warnings | Merged & Closed | `4d9b938` | [34564020985](https://github.com/koorikla/composition-factory/actions/runs/34564020985) | `tests/cf183-playwright-seeded-cache.spec.js` |
 | **CF-173** (#58) | web-proto duplicates utility functions and palette.js famOf diverges from canvas.js colors | Merged & Closed | `1bc52aa` | [34564260992](https://github.com/koorikla/composition-factory/actions/runs/34564260992) | `tests/cf173-unify-utils-famof.spec.js` |
+| **CF-182** (#67) | AssembleProviders helper duplicated across CLI commands and API endpoints | Merged & Closed | `85732dc` | [34565015617](https://github.com/koorikla/composition-factory/actions/runs/34565015617) | `cmd/cf/options_test.go:TestAssembleProvidersDeduplication` |
+| **CF-162** (#47) | Adopt/AdoptTree performs redundant disk reads and unmarshals across provider references | Merged & Closed | `4a8f307` | [34565280631](https://github.com/koorikla/composition-factory/actions/runs/34565280631) | `internal/adopt/adopt_test.go:TestAdoptStoreMemoization` |
+| **CF-145** (#30) | Empty canvas KINDS and SOURCES words lack click and tab-switch affordances | Merged & Closed | `fa718cf` | [34565587515](https://github.com/koorikla/composition-factory/actions/runs/34565587515) | `tests/cf145-empty-canvas-tab-links.spec.js` |
+| **CF-175** (#60) | FieldTree includes server-added fields on native K8s resources | Merged & Closed | `90b15e4` | [34566290580](https://github.com/koorikla/composition-factory/actions/runs/34566290580) | `internal/schema/tree_test.go:TestNativeCRDFieldTreeExcludesServerFields`, `internal/schema/k8s/k8s_test.go:TestAllCoreCRDsFieldTreeExcludesServerAddedFields` |
+| **CF-148** (#33) | Header artifacts chip count disagrees with ARTIFACTS panel file count | Merged & Closed | `6d1ddba` | [34566797828](https://github.com/koorikla/composition-factory/actions/runs/34566797828) | `tests/cf148-header-artifacts-count.spec.js` |
+| **CF-176** (#61) | docs/dsl.md says convention matches field path suffix, but on managed kinds only top-level leaf names are compared | Merged & Closed | `12f6289` | [34567413251](https://github.com/koorikla/composition-factory/actions/runs/34567413251) | `internal/emit/templates_test.go:TestCF176ConventionMatchingNestedManagedFieldIsRefused`, `TestCF176ConventionExplicitNestedOverrideOnManagedKindAllowed` |
+| **CF-180** (#65) | cmd/cf/gen.go duplicates crossplane render pipeline without Docker daemon error classification | Merged & Closed | `d7364d3` | [34567727172](https://github.com/koorikla/composition-factory/actions/runs/34567727172) | `cmd/cf/gen_test.go:TestCF180GenValidateDockerUnavailable`, `internal/emit/render_test.go:TestRenderCheckDockerUnavailable` |
+| **CF-136** (#21) | The annotation form accepts an empty value, then fails with engine jargon and discards the key | Merged & Closed | `17f2ca2` | [34567989959](https://github.com/koorikla/composition-factory/actions/runs/34567989959) | `tests/cf136-annotation-empty-value.spec.js` |
 
 *Note: Issues CF-149 (#34), CF-152 (#37), CF-092 (#4), and CF-141 (#26) were closed in runs earlier in the day.*
 
@@ -87,14 +95,24 @@ Each issue had its acceptance tests run and verified failing before the fix, qua
 - **CF-162** (`internal/adopt/adopt.go`, `internal/adopt/tree.go`, `internal/adopt/adopt_test.go`, `internal/adopt/tree_test.go`): Added memoized `Store` to `adopt.Options` and passed across all resource inferences in `Adopt` and `AdoptTree`, eliminating redundant O(R * P) disk reads and multi-megabyte JSON unmarshals. CI run 34565280631 green.
 - **CF-145** (`web-proto/js/regions/canvas.js`, `web-proto/js/regions/palette.js`, `web-proto/css/proto.css`, `tests/cf145-empty-canvas-tab-links.spec.js`): Wrapped KINDS and SOURCES in the empty canvas hint in interactive button-role elements with proper hover/focus styling and wired them to switch palette tabs upon click or keyboard Enter. CI run 34565587515 green.
 
+### Wave 8
+- **CF-175** (`internal/schema/tree.go`, `internal/schema/tree_test.go`, `internal/schema/k8s/k8s_test.go`): Excluded server-injected metadata fields (`managedFields`, `creationTimestamp`, `uid`, `resourceVersion`, `generation`, `status`) from native K8s CRD `FieldTree()` emission to prevent spurious canvas fields that the server drops on round-trip. CI run 34566290580 green.
+- **CF-148** (`web-proto/js/regions/output.js`, `tests/cf148-header-artifacts-count.spec.js`): Reconciled top header chip and ARTIFACTS panel file counts by calculating total non-empty artifact documents consistently across both views. CI run 34566797828 green.
+
+### Wave 9
+- **CF-176** (`internal/emit/composition.go`, `internal/emit/templates_test.go`, `docs/dsl.md`): Enforced convention matching behavior on managed kinds: top-level matches apply cleanly, while unmatched nested leaf matches are refused loudly unless explicitly overridden via fields, matching the DSL documentation contract. CI run 34567413251 green.
+- **CF-180** (`cmd/cf/gen.go`, `cmd/cf/gen_test.go`, `internal/api/render.go`, `internal/emit/render.go`, `internal/emit/render_test.go`): Consolidated the Crossplane composition render execution pipeline into shared engine package `internal/emit/render.go` (One Engine rule). Added Docker daemon status classification for CLI `cf gen --validate` and HTTP API `/api/render`. CI run 34567727172 green.
+- **CF-136** (`web-proto/js/regions/inspector.js`, `web-proto/js/main.js`, `web-proto/js/utils.js`, `web-proto/js/regions/output.js`, `web-proto/js/regions/palette.js`, `tests/cf136-annotation-empty-value.spec.js`): Validated annotation values client-side to prevent 400 rejection; retained draft keys, guided users in plain terms without DSL mode jargon (`set exactly one of...`), and cleared error toasts on subsequent successful user actions. CI run 34567989959 green.
+
 ---
 
 ## 3. Residues & Follow-up Items Noticed
 
 During verification and testing, the following adjacent items were noted:
-1. **CF-136**: Empty annotation values in the inspector send an invalid schema payload rather than prompting the user or treating it as a wire target.
-2. **CF-130**: `spec.environment` has no visual management in the inspector card, only raw DSL editing.
-3. **CF-137**: Import replaces document with no confirmation, toast, or summary.
-4. **CF-155**: Renaming a parameter in the inspector moves the row immediately due to immediate key re-sorting, shifting active inputs under the cursor.
+1. **CF-130**: `spec.environment` has no visual management in the inspector card, only raw DSL editing.
+2. **CF-137**: Import replaces document with no confirmation, toast, or summary.
+3. **CF-155**: Renaming a parameter in the inspector moves the row immediately due to immediate key re-sorting, shifting active inputs under the cursor.
+4. **CF-178**: `canvas.js` couples pure dependency-tree layout with 600 lines of drag-to-wire DOM logic.
+5. **CF-177**: `inspector.js` is a 2400-line monolith coupling XRD rendering, expression preview, and form mutations.
 
 These items remain tracked in GitHub Issues for future driver runs.
