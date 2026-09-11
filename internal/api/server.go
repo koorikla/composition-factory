@@ -468,8 +468,10 @@ func etagMatches(ifNoneMatch, etag string) bool {
 	if ifNoneMatch == "*" {
 		return true
 	}
+	trimmedETag := strings.Trim(etag, `"`)
 	for _, candidate := range strings.Split(ifNoneMatch, ",") {
-		if strings.TrimSpace(candidate) == etag {
+		c := strings.TrimSpace(candidate)
+		if c == etag || strings.Trim(c, `"`) == trimmedETag {
 			return true
 		}
 	}

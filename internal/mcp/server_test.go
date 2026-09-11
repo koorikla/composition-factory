@@ -414,6 +414,124 @@ func TestReplaceBlueprintUnknownKeyMatchesHTTP(t *testing.T) {
 		http.MethodPut, "/api/blueprint", string(body))
 }
 
+func TestMCP_ReplaceBlueprint_StaleRevisionRejected(t *testing.T) {
+	s := newStack(t)
+
+	// 1. Call get_blueprint to obtain initial state and revision.
+	getRes, err := s.session.CallTool(context.Background(), &sdk.CallToolParams{
+		Name: "get_blueprint",
+	})
+	if err != nil {
+		t.Fatalf("CallTool get_blueprint: %v", err)
+	}
+	if getRes.IsError || len(getRes.Content) == 0 {
+		t.Fatalf("get_blueprint failed or empty: %+v", getRes)
+	}
+	tc, ok := getRes.Content[0].(*sdk.TextContent)
+	if !ok {
+		t.Fatalf("get_blueprint content[0] is %T, want *TextContent", getRes.Content[0])
+	}
+	var initialDoc map[string]any
+	if err := json.Unmarshal([]byte(tc.Text), &initialDoc); err != nil {
+		t.Fatalf("unmarshal initial blueprint: %v", err)
+	}
+	initialRev, _ := getRes.Meta["revision"].(string)
+	if initialRev == "" {
+		t.Fatalf("expected non-empty revision in get_blueprint metadata, got %v", getRes.Meta)
+	}
+
+	// 2. Call add_parameter to modify the blueprint (advancing its revision).
+	s.toolOK(t, "add_parameter", map[string]any{
+		"name":      "concurrentParam",
+		"parameter": map[string]any{"type": "string", "description": "added concurrently"},
+	})
+	if _, ok := s.reload(t).Spec.XRD.Parameters["concurrentParam"]; !ok {
+		t.Fatal("concurrentParam was not added to blueprint")
+	}
+
+	// 3. Call replace_blueprint passing the initial blueprint with the old revision.
+	replaceRes, err := s.session.CallTool(context.Background(), &sdk.CallToolParams{
+		Name: "replace_blueprint",
+		Arguments: map[string]any{
+			"blueprint": initialDoc,
+			"revision":  initialRev,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool replace_blueprint: %v", err)
+	}
+
+	// 4. Assert that replace_blueprint returns an error (isError: true or error text
+	// containing precondition failed / revision mismatch) and the intermediate parameter is preserved.
+	if !replaceRes.IsError {
+		t.Fatalf("replace_blueprint succeeded with stale revision, want isError: true")
+	}
+	if len(replaceRes.Content) == 0 {
+		t.Fatalf("replace_blueprint error result has no content")
+	}
+	errTc, ok := replaceRes.Content[0].(*sdk.TextContent)
+	if !ok {
+		t.Fatalf("replace_blueprint content[0] is %T, want *TextContent", replaceRes.Content[0])
+	}
+	errLower := strings.ToLower(errTc.Text)
+	if !strings.Contains(errLower, "precondition failed") && !strings.Contains(errLower, "revision") {
+		t.Errorf("expected error text containing precondition failed or revision, got %q", errTc.Text)
+	}
+
+	// Intermediate parameter is preserved on disk
+	currentBP := s.reload(t)
+	if _, ok := currentBP.Spec.XRD.Parameters["concurrentParam"]; !ok {
+		t.Errorf("concurrentParam was not preserved on disk after stale replace was rejected")
+	}
+
+	// 4b. Assert that if_match alias with stale revision is also rejected.
+	replaceIfMatchRes, err := s.session.CallTool(context.Background(), &sdk.CallToolParams{
+		Name: "replace_blueprint",
+		Arguments: map[string]any{
+			"blueprint": initialDoc,
+			"if_match":  initialRev,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool replace_blueprint with if_match: %v", err)
+	}
+	if !replaceIfMatchRes.IsError {
+		t.Fatalf("replace_blueprint succeeded with stale if_match, want isError: true")
+	}
+
+	// 5. Assert that replace_blueprint succeeds when provided with the fresh current revision.
+	freshGetRes, err := s.session.CallTool(context.Background(), &sdk.CallToolParams{
+		Name: "get_blueprint",
+	})
+	if err != nil {
+		t.Fatalf("CallTool fresh get_blueprint: %v", err)
+	}
+	freshRev, _ := freshGetRes.Meta["revision"].(string)
+	if freshRev == "" || freshRev == initialRev {
+		t.Fatalf("expected new revision distinct from initial, got %q vs %q", freshRev, initialRev)
+	}
+	var freshDoc map[string]any
+	_ = json.Unmarshal([]byte(freshGetRes.Content[0].(*sdk.TextContent).Text), &freshDoc)
+	freshDoc["spec"].(map[string]any)["xrd"].(map[string]any)["parameters"].(map[string]any)["anotherParam"] = map[string]any{"type": "boolean"}
+
+	matchRes, err := s.session.CallTool(context.Background(), &sdk.CallToolParams{
+		Name: "replace_blueprint",
+		Arguments: map[string]any{
+			"blueprint": freshDoc,
+			"revision":  freshRev,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool replace_blueprint with matching revision: %v", err)
+	}
+	if matchRes.IsError {
+		t.Fatalf("replace_blueprint failed with matching revision: %+v", matchRes)
+	}
+	if _, ok := s.reload(t).Spec.XRD.Parameters["anotherParam"]; !ok {
+		t.Errorf("anotherParam was not persisted after matching replace")
+	}
+}
+
 // --- add_parameter ---
 
 func TestAddParameter(t *testing.T) {

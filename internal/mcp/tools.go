@@ -71,7 +71,8 @@ func (s *server) register(srv *sdk.Server) {
 			"and spec with sources (provider refs), xrd (group/kind/plural/version/scope and the " +
 			"parameters map) and resources (each with name, kind, provider and a fields map whose " +
 			"values set exactly one of from/value/raw). Always re-read after editing; it is the exact " +
-			"shape replace_blueprint expects back.",
+			"shape replace_blueprint expects back. The response metadata carries the revision / ETag " +
+			"for optimistic concurrency control with replace_blueprint.",
 	}, s.getBlueprint)
 
 	replaceBlueprint := &sdk.Tool{
@@ -90,6 +91,14 @@ func (s *server) register(srv *sdk.Server) {
 			"blueprint": {
 				"type": "object",
 				"description": "The complete blueprint document, in the exact JSON shape get_blueprint returns."
+			},
+			"revision": {
+				"type": "string",
+				"description": "Optional current blueprint revision (from get_blueprint metadata). If provided, the replace is refused with precondition failed if the revision does not match the server's current blueprint revision."
+			},
+			"if_match": {
+				"type": "string",
+				"description": "Alias for revision: conditional replace requiring current ETag/revision to match."
 			}
 		},
 		"required": ["blueprint"],
@@ -376,11 +385,48 @@ type replaceBlueprintInput struct {
 	// DisallowUnknownFields decode sees exactly what the agent sent. See the
 	// file comment.
 	Blueprint json.RawMessage `json:"blueprint"`
+	Revision  string          `json:"revision,omitempty"`
+	IfMatch   string          `json:"if_match,omitempty"`
 }
 
 // replaceBlueprint mirrors PUT /api/blueprint.
 func (s *server) replaceBlueprint(_ context.Context, _ *sdk.CallToolRequest, in replaceBlueprintInput) (*sdk.CallToolResult, any, error) {
-	return s.bridge(http.MethodPut, "/api/blueprint", rawOrNull(in.Blueprint))
+	headers := make(http.Header)
+	revision := in.Revision
+	if revision == "" {
+		revision = in.IfMatch
+	}
+	blueprintBytes := rawOrNull(in.Blueprint)
+	if revision == "" && len(blueprintBytes) > 0 && blueprintBytes[0] == '{' {
+		var probe struct {
+			Revision string `json:"revision"`
+			Metadata struct {
+				ResourceVersion string `json:"resourceVersion"`
+			} `json:"metadata"`
+		}
+		if err := json.Unmarshal(blueprintBytes, &probe); err == nil {
+			if probe.Revision != "" {
+				revision = probe.Revision
+				var rawMap map[string]json.RawMessage
+				if err := json.Unmarshal(blueprintBytes, &rawMap); err == nil {
+					delete(rawMap, "revision")
+					if stripped, err := json.Marshal(rawMap); err == nil {
+						blueprintBytes = stripped
+					}
+				}
+			} else if probe.Metadata.ResourceVersion != "" {
+				revision = probe.Metadata.ResourceVersion
+			}
+		}
+	}
+	if revision != "" {
+		headers.Set("If-Match", revision)
+	}
+	status, resp, respHeader, err := s.callWithHeaders(http.MethodPut, "/api/blueprint", blueprintBytes, headers)
+	if err != nil {
+		return nil, nil, err
+	}
+	return resultWithHeader(status, resp, respHeader)
 }
 
 type addParameterInput struct {
@@ -581,7 +627,7 @@ type generateOutput struct {
 // the dry run returned — so a generation written by an MCP call leaves the
 // identical tree a CLI run or a canvas write would have.
 func (s *server) generate(_ context.Context, _ *sdk.CallToolRequest, in generateInput) (*sdk.CallToolResult, any, error) {
-	status, body, err := s.call(http.MethodPost, "/api/generate", []byte(`{"write":false}`))
+	status, body, _, err := s.call(http.MethodPost, "/api/generate", []byte(`{"write":false}`))
 	if err != nil {
 		return nil, nil, err
 	}
