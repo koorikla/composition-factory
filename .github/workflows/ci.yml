@@ -1,14 +1,21 @@
 name: ci
 on: [push, pull_request]
+
+permissions:
+  contents: read
+
 jobs:
   # Lane A runs everywhere and catches malformed output fast.
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: "1.27" }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
       - run: npm ci
@@ -20,14 +27,20 @@ jobs:
   # Lane B needs a Docker daemon; crossplane render runs the engine in containers.
   acceptance:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: "1.27" }
       - name: Install crossplane CLI
         run: |
-          curl -sL https://raw.githubusercontent.com/crossplane/crossplane/main/install.sh | sh
+          curl -sLo crossplane-cli.tar.gz https://cli.crossplane.io/stable/v2.5.0/bundle/linux_amd64/crossplane-cli.tar.gz
+          echo "aca4392b9aeebfaa5625833b10b52ad86ce43e2f8d86119894080c37ae8b2bca  crossplane-cli.tar.gz" | sha256sum -c -
+          tar -xzf crossplane-cli.tar.gz
           sudo mv crossplane /usr/local/bin/
+          rm -f crossplane-cli.tar.gz crossplane.sha256
       - run: make test-docker
         env:
           CF_REQUIRE_ACCEPTANCE: "1"
@@ -35,17 +48,23 @@ jobs:
   # Lane C: Playwright behavior suite over web-proto/ with isolated cf serve.
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: "1.27" }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
       - name: Install crossplane CLI
         run: |
-          curl -sL https://raw.githubusercontent.com/crossplane/crossplane/main/install.sh | sh
+          curl -sLo crossplane-cli.tar.gz https://cli.crossplane.io/stable/v2.5.0/bundle/linux_amd64/crossplane-cli.tar.gz
+          echo "aca4392b9aeebfaa5625833b10b52ad86ce43e2f8d86119894080c37ae8b2bca  crossplane-cli.tar.gz" | sha256sum -c -
+          tar -xzf crossplane-cli.tar.gz
           sudo mv crossplane /usr/local/bin/
+          rm -f crossplane-cli.tar.gz crossplane.sha256
       - name: Pre-pull function images
         run: |
           docker pull xpkg.upbound.io/crossplane-contrib/function-go-templating:v0.12.0 || true
@@ -56,19 +75,25 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Verify Docker build
         run: docker build .
 
   # Lane C: in-cluster verification on real kind + Crossplane.
   cluster:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version: "1.27" }
-      - uses: azure/setup-helm@v5
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - name: Install kind
         run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
