@@ -131,6 +131,28 @@ func TestFileSystemOutputPaths(t *testing.T) {
 	}
 }
 
+func TestGenerateRefusesFileSystemWithNonGoEngine(t *testing.T) {
+	for _, engine := range []string{blueprint.EngineKCL, blueprint.EnginePython} {
+		t.Run(engine, func(t *testing.T) {
+			b := testBlueprint()
+			b.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-west-1"}
+			b.Spec.Emit = &blueprint.Emit{
+				TemplateSource: blueprint.TemplateSourceFileSystem,
+				Engine:         engine,
+			}
+			_, err := Generate(b, fsCRDs(t), "out")
+			if err == nil {
+				t.Fatalf("Generate must refuse templateSource FileSystem with engine %s", engine)
+			}
+			for _, want := range []string{"spec.emit.templateSource", "FileSystem", "go-templating", engine} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should mention %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestFileSystemCompositionStep(t *testing.T) {
 	outs, err := Generate(fsBlueprint(), fsCRDs(t), "")
 	if err != nil {

@@ -56,19 +56,6 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	store := cache.New(c.CacheDir)
-	crds, err := cache.LoadSources(store, b, filepath.Dir(c.Blueprint))
-	if err != nil {
-		return 1, err
-	}
-	// Native Kubernetes kinds are always available: vendored into the
-	// binary, pinned to one Kubernetes version, never fetched or cached —
-	// so they join the schema set unconditionally rather than via a source.
-	native, err := k8s.Kinds()
-	if err != nil {
-		return 1, err
-	}
-	crds = append(crds, native...)
 	if c.TemplateSource == "filesystem" {
 		if b.Spec.Emit == nil {
 			b.Spec.Emit = &blueprint.Emit{}
@@ -91,6 +78,22 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 		}
 		b.Spec.XRD.Group = b.Spec.XRD.Group + suffix
 	}
+	if err := b.Validate(); err != nil {
+		return 1, err
+	}
+	store := cache.New(c.CacheDir)
+	crds, err := cache.LoadSources(store, b, filepath.Dir(c.Blueprint))
+	if err != nil {
+		return 1, err
+	}
+	// Native Kubernetes kinds are always available: vendored into the
+	// binary, pinned to one Kubernetes version, never fetched or cached —
+	// so they join the schema set unconditionally rather than via a source.
+	native, err := k8s.Kinds()
+	if err != nil {
+		return 1, err
+	}
+	crds = append(crds, native...)
 	outputs, err := emit.Generate(b, crds, c.Out)
 	if err != nil {
 		return 1, err

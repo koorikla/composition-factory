@@ -112,3 +112,29 @@ func TestValidateRejectsUnknownEngine(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateRejectsFileSystemWithKCLEngine(t *testing.T) {
+	doc := valid + "  emit:\n    templateSource: FileSystem\n    engine: kcl\n"
+	_, err := Load(write(t, doc))
+	if err == nil {
+		t.Fatal("expected an error for templateSource: FileSystem with engine: kcl")
+	}
+	for _, want := range []string{"spec.emit.templateSource", "FileSystem", "go-templating", "kcl"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err, want)
+		}
+	}
+}
+
+func TestValidateRejectsFileSystemWithPythonEngine(t *testing.T) {
+	doc := valid + "  emit:\n    templateSource: FileSystem\n    engine: python\n"
+	_, err := Load(write(t, doc))
+	if err == nil {
+		t.Fatal("expected an error for templateSource: FileSystem with engine: python")
+	}
+	for _, want := range []string{"spec.emit.templateSource", "FileSystem", "go-templating", "python"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err, want)
+		}
+	}
+}

@@ -23,7 +23,7 @@ var templatingFunction = fn{
 // declared it -- tag, digest pin, or neither, verbatim.
 func Functions(b *blueprint.Blueprint) ([]byte, error) {
 	rcName := ""
-	if b.TemplateSource() == blueprint.TemplateSourceFileSystem {
+	if b.TemplateSource() == blueprint.TemplateSourceFileSystem && b.Engine() == blueprint.EngineGoTemplating {
 		rcName = blueprint.TemplatingFunctionName
 	}
 	return functionsDoc(b, rcName)

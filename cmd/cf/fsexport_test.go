@@ -88,3 +88,109 @@ func TestPackageRefusesFileSystemMode(t *testing.T) {
 		t.Errorf("no package file may be written on refusal")
 	}
 }
+
+func TestGenRefusesFileSystemWithNonGoEngine(t *testing.T) {
+	for _, engine := range []string{"kcl", "python"} {
+		t.Run(engine, func(t *testing.T) {
+			dir, bp, cacheDir := seed(t)
+			out := filepath.Join(dir, "out")
+			cmd := &GenCmd{
+				Blueprint:      bp,
+				Out:            out,
+				CacheDir:       cacheDir,
+				Engine:         engine,
+				TemplateSource: "filesystem",
+			}
+			var buf bytes.Buffer
+			err := cmd.Run(&buf)
+			if err == nil {
+				t.Fatalf("cf gen must refuse --template-source filesystem with --engine %s", engine)
+			}
+			for _, want := range []string{"templateSource", "FileSystem", "go-templating", engine} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should mention %q", err, want)
+				}
+			}
+			if _, statErr := os.Stat(filepath.Join(out, "runtime")); statErr == nil {
+				t.Errorf("runtime directory should not be written on refusal")
+			}
+			if _, statErr := os.Stat(filepath.Join(out, "templates")); statErr == nil {
+				t.Errorf("templates directory should not be written on refusal")
+			}
+		})
+	}
+}
+
+func TestGenRefusesBlueprintWithFileSystemAndNonGoEngine(t *testing.T) {
+	for _, engine := range []string{"kcl", "python"} {
+		t.Run(engine, func(t *testing.T) {
+			dir, bp, cacheDir := seed(t)
+			body := genBlueprint + "  emit:\n    templateSource: FileSystem\n    engine: " + engine + "\n"
+			if err := os.WriteFile(bp, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out := filepath.Join(dir, "out")
+			cmd := &GenCmd{
+				Blueprint: bp,
+				Out:       out,
+				CacheDir:  cacheDir,
+			}
+			var buf bytes.Buffer
+			err := cmd.Run(&buf)
+			if err == nil {
+				t.Fatalf("cf gen must refuse blueprint with templateSource: FileSystem and engine: %s", engine)
+			}
+			for _, want := range []string{"templateSource", "FileSystem", "go-templating", engine} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should mention %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestGenRefusesBlueprintFileSystemWithEngineFlag(t *testing.T) {
+	dir, bp, cacheDir := seedFileSystem(t)
+	out := filepath.Join(dir, "out")
+	cmd := &GenCmd{
+		Blueprint: bp,
+		Out:       out,
+		CacheDir:  cacheDir,
+		Engine:    "kcl",
+	}
+	var buf bytes.Buffer
+	err := cmd.Run(&buf)
+	if err == nil {
+		t.Fatalf("cf gen must refuse --engine kcl when blueprint has templateSource: FileSystem")
+	}
+	for _, want := range []string{"templateSource", "FileSystem", "go-templating", "kcl"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err, want)
+		}
+	}
+}
+
+func TestGenRefusesBlueprintEngineWithTemplateSourceFlag(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	body := genBlueprint + "  emit:\n    engine: kcl\n"
+	if err := os.WriteFile(bp, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out")
+	cmd := &GenCmd{
+		Blueprint:      bp,
+		Out:            out,
+		CacheDir:       cacheDir,
+		TemplateSource: "filesystem",
+	}
+	var buf bytes.Buffer
+	err := cmd.Run(&buf)
+	if err == nil {
+		t.Fatalf("cf gen must refuse --template-source filesystem when blueprint has engine: kcl")
+	}
+	for _, want := range []string{"templateSource", "FileSystem", "go-templating", "kcl"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err, want)
+		}
+	}
+}

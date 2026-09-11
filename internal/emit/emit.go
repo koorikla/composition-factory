@@ -112,7 +112,7 @@ func Generate(b *blueprint.Blueprint, crds []schema.CRD, outDir string, opts ...
 		out = append(out, Output{Path: filepath.Join(outDir, "environmentconfigs", envCfg.Name+".yaml"), Body: cfgBytes})
 	}
 
-	if b.TemplateSource() == blueprint.TemplateSourceFileSystem {
+	if b.TemplateSource() == blueprint.TemplateSourceFileSystem && b.Engine() == blueprint.EngineGoTemplating {
 		rt, err := RuntimeDoc(b, crds)
 		if err != nil {
 			return nil, err

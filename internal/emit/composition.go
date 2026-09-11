@@ -17,7 +17,7 @@ import (
 // against crds.
 func Composition(b *blueprint.Blueprint, crds []schema.CRD) ([]byte, error) {
 	fsDir := ""
-	if b.TemplateSource() == blueprint.TemplateSourceFileSystem {
+	if b.TemplateSource() == blueprint.TemplateSourceFileSystem && b.Engine() == blueprint.EngineGoTemplating {
 		fsDir = templatesDirPath(b)
 	}
 	return composition(b, crds, fsDir)

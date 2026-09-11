@@ -35,6 +35,10 @@ func (b *Blueprint) validateRoot() error {
 					b.Spec.Emit.Engine, EngineGoTemplating, EngineKCL, EnginePython)
 			}
 		}
+		if b.TemplateSource() == TemplateSourceFileSystem && b.Engine() != EngineGoTemplating {
+			return fmt.Errorf("spec.emit.templateSource: %s is only supported with the %s engine (current engine is %q)",
+				TemplateSourceFileSystem, EngineGoTemplating, b.Engine())
+		}
 	}
 	return nil
 }
