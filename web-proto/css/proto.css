@@ -931,12 +931,21 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* toast notification */
-.toast-bar{position:fixed;top:54px;left:50%;transform:translateX(-50%);background:var(--surface);
+.toast-container{position:fixed;top:var(--toast-top,54px);left:50%;transform:translateX(-50%);
+  display:flex;flex-direction:column;align-items:center;gap:8px;z-index:5000;
+  pointer-events:none;max-width:90vw}
+.toast-container > .toast-bar{position:static;transform:none;pointer-events:auto;max-width:100%;
+  animation:toast-in-item .2s ease-out}
+@keyframes toast-in-item{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+.toast-bar{position:fixed;top:var(--toast-top,54px);left:50%;transform:translateX(-50%);background:var(--surface);
   color:var(--ink);border:1px solid var(--rule-2);border-radius:6px;box-shadow:var(--shadow-lg);
   padding:8px 14px;font-size:12px;display:flex;align-items:center;gap:10px;z-index:5000;
-  animation:toast-in .2s ease-out}
-@keyframes toast-in{from{top:40px;opacity:0}to{top:54px;opacity:1}}
+  max-width:min(800px,90vw);box-sizing:border-box;animation:toast-in .2s ease-out}
+.toast-bar .toast-msg{word-break:break-word}
+@keyframes toast-in{from{transform:translate(-50%, -8px);opacity:0}to{transform:translate(-50%, 0);opacity:1}}
 .toast-link{color:var(--wire-xrd);font-weight:600;text-decoration:underline;cursor:pointer}
+#canvas-error-toast, .toast-bar.toast-error{order:-1;z-index:5001}
 
 /* xr inline add */
 .xr-add-row{display:flex;gap:4px;align-items:center;padding:5px 8px;background:var(--surface-2);border-top:1px solid var(--rule)}

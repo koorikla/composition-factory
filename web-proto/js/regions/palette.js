@@ -113,13 +113,12 @@ function showToast(html, onLinkClick) {
   var old = document.getElementById("palette-toast");
   if (old) old.remove();
   clearTimeout(toastTimer);
-  var errToast = document.getElementById("canvas-error-toast");
-  if (errToast) errToast.remove();
+  var container = document.getElementById("toast-container") || document.body;
   var t = document.createElement("div");
   t.id = "palette-toast";
   t.className = "toast-bar";
   t.innerHTML = html;
-  document.body.appendChild(t);
+  container.appendChild(t);
   if (onLinkClick) {
     t.addEventListener("click", function (e) {
       if (e.target.closest(".toast-link")) {

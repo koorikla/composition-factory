@@ -51,22 +51,55 @@ store.loadDoc();
 })();
 
 
-/* ---- global error toast for rejected store actions (CF-011, CF-136) ---- */
+/* ---- global toast container and error toast (CF-011, CF-136, CF-235) ---- */
+export function getToastContainer() {
+  let c = document.getElementById("toast-container");
+  if (!c) {
+    c = document.createElement("div");
+    c.id = "toast-container";
+    c.className = "toast-container";
+    c.setAttribute("aria-live", "polite");
+    document.body.appendChild(c);
+  }
+  return c;
+}
+
+export function updateToastTop() {
+  const topbar = document.getElementById("region-topbar");
+  let bottom = topbar ? topbar.getBoundingClientRect().bottom : 46;
+
+  // Check all top-level warnbars directly under .app or body, plus #import-warn and #render-warn-banner
+  const warnbars = document.querySelectorAll(".app > .warnbar, body > .warnbar, #import-warn, #render-warn-banner");
+  for (let i = 0; i < warnbars.length; i++) {
+    const wb = warnbars[i];
+    if (!wb.hidden && wb.offsetHeight > 0) {
+      bottom = Math.max(bottom, wb.getBoundingClientRect().bottom);
+    }
+  }
+
+  const topOffset = Math.round(bottom + 8);
+  document.documentElement.style.setProperty("--toast-top", topOffset + "px");
+}
+
 let toastTimer = null;
 export function showErrorToast(msg) {
   if (!msg) return;
+  const container = getToastContainer();
   let t = document.getElementById("canvas-error-toast");
   if (!t) {
     t = document.createElement("div");
     t.id = "canvas-error-toast";
-    t.className = "toast-bar";
+    t.className = "toast-bar toast-error";
     t.style.borderColor = "var(--err)";
-    document.body.appendChild(t);
+    container.prepend(t);
+  } else if (t.parentNode !== container) {
+    container.prepend(t);
   }
   t.innerHTML = '<span style="color:var(--err)">⚠️</span> <span class="toast-msg" style="flex:1">' + esc(msg) + '</span> <button class="toast-close" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px;padding:0 4px">&times;</button>';
   t.querySelector(".toast-close").onclick = function () {
     clearErrorToast();
   };
+  updateToastTop();
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(function () {
     clearErrorToast();
@@ -82,8 +115,57 @@ export function clearErrorToast() {
   if (t) {
     t.remove();
   }
+  updateToastTop();
 }
 window.clearErrorToast = clearErrorToast;
+
+if (typeof window !== "undefined") {
+  window.addEventListener("resize", updateToastTop);
+
+  if (typeof MutationObserver !== "undefined") {
+    const toastObserver = new MutationObserver(function (mutations) {
+      let needsUpdate = false;
+      const container = getToastContainer();
+      for (let i = 0; i < mutations.length; i++) {
+        const m = mutations[i];
+        if (m.type === "childList") {
+          for (let j = 0; j < m.addedNodes.length; j++) {
+            const node = m.addedNodes[j];
+            if (node.nodeType === 1) {
+              if (node.classList && node.classList.contains("toast-bar") && node.parentNode !== container) {
+                if (node.id === "canvas-error-toast" || node.classList.contains("toast-error")) {
+                  container.prepend(node);
+                } else {
+                  container.appendChild(node);
+                }
+              }
+              needsUpdate = true;
+            }
+          }
+          if (m.removedNodes.length > 0) needsUpdate = true;
+        } else if (m.type === "attributes") {
+          needsUpdate = true;
+        }
+      }
+      if (needsUpdate) {
+        updateToastTop();
+      }
+    });
+
+    toastObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["hidden", "style", "class"],
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", updateToastTop);
+  } else {
+    updateToastTop();
+  }
+}
 
 store.subscribe("error", function (err) {
   if (err && err.message) {
@@ -539,12 +621,12 @@ function ensureBp() {
       op.then(function (doc) {
         if (!doc) return; // failures surface through the store's error topic
         store.select(null);
-        showImportToast(prevDoc, doc, isComp);
         if (isComp) {
           reportAdoptLoss();
         } else {
           clearNotice();
         }
+        showImportToast(prevDoc, doc, isComp);
       });
     }).catch(function (err) {
       notice("failed to read file: " + (err && err.message ? err.message : err), true);
@@ -666,6 +748,7 @@ function ensureBp() {
       msg += " \u2014 " + parts.join(" | ");
     }
 
+    var container = getToastContainer();
     var toast = document.createElement("div");
     toast.id = "import-toast";
     toast.className = "toast-bar";
@@ -692,6 +775,7 @@ function ensureBp() {
     undoBtn.onclick = function () {
       store.undo();
       if (toast.parentNode) toast.remove();
+      updateToastTop();
     };
     toast.appendChild(undoBtn);
 
@@ -703,13 +787,16 @@ function ensureBp() {
     closeBtn.textContent = "\u00d7";
     closeBtn.onclick = function () {
       if (toast.parentNode) toast.remove();
+      updateToastTop();
     };
     toast.appendChild(closeBtn);
 
-    document.body.appendChild(toast);
+    container.appendChild(toast);
+    updateToastTop();
     importToastTimer = setTimeout(function () {
       if (toast.parentNode) toast.remove();
       importToastTimer = null;
+      updateToastTop();
     }, 12000);
   }
 
@@ -766,6 +853,7 @@ function clearNotice() {
   var bar = document.getElementById("import-warn");
   if (bar) {
     bar.hidden = true;
+    updateToastTop();
   }
 }
 
@@ -805,13 +893,17 @@ function notice(text, isError, persistent) {
       clearTimeout(noticeTimer);
       noticeTimer = null;
     }
+    updateToastTop();
   };
   bar.appendChild(dismissBtn);
+
+  updateToastTop();
 
   if (!persistent) {
     noticeTimer = setTimeout(function () {
       bar.hidden = true;
       noticeTimer = null;
+      updateToastTop();
     }, isError ? 8000 : 12000);
   }
 }
