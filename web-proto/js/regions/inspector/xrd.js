@@ -10,10 +10,19 @@ import { state, PARAM_TYPES } from "./state.js";
 export { PARAM_TYPES };
 
 export function parseWhen(str) {
-  if (!str) return {};
-  var m = /^params\.([A-Za-z][A-Za-z0-9]*)(?:\s(==|!=)\s"([^"]*)")?$/.exec(str);
-  if (!m) return {};
-  return { param: m[1], op: m[2] || "==", val: m[3] };
+  if (!str || typeof str !== "string") return {};
+  var s = str.trim();
+  var m = /^(params|parameters|\$params|env|\$env)\.([A-Za-z0-9_.-]+?)(?:\s*(==|!=)\s*"([^"]*)")?$/.exec(s);
+  if (!m) {
+    var fallback = /^(params|parameters|\$params|env|\$env)\.([A-Za-z0-9_.-]+)/.exec(s);
+    if (fallback) {
+      var src = (fallback[1] === "env" || fallback[1] === "$env") ? "env" : "params";
+      return { source: src, param: fallback[2].replace(/\.+$/, ""), op: "==", val: undefined };
+    }
+    return {};
+  }
+  var source = (m[1] === "env" || m[1] === "$env") ? "env" : "params";
+  return { source: source, param: m[2].replace(/\.+$/, ""), op: m[3] || "==", val: m[4] };
 }
 
 export function paramsOf(doc) {
@@ -59,7 +68,7 @@ export function isWhenReferencingParam(whenStr, pn) {
   if (!whenStr || typeof whenStr !== "string") return false;
   if (isParamRef(whenStr, pn)) return true;
   var parsed = parseWhen(whenStr);
-  if (parsed && parsed.param === pn) return true;
+  if (parsed && parsed.source === "params" && parsed.param === pn) return true;
   var m = /^(?:params|parameters)\.([A-Za-z0-9_-]+)/.exec(whenStr);
   if (m && m[1] === pn) return true;
   return false;

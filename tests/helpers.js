@@ -50,14 +50,20 @@ function getEngineURL() {
 
 const ENGINE = getEngineURL()
 
-async function resetDoc(request) {
+async function resetDoc(requestOrPage, doc) {
   seedCache()
+  const req = requestOrPage && requestOrPage.request ? requestOrPage.request : requestOrPage
   let api
-  try { api = await request.get(ENGINE + '/api/kinds') } catch (e) { api = null }
+  try { api = await req.get(ENGINE + '/api/kinds') } catch (e) { api = null }
   test.skip(!api || !api.ok(), `cf serve is not running on ${ENGINE}`)
 
-  const r = await request.put(ENGINE + '/api/blueprint', { data: pristine })
+  const data = doc || pristine
+  const r = await req.put(ENGINE + '/api/blueprint', { data })
   if (!r.ok()) throw new Error('resetDoc failed: ' + (await r.text()))
+  if (requestOrPage && requestOrPage.goto) {
+    await requestOrPage.goto('/')
+    await canvasSettled(requestOrPage)
+  }
 }
 
 module.exports = { resetDoc, ENGINE, seedCache }

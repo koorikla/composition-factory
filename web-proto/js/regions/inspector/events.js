@@ -656,14 +656,33 @@ function whenFromControls(rootEl, rn) {
   var pSel = rootEl.querySelector('[data-when-param="' + CSS.escape(rn) + '"]');
   var p = pSel && pSel.value;
   if (!p) return null;
-  var params = paramsOf(state.store.state.doc);
-  var decl = params[p] || {};
-  if (decl.type === "boolean") return "params." + p;
+  var doc = state.store && state.store.state && state.store.state.doc;
+  var params = paramsOf(doc);
+  var env = (doc && doc.spec && doc.spec.environment) || {};
+
+  var isEnv = false;
+  var key = p;
+  if (p.indexOf("env.") === 0) {
+    isEnv = true;
+    key = p.slice(4);
+  } else if (p.indexOf("params.") === 0) {
+    isEnv = false;
+    key = p.slice(7);
+  } else if (env[p] && !params[p]) {
+    isEnv = true;
+    key = p;
+  }
+
+  var prefix = isEnv ? "env." : "params.";
+  var decl = isEnv ? (env[key] || {}) : (params[key] || {});
+
+  if (decl.type === "boolean") return prefix + key;
   var opEl = rootEl.querySelector('[data-when-op="' + CSS.escape(rn) + '"]');
   var valEl = rootEl.querySelector('[data-when-val="' + CSS.escape(rn) + '"]');
   var op = opEl ? opEl.value : "==";
-  var val = valEl ? valEl.value : ((decl.enum && decl.enum[0]) || "");
-  return "params." + p + " " + op + ' "' + val + '"';
+  var fallbackVal = (decl.enum && decl.enum[0]) || (decl.default !== undefined ? String(decl.default) : "");
+  var val = valEl ? valEl.value : fallbackVal;
+  return prefix + key + " " + op + ' "' + val + '"';
 }
 
 export function onBoxChange(e) {
@@ -737,7 +756,15 @@ export function onBoxChange(e) {
     state.store.replaceDoc(function (d) {
       var r = d.spec.resources.find(function (x) { return x.name === wrn; });
       if (!r) return;
-      if (expr) r.when = expr; else delete r.when;
+      if (expr) {
+        r.when = expr;
+      } else {
+        var isExplicitAlways = t.matches("[data-when-param]") && !t.value;
+        var isEnvActive = r.when && /^(?:env|\$env)\./.test(r.when.trim());
+        if (isExplicitAlways || !isEnvActive) {
+          delete r.when;
+        }
+      }
     });
     return;
   }

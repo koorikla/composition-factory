@@ -835,22 +835,57 @@ async function renderResource(res) {
     "</div>";
 
   // when: conditional resource — builder for the engine's exact grammar:
-  // bare boolean param, or  params.x == "literal" / != "literal"
+  // bare boolean param or env, or (params|env).x == "literal" / != "literal"
   var w = parseWhen(res.when);
+  var env = (doc && doc.spec && doc.spec.environment) || {};
   var condParams = Object.keys(allParams).filter(function (n) {
-    var t = allParams[n].type;
+    var t = allParams[n] && allParams[n].type;
     return t === "boolean" || t === "string";
   });
+  var condEnv = Object.keys(env).filter(function (k) {
+    var t = env[k] && env[k].type;
+    return t === "boolean" || t === "string";
+  });
+
+  var selectedWhenVal = "";
+  if (w.param) {
+    var src = w.source || (env[w.param] && !allParams[w.param] ? "env" : "params");
+    selectedWhenVal = src + "." + w.param;
+  }
+
   h += '<div class="fld"><div class="frow" style="margin-bottom:0">' +
     '<span class="lbl" style="flex:0 0 auto">when</span>' +
     '<select class="tsel" data-when-param="' + esc(res.name) + '" style="flex:1;min-width:0" ' +
     'title="Compose this resource only when the condition holds">' +
-    '<option value=""' + (!w.param ? " selected" : "") + ">\u2014 always \u2014</option>" +
+    '<option value=""' + (!selectedWhenVal ? " selected" : "") + ">\u2014 always \u2014</option>" +
+    condEnv.map(function (k) {
+      var val = "env." + k;
+      return '<option value="' + esc(val) + '"' + (selectedWhenVal === val ? " selected" : "") + ">" + esc(val) + "</option>";
+    }).join("") +
     condParams.map(function (n) {
-      return '<option value="' + esc(n) + '"' + (w.param === n ? " selected" : "") + ">params." + esc(n) + "</option>";
-    }).join("") + "</select>";
-  if (w.param && allParams[w.param] && allParams[w.param].type === "string") {
-    var vals = allParams[w.param].enum || [];
+      var val = "params." + n;
+      return '<option value="' + esc(val) + '"' + (selectedWhenVal === val ? " selected" : "") + ">" + esc(val) + "</option>";
+    }).join("");
+
+  if (selectedWhenVal && selectedWhenVal.indexOf("env.") === 0 && condEnv.indexOf(w.param) === -1) {
+    h += '<option value="' + esc(selectedWhenVal) + '" selected>' + esc(selectedWhenVal) + "</option>";
+  } else if (selectedWhenVal && selectedWhenVal.indexOf("params.") === 0 && condParams.indexOf(w.param) === -1) {
+    h += '<option value="' + esc(selectedWhenVal) + '" selected>' + esc(selectedWhenVal) + "</option>";
+  }
+
+  h += "</select>";
+
+  var whenDecl = null;
+  if (w.param) {
+    if (w.source === "env" || (!w.source && env[w.param])) {
+      whenDecl = env[w.param];
+    } else {
+      whenDecl = allParams[w.param];
+    }
+  }
+
+  if (whenDecl && whenDecl.type === "string") {
+    var vals = whenDecl.enum || [];
     h += '<select class="tsel" data-when-op="' + esc(res.name) + '" style="flex:0 0 auto">' +
       ["==", "!="].map(function (o) {
         return '<option value="' + o + '"' + (w.op === o ? " selected" : "") + ">" + o + "</option>";
@@ -872,7 +907,7 @@ async function renderResource(res) {
       '.<div class="dg" style="margin-top:4px">Run: <code>cf provider add ' + esc(provRef) + '</code></div></div>';
   } else {
     var params = paramsOf(doc);
-    var env = (doc && doc.spec && doc.spec.environment) || {};
+    env = (doc && doc.spec && doc.spec.environment) || {};
     // Required branches (e.g. Deployment's spec.selector / spec.template):
     // must-set objects with no chain-true leaves — surfaced as rows of their
     // own so the Required view shows what a user actually has to fill.

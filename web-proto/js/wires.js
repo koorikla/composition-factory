@@ -125,17 +125,22 @@ export function listWires(doc) {
 /**
  * Parse a when: condition expression.
  * @param {string} str
- * @returns {{param?: string, op?: string, val?: string}}
+ * @returns {{source?: string, param?: string, op?: string, val?: string}}
  */
 export function parseWhen(str) {
   if (!str || typeof str !== "string") return {};
-  const m = /^(?:params|parameters|\$params)\.([A-Za-z0-9_.-]+?)(?:\s*(==|!=)\s*"([^"]*)")?$/.exec(str.trim());
+  const s = str.trim();
+  const m = /^(params|parameters|\$params|env|\$env)\.([A-Za-z0-9_.-]+?)(?:\s*(==|!=)\s*"([^"]*)")?$/.exec(s);
   if (!m) {
-    const fallback = /^(?:params|parameters|\$params)\.([A-Za-z0-9_.-]+)/.exec(str.trim());
-    if (fallback) return { param: fallback[1].replace(/\.+$/, ""), op: "==", val: undefined };
+    const fallback = /^(params|parameters|\$params|env|\$env)\.([A-Za-z0-9_.-]+)/.exec(s);
+    if (fallback) {
+      const src = (fallback[1] === "env" || fallback[1] === "$env") ? "env" : "params";
+      return { source: src, param: fallback[2].replace(/\.+$/, ""), op: "==", val: undefined };
+    }
     return {};
   }
-  return { param: m[1].replace(/\.+$/, ""), op: m[2] || "==", val: m[3] };
+  const source = (m[1] === "env" || m[1] === "$env") ? "env" : "params";
+  return { source, param: m[2].replace(/\.+$/, ""), op: m[3] || "==", val: m[4] };
 }
 
 /**
@@ -162,7 +167,7 @@ export function isWhenReferencingParam(whenStr, pn) {
   if (!whenStr || typeof whenStr !== "string") return false;
   if (isParamRef(whenStr, pn)) return true;
   const parsed = parseWhen(whenStr);
-  if (parsed && (parsed.param === pn || (parsed.param && parsed.param.indexOf(pn + ".") === 0))) return true;
+  if (parsed && parsed.source === "params" && (parsed.param === pn || (parsed.param && parsed.param.indexOf(pn + ".") === 0))) return true;
   const m = /^(?:params|parameters|\$params)\.([A-Za-z0-9_.-]+)/.exec(whenStr.trim());
   if (m && (m[1] === pn || m[1].indexOf(pn + ".") === 0)) return true;
   return false;
@@ -176,7 +181,8 @@ export function isWhenReferencingParam(whenStr, pn) {
 export function extractWhenParam(when) {
   if (typeof when !== "string") return null;
   const parsed = parseWhen(when);
-  return parsed.param || null;
+  if (parsed && parsed.source === "params") return parsed.param || null;
+  return null;
 }
 
 /**
@@ -203,6 +209,8 @@ export function extractForEachParam(forEach) {
 
 function extractWhenEnv(when) {
   if (typeof when !== "string") return null;
+  const parsed = parseWhen(when);
+  if (parsed && parsed.source === "env") return parsed.param || null;
   const s = when.trim();
   const m = /^(?:\$env|env)\.([A-Za-z0-9_.-]+)/.exec(s);
   if (!m) return null;

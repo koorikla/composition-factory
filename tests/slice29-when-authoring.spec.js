@@ -11,7 +11,7 @@ test.beforeEach(async ({ request }) => {
 test('building a condition persists the canonical grammar and badges the card', async ({ page, request }) => {
   await page.goto('/')
   await page.click('.node[data-id="dead-letter"] .node-h')
-  await page.selectOption('#insp select[data-when-param]', 'region')
+  await page.selectOption('#insp select[data-when-param]', 'params.region')
   await page.selectOption('#insp select[data-when-op]', '==')
   await page.selectOption('#insp select[data-when-val]', 'eu-north-1')
   await expect.poll(async () => {
@@ -26,7 +26,7 @@ test('the render check counts the conditional resource in and out', async ({ pag
   test.setTimeout(90000)
   await page.goto('/')
   await page.click('.node[data-id="dead-letter"] .node-h')
-  await page.selectOption('#insp select[data-when-param]', 'region')
+  await page.selectOption('#insp select[data-when-param]', 'params.region')
   await page.selectOption('#insp select[data-when-op]', '==')
   await page.selectOption('#insp select[data-when-val]', 'eu-north-1')
   await expect.poll(async () => {
@@ -51,7 +51,7 @@ test('the render check counts the conditional resource in and out', async ({ pag
 test('clearing the condition removes the key and the badge', async ({ page, request }) => {
   await page.goto('/')
   await page.click('.node[data-id="dead-letter"] .node-h')
-  await page.selectOption('#insp select[data-when-param]', 'region')
+  await page.selectOption('#insp select[data-when-param]', 'params.region')
   await page.selectOption('#insp select[data-when-op]', '==')
   await page.selectOption('#insp select[data-when-val]', 'eu-north-1')
   await expect(page.locator('.node[data-id="dead-letter"]')).toContainText(/when/i)
