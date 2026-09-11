@@ -12,10 +12,14 @@ import (
 func SampleXR(b *blueprint.Blueprint) ([]byte, error) {
 	spec := map[string]any{}
 	for name, p := range b.Spec.XRD.Parameters {
-		if !p.Required && !isForEachParam(b, name) {
+		if !hasRequiredOrDefault(p) && !isForEachParam(b, name) {
 			continue
 		}
-		spec[name] = placeholderValue(p)
+		val := placeholderValue(p)
+		if obj, ok := val.(map[string]any); ok && !p.Required && len(obj) == 0 && !isForEachParam(b, name) {
+			continue
+		}
+		spec[name] = val
 	}
 	metadata := map[string]any{"name": "render-check"}
 	if b.Spec.XRD.Scope == "Namespaced" {
@@ -28,6 +32,20 @@ func SampleXR(b *blueprint.Blueprint) ([]byte, error) {
 		"metadata":   metadata,
 		"spec":       spec,
 	})
+}
+
+func hasRequiredOrDefault(p blueprint.Parameter) bool {
+	if p.Required || p.Default != "" {
+		return true
+	}
+	if p.Type == "object" {
+		for _, member := range p.Properties {
+			if hasRequiredOrDefault(member) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isForEachParam(b *blueprint.Blueprint, paramName string) bool {
@@ -60,7 +78,7 @@ func placeholderValue(p blueprint.Parameter) any {
 	case "object":
 		obj := map[string]any{}
 		for name, member := range p.Properties {
-			if member.Required || member.Default != "" {
+			if hasRequiredOrDefault(member) {
 				obj[name] = placeholderValue(member)
 			}
 		}

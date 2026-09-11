@@ -283,8 +283,8 @@ func TestRenderIsNeverAnsweredWith304(t *testing.T) {
 // TestSampleXRUsesTypeAppropriatePlaceholders pins the synthesis rules for
 // every parameter type directly against sampleXR: enum takes its first
 // value (even on a non-string type), string "sample", integer/number 1,
-// boolean true; non-required parameters are omitted entirely so the render
-// exercises the composition's default-injection path for them.
+// boolean true; parameters with defaults are included with their parsed values;
+// optional parameters without defaults are omitted entirely.
 func TestSampleXRUsesTypeAppropriatePlaceholders(t *testing.T) {
 	b := &blueprint.Blueprint{}
 	b.Spec.XRD = blueprint.XRD{
@@ -331,6 +331,7 @@ func TestSampleXRUsesTypeAppropriatePlaceholders(t *testing.T) {
 		"size":         float64(1),
 		"ratio":        float64(1),
 		"encrypted":    true,
+		"maxDepth":     float64(4),
 	}
 	if diff := cmp.Diff(wantSpec, xr.Spec); diff != "" {
 		t.Errorf("spec (-want +got):\n%s", diff)
