@@ -140,3 +140,6 @@ relabel_handed_back() {
   jq '.labels = ([.labels[] | select(.name != "parked")] + [{name: "handed-back"}] | unique_by(.name))' \
     "$f" > "$f.tmp" && mv "$f.tmp" "$f"
 }
+
+# iso_ago MINUTES: CF_NOW minus MINUTES as GitHub writes timestamps.
+iso_ago() { jq -nr --argjson t "$((CF_NOW - $1 * 60))" '$t | strftime("%Y-%m-%dT%H:%M:%SZ")'; }

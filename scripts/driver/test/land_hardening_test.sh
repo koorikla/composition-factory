@@ -147,7 +147,8 @@ EOF
 
 test_red_main_is_not_landed_on() {
   land_repo || return 1
-  base_run_gh '{"status":"completed","conclusion":"failure"}' || return 1
+  # A second attempt that failed five minutes ago: not rerun again yet.
+  base_run_gh "{\"attempt\":2,\"status\":\"completed\",\"conclusion\":\"failure\",\"updatedAt\":\"$(iso_ago 5)\"}" || return 1
   printf 'green\n' > "$FAKE_GH_DIR/ci-results"
   local out rc
   out="$("$LAND" 42 2>/dev/null)"; rc=$?
@@ -156,7 +157,7 @@ test_red_main_is_not_landed_on() {
     assert_eq "$BASE_SHA" "$(origin_git rev-parse main)" "nothing is pushed onto a red main" &&
     assert_eq yes "$(has_branch CF-900-thing)" "the topic branch is kept" &&
     assert_eq no "$(has_worktree)" "no scratch worktree is left" &&
-    assert_eq 0 "$(grep -c 'run rerun' "$FAKE_GH_DIR/calls.log")" "a failure outside e2e is not rerun" &&
+    assert_eq 0 "$(grep -c 'run rerun' "$FAKE_GH_DIR/calls.log")" "a recently failed second attempt is not rerun" &&
     assert_eq "handed-back severity:P2" "$(labels_of 42)" "MAIN-RED leaves the issue's labels as they are" &&
     assert_eq 0 "$(grep -c '^issue \(edit\|comment\)' "$FAKE_GH_DIR/calls.log")" "MAIN-RED neither edits nor comments"
 }
@@ -524,4 +525,97 @@ EOF
   assert_eq 7 "$rc" "a watch that ignores SIGTERM is killed and the landing reverted" &&
     assert_contains "$out" "REVERTED https://ci.example/runs/" "reverted output" &&
     { [ "$SECONDS" -lt 20 ] || fail "the stubborn watch was not killed: ${SECONDS}s"; }
+}
+
+# main_run_gh ATTEMPT CONCLUSION FAILED_JOB UPDATED_MIN_AGO RERUN: gh ahead of the
+# fake for main's pre-landing run, as GitHub reports it: attempt ATTEMPT,
+# completed with CONCLUSION, job FAILED_JOB (test, acceptance or e2e) failed, last
+# updated UPDATED_MIN_AGO minutes before CF_NOW. After `run rerun` of that run it
+# reads the next attempt, and watching it exits 0 when RERUN is green. Every
+# other call goes to the fake gh.
+main_run_gh() {
+  sandbox_dir_guard || return 1
+  local jobs rerun_conclusion=failure
+  [ "$5" != green ] || rerun_conclusion=success
+  jobs="$(jq -cn --arg f "$3" '[("test", "acceptance", "e2e") | {name: ., status: "completed",
+    conclusion: (if . == $f then "failure" else "success" end)}]')" || return 1
+  jq -cn --argjson a "$1" --arg c "$2" --arg u "$(iso_ago "$4")" --argjson j "$jobs" \
+    '{attempt: $a, status: "completed", conclusion: $c, updatedAt: $u, jobs: $j}' > "$SANDBOX/main-run.json" &&
+    jq -cn --argjson a "$(($1 + 1))" --arg c "$rerun_conclusion" --arg u "$(iso_ago 0)" \
+      '{attempt: $a, status: "completed", conclusion: $c, updatedAt: $u, jobs: []}' > "$SANDBOX/main-rerun.json" ||
+    return 1
+  shim gh <<EOF
+#!/bin/bash
+D="\$FAKE_GH_DIR"
+main_id="\$(cat "\$D/runs/$BASE_SHA" 2>/dev/null)"
+if [ -n "\$main_id" ] && [ "\${3:-}" = "\$main_id" ]; then
+  case "\$1 \$2" in
+  "run view")
+    echo "\$*" >> "\$D/calls.log"
+    if [ -e "\$D/main-reran" ]; then cat "$SANDBOX/main-rerun.json"; else cat "$SANDBOX/main-run.json"; fi
+    exit 0
+    ;;
+  "run rerun")
+    echo "\$*" >> "\$D/calls.log"
+    : > "\$D/main-reran"
+    exit 0
+    ;;
+  "run watch")
+    echo "\$*" >> "\$D/calls.log"
+    [ -e "\$D/main-reran" ] && [ "$5" = green ]
+    exit
+    ;;
+  esac
+fi
+exec "$TEST_DIR/fakebin/gh" "\$@"
+EOF
+}
+
+test_main_first_attempt_red_outside_e2e_is_rerun() {
+  land_repo || return 1
+  main_run_gh 1 failure acceptance 5 green || return 1
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local out rc main_id
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  main_id="$(cat "$FAKE_GH_DIR/runs/$BASE_SHA")"
+  assert_eq 0 "$rc" "a first attempt red in acceptance is rerun, and its green rerun takes the landing" &&
+    assert_contains "$out" "LANDED $(origin_git rev-parse main) " "landing output" &&
+    assert_eq 1 "$(grep -c "run rerun $main_id --failed" "$FAKE_GH_DIR/calls.log")" "main's failed jobs are rerun once" &&
+    assert_eq 1 "$(grep -c 'run rerun' "$FAKE_GH_DIR/calls.log")" "nothing else is rerun"
+}
+
+test_main_second_attempt_red_recently_is_not_rerun() {
+  land_repo || return 1
+  main_run_gh 2 failure e2e 5 green || return 1
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local out rc
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 8 "$rc" "a second attempt red five minutes ago stops the landing" &&
+    assert_contains "$out" "MAIN-RED https://ci.example/runs/" "main-red output" &&
+    assert_eq "$BASE_SHA" "$(origin_git rev-parse main)" "nothing is pushed" &&
+    assert_eq 0 "$(grep -c 'run rerun' "$FAKE_GH_DIR/calls.log")" "main is not rerun again, not even for e2e"
+}
+
+test_main_second_attempt_red_long_ago_is_rerun() {
+  land_repo || return 1
+  main_run_gh 2 failure acceptance 120 green || return 1
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local out rc main_id
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  main_id="$(cat "$FAKE_GH_DIR/runs/$BASE_SHA")"
+  assert_eq 0 "$rc" "a second attempt red two hours ago is rerun and lands when green" &&
+    assert_contains "$out" "LANDED $(origin_git rev-parse main) " "landing output" &&
+    assert_eq 1 "$(grep -c "run rerun $main_id --failed" "$FAKE_GH_DIR/calls.log")" "main is rerun once"
+}
+
+test_main_rerun_after_is_configurable() {
+  land_repo || return 1
+  main_run_gh 3 timed_out acceptance 5 green || return 1
+  export CF_LAND_MAIN_RERUN_AFTER_SEC=60
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local out rc
+  out="$("$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 0 "$rc" "a run idle longer than CF_LAND_MAIN_RERUN_AFTER_SEC is rerun" &&
+    assert_contains "$out" "LANDED " "landing output" &&
+    assert_eq 1 "$(grep -c 'run rerun' "$FAKE_GH_DIR/calls.log")" "main is rerun once"
 }
