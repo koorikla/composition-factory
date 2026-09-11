@@ -1529,8 +1529,30 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 	}
 	cleanTmpl := reDefine.ReplaceAllString(tmpl, "")
 
-	// 2. Discover parameter and environment references
-	paramMatches := reParamVar.FindAllStringSubmatch(cleanTmpl, -1)
+	// 2. Discover parameter and environment references (including within named templates / define blocks)
+	for _, action := range reTemplateAction.FindAllStringSubmatch(tmpl, -1) {
+		body := action[1]
+		if strings.HasPrefix(strings.TrimSpace(body), "/*") {
+			continue
+		}
+		for _, m := range reEvidenceAnySpec.FindAllStringSubmatch(body, -1) {
+			pName := m[1]
+			if isValidParamIdentifier(pName) {
+				ensureParamDeclared(bp, pName)
+			} else {
+				report.Record("template.param."+pName, "invalid parameter identifier")
+			}
+		}
+		for _, m := range reEvidenceGuard.FindAllStringSubmatch(body, -1) {
+			pName := m[1]
+			if isValidParamIdentifier(pName) {
+				ensureParamDeclared(bp, pName)
+			} else {
+				report.Record("template.param."+pName, "invalid parameter identifier")
+			}
+		}
+	}
+	paramMatches := reParamVar.FindAllStringSubmatch(tmpl, -1)
 	for _, m := range paramMatches {
 		if len(m) >= 2 {
 			pName := m[1]
@@ -1541,7 +1563,7 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 			}
 		}
 	}
-	envMatches := reEnvVar.FindAllString(cleanTmpl, -1)
+	envMatches := reEnvVar.FindAllString(tmpl, -1)
 	for _, raw := range envMatches {
 		key := matchEnvVar(raw)
 		if key != "" && isValidParamIdentifier(key) {
