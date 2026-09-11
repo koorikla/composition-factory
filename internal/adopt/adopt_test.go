@@ -3,10 +3,13 @@ package adopt
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/schema"
 )
@@ -1734,5 +1737,105 @@ spec:
 	}
 	if fldWildcard.Value != "*" {
 		t.Errorf("wildcard managementPolicies.Value = %q, want '*'", fldWildcard.Value)
+	}
+}
+
+func TestInferProviderReusesMemoizedStoreAcrossResources(t *testing.T) {
+	cacheDir := t.TempDir()
+	store := cache.New(cacheDir)
+	ref := "xpkg.upbound.io/upbound/provider-custom-test:v1.0.0"
+	crds := []schema.CRD{
+		{
+			Group: "custom.test.io",
+			Kind:  "ResourceA",
+		},
+		{
+			Group: "custom.test.io",
+			Kind:  "ResourceB",
+		},
+	}
+	if err := store.SaveCRDs(ref, "sha256:abc123456", crds); err != nil {
+		t.Fatalf("SaveCRDs failed: %v", err)
+	}
+
+	// First resource lookup loads provider schemas into store's memo.
+	p1 := inferProvider("custom.test.io/v1", "ResourceA", "", store, nil)
+	if p1 != ref {
+		t.Fatalf("inferProvider(ResourceA) = %q, want %q", p1, ref)
+	}
+
+	// Corrupt crds.json on disk so that any subsequent disk read/unmarshal will fail.
+	// We keep the "ref" field at the beginning so store.List() still discovers the provider,
+	// but store.Load(ref) would fail if it attempted to re-read and unmarshal from disk.
+	matches, err := filepath.Glob(filepath.Join(cacheDir, "*", "crds.json"))
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("failed to locate cached crds.json: %v", err)
+	}
+	corrupted := fmt.Sprintf("{\"ref\": %q, \"crds\": [INVALID_JSON_CORRUPTED", ref)
+	if err := os.WriteFile(matches[0], []byte(corrupted), 0o644); err != nil {
+		t.Fatalf("failed to write corrupted crds.json: %v", err)
+	}
+
+	// Second lookup on the SAME store must hit the in-memory memo and succeed without reading disk.
+	p2 := inferProvider("custom.test.io/v1", "ResourceB", "", store, nil)
+	if p2 != ref {
+		t.Fatalf("inferProvider(ResourceB) = %q, want %q; expected memoized store to be reused", p2, ref)
+	}
+
+	// Full adoption verification: adopting a Composition with multiple resources
+	// reuses the memoized Store across all resources.
+	cacheDir2 := t.TempDir()
+	store2 := cache.New(cacheDir2)
+	if err := store2.SaveCRDs(ref, "sha256:abc123456", crds); err != nil {
+		t.Fatalf("SaveCRDs failed: %v", err)
+	}
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-multi-resource-memoized
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XCustom
+  resources:
+    - name: res-a
+      base:
+        apiVersion: custom.test.io/v1
+        kind: ResourceA
+    - name: res-b
+      base:
+        apiVersion: custom.test.io/v1
+        kind: ResourceB
+`
+	bp, _, err := Adopt([]byte(manifest), Options{Store: store2, CacheDir: cacheDir2})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 2 {
+		t.Fatalf("got %d resources, want 2", len(bp.Spec.Resources))
+	}
+	if bp.Spec.Resources[0].Provider != ref {
+		t.Errorf("resource 0 provider = %q, want %q", bp.Spec.Resources[0].Provider, ref)
+	}
+	if bp.Spec.Resources[1].Provider != ref {
+		t.Errorf("resource 1 provider = %q, want %q", bp.Spec.Resources[1].Provider, ref)
+	}
+
+	// Verify that passing CacheDir without pre-initialized Store also initializes
+	// a single store once and correctly infers providers across multiple resources.
+	bpCacheOnly, _, err := Adopt([]byte(manifest), Options{CacheDir: cacheDir2})
+	if err != nil {
+		t.Fatalf("Adopt with CacheDir failed: %v", err)
+	}
+	if len(bpCacheOnly.Spec.Resources) != 2 {
+		t.Fatalf("got %d resources, want 2", len(bpCacheOnly.Spec.Resources))
+	}
+	if bpCacheOnly.Spec.Resources[0].Provider != ref {
+		t.Errorf("resource 0 provider = %q, want %q", bpCacheOnly.Spec.Resources[0].Provider, ref)
+	}
+	if bpCacheOnly.Spec.Resources[1].Provider != ref {
+		t.Errorf("resource 1 provider = %q, want %q", bpCacheOnly.Spec.Resources[1].Provider, ref)
 	}
 }

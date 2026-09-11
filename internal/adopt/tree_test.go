@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/schema/k8s"
@@ -1108,5 +1109,76 @@ spec:
 				t.Errorf("XRD.Plural = %q, want %q", bp.Spec.XRD.Plural, tt.wantPlural)
 			}
 		})
+	}
+}
+
+func TestAdoptTreeReusesMemoizedStore(t *testing.T) {
+	cacheDir := t.TempDir()
+	store := cache.New(cacheDir)
+	ref := "xpkg.upbound.io/upbound/provider-tree-test:v1.0.0"
+	crds := []schema.CRD{
+		{
+			Group: "tree.test.io",
+			Kind:  "TreeResourceA",
+		},
+		{
+			Group: "tree.test.io",
+			Kind:  "TreeResourceB",
+		},
+	}
+	if err := store.SaveCRDs(ref, "sha256:abc123tree", crds); err != nil {
+		t.Fatalf("SaveCRDs failed: %v", err)
+	}
+
+	treeDir := t.TempDir()
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-tree-memoized
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTree
+  resources:
+    - name: res-a
+      base:
+        apiVersion: tree.test.io/v1
+        kind: TreeResourceA
+    - name: res-b
+      base:
+        apiVersion: tree.test.io/v1
+        kind: TreeResourceB
+`
+	if err := os.WriteFile(filepath.Join(treeDir, "composition.yaml"), []byte(compYAML), 0o644); err != nil {
+		t.Fatalf("write composition.yaml: %v", err)
+	}
+
+	bp, _, err := AdoptTree(treeDir, Options{Store: store, CacheDir: cacheDir})
+	if err != nil {
+		t.Fatalf("AdoptTree failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 2 {
+		t.Fatalf("got %d resources, want 2", len(bp.Spec.Resources))
+	}
+	if bp.Spec.Resources[0].Provider != ref {
+		t.Errorf("resource 0 provider = %q, want %q", bp.Spec.Resources[0].Provider, ref)
+	}
+	if bp.Spec.Resources[1].Provider != ref {
+		t.Errorf("resource 1 provider = %q, want %q", bp.Spec.Resources[1].Provider, ref)
+	}
+
+	// Also verify with CacheDir only (no Store explicitly passed)
+	bpCacheOnly, _, err := AdoptTree(treeDir, Options{CacheDir: cacheDir})
+	if err != nil {
+		t.Fatalf("AdoptTree with CacheDir failed: %v", err)
+	}
+	if len(bpCacheOnly.Spec.Resources) != 2 {
+		t.Fatalf("got %d resources, want 2", len(bpCacheOnly.Spec.Resources))
+	}
+	if bpCacheOnly.Spec.Resources[0].Provider != ref {
+		t.Errorf("resource 0 provider = %q, want %q", bpCacheOnly.Spec.Resources[0].Provider, ref)
+	}
+	if bpCacheOnly.Spec.Resources[1].Provider != ref {
+		t.Errorf("resource 1 provider = %q, want %q", bpCacheOnly.Spec.Resources[1].Provider, ref)
 	}
 }

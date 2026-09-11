@@ -57,6 +57,9 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	if opts.FunctionPackages == nil {
 		opts.FunctionPackages = make(map[string]string)
 	}
+	if opts.Store == nil && opts.CacheDir != "" {
+		opts.Store = cache.New(opts.CacheDir)
+	}
 	if lock, _ := cache.ReadLock(filepath.Join(dirPath, ".cf.lock")); lock != nil {
 		for _, f := range lock.Functions {
 			opts.FunctionPackages[f.Ref] = f.Ref

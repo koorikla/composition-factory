@@ -24,6 +24,9 @@ type Options struct {
 	DefaultProviderRef string
 	// CacheDir is the schema cache directory used for schema lookups.
 	CacheDir string
+	// Store is an optional shared schema store. If nil and CacheDir is set,
+	// a Store will be initialized once and reused across adoption passes.
+	Store *cache.Store
 	// FunctionPackages maps function names to pinned package references.
 	FunctionPackages map[string]string
 }
@@ -183,6 +186,10 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 
 	if opts.FunctionPackages == nil {
 		opts.FunctionPackages = make(map[string]string)
+	}
+
+	if opts.Store == nil && opts.CacheDir != "" {
+		opts.Store = cache.New(opts.CacheDir)
 	}
 
 	var compDoc map[string]any
@@ -705,7 +712,7 @@ func normalizeDNSLabel(name string) string {
 	return s
 }
 
-func inferProvider(apiVersion, kind string, defaultProvider string, cacheDir string, bp *blueprint.Blueprint) string {
+func inferProvider(apiVersion, kind string, defaultProvider string, store *cache.Store, bp *blueprint.Blueprint) string {
 	if strings.Contains(apiVersion, "k8s.io") || !strings.Contains(apiVersion, ".") {
 		return blueprint.NativeProvider
 	}
@@ -731,8 +738,7 @@ func inferProvider(apiVersion, kind string, defaultProvider string, cacheDir str
 	}
 
 	// 2. Check local schema cache if available
-	if cacheDir != "" {
-		store := cache.New(cacheDir)
+	if store != nil {
 		if list, err := store.List(); err == nil && len(list) > 0 {
 			for _, ref := range list {
 				if crds, err := store.Load(ref); err == nil {
@@ -1475,7 +1481,11 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 		nameMapping[name] = normName
 	}
 
-	provider := inferProvider(apiVersion, kind, opts.DefaultProviderRef, opts.CacheDir, bp)
+	store := opts.Store
+	if store == nil && opts.CacheDir != "" {
+		store = cache.New(opts.CacheDir)
+	}
+	provider := inferProvider(apiVersion, kind, opts.DefaultProviderRef, store, bp)
 
 	res := &blueprint.Resource{
 		Name:        normName,
