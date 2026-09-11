@@ -39,15 +39,21 @@ func (c *AdoptCmd) run(out io.Writer) (int, error) {
 		CacheDir:           c.CacheDir,
 	}
 
-	bpPath := c.Blueprint
-	if bpPath == "" && c.Out != "" {
-		if _, err := os.Stat(c.Out); err == nil {
-			bpPath = c.Out
+	if c.Blueprint != "" {
+		data, err := os.ReadFile(c.Blueprint)
+		if err != nil {
+			return 1, fmt.Errorf("read base blueprint: %w", err)
 		}
-	}
-	if bpPath != "" {
-		if data, err := os.ReadFile(bpPath); err == nil {
+		baseBP, err := blueprint.Parse(data)
+		if err != nil {
+			return 1, fmt.Errorf("parse base blueprint: %w", err)
+		}
+		baseBP.SetSourcePath(c.Blueprint)
+		opts.BaseBlueprint = baseBP
+	} else if c.Out != "" {
+		if data, err := os.ReadFile(c.Out); err == nil {
 			if baseBP, err := blueprint.Parse(data); err == nil {
+				baseBP.SetSourcePath(c.Out)
 				opts.BaseBlueprint = baseBP
 			}
 		}
