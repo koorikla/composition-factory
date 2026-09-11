@@ -2379,3 +2379,211 @@ spec:
 		t.Errorf("expected known field region to be preserved, got: %+v", res.Fields["region"])
 	}
 }
+
+func TestAdoptClassicCompositionPatchSets(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: classic-patchsets
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1
+    kind: XRQueue
+  patchSets:
+    - name: common-params
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.region
+          toFieldPath: spec.forProvider.region
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.tags
+          toFieldPath: metadata.labels.env
+  resources:
+    - name: sqs-queue
+      base:
+        apiVersion: sqs.aws.upbound.io/v1beta1
+        kind: Queue
+        spec:
+          forProvider: {}
+      patches:
+        - type: PatchSet
+          patchSetName: common-params
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.queueName
+          toFieldPath: spec.forProvider.name
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond XRD-less parameter report, got drops: %+v", d)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+	if r.Fields["region"].From != "params.region" {
+		t.Errorf("region field = %+v, want From: params.region", r.Fields["region"])
+	}
+	if r.Fields["metadata.labels[env]"].From != "params.tags" {
+		t.Errorf("metadata.labels[env] field = %+v, want From: params.tags", r.Fields["metadata.labels[env]"])
+	}
+	if r.Fields["name"].From != "params.queueName" {
+		t.Errorf("name field = %+v, want From: params.queueName", r.Fields["name"])
+	}
+	if _, ok := bp.Spec.XRD.Parameters["region"]; !ok {
+		t.Errorf("expected parameter 'region' to be declared in XRD")
+	}
+	if _, ok := bp.Spec.XRD.Parameters["tags"]; !ok {
+		t.Errorf("expected parameter 'tags' to be declared in XRD")
+	}
+}
+
+func TestAdoptPipelineCompositionPatchSets(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: pt-patchsets
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XBucket
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: common-params
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.region
+        resources:
+          - name: s3-bucket
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                forProvider: {}
+            patches:
+              - type: PatchSet
+                patchSetName: common-params
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.bucketName
+                toFieldPath: spec.forProvider.name
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond XRD-less parameter report, got drops: %+v", d)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+	if r.Fields["region"].From != "params.region" {
+		t.Errorf("region field = %+v, want From: params.region", r.Fields["region"])
+	}
+	if r.Fields["name"].From != "params.bucketName" {
+		t.Errorf("name field = %+v, want From: params.bucketName", r.Fields["name"])
+	}
+	if _, ok := bp.Spec.XRD.Parameters["region"]; !ok {
+		t.Errorf("expected parameter 'region' to be declared in XRD")
+	}
+	if _, ok := bp.Spec.XRD.Parameters["bucketName"]; !ok {
+		t.Errorf("expected parameter 'bucketName' to be declared in XRD")
+	}
+}
+
+func TestAdoptPatchSetNotFound(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: classic-patchset-missing
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1
+    kind: XRQueue
+  resources:
+    - name: sqs-queue
+      base:
+        apiVersion: sqs.aws.upbound.io/v1beta1
+        kind: Queue
+        spec:
+          forProvider: {}
+      patches:
+        - type: PatchSet
+          patchSetName: non-existent
+`
+	_, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	found := false
+	for _, d := range report.Drops {
+		if d.Path == "resource.sqs-queue.patches[0]" && strings.Contains(d.Reason, `patchSet "non-existent" not found`) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected drop for missing patchSet, got drops: %+v", report.Drops)
+	}
+}
+
+func TestAdoptPatchSetUnsupportedPatch(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: classic-patchset-unsupported
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1
+    kind: XRQueue
+  patchSets:
+    - name: common-params
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.region
+          toFieldPath: spec.forProvider.region
+          transforms:
+            - type: map
+              map:
+                dev: us-east-1
+  resources:
+    - name: sqs-queue
+      base:
+        apiVersion: sqs.aws.upbound.io/v1beta1
+        kind: Queue
+        spec:
+          forProvider: {}
+      patches:
+        - type: PatchSet
+          patchSetName: common-params
+`
+	_, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	found := false
+	for _, d := range report.Drops {
+		if strings.Contains(d.Reason, "patch transforms are not supported in blueprint") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected drop for unsupported patch transform inside patchSet, got drops: %+v", report.Drops)
+	}
+}

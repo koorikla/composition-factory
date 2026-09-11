@@ -274,7 +274,8 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 				return nil, nil, err
 			}
 		} else if resources, ok := spec["resources"].([]any); ok && len(resources) > 0 {
-			if err := parseClassicComposition(resources, bp, opts, report, nameMapping); err != nil {
+			patchSets, _ := spec["patchSets"].([]any)
+			if err := parseClassicComposition(resources, patchSets, bp, opts, report, nameMapping); err != nil {
 				return nil, nil, err
 			}
 		}

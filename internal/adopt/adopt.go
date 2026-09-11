@@ -370,7 +370,8 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 			return nil, nil, err
 		}
 	} else if resources, ok := spec["resources"].([]any); ok && len(resources) > 0 {
-		if err := parseClassicComposition(resources, bp, opts, report, nameMapping); err != nil {
+		patchSets, _ := spec["patchSets"].([]any)
+		if err := parseClassicComposition(resources, patchSets, bp, opts, report, nameMapping); err != nil {
 			return nil, nil, err
 		}
 	} else {
@@ -434,7 +435,7 @@ func checkCompositionSpecFields(spec map[string]any, report *LossReport) {
 	}
 	sort.Strings(specKeys)
 	for _, k := range specKeys {
-		if k == "compositeTypeRef" || k == "mode" || k == "pipeline" || k == "resources" {
+		if k == "compositeTypeRef" || k == "mode" || k == "pipeline" || k == "resources" || k == "patchSets" {
 			continue
 		}
 		path := fmt.Sprintf("spec.%s", k)
@@ -1280,8 +1281,9 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 			seenEngineStep = true
 			input, _ := step["input"].(map[string]any)
 			if input != nil {
+				patchSets, _ := input["patchSets"].([]any)
 				if resources, ok := input["resources"].([]any); ok {
-					if err := parseClassicComposition(resources, bp, opts, report, nameMapping); err != nil {
+					if err := parseClassicComposition(resources, patchSets, bp, opts, report, nameMapping); err != nil {
 						return fmt.Errorf("parse patch-and-transform resources: %w", err)
 					}
 				}
@@ -1601,7 +1603,20 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 	return nil
 }
 
-func parseClassicComposition(resources []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
+func parseClassicComposition(resources []any, patchSets []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
+	patchSetsMap := make(map[string][]any)
+	for _, psRaw := range patchSets {
+		if psMap, ok := psRaw.(map[string]any); ok {
+			if name, ok := psMap["name"].(string); ok && name != "" {
+				if patches, ok := psMap["patches"].([]any); ok {
+					patchSetsMap[name] = patches
+				} else {
+					patchSetsMap[name] = nil
+				}
+			}
+		}
+	}
+
 	for resIdx, resRaw := range resources {
 		resMap, ok := resRaw.(map[string]any)
 		if !ok {
@@ -1631,101 +1646,8 @@ func parseClassicComposition(resources []any, bp *blueprint.Blueprint, opts Opti
 		// Apply patches
 		if patches, ok := resMap["patches"].([]any); ok {
 			for patchIdx, pRaw := range patches {
-				pMap, ok := pRaw.(map[string]any)
-				if !ok {
-					continue
-				}
-				pType, _ := pMap["type"].(string)
-				fromPath, _ := pMap["fromFieldPath"].(string)
-				toPath, _ := pMap["toFieldPath"].(string)
-
-				if transforms, ok := pMap["transforms"].([]any); ok && len(transforms) > 0 {
-					report.Record(fmt.Sprintf("resource.%s.patches[%d].transforms", res.Name, patchIdx),
-						"patch transforms are not supported in blueprint")
-				}
-
-				if pType == "FromCompositeFieldPath" || pType == "" {
-					var isParamPatch bool
-					var paramName string
-					if strings.HasPrefix(fromPath, "spec.parameters.") {
-						paramName = strings.TrimPrefix(fromPath, "spec.parameters.")
-						isParamPatch = true
-					} else if strings.HasPrefix(fromPath, "spec.") {
-						paramName = strings.TrimPrefix(fromPath, "spec.")
-						isParamPatch = true
-					}
-
-					if strings.HasPrefix(toPath, "spec.forProvider.") {
-						targetField := strings.TrimPrefix(toPath, "spec.forProvider.")
-						if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
-							if res.Fields == nil {
-								res.Fields = make(map[string]blueprint.Field)
-							}
-							res.Fields[targetField] = blueprint.Field{
-								From: "params." + paramName,
-							}
-							ensureParamDeclared(bp, paramName)
-						} else {
-							report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
-								fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
-						}
-					} else if strings.HasPrefix(toPath, "spec.") {
-						targetField := strings.TrimPrefix(toPath, "spec.")
-						if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
-							if res.Envelope == nil {
-								res.Envelope = make(map[string]blueprint.Field)
-							}
-							res.Envelope[targetField] = blueprint.Field{
-								From: "params." + paramName,
-							}
-							ensureParamDeclared(bp, paramName)
-						} else {
-							report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
-								fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
-						}
-					} else if strings.HasPrefix(toPath, "metadata.annotations.") || strings.HasPrefix(toPath, "metadata.annotations[") {
-						annKey := strings.TrimPrefix(toPath, "metadata.annotations.")
-						if strings.HasPrefix(toPath, "metadata.annotations[") {
-							annKey = strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.annotations["), "]")
-						}
-						if isParamPatch && paramName != "" && annKey != "" && isValidParamIdentifier(paramName) {
-							if res.Annotations == nil {
-								res.Annotations = make(map[string]blueprint.Field)
-							}
-							res.Annotations[annKey] = blueprint.Field{
-								From: "params." + paramName,
-							}
-							ensureParamDeclared(bp, paramName)
-						} else {
-							report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
-								fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
-						}
-					} else if strings.HasPrefix(toPath, "metadata.") {
-						targetField := toPath
-						if strings.HasPrefix(toPath, "metadata.labels.") {
-							labelKey := strings.TrimPrefix(toPath, "metadata.labels.")
-							targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
-						}
-						if isParamPatch && paramName != "" && isValidParamIdentifier(paramName) {
-							if res.Fields == nil {
-								res.Fields = make(map[string]blueprint.Field)
-							}
-							res.Fields[targetField] = blueprint.Field{
-								From: "params." + paramName,
-							}
-							ensureParamDeclared(bp, paramName)
-						} else {
-							report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
-								fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
-						}
-					} else {
-						report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
-							fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
-					}
-				} else {
-					report.Record(fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx),
-						fmt.Sprintf("patch type %q is not supported in blueprint", pType))
-				}
+				patchPath := fmt.Sprintf("resource.%s.patches[%d]", res.Name, patchIdx)
+				applyPatch(pRaw, patchPath, res, bp, report, patchSetsMap, make(map[string]bool))
 			}
 		}
 
@@ -1741,6 +1663,123 @@ func parseClassicComposition(resources []any, bp *blueprint.Blueprint, opts Opti
 		_ = resIdx
 	}
 	return nil
+}
+
+func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *blueprint.Blueprint, report *LossReport, patchSetsMap map[string][]any, visited map[string]bool) {
+	pMap, ok := pRaw.(map[string]any)
+	if !ok {
+		return
+	}
+	pType, _ := pMap["type"].(string)
+	fromPath, _ := pMap["fromFieldPath"].(string)
+	toPath, _ := pMap["toFieldPath"].(string)
+
+	if transforms, ok := pMap["transforms"].([]any); ok && len(transforms) > 0 {
+		report.Record(fmt.Sprintf("%s.transforms", patchPath),
+			"patch transforms are not supported in blueprint")
+	}
+
+	if pType == "PatchSet" {
+		patchSetName, _ := pMap["patchSetName"].(string)
+		psPatches, found := patchSetsMap[patchSetName]
+		if !found {
+			report.Record(patchPath, fmt.Sprintf("patchSet %q not found", patchSetName))
+			return
+		}
+		if visited[patchSetName] {
+			report.Record(patchPath, fmt.Sprintf("circular patchSet reference %q", patchSetName))
+			return
+		}
+		visited[patchSetName] = true
+		for _, psPatchRaw := range psPatches {
+			applyPatch(psPatchRaw, patchPath, res, bp, report, patchSetsMap, visited)
+		}
+		delete(visited, patchSetName)
+		return
+	}
+
+	if pType == "FromCompositeFieldPath" || pType == "" {
+		var isParamPatch bool
+		var paramName string
+		if strings.HasPrefix(fromPath, "spec.parameters.") {
+			paramName = strings.TrimPrefix(fromPath, "spec.parameters.")
+			isParamPatch = true
+		} else if strings.HasPrefix(fromPath, "spec.") {
+			paramName = strings.TrimPrefix(fromPath, "spec.")
+			isParamPatch = true
+		}
+
+		if strings.HasPrefix(toPath, "spec.forProvider.") {
+			targetField := strings.TrimPrefix(toPath, "spec.forProvider.")
+			if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
+				if res.Fields == nil {
+					res.Fields = make(map[string]blueprint.Field)
+				}
+				res.Fields[targetField] = blueprint.Field{
+					From: "params." + paramName,
+				}
+				ensureParamDeclared(bp, paramName)
+			} else {
+				report.Record(patchPath,
+					fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
+			}
+		} else if strings.HasPrefix(toPath, "spec.") {
+			targetField := strings.TrimPrefix(toPath, "spec.")
+			if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
+				if res.Envelope == nil {
+					res.Envelope = make(map[string]blueprint.Field)
+				}
+				res.Envelope[targetField] = blueprint.Field{
+					From: "params." + paramName,
+				}
+				ensureParamDeclared(bp, paramName)
+			} else {
+				report.Record(patchPath,
+					fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
+			}
+		} else if strings.HasPrefix(toPath, "metadata.annotations.") || strings.HasPrefix(toPath, "metadata.annotations[") {
+			annKey := strings.TrimPrefix(toPath, "metadata.annotations.")
+			if strings.HasPrefix(toPath, "metadata.annotations[") {
+				annKey = strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.annotations["), "]")
+			}
+			if isParamPatch && paramName != "" && annKey != "" && isValidParamIdentifier(paramName) {
+				if res.Annotations == nil {
+					res.Annotations = make(map[string]blueprint.Field)
+				}
+				res.Annotations[annKey] = blueprint.Field{
+					From: "params." + paramName,
+				}
+				ensureParamDeclared(bp, paramName)
+			} else {
+				report.Record(patchPath,
+					fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+			}
+		} else if strings.HasPrefix(toPath, "metadata.") {
+			targetField := toPath
+			if strings.HasPrefix(toPath, "metadata.labels.") {
+				labelKey := strings.TrimPrefix(toPath, "metadata.labels.")
+				targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
+			}
+			if isParamPatch && paramName != "" && isValidParamIdentifier(paramName) {
+				if res.Fields == nil {
+					res.Fields = make(map[string]blueprint.Field)
+				}
+				res.Fields[targetField] = blueprint.Field{
+					From: "params." + paramName,
+				}
+				ensureParamDeclared(bp, paramName)
+			} else {
+				report.Record(patchPath,
+					fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+			}
+		} else {
+			report.Record(patchPath,
+				fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
+		}
+	} else {
+		report.Record(patchPath,
+			fmt.Sprintf("patch type %q is not supported in blueprint", pType))
+	}
 }
 
 func uniqueName(bp *blueprint.Blueprint, res *blueprint.Resource) {
