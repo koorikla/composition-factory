@@ -3,6 +3,7 @@
 # the same shape as land_test.sh (which stays verbatim and keeps its own copy).
 # Sourced after lib.sh. Defines no test_* functions, so run.sh never runs it.
 
+# shellcheck disable=SC2034 # used by the test files that source this one
 LAND="$DRIVER_DIR/land.sh"
 
 # land_repo: a bare origin and a working clone. main has one commit; topic branch
