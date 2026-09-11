@@ -52,6 +52,7 @@ let kindsError = null;       // verbatim server message, or null
 let kindsLoaded = false;
 let searchSeq = 0;
 let debounceTimer = null;
+let kindsCatMatches = [];
 
 let paramFormOpen = false;
 let paramErr = null;
@@ -155,9 +156,19 @@ function switchTab(r) {
 function loadKinds() {
   const q = (rail === "kinds" && searchEl && searchEl.value || "").trim();
   const seq = ++searchSeq;
-  api.getKinds(q).then(function (d) {
+  if (!q) {
+    kindsCatMatches = [];
+  }
+  const pKinds = api.getKinds(q);
+  const pCat = q
+    ? api.getCatalogue(q, "provider").catch(function () { return { providers: [] }; })
+    : Promise.resolve({ providers: [] });
+  Promise.all([pKinds, pCat]).then(function (results) {
     if (seq !== searchSeq) return; // stale response
+    const d = results[0];
+    const cat = results[1];
     kinds = d && d.kinds || [];
+    kindsCatMatches = cat && cat.providers || [];
     kindsError = null;
     kindsLoaded = true;
     if (rail === "kinds" || rail === "src") drawRail();
@@ -204,12 +215,55 @@ function loadFunctions(q) {
 
 /* ---------------- tab renderers ---------------- */
 
+function drawKindsEmpty(q) {
+  if (!q) {
+    return '<div class="empty">No kinds available. Add a provider in <button class="btn link" data-tab-switch="src" style="font-weight:600;text-decoration:underline;cursor:pointer;color:inherit;background:none;border:none;padding:0;font-size:inherit">SOURCES</button> or run: <code>cf provider add &lt;ref&gt;</code>.</div>';
+  }
+
+  let h = '<div class="empty">';
+  if (providersErr) {
+    h += '<div class="warnbar" role="alert" style="margin:0 0 10px;text-align:left">' + esc(providersErr) + '</div>';
+  }
+  h += '<div style="margin-bottom:8px">No kinds match search query. Add a provider in <button class="btn link" data-tab-switch="src" style="font-weight:600;text-decoration:underline;cursor:pointer;color:inherit;background:none;border:none;padding:0;font-size:inherit">SOURCES</button>.</div>';
+
+  if (kindsCatMatches && kindsCatMatches.length > 0) {
+    const doc = store && store.state && store.state.doc;
+    const docSources = (doc && doc.spec && doc.spec.sources) || [];
+    const installed = providers !== null ? providers : docSources;
+
+    h += '<div style="margin-top:12px;text-align:left;border:1px solid var(--rule);border-radius:6px;background:var(--surface);overflow:hidden">';
+    h += '<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted);background:var(--sunk);border-bottom:1px solid var(--rule);text-transform:uppercase;letter-spacing:0.5px">Matching Catalogue Providers</div>';
+    kindsCatMatches.slice(0, 5).forEach(function (c) {
+      const isInstalled = (installed || []).some(function (s) {
+        if (s.error) return false;
+        const sp = (s.provider || "").split(":")[0];
+        const cr = (c.ref || "").split(":")[0];
+        return s.provider === c.ref || (cr && sp && sp === cr);
+      });
+      const instInfo = (providers || []).find(function (p) { return p.ref === c.ref; });
+      const countLabel = instInfo && instInfo.kinds ? 'Installed \u00b7 ' + instInfo.kinds + ' kinds' : 'Installed';
+
+      h += '<div class="cat-row src-row" style="cursor:default" title="' + esc(c.description || c.name) + '">' +
+        '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(c.name) + '</span>' +
+        '<span class="dg">' + esc(c.ref || "no published image \u2014 publishes elsewhere") + '</span></span>' +
+        (isInstalled
+          ? '<span class="pill" style="font-size:9.5px;background:var(--wire-status-soft);color:var(--wire-status);align-self:center;flex:0 0 auto">' + esc(countLabel) + '</span>'
+          : (c.ref ? '<button class="btn sm cat-add" data-cat-ref="' + esc(c.ref) + '">Add</button>' : '')) +
+        '</div>';
+    });
+    h += '</div>';
+  }
+
+  h += '</div>';
+  return h;
+}
+
 function drawKinds() {
   if (kindsError) return '<div class="empty">' + esc(kindsError) + "</div>";
   if (!kindsLoaded) return '<div class="empty">Loading kinds…</div>';
   const q = (searchEl && searchEl.value || "").trim();
   if (!kinds.length) {
-    return '<div class="empty">' + (q ? "No kinds match search query." : "No kinds available. Run: <code>cf provider add &lt;ref&gt;</code> to add a provider.") + "</div>";
+    return drawKindsEmpty(q);
   }
   // Group by `group`, first-appearance order (header rows like the prototype).
   const order = [];
@@ -221,7 +275,7 @@ function drawKinds() {
     byGroup[g].push(k);
   });
   if (!order.length) {
-    return '<div class="empty">' + (q ? "No kinds match search query." : "No kinds available. Run: <code>cf provider add &lt;ref&gt;</code> to add a provider.") + "</div>";
+    return drawKindsEmpty(q);
   }
   const doc = store.state.doc;
   const xrdScope = (doc && doc.spec && doc.spec.xrd && doc.spec.xrd.scope) || "Namespaced";
@@ -813,6 +867,11 @@ function bindPaletteEvents() {
   });
 
   railEl.addEventListener("click", function (e) {
+    const tabSwitchBtn = e.target.closest("[data-tab-switch]");
+    if (tabSwitchBtn) {
+      switchTab(tabSwitchBtn.getAttribute("data-tab-switch"));
+      return;
+    }
     const kindRow = e.target.closest(".kind[data-kind]");
     if (kindRow && !isPaletteDragging) {
       hideKindPreview();
@@ -954,9 +1013,10 @@ function bindPaletteEvents() {
       catBtn.innerHTML = '<span class="spinner"></span> Adding\u2026';
       providersErr = null;
       api.addProvider(catRef).then(function () {
+        const q = (rail === "kinds" && searchEl && searchEl.value || "").trim();
         return Promise.all([
           api.getProviders().then(function (r) { providers = r.providers || []; }),
-          api.getKinds().then(function (d) { kinds = d.kinds || []; kindsLoaded = true; }),
+          api.getKinds(q).then(function (d) { kinds = d.kinds || []; kindsLoaded = true; }),
           store.loadDoc()
         ]);
       }).then(function () {

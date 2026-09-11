@@ -48,7 +48,7 @@ test('CF-072: palette empty states distinguish between search query and empty ca
   // Empty state should indicate no search matches
   const emptyEl = page.locator('#lrail .empty')
   await expect(emptyEl).toBeVisible()
-  await expect(emptyEl).toHaveText('No kinds match search query.')
+  await expect(emptyEl).toContainText('No kinds match search query.')
 
   // When kinds list is empty without a search query, it should say "No kinds available."
   await page.evaluate(() => {
