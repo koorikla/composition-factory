@@ -493,6 +493,9 @@ func TestCheckRequiredFieldsOnRealCRD(t *testing.T) {
 		CacheDir:  cache.DefaultRoot(),
 	}
 	code, err := cmd.run(&buf)
+	if err != nil && strings.Contains(err.Error(), "is not in the cache") {
+		t.Skipf("skipping: s3 provider not in cache: %v", err)
+	}
 	if code == 0 && err == nil {
 		t.Fatalf("expected error stating that required field \"region\" on resource \"Bucket\" is missing, got exit 0")
 	}
