@@ -2001,3 +2001,65 @@ func TestCF110ResourceEndpointsRejectUnknownKindAndField(t *testing.T) {
 		t.Error("the blueprint file changed despite rejected resource mutations")
 	}
 }
+
+func TestCF214DecodeJSONRejectsTrailingContent(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	current := mustLoadBlueprint(t, path)
+	body, err := json.Marshal(current)
+	if err != nil {
+		t.Fatalf("marshal blueprint: %v", err)
+	}
+
+	// 1. Valid JSON with trailing whitespace / newline passes with HTTP 200.
+	rec := do(t, h, "PUT", "/api/blueprint", string(body)+"\n  \t\r\n ")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT with trailing whitespace status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	// Snapshot disk state before testing rejected mutations.
+	snapshot, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+
+	// 2. Valid JSON followed by a second JSON document is rejected with HTTP 400.
+	rec = do(t, h, "PUT", "/api/blueprint", string(body)+` {"second":1}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT with second JSON document status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "unexpected trailing content") {
+		t.Errorf("error body = %q, want mention of unexpected trailing content", rec.Body)
+	}
+	afterSecondDoc, _ := os.ReadFile(path)
+	if !bytes.Equal(snapshot, afterSecondDoc) {
+		t.Error("blueprint file changed despite 400 on second JSON document")
+	}
+
+	// 3. Valid JSON followed by garbage bytes is rejected with HTTP 400.
+	rec = do(t, h, "PUT", "/api/blueprint", string(body)+" garbage")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT with trailing garbage bytes status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "unexpected trailing content") {
+		t.Errorf("error body = %q, want mention of unexpected trailing content", rec.Body)
+	}
+	afterGarbage, _ := os.ReadFile(path)
+	if !bytes.Equal(snapshot, afterGarbage) {
+		t.Error("blueprint file changed despite 400 on trailing garbage bytes")
+	}
+
+	// 4. Also verify parameter route (POST /api/blueprint/parameters) rejects trailing content.
+	rec = do(t, h, "POST", "/api/blueprint/parameters",
+		`{"name":"cf214param","parameter":{"type":"string"}} {"extra":true}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST parameter with trailing doc status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "unexpected trailing content") {
+		t.Errorf("error body = %q, want mention of unexpected trailing content", rec.Body)
+	}
+	afterParam, _ := os.ReadFile(path)
+	if !bytes.Equal(snapshot, afterParam) {
+		t.Error("blueprint file changed despite 400 on parameter route with trailing content")
+	}
+}

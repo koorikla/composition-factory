@@ -897,12 +897,20 @@ func silentlyDropped(existing blueprint.Parameter, present map[string]bool) []st
 
 // decodeJSON decodes r's body as JSON into v, rejecting unknown fields so a
 // client typo (e.g. "paramter") fails loudly as a 400 instead of silently
-// being ignored.
+// being ignored. It verifies that no trailing non-whitespace data follows the
+// first JSON document.
 func decodeJSON(r *http.Request, v any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("invalid request body: %w", err)
+	}
+	var dump any
+	if err := dec.Decode(&dump); err != io.EOF {
+		if err == nil {
+			return errors.New("unexpected trailing content after JSON document")
+		}
+		return fmt.Errorf("unexpected trailing content after JSON document: %w", err)
 	}
 	return nil
 }
