@@ -35,7 +35,7 @@ test('KINDS rail sorts kinds alphabetically and labels cluster-scoped provider v
   }
 });
 
-test('Examples modal displays (replaces current blueprint · undoable) note under load buttons', async ({ page }) => {
+test('Examples modal displays replacement note naming served blueprint under load buttons', async ({ page }) => {
   await page.goto('/');
   const exBtn = page.locator('#examplesBtn');
   await expect(exBtn).toBeVisible();
@@ -46,7 +46,7 @@ test('Examples modal displays (replaces current blueprint · undoable) note unde
   // Wait for example cards to render
   const card = page.locator('.example-card[data-id="irsa"]');
   await expect(card).toBeVisible({ timeout: 10000 });
-  await expect(card.locator('.example-note')).toContainText('(replaces current blueprint · undoable)');
+  await expect(card.locator('.example-note')).toContainText('(replaces doc.cf.yaml · undoable)');
   await page.keyboard.press('Escape');
 });
 

@@ -608,14 +608,21 @@ function notice(text, isError, persistent) {
   if (!btn || !overlay || !grid) return;
 
   var cachedExamples = null;
+  var cachedBlueprintName = "";
 
-  
+  function getTargetBlueprintName() {
+    if (cachedBlueprintName) return cachedBlueprintName;
+    var doc = store && store.state && store.state.doc;
+    var name = (doc && doc.metadata && doc.metadata.name) || "blueprint";
+    return name + ".cf.yaml";
+  }
 
   function renderExamples(list) {
     if (!list || !list.length) {
       grid.innerHTML = '<div class="empty">No starter examples available.</div>';
       return;
     }
+    var targetBp = esc(cachedBlueprintName || getTargetBlueprintName());
     var html = "";
     list.forEach(function (ex) {
       var ic = ex.icon || { label: "EX", color: "var(--wire-xrd)" };
@@ -652,19 +659,37 @@ function notice(text, isError, persistent) {
         tagsHtml +
         '</div>' +
         '<button class="btn pri sm example-btn" data-load-id="' + esc(ex.id) + '">Load Blueprint</button>' +
-        '<div class="example-note" style="font-size:10px;color:var(--faint);text-align:center;margin-top:3px">(replaces current blueprint \u00b7 undoable)</div>' +
+        '<div class="example-note" style="font-size:10px;color:var(--faint);text-align:center;margin-top:3px">(replaces ' + targetBp + ' \u00b7 undoable)</div>' +
         '</div>';
     });
     grid.innerHTML = html;
   }
 
   function loadExamples() {
+    function ensureBp() {
+      if (cachedBlueprintName) return Promise.resolve(cachedBlueprintName);
+      return api.getVersion().then(function (r) {
+        if (r && r.blueprint) {
+          var bp = r.blueprint;
+          var slashIdx = Math.max(bp.lastIndexOf("/"), bp.lastIndexOf("\\"));
+          cachedBlueprintName = slashIdx >= 0 ? bp.slice(slashIdx + 1) : bp;
+        }
+        return cachedBlueprintName;
+      }).catch(function () { return ""; });
+    }
+
     if (cachedExamples) {
-      renderExamples(cachedExamples);
+      ensureBp().then(function () {
+        renderExamples(cachedExamples);
+      });
       return;
     }
     grid.innerHTML = '<div class="empty">Loading examples…</div>';
-    api.getExamples().then(function (data) {
+    Promise.all([
+      api.getExamples(),
+      ensureBp(),
+    ]).then(function (res) {
+      var data = res[0];
       cachedExamples = data && data.examples || [];
       renderExamples(cachedExamples);
     }).catch(function (err) {
