@@ -6898,3 +6898,56 @@ spec:
 		}
 	})
 }
+
+func TestCF293_ManagedResourceWithoutForProvider(t *testing.T) {
+	manifest := []byte(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+  - step: go-templating
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: test-bucket
+          spec:
+            deletionPolicy: Orphan
+            writeConnectionSecretToRef:
+              name: test-secret
+              namespace: default
+`)
+	bp, report, err := Adopt(manifest, Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+	if res.Envelope["deletionPolicy"].Value != "Orphan" {
+		t.Errorf("expected envelope deletionPolicy Orphan, got %q", res.Envelope["deletionPolicy"].Value)
+	}
+	if res.Envelope["writeConnectionSecretToRef.name"].Value != "test-secret" {
+		t.Errorf("expected writeConnectionSecretToRef.name test-secret, got %+v", res.Envelope["writeConnectionSecretToRef.name"])
+	}
+	if len(res.Fields) != 0 {
+		t.Errorf("expected 0 fields in Fields map, got %+v", res.Fields)
+	}
+	if len(report.Drops) != 0 {
+		t.Errorf("expected 0 dropped fields, got %v", report.Drops)
+	}
+}

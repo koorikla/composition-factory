@@ -2673,8 +2673,10 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 
 	// Extract spec fields
 	if spec, ok := m["spec"].(map[string]any); ok {
-		if forProvider, ok := spec["forProvider"].(map[string]any); ok {
-			extractFields("", forProvider, res.Fields, placeholders, res.Name, report, nameMapping, bp, isNative)
+		if !isNative {
+			if forProvider, ok := spec["forProvider"].(map[string]any); ok {
+				extractFields("", forProvider, res.Fields, placeholders, res.Name, report, nameMapping, bp, isNative)
+			}
 			if initProvider, ok := spec["initProvider"].(map[string]any); ok {
 				initKeys := make([]string, 0, len(initProvider))
 				for k := range initProvider {
