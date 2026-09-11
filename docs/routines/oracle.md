@@ -1,8 +1,16 @@
-# Oracle routine (Claude, cloud)
+# Oracle routines (Claude, cloud)
 
-Daily at 05:00 Europe/Tallinn (`0 2 * * *` UTC), model claude-opus-5, environment: Anthropic
-cloud with a fresh checkout of this repository, no MCP connectors. Routine id
-`trig_015UP4NixEFmvaqUX96PTvZR` (manage at https://claude.ai/code/routines).
+Two routines, both claude-opus-5 in the Anthropic cloud with a fresh checkout of this
+repository and no MCP connectors (manage at https://claude.ai/code/routines):
+
+| routine | schedule (UTC) | scope | cap |
+|---|---|---|---|
+| deep — `trig_015UP4NixEFmvaqUX96PTvZR` | `0 2 * * *` (05:00 Tallinn) | verify last 24 h of closes, two missions + one extra area, lint/lint-strict/test-short/govulncheck, drift spot-check | 2.5 h, ≤12 issues |
+| light — see routine list | `0 6,10,14,18,22 * * *` | verify closes of the last 5 h, lint/lint-strict/test-short, one mission to Generate | 75 min, ≤6 issues |
+
+Together they guarantee an oracle pass at least every 4 hours, so a half-fix merged by the
+hourly overnight driver is caught within one cycle. The deep run is described below; the
+light run is the same contract with the smaller scope in the table.
 
 It re-verifies issues closed in the previous 24 h against real inputs, runs two rotating
 canvas missions (`.claude/skills/canvas-ux-tester/missions.md`, day-of-month % 3) with a
