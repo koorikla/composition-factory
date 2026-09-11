@@ -204,3 +204,32 @@ func TestCatalogueQFiltersByKindName(t *testing.T) {
 		})
 	}
 }
+
+// TestCatalogueQFiltersByServiceAndEngineWords verifies that searching the catalogue
+// via GET /api/catalogue?q= for engine/service words ("postgres", "sql") returns
+// provider-aws-rds. (CF-142, #27)
+func TestCatalogueQFiltersByServiceAndEngineWords(t *testing.T) {
+	h := testHandler(t)
+
+	for _, q := range []string{"postgres", "sql"} {
+		t.Run(q, func(t *testing.T) {
+			var res struct {
+				Providers []catalogue.Provider `json:"providers"`
+			}
+			if code := getJSON(t, h, "/api/catalogue?q="+q, &res); code != 200 {
+				t.Fatalf("status %d", code)
+			}
+			found := false
+			for _, p := range res.Providers {
+				if p.Name == "provider-aws-rds" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("GET /api/catalogue?q=%s did not return provider-aws-rds in results: %+v",
+					q, res.Providers)
+			}
+		})
+	}
+}

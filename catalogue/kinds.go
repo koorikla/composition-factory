@@ -19,6 +19,7 @@ var packageKinds = map[string][]string{
 		"Instance", "DBInstance", "DatabaseInstance", "RDSInstance", "Cluster", "DBCluster",
 		"DBSubnetGroup", "ParameterGroup", "DBParameterGroup", "OptionGroup",
 		"ClusterInstance", "ClusterParameterGroup", "ClusterSnapshot", "RDS", "Database",
+		"PostgreSQL", "Postgres", "MySQL", "MariaDB", "Aurora", "SQL",
 	},
 	"provider-aws-sqs": {
 		"Queue", "QueuePolicy", "QueueRedrivePolicy", "QueueRedriveAllowPolicy", "SQS", "SQSQueue",
@@ -102,6 +103,7 @@ var packageKinds = map[string][]string{
 	// GCP services
 	"provider-gcp-sql": {
 		"DatabaseInstance", "CloudSQL", "CloudSQLInstance", "Instance", "Database", "User", "SSLSubnet", "SSLKey", "BackupRun", "SQL",
+		"PostgreSQL", "Postgres", "MySQL",
 	},
 	"provider-gcp-storage": {
 		"Bucket", "BucketAccessControl", "BucketIAMMember", "BucketIAMBinding", "BucketObject", "DefaultObjectAccessControl", "HmacKey", "GCS", "GCSBucket",

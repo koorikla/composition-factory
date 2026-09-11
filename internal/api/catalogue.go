@@ -85,18 +85,6 @@ func handleCatalogue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries := make([]catalogue.Provider, 0, len(catalogueEntries))
-	for _, e := range catalogueEntries {
-		isFn := strings.HasPrefix(e.Name, "function-")
-		if typ == "function" && !isFn {
-			continue
-		}
-		if typ == "provider" && isFn {
-			continue
-		}
-		if q == "" || catalogue.Matches(e, q) {
-			entries = append(entries, e)
-		}
-	}
+	entries := catalogue.Search(catalogueEntries, q, typ)
 	writeJSON(w, http.StatusOK, map[string]any{"providers": entries})
 }

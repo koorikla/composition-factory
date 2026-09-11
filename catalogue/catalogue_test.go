@@ -159,3 +159,30 @@ func TestKindsAndPackagesForKind(t *testing.T) {
 		t.Errorf("PackagesForKind(DatabaseInstance) = %v, want provider-gcp-sql", pkgs)
 	}
 }
+
+// TestSearchFindsRDSByServiceAndEngineWords verifies that searching the catalogue
+// for common service and engine words a platform engineer knows ("postgres", "postgresql",
+// "sql", "mysql", "mariadb", "aurora") finds provider-aws-rds. (CF-142, #27)
+func TestSearchFindsRDSByServiceAndEngineWords(t *testing.T) {
+	entries, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	queries := []string{"postgres", "postgresql", "sql", "mysql", "mariadb", "aurora"}
+	for _, q := range queries {
+		t.Run(q, func(t *testing.T) {
+			results := Search(entries, q, "provider")
+			found := false
+			for _, r := range results {
+				if r.Name == "provider-aws-rds" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("Search(%q) did not return provider-aws-rds; got %d results", q, len(results))
+			}
+		})
+	}
+}
