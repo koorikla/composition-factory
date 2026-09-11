@@ -26,7 +26,6 @@ type FieldsCmd struct {
 
 func (c *FieldsCmd) Run(out io.Writer) error {
 	store := cache.New(c.CacheDir)
-	var refs []string
 	var b *blueprint.Blueprint
 	var blueprintDir string
 
@@ -38,23 +37,9 @@ func (c *FieldsCmd) Run(out io.Writer) error {
 		}
 		b = loaded
 		blueprintDir = filepath.Dir(c.Blueprint)
-		seen := make(map[string]bool, len(b.Spec.Sources))
-		for _, s := range b.Spec.Sources {
-			if s.Provider != "" && !seen[s.Provider] {
-				seen[s.Provider] = true
-				if _, err := store.Load(s.Provider); err != nil {
-					fmt.Fprintf(os.Stderr, "cf: warning: provider %q is not in the cache — continuing without it; schemas load on demand\n", s.Provider)
-					continue
-				}
-				refs = append(refs, s.Provider)
-			}
-		}
 	}
 
-	if b == nil || len(b.Spec.Sources) == 0 {
-		cached, _ := store.List()
-		refs = cached
-	}
+	refs := AssembleProviders(store, b, nil, false)
 
 	idx, err := api.BuildIndex(store, refs, b, blueprintDir)
 	if err != nil {

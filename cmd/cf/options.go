@@ -24,22 +24,62 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string, cl *clust
 	}
 
 	store := cache.New(cacheDir)
+	refs := AssembleProviders(store, b, cl, syncClusterNow)
 
-	// refs doubles as Options.Providers: the exact provider set the index is
-	// built over, in blueprint-source order, deduplicated.
-	refs := make([]string, 0, len(b.Spec.Sources))
-	seen := make(map[string]bool, len(b.Spec.Sources))
-	for _, s := range b.Spec.Sources {
-		if s.Provider != "" && !seen[s.Provider] {
-			seen[s.Provider] = true
-			if _, err := store.Load(s.Provider); err != nil {
-				// A source missing from the cache no longer kills startup: the
-				// server comes up with a partial index and the runtime auto-sync
-				// fetches it on demand.
-				fmt.Fprintf(os.Stderr, "cf: warning: provider %q is not in the cache — continuing without it; schemas load on demand\n", s.Provider)
-				continue
+	idx, err := api.BuildIndex(store, refs, b, filepath.Dir(blueprintPath))
+	if err != nil {
+		return api.Options{}, err
+	}
+
+	return api.Options{
+		Index:         idx,
+		Store:         store,
+		Blueprint:     blueprintPath,
+		OutDir:        outDir,
+		Lock:          lockPath,
+		Providers:     refs,
+		Version:       version,
+		ClusterClient: cl,
+	}, nil
+}
+
+// AssembleProviders collects the provider set to index and serve:
+// 1. inspects declared blueprint sources in document order, deduplicating references
+// 2. checks store cache presence, warning on os.Stderr for missing providers so startup continues with a partial index
+// 3. if no blueprint sources are declared (or b is nil), falls back to all cached providers in store.List()
+// 4. if a cluster client is provided, syncs or loads live cluster CRDs under cluster.ProviderLabel
+func AssembleProviders(store *cache.Store, b *blueprint.Blueprint, cl *cluster.Client, syncClusterNow bool) []string {
+	if store == nil {
+		return nil
+	}
+
+	var refs []string
+	seen := make(map[string]bool)
+
+	if b != nil {
+		for _, s := range b.Spec.Sources {
+			if s.Provider != "" && !seen[s.Provider] {
+				seen[s.Provider] = true
+				if _, err := store.Load(s.Provider); err != nil {
+					// A source missing from the cache no longer kills startup: the
+					// server comes up with a partial index and the runtime auto-sync
+					// fetches it on demand.
+					fmt.Fprintf(os.Stderr, "cf: warning: provider %q is not in the cache — continuing without it; schemas load on demand\n", s.Provider)
+					continue
+				}
+				refs = append(refs, s.Provider)
 			}
-			refs = append(refs, s.Provider)
+		}
+	}
+
+	// If no blueprint sources found, discover all cached providers
+	if b == nil || len(b.Spec.Sources) == 0 {
+		cached, _ := store.List()
+		for _, p := range cached {
+			if !seen[p] {
+				seen[p] = true
+				refs = append(refs, p)
+			}
 		}
 	}
 
@@ -61,19 +101,5 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string, cl *clust
 		}
 	}
 
-	idx, err := api.BuildIndex(store, refs, b, filepath.Dir(blueprintPath))
-	if err != nil {
-		return api.Options{}, err
-	}
-
-	return api.Options{
-		Index:         idx,
-		Store:         store,
-		Blueprint:     blueprintPath,
-		OutDir:        outDir,
-		Lock:          lockPath,
-		Providers:     refs,
-		Version:       version,
-		ClusterClient: cl,
-	}, nil
+	return refs
 }
