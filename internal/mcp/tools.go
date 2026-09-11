@@ -468,7 +468,7 @@ func (s *server) addResource(_ context.Context, _ *sdk.CallToolRequest, in addRe
 	}
 	if bodyNameRaw, exists := rawMap["name"]; exists {
 		var bodyName string
-		if err := json.Unmarshal(bodyNameRaw, &bodyName); err == nil && bodyName != "" && in.Name != "" && bodyName != in.Name {
+		if err := json.Unmarshal(bodyNameRaw, &bodyName); err == nil && bodyName != "" && bodyName != in.Name {
 			return nil, nil, fmt.Errorf("resource name in body %q does not match name argument %q", bodyName, in.Name)
 		}
 	}

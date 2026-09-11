@@ -112,4 +112,14 @@ func TestAddResourceNameMismatchRejected(t *testing.T) {
 	if !strings.Contains(text, want) {
 		t.Errorf("add_resource error %q does not contain %q", text, want)
 	}
+
+	// Same name in body and argument is accepted.
+	s.toolOK(t, "add_resource", map[string]any{
+		"name": "res-a",
+		"resource": map[string]any{
+			"name":     "res-a",
+			"kind":     "Queue",
+			"provider": testProviderRef,
+		},
+	})
 }
