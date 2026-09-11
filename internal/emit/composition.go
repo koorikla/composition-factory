@@ -547,39 +547,36 @@ func templateCallRHS(name, resource, field string) string {
 // order wins for each leaf; an explicit field of any form wins over every
 // convention — that is the override mechanism, so it is a merge rule here
 // rather than a special case anywhere else. The receiver's Fields map is
-// never mutated.
+// never mutated. A native Kubernetes kind receives no merge at all: a
+// convention matching any of its un-overridden fields is refused (below).
 func conventionFields(r blueprint.Resource, b *blueprint.Blueprint, crd schema.CRD) (map[string]blueprint.Field, error) {
 	if len(b.Spec.Conventions) == 0 {
 		return r.Fields, nil
 	}
-	// Conventions cannot target native Kubernetes kinds (docs/dsl.md:418).
-	// If any convention matches an un-overridden top-level leaf of the native
-	// object, return a real error rather than a silent skip. Non-matching
-	// conventions safely skip the native kind so blueprints can freely compose
-	// native kinds alongside convention-governed managed resources.
+	// Conventions cannot target native Kubernetes kinds (docs/dsl.md,
+	// Conventions): a native object has no forProvider plan for them to fill,
+	// and a template call's output re-indents to the fixed forProvider column,
+	// which a native leaf at an arbitrary depth breaks. So a convention that
+	// WOULD have applied — one matching an un-overridden settable field of the
+	// object at any depth, spec.replicas on a Deployment as much as immutable
+	// on a Secret — is a real error rather than a silent skip: the alternative
+	// is a define block that is emitted and never called, and a field the
+	// author declared that never reaches the cluster. Conventions that match
+	// nothing on the object skip it, so a blueprint can freely compose native
+	// kinds alongside convention-governed managed resources.
 	if crd.Native {
 		nodes, err := crd.FieldTree()
 		if err != nil {
 			return nil, fmt.Errorf("resource %q (kind %q): %w", r.Name, r.Kind, err)
 		}
-		for _, n := range nodes {
-			if len(n.Children) > 0 {
-				continue // a branch is a subtree, not a settable field
-			}
-			hasExplicit := false
-			for k := range r.Fields {
-				base, _, isMap := blueprint.ParseFieldPath(k)
-				if k == n.Name || (isMap && base == n.Name) {
-					hasExplicit = true
-					break
-				}
-			}
-			if hasExplicit {
+		for _, leaf := range schema.Leaves(nodes, "") {
+			if explicitlySet(r.Fields, leaf.Path) {
 				continue // explicit wins: that IS the override
 			}
 			for _, c := range b.Spec.Conventions {
-				if strings.HasSuffix(n.Name, c.Match) {
-					return nil, fmt.Errorf("resource %q: conventions cannot match native Kubernetes kind", r.Name)
+				if strings.HasSuffix(leaf.Path, c.Match) {
+					return nil, fmt.Errorf("resource %q: conventions cannot match native Kubernetes kind (match %q names %s field %q)",
+						r.Name, c.Match, r.Kind, leaf.Path)
 				}
 			}
 		}
@@ -616,6 +613,23 @@ func conventionFields(r blueprint.Resource, b *blueprint.Blueprint, crd schema.C
 		}
 	}
 	return merged, nil
+}
+
+// explicitlySet reports whether the blueprint's explicit fields cover the
+// schema leaf at path: the leaf itself, a map entry under it
+// (labels["app"] covers labels), or an ancestor assigned wholesale
+// (spec.selector as raw YAML covers spec.selector.matchLabels). Array
+// indices compare as written; schema leaves carry [0].
+func explicitlySet(fields map[string]blueprint.Field, path string) bool {
+	for k := range fields {
+		if base, _, isMap := blueprint.ParseFieldPath(k); isMap {
+			k = base
+		}
+		if k == path || strings.HasPrefix(path, k+".") || strings.HasPrefix(path, k+"[") {
+			return true
+		}
+	}
+	return false
 }
 
 // whenCondition compiles a validated when expression to the template

@@ -337,10 +337,12 @@ xr: {{ .xr | quote }}
 }
 
 // Conventions x native kinds, revised ruling: conventions SKIP native
-// resources instead of refusing the document (their top-level leaves are
-// structural — never convention targets), so a conventions-bearing
+// resources instead of refusing the document, so a conventions-bearing
 // blueprint can freely compose native kinds. Managed siblings still get
-// the convention; the native document must carry no template call.
+// the convention; the native document must carry no template call. Only
+// the tags convention is kept here: no Deployment field ends in "tags",
+// whereas "name" names metadata.name and the container name at depth,
+// which is the refusal CF-109 and CF-149 guard.
 func TestConventionsSkipNativeKinds(t *testing.T) {
 	native, err := k8s.Kinds()
 	if err != nil {
@@ -349,6 +351,7 @@ func TestConventionsSkipNativeKinds(t *testing.T) {
 	crds := append(native, conventionCRDs(t)...)
 
 	b := conventionTestBlueprint()
+	b.Spec.Conventions = []blueprint.Convention{{Match: "tags", Template: "cf.tags"}}
 	b.Spec.Resources = append(b.Spec.Resources, blueprint.Resource{
 		Name: "web", Kind: "Deployment", Provider: blueprint.NativeProvider,
 		Fields: map[string]blueprint.Field{"spec.replicas": {Raw: "2"}},
@@ -474,10 +477,12 @@ func TestCF109ConventionExplicitOverrideOnNativeKindAllowed(t *testing.T) {
 	crds := append(native, conventionCRDs(t)...)
 
 	b := conventionTestBlueprint()
-	b.Spec.Conventions = append(b.Spec.Conventions, blueprint.Convention{
-		Match:    "immutable",
-		Template: "cf.tags",
-	})
+	// "name" would name the Secret's metadata.name at depth (CF-149); the
+	// override under test is immutable alone.
+	b.Spec.Conventions = []blueprint.Convention{
+		{Match: "tags", Template: "cf.tags"},
+		{Match: "immutable", Template: "cf.tags"},
+	}
 	b.Spec.Resources = append(b.Spec.Resources, blueprint.Resource{
 		Name:     "secret",
 		Kind:     "Secret",
@@ -503,5 +508,93 @@ func TestCF109ConventionExplicitOverrideOnNativeKindAllowed(t *testing.T) {
 	}
 	if strings.Contains(rest, `include "cf.tags"`) {
 		t.Error("convention template call leaked into native secret document")
+	}
+}
+
+// CF-149: the CF-109 refusal only inspected the TOP-LEVEL leaves of a native
+// kind's field tree, so `match: replicas` against a Deployment (whose
+// replicas lives at spec.replicas) was still silently ignored — cf gen exited
+// 0, the define block was emitted and never called, and the Deployment
+// reached the cluster without a replicas field. A convention that matches a
+// field at ANY depth of a native kind is refused with the documented error,
+// exercised here on the real vendored apps/v1 Deployment.
+func TestCF149ConventionMatchingNestedNativeFieldIsRefused(t *testing.T) {
+	native, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+	crds := append(native, conventionCRDs(t)...)
+
+	b := conventionTestBlueprint()
+	// Only conventions that name no Deployment field, plus the one under
+	// test: replicas exists on Deployment solely as the nested spec.replicas.
+	b.Spec.Conventions = []blueprint.Convention{
+		{Match: "tags", Template: "cf.tags"},
+		{Match: "replicas", Template: "cf.tags"},
+	}
+	b.Spec.Resources = append(b.Spec.Resources, blueprint.Resource{
+		Name: "web", Kind: "Deployment", Provider: blueprint.NativeProvider,
+		Fields: map[string]blueprint.Field{
+			"spec.selector.matchLabels":              {Raw: "{app: web}"},
+			"spec.template.metadata.labels":          {Raw: "{app: web}"},
+			"spec.template.spec.containers[0].name":  {Value: "web"},
+			"spec.template.spec.containers[0].image": {Value: "nginx"},
+		},
+	})
+
+	_, err = Composition(b, crds)
+	if err == nil {
+		t.Fatal("Composition accepted a convention matching the nested Deployment field spec.replicas; want the documented refusal")
+	}
+	wantMsg := `resource "web": conventions cannot match native Kubernetes kind`
+	if !strings.Contains(err.Error(), wantMsg) {
+		t.Fatalf("expected error containing %q, got: %v", wantMsg, err)
+	}
+	if !strings.Contains(err.Error(), "spec.replicas") {
+		t.Errorf("error %q does not name the matched field spec.replicas", err)
+	}
+}
+
+// The override mechanism holds at depth too: a Deployment that sets
+// spec.replicas explicitly is not refused, and no convention call leaks into
+// the native document.
+func TestCF149ConventionExplicitNestedOverrideOnNativeKindAllowed(t *testing.T) {
+	native, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+	crds := append(native, conventionCRDs(t)...)
+
+	b := conventionTestBlueprint()
+	b.Spec.Conventions = []blueprint.Convention{
+		{Match: "tags", Template: "cf.tags"},
+		{Match: "replicas", Template: "cf.tags"},
+	}
+	b.Spec.Resources = append(b.Spec.Resources, blueprint.Resource{
+		Name: "web", Kind: "Deployment", Provider: blueprint.NativeProvider,
+		Fields: map[string]blueprint.Field{
+			"spec.replicas":                          {Raw: "2"},
+			"spec.selector.matchLabels":              {Raw: "{app: web}"},
+			"spec.template.metadata.labels":          {Raw: "{app: web}"},
+			"spec.template.spec.containers[0].name":  {Value: "web"},
+			"spec.template.spec.containers[0].image": {Value: "nginx"},
+		},
+	})
+
+	comp, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v, want explicit spec.replicas to override the convention", err)
+	}
+	doc := string(comp)
+	webStart := strings.Index(doc, `setResourceNameAnnotation "web"`)
+	if webStart < 0 {
+		t.Fatal("native Deployment document not found in the Composition")
+	}
+	rest := doc[webStart:]
+	if next := strings.Index(rest[1:], "setResourceNameAnnotation"); next > 0 {
+		rest = rest[:next+1]
+	}
+	if strings.Contains(rest, `include "cf.`) {
+		t.Error("a convention template call leaked into the native Deployment document")
 	}
 }
