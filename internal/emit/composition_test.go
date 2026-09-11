@@ -1053,3 +1053,80 @@ func TestCF169ClusterProviderScopeMismatch(t *testing.T) {
 		t.Errorf("error = %q, want substring %q", err.Error(), wantSubstr)
 	}
 }
+
+func TestCF301_LoopedCustomMetadataNameIncludesIndex(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-looped-name"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XLoopedName", Plural: "xloopednames",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"prefix":   {Type: "string"},
+					"replicas": {Type: "integer", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "worker",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					ForEach:  "params.replicas",
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "params.prefix"},
+					},
+				},
+			},
+		},
+	}
+	out, err := Composition(bp, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition failed: %v", err)
+	}
+	// The generated template must index the custom name with $i when looped
+	compStr := string(out)
+	if !strings.Contains(compStr, `$i`) || !strings.Contains(compStr, `name:`) {
+		t.Fatalf("expected looped custom metadata.name to incorporate loop index $i, got:\n%s", compStr)
+	}
+	if !strings.Contains(compStr, `name: {{ printf "%s-%d" $spec.prefix $i }}`) {
+		t.Fatalf("expected exact printf formatting with loop index $i, got:\n%s", compStr)
+	}
+}
+
+func TestCF301_LoopedCustomMetadataNameLiteralValue(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-looped-name-literal"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XLoopedNameLit", Plural: "xloopednamelits",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"replicas": {Type: "integer", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "worker",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					ForEach:  "params.replicas",
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {Value: "worker-custom"},
+					},
+				},
+			},
+		},
+	}
+	out, err := Composition(bp, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition failed: %v", err)
+	}
+	compStr := string(out)
+	if !strings.Contains(compStr, `name: {{ printf "%s-%d" "worker-custom" $i }}`) {
+		t.Fatalf("expected literal value to be formatted with printf and loop index $i, got:\n%s", compStr)
+	}
+}

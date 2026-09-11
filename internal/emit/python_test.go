@@ -1013,3 +1013,78 @@ func TestPythonEnvironmentDefaults(t *testing.T) {
 		t.Errorf("expected bool(env.get(\"enabled\", True)) in python body, got:\n%s", body)
 	}
 }
+
+func TestCF301_PythonLoopedCustomMetadataNameIncludesIndex(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-looped-name-py"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EnginePython},
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XLoopedName", Plural: "xloopednames",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"prefix":   {Type: "string"},
+					"replicas": {Type: "integer", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "worker",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					ForEach:  "params.replicas",
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "params.prefix"},
+					},
+				},
+			},
+		},
+	}
+	out, err := Composition(bp, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition failed: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `"name": f"{spec.get('prefix')}-{_i}",`) {
+		t.Fatalf("expected Python looped custom metadata.name to incorporate loop index _i, got:\n%s", s)
+	}
+}
+
+func TestCF301_PythonLoopedCustomMetadataNameLiteralValue(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-looped-name-py-lit"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EnginePython},
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XLoopedNameLit", Plural: "xloopednamelits",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"replicas": {Type: "integer", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "worker",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					ForEach:  "params.replicas",
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {Value: "worker-custom"},
+					},
+				},
+			},
+		},
+	}
+	out, err := Composition(bp, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition failed: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `"name": f"worker-custom-{_i}",`) {
+		t.Fatalf("expected Python literal name to incorporate loop index _i, got:\n%s", s)
+	}
+}

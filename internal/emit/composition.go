@@ -292,7 +292,7 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 	if crd.Native {
 		var metaName *forProviderField
 		for i := range metaPlan {
-			if metaPlan[i].path == "metadata.name" {
+			if metaPlan[i].path == "metadata.name" || metaPlan[i].path == "name" {
 				metaName = &metaPlan[i]
 				break
 			}
@@ -301,7 +301,11 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 			if metaName.guard != "" {
 				d.Line(ti, "  {{- if %s }}", metaName.guard)
 			}
-			d.Line(ti, "  name: %s", metaName.rhs)
+			if looped {
+				d.Line(ti, "  name: %s", goLoopedMetaName(metaName))
+			} else {
+				d.Line(ti, "  name: %s", metaName.rhs)
+			}
 			if metaName.guard != "" {
 				d.Line(ti, "  {{- end }}")
 			}
@@ -566,6 +570,34 @@ const templateFieldNindent = 6
 func templateCallRHS(name, resource, field string) string {
 	return fmt.Sprintf(`{{ include %q (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" %q "field" %q) | trim | nindent %d }}`,
 		name, resource, field, templateFieldNindent)
+}
+
+// goLoopedMetaName formats a custom metadata.name expression incorporating the
+// loop index $i when emitting a looped resource (CF-301).
+func goLoopedMetaName(metaName *forProviderField) string {
+	if metaName.structured.rawExpr != "" {
+		if metaName.structured.kind == rhsMetadata {
+			return fmt.Sprintf(`{{ printf "%%s-%s-%%d" $xr $i }}`, metaName.structured.resource)
+		}
+		expr := metaName.structured.rawExpr
+		if strings.Contains(expr, " ") && !strings.HasPrefix(expr, "(") {
+			expr = "(" + expr + ")"
+		}
+		return fmt.Sprintf(`{{ printf "%%s-%%d" %s $i }}`, expr)
+	}
+	if metaName.structured.kind == rhsLiteral {
+		return fmt.Sprintf(`{{ printf "%%s-%%d" %s $i }}`, strconv.Quote(metaName.structured.value))
+	}
+	if metaName.structured.kind == rhsRaw {
+		if strings.Contains(metaName.rhs, "{{") {
+			return fmt.Sprintf("%s-{{ $i }}", metaName.rhs)
+		}
+		return fmt.Sprintf(`{{ printf "%%s-%%d" %s $i }}`, strconv.Quote(metaName.rhs))
+	}
+	if strings.Contains(metaName.rhs, "{{") {
+		return fmt.Sprintf("%s-{{ $i }}", metaName.rhs)
+	}
+	return fmt.Sprintf(`{{ printf "%%s-%%d" %s $i }}`, strconv.Quote(metaName.rhs))
 }
 
 // conventionFields merges spec.conventions into r's explicit fields: every

@@ -1084,3 +1084,78 @@ spec:
 		t.Errorf("found redundant duplicate guard inside configRef:\n%s", s)
 	}
 }
+
+func TestCF301_KCLLoopedCustomMetadataNameIncludesIndex(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-looped-name-kcl"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EngineKCL},
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XLoopedName", Plural: "xloopednames",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"prefix":   {Type: "string"},
+					"replicas": {Type: "integer", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "worker",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					ForEach:  "params.replicas",
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "params.prefix"},
+					},
+				},
+			},
+		},
+	}
+	out, err := Composition(bp, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition failed: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `name = "${_spec?.prefix}-${_i}"`) {
+		t.Fatalf("expected KCL looped custom metadata.name to incorporate loop index _i, got:\n%s", s)
+	}
+}
+
+func TestCF301_KCLLoopedCustomMetadataNameLiteralValue(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-looped-name-kcl-lit"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EngineKCL},
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XLoopedNameLit", Plural: "xloopednamelits",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"replicas": {Type: "integer", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "worker",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					ForEach:  "params.replicas",
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {Value: "worker-custom"},
+					},
+				},
+			},
+		},
+	}
+	out, err := Composition(bp, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition failed: %v", err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `name = "worker-custom-${_i}"`) {
+		t.Fatalf("expected KCL literal name to incorporate loop index _i, got:\n%s", s)
+	}
+}
