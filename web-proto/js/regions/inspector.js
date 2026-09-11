@@ -212,9 +212,6 @@ function inferFnMeta(step) {
   if (!step) return null;
   var pkg = step.package || "";
   var fn = step.functionRef || step.name || "";
-  if (pkg.indexOf("function-auto-ready") !== -1 || fn.indexOf("auto-ready") !== -1) {
-    return { apiVersion: "autoready.fn.crossplane.io/v1alpha1", kind: "AutoReady" };
-  }
   if (pkg.indexOf("function-environment-configs") !== -1 || fn.indexOf("environment-configs") !== -1) {
     return { apiVersion: "environmentconfigs.fn.crossplane.io/v1beta1", kind: "Input" };
   }

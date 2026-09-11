@@ -1046,12 +1046,31 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 		}
 	}
 
+	hasOtherCustomSteps := false
+	for _, s := range otherSteps {
+		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName && len(bp.Spec.Environment) > 0 {
+			if s.Input == "" || strings.TrimSpace(s.Input) == strings.TrimSpace(blueprint.DefaultEnvironmentConfigsInput) {
+				continue
+			}
+		}
+		if (s.FunctionRef == "function-auto-ready" || s.Name == "auto-ready") && s.Input == "" &&
+			(s.Package == "" || s.Package == "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0") {
+			continue
+		}
+		hasOtherCustomSteps = true
+		break
+	}
+
 	var finalSteps []blueprint.PipelineStep
 	for _, s := range otherSteps {
 		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName && len(bp.Spec.Environment) > 0 {
 			if s.Input == "" || strings.TrimSpace(s.Input) == strings.TrimSpace(blueprint.DefaultEnvironmentConfigsInput) {
 				continue
 			}
+		}
+		if !hasOtherCustomSteps && (s.FunctionRef == "function-auto-ready" || s.Name == "auto-ready") && s.Input == "" &&
+			(s.Package == "" || s.Package == "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0") {
+			continue
 		}
 		finalSteps = append(finalSteps, s)
 	}
