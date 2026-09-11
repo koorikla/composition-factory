@@ -224,3 +224,31 @@ spec:
 		t.Fatalf("persisted blueprint missing resources: []")
 	}
 }
+
+func TestImportRejectsMultiDocumentYAML(t *testing.T) {
+	srv, _, _, _ := testServerParts(t)
+
+	twoDocs := testBlueprintYAML + "\n---\n" + testBlueprintYAML
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/blueprint/import", strings.NewReader(twoDocs))
+	req.Header.Set("Content-Type", "application/yaml")
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("two docs: status %d, want 400: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "blueprint must contain exactly one YAML document") {
+		t.Fatalf("unexpected error response: %s", rec.Body)
+	}
+
+	trailingGarbage := testBlueprintYAML + "\n---\n{{{{ not yaml at all"
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest("POST", "/api/blueprint/import", strings.NewReader(trailingGarbage))
+	req2.Header.Set("Content-Type", "application/yaml")
+	srv.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusBadRequest {
+		t.Fatalf("trailing garbage: status %d, want 400: %s", rec2.Code, rec2.Body)
+	}
+	if !strings.Contains(rec2.Body.String(), "blueprint must contain exactly one YAML document") {
+		t.Fatalf("unexpected error response: %s", rec2.Body)
+	}
+}
