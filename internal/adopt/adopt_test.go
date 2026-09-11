@@ -2283,6 +2283,442 @@ spec:
 	}
 }
 
+func TestPruneUnknownWiredFields(t *testing.T) {
+	crdYAML := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: queues.sqs.aws.upbound.io
+spec:
+  group: sqs.aws.upbound.io
+  scope: Namespaced
+  names:
+    kind: Queue
+    plural: queues
+    categories: [managed]
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+                  maxMessageSize: {type: number}
+`
+	crds, err := schema.ParseCRDs([][]byte{[]byte(crdYAML)})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	providerRef := "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
+	cacheDir := t.TempDir()
+	store := cache.New(cacheDir)
+	if err := store.SaveCRDs(providerRef, "sha256:test", crds); err != nil {
+		t.Fatalf("SaveCRDs: %v", err)
+	}
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-wired-unknown
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+                bogusSetting: 'yes'
+                {{- if hasKey $spec "retentionDays" }}
+                retentionDays: {{ $spec.retentionDays }}
+                {{- end }}
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		Store:    store,
+		CacheDir: cacheDir,
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	dropsByPath := make(map[string]string)
+	for _, d := range report.Drops {
+		dropsByPath[d.Path] = d.Reason
+	}
+
+	if _, ok := dropsByPath["resource.main-queue.fields.bogusSetting"]; !ok {
+		t.Errorf("expected drop for bogusSetting, got drops: %+v", report.Drops)
+	}
+	if _, ok := dropsByPath["resource.main-queue.fields.retentionDays"]; !ok {
+		t.Errorf("expected drop for wired unknown field retentionDays, got drops: %+v", report.Drops)
+	}
+	if _, ok := dropsByPath["xrd.parameters.retentionDays"]; !ok {
+		t.Errorf("expected drop for orphaned parameter retentionDays, got drops: %+v", report.Drops)
+	}
+
+	res := bp.ResourceNamed("main-queue")
+	if res == nil {
+		t.Fatalf("missing main-queue resource")
+	}
+	if _, ok := res.Fields["retentionDays"]; ok {
+		t.Errorf("retentionDays should be pruned from main-queue fields")
+	}
+	if _, ok := res.Fields["bogusSetting"]; ok {
+		t.Errorf("bogusSetting should be pruned from main-queue fields")
+	}
+
+	if _, ok := bp.Spec.XRD.Parameters["retentionDays"]; ok {
+		t.Errorf("orphaned parameter retentionDays should have been dropped, but remains in bp.Spec.XRD.Parameters")
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("adopted blueprint failed validation: %v", err)
+	}
+
+	if _, err := emit.Generate(bp, crds, ""); err != nil {
+		t.Fatalf("emit.Generate failed on adopted blueprint: %v", err)
+	}
+}
+
+func TestAdoptClassicCompositionUnknownWiredForProviderFieldsPruned(t *testing.T) {
+	crdYAML := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: queues.sqs.aws.upbound.io
+spec:
+  group: sqs.aws.upbound.io
+  scope: Namespaced
+  names:
+    kind: Queue
+    plural: queues
+    categories: [managed]
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+                  maxMessageSize: {type: number}
+`
+	crds, err := schema.ParseCRDs([][]byte{[]byte(crdYAML)})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	providerRef := "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
+	cacheDir := t.TempDir()
+	store := cache.New(cacheDir)
+	if err := store.SaveCRDs(providerRef, "sha256:test", crds); err != nil {
+		t.Fatalf("SaveCRDs: %v", err)
+	}
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: classic-unknown-wired
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  resources:
+    - name: classic-queue
+      base:
+        apiVersion: sqs.aws.upbound.io/v1beta1
+        kind: Queue
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.retentionDays
+          toFieldPath: spec.forProvider.bogusField
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		Store:    store,
+		CacheDir: cacheDir,
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	dropsByPath := make(map[string]string)
+	for _, d := range report.Drops {
+		dropsByPath[d.Path] = d.Reason
+	}
+
+	if _, ok := dropsByPath["resource.classic-queue.fields.bogusField"]; !ok {
+		t.Errorf("expected drop for resource.classic-queue.fields.bogusField, got drops: %+v", report.Drops)
+	}
+
+	res := bp.ResourceNamed("classic-queue")
+	if res == nil {
+		t.Fatalf("missing classic-queue resource")
+	}
+	if _, ok := res.Fields["bogusField"]; ok {
+		t.Errorf("bogusField should be pruned from classic-queue fields")
+	}
+
+	if _, ok := bp.Spec.XRD.Parameters["retentionDays"]; ok {
+		t.Errorf("orphaned parameter retentionDays should have been dropped, but remains in bp.Spec.XRD.Parameters")
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("adopted blueprint failed validation: %v", err)
+	}
+
+	if _, err := emit.Generate(bp, crds, ""); err != nil {
+		t.Fatalf("emit.Generate failed on adopted blueprint: %v", err)
+	}
+}
+
+func TestPruneUnknownWiredFields_BaseBlueprintParameterPreserved(t *testing.T) {
+	crdYAML := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: queues.sqs.aws.upbound.io
+spec:
+  group: sqs.aws.upbound.io
+  scope: Namespaced
+  names:
+    kind: Queue
+    plural: queues
+    categories: [managed]
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+`
+	crds, err := schema.ParseCRDs([][]byte{[]byte(crdYAML)})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	providerRef := "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
+	cacheDir := t.TempDir()
+	store := cache.New(cacheDir)
+	if err := store.SaveCRDs(providerRef, "sha256:test", crds); err != nil {
+		t.Fatalf("SaveCRDs: %v", err)
+	}
+
+	baseBP := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Parameters: map[string]blueprint.Parameter{
+					"retentionDays": {Type: "integer", Required: false},
+				},
+			},
+		},
+	}
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-wired-unknown-base
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+                {{- if hasKey $spec "retentionDays" }}
+                retentionDays: {{ $spec.retentionDays }}
+                {{- end }}
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		Store:         store,
+		CacheDir:      cacheDir,
+		BaseBlueprint: baseBP,
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	dropsByPath := make(map[string]string)
+	for _, d := range report.Drops {
+		dropsByPath[d.Path] = d.Reason
+	}
+
+	if _, ok := dropsByPath["resource.main-queue.fields.retentionDays"]; !ok {
+		t.Errorf("expected drop for wired unknown field retentionDays, got drops: %+v", report.Drops)
+	}
+
+	// Parameter retentionDays was defined in BaseBlueprint, so it must be preserved
+	if _, ok := bp.Spec.XRD.Parameters["retentionDays"]; !ok {
+		t.Errorf("parameter retentionDays from BaseBlueprint should be preserved")
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("adopted blueprint failed validation: %v", err)
+	}
+
+	if _, err := emit.Generate(bp, crds, ""); err != nil {
+		t.Fatalf("emit.Generate failed on adopted blueprint: %v", err)
+	}
+}
+
+func TestPruneUnknownWiredFields_NestedParameterMemberPruned(t *testing.T) {
+	crdYAML := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: queues.sqs.aws.upbound.io
+spec:
+  group: sqs.aws.upbound.io
+  scope: Namespaced
+  names:
+    kind: Queue
+    plural: queues
+    categories: [managed]
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+`
+	crds, err := schema.ParseCRDs([][]byte{[]byte(crdYAML)})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	providerRef := "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
+	cacheDir := t.TempDir()
+	store := cache.New(cacheDir)
+	if err := store.SaveCRDs(providerRef, "sha256:test", crds); err != nil {
+		t.Fatalf("SaveCRDs: %v", err)
+	}
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-nested-param
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: main-queue
+            spec:
+              forProvider:
+                region: {{ $spec.tuning.region }}
+                retentionDays: {{ $spec.tuning.retentionDays }}
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		Store:    store,
+		CacheDir: cacheDir,
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	dropsByPath := make(map[string]string)
+	for _, d := range report.Drops {
+		dropsByPath[d.Path] = d.Reason
+	}
+
+	if _, ok := dropsByPath["resource.main-queue.fields.retentionDays"]; !ok {
+		t.Errorf("expected drop for wired unknown field retentionDays, got drops: %+v", report.Drops)
+	}
+	if _, ok := dropsByPath["xrd.parameters.tuning.properties.retentionDays"]; !ok {
+		t.Errorf("expected drop for orphaned property tuning.retentionDays, got drops: %+v", report.Drops)
+	}
+
+	tuning, ok := bp.Spec.XRD.Parameters["tuning"]
+	if !ok {
+		t.Fatalf("expected tuning parameter to exist")
+	}
+	if _, ok := tuning.Properties["retentionDays"]; ok {
+		t.Errorf("tuning.Properties[retentionDays] should be pruned")
+	}
+	if _, ok := tuning.Properties["region"]; !ok {
+		t.Errorf("tuning.Properties[region] should be preserved")
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("adopted blueprint failed validation: %v", err)
+	}
+
+	if _, err := emit.Generate(bp, crds, ""); err != nil {
+		t.Fatalf("emit.Generate failed on adopted blueprint: %v", err)
+	}
+}
+
 func TestAdoptClassicCompositionUnknownForProviderFieldsReportedInLossReport(t *testing.T) {
 	crdYAML := `apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
