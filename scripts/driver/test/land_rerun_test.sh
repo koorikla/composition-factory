@@ -11,8 +11,7 @@
 # for a run that has already completed, until a view has read the new attempt.
 # Every other call goes to the fake gh.
 slow_rerun_gh() {
-  mkdir -p "$SANDBOX/bin"
-  cat > "$SANDBOX/bin/gh" <<EOF
+  shim gh <<EOF
 #!/bin/bash
 set -u
 D="\$FAKE_GH_DIR"
@@ -47,13 +46,11 @@ case "\$1 \${2:-}" in
 esac
 exec "$TEST_DIR/fakebin/gh" "\$@"
 EOF
-  chmod +x "$SANDBOX/bin/gh"
-  export PATH="$SANDBOX/bin:$PATH"
 }
 
 test_e2e_rerun_is_watched_only_after_it_starts() {
-  land_repo
-  slow_rerun_gh 3
+  land_repo || return 1
+  slow_rerun_gh 3 || return 1
   printf 'e2e-red\ngreen\n' > "$FAKE_GH_DIR/ci-results"
   local out rc
   out="$("$LAND" 42 2>/dev/null)"; rc=$?
@@ -64,9 +61,10 @@ test_e2e_rerun_is_watched_only_after_it_starts() {
 }
 
 test_registered_worktree_with_deleted_directory_is_pruned() {
-  land_repo
-  git worktree add -q --detach .worktrees/land-CF-900 main
-  rm -rf .worktrees/land-CF-900
+  land_repo || return 1
+  sandbox_guard || return 1
+  git worktree add -q --detach .worktrees/land-CF-900 main &&
+    rm -rf "$SANDBOX/work/.worktrees/land-CF-900" || return 1
   printf 'green\n' > "$FAKE_GH_DIR/ci-results"
   local out rc
   out="$("$LAND" 42 2>/dev/null)"; rc=$?
