@@ -124,7 +124,7 @@ test.describe('CF-221 (#107) — Delete wired environment key unwires referencin
     });
   });
 
-  test('deleting a wired environment key via SHARED palette prompts and unwires referencing fields', async ({ page, request }) => {
+  test('cancelling confirmation dialog in inspector preserves wired environment key and its wires', async ({ page, request }) => {
     const doc = JSON.parse(JSON.stringify(pristine));
     doc.spec.environment = {
       clusterEnv: { type: 'string', default: 'prod' }
@@ -138,35 +138,31 @@ test.describe('CF-221 (#107) — Delete wired environment key unwires referencin
     await page.goto('/');
     await canvasSettled(page);
 
-    // Switch to SHARED palette tab
-    await page.click('#rtabs button[data-r="shared"]');
+    const envCard = page.locator('.node[data-id="environment"]');
+    await envCard.locator('.node-h').click();
+
+    const inspector = page.locator('#region-inspector');
+    await expect(inspector.locator('[data-env-key="clusterEnv"]')).toBeVisible();
 
     let dialogMessage = '';
     page.on('dialog', async (dialog) => {
       dialogMessage = dialog.message();
-      await dialog.accept();
+      await dialog.dismiss();
     });
 
-    await page.click('[data-env-del="clusterEnv"]');
+    const delBtn = inspector.locator('button[data-env-del-key="clusterEnv"]');
+    await delBtn.click();
 
-    expect(dialogMessage).toBe('Environment key "$env.clusterEnv" is wired into 1 field. Delete it and unwire all referencing fields?');
+    expect(dialogMessage).toBe('Environment key "clusterEnv" is wired into 1 field. Delete it and unwire all referencing fields?');
 
-    const toast = page.locator('#errtoast');
-    await expect(toast).not.toBeVisible();
+    // Key still visible in inspector
+    await expect(inspector.locator('[data-env-key="clusterEnv"]')).toBeVisible();
 
-    await expect.poll(async () => {
-      const res = await request.get(`${ENGINE}/api/blueprint`);
-      const updatedDoc = await res.json();
-      const env = (updatedDoc.spec && updatedDoc.spec.environment) || {};
-      const res0 = (updatedDoc.spec && updatedDoc.spec.resources[0]) || {};
-      return {
-        hasClusterEnv: 'clusterEnv' in env,
-        res0HasWire: !!(res0.fields && res0.fields.region)
-      };
-    }).toEqual({
-      hasClusterEnv: false,
-      res0HasWire: false
-    });
+    // Key still exists on server with wire intact
+    const res = await request.get(`${ENGINE}/api/blueprint`);
+    const updatedDoc = await res.json();
+    expect(updatedDoc.spec.environment.clusterEnv).toBeDefined();
+    expect(updatedDoc.spec.resources[0].fields.region.from).toBe('env.clusterEnv');
   });
 
   test('deleting an unwired environment key in inspector succeeds without confirmation prompt', async ({ page, request }) => {
