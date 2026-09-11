@@ -1848,22 +1848,27 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 					fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
 			}
 		} else if strings.HasPrefix(toPath, "metadata.") {
-			targetField := toPath
-			if strings.HasPrefix(toPath, "metadata.labels.") {
-				labelKey := strings.TrimPrefix(toPath, "metadata.labels.")
-				targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
-			}
-			if isParamPatch && paramName != "" && isValidParamIdentifier(paramName) {
-				if res.Fields == nil {
-					res.Fields = make(map[string]blueprint.Field)
-				}
-				res.Fields[targetField] = blueprint.Field{
-					From: "params." + paramName,
-				}
-				ensureParamDeclared(bp, paramName)
-			} else {
+			if res.Provider != blueprint.NativeProvider {
 				report.Record(patchPath,
-					fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+					fmt.Sprintf("managed resource metadata field %q is not supported in blueprint", toPath))
+			} else {
+				targetField := toPath
+				if strings.HasPrefix(toPath, "metadata.labels.") {
+					labelKey := strings.TrimPrefix(toPath, "metadata.labels.")
+					targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
+				}
+				if isParamPatch && paramName != "" && isValidParamIdentifier(paramName) {
+					if res.Fields == nil {
+						res.Fields = make(map[string]blueprint.Field)
+					}
+					res.Fields[targetField] = blueprint.Field{
+						From: "params." + paramName,
+					}
+					ensureParamDeclared(bp, paramName)
+				} else {
+					report.Record(patchPath,
+						fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+				}
 			}
 		} else {
 			report.Record(patchPath,
@@ -2061,7 +2066,31 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 			otherMeta[k] = v
 		}
 		if len(otherMeta) > 0 {
-			extractFields("metadata", otherMeta, res.Fields, placeholders, res.Name, report, nameMapping, bp)
+			if res.Provider == blueprint.NativeProvider {
+				extractFields("metadata", otherMeta, res.Fields, placeholders, res.Name, report, nameMapping, bp)
+			} else {
+				keys := make([]string, 0, len(otherMeta))
+				for k := range otherMeta {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, k := range keys {
+					if subMap, ok := otherMeta[k].(map[string]any); ok {
+						subKeys := make([]string, 0, len(subMap))
+						for sk := range subMap {
+							subKeys = append(subKeys, sk)
+						}
+						sort.Strings(subKeys)
+						for _, sk := range subKeys {
+							report.Record(fmt.Sprintf("resource.%s.metadata.%s[%s]", res.Name, k, sk),
+								fmt.Sprintf("managed resource metadata field %q is not supported in blueprint", k+"."+sk))
+						}
+					} else {
+						report.Record(fmt.Sprintf("resource.%s.metadata.%s", res.Name, k),
+							fmt.Sprintf("managed resource metadata field %q is not supported in blueprint", k))
+					}
+				}
+			}
 		}
 	}
 

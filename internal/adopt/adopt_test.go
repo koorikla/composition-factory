@@ -2398,7 +2398,7 @@ spec:
           toFieldPath: spec.forProvider.region
         - type: FromCompositeFieldPath
           fromFieldPath: spec.parameters.tags
-          toFieldPath: metadata.labels.env
+          toFieldPath: metadata.annotations.env
   resources:
     - name: sqs-queue
       base:
@@ -2427,8 +2427,8 @@ spec:
 	if r.Fields["region"].From != "params.region" {
 		t.Errorf("region field = %+v, want From: params.region", r.Fields["region"])
 	}
-	if r.Fields["metadata.labels[env]"].From != "params.tags" {
-		t.Errorf("metadata.labels[env] field = %+v, want From: params.tags", r.Fields["metadata.labels[env]"])
+	if r.Annotations["env"].From != "params.tags" {
+		t.Errorf("annotations[env] field = %+v, want From: params.tags", r.Annotations["env"])
 	}
 	if r.Fields["name"].From != "params.queueName" {
 		t.Errorf("name field = %+v, want From: params.queueName", r.Fields["name"])
