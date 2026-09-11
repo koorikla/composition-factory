@@ -6808,3 +6808,93 @@ spec:
 		t.Errorf("expected output YAML to contain comment '# adopt: dropped manifest.CompositeResourceDefinition/xothers.example.org', got:\n%s", string(outYAML))
 	}
 }
+
+func TestCF296_AdoptEnvironmentWhenComparisonQuotes(t *testing.T) {
+	t.Run("eq basic", func(t *testing.T) {
+		manifest := []byte(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-env-when-comp
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- if eq $env.stage "prod" }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+            data:
+              env: "prod"
+            {{- end }}
+`)
+
+		bp, _, err := Adopt(manifest, Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		wantWhen := `env.stage == "prod"`
+		if bp.Spec.Resources[0].When != wantWhen {
+			t.Errorf("resource when = %q, want %q", bp.Spec.Resources[0].When, wantWhen)
+		}
+	})
+
+	t.Run("ne index default", func(t *testing.T) {
+		manifest := []byte(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-env-when-comp-ne
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- if ne (default "" (index $env "stage")) "dev" }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+            data:
+              env: "not-dev"
+            {{- end }}
+`)
+
+		bp, _, err := Adopt(manifest, Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		wantWhen := `env.stage != "dev"`
+		if bp.Spec.Resources[0].When != wantWhen {
+			t.Errorf("resource when = %q, want %q", bp.Spec.Resources[0].When, wantWhen)
+		}
+	})
+}

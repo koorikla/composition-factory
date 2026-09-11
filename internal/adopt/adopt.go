@@ -1873,14 +1873,14 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 			key, lit = m[3], m[4]
 		}
 		ensureEnvDeclared(bp, key, "string")
-		return fmt.Sprintf("env.%s == %s", key, lit)
+		return fmt.Sprintf("env.%s == %q", key, lit)
 	} else if m := reWhenIfEnvNe.FindStringSubmatch(text); len(m) >= 3 {
 		key, lit := m[1], m[2]
 		if key == "" && len(m) >= 5 {
 			key, lit = m[3], m[4]
 		}
 		ensureEnvDeclared(bp, key, "string")
-		return fmt.Sprintf("env.%s != %s", key, lit)
+		return fmt.Sprintf("env.%s != %q", key, lit)
 	} else if m := reWhenIfEnvSimple.FindStringSubmatch(text); len(m) >= 2 {
 		key := m[1]
 		if key == "" && len(m) >= 3 {
