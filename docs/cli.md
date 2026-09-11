@@ -18,14 +18,14 @@ cf version
 
 ### `cf init` — Scaffold Minimal Blueprint
 
-Scaffolds a minimal valid blueprint document (`blueprint.cf.yaml` by default) containing a Namespaced XRD identity and the required `providerName` parameter:
+Scaffolds a minimal valid blueprint document (`doc.cf.yaml` by default) containing a Namespaced XRD identity and the required `providerName` parameter:
 
 ```sh
 cf init [path]
 ```
 
 #### Arguments:
-- `[path]`: Optional path for the created blueprint file (defaults to `blueprint.cf.yaml`). Refuses to overwrite existing files.
+- `[path]`: Optional path for the created blueprint file (defaults to `doc.cf.yaml`). Refuses to overwrite existing files.
 
 Example:
 ```sh
