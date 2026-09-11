@@ -126,3 +126,17 @@ shim() {
     chmod +x "$SANDBOX/bin/$1" || return 1
   case ":$PATH:" in *":$SANDBOX/bin:"*) ;; *) export PATH="$SANDBOX/bin:$PATH" ;; esac
 }
+
+# labels_of N: issue N's label names, sorted, space-separated.
+labels_of() { jq -r '[.labels[].name] | sort | join(" ")' "$FAKE_GH_DIR/issues/$1.json"; }
+
+# last_comment N: the body of issue N's newest comment.
+last_comment() { jq -r '.comments | last | .body' "$FAKE_GH_DIR/issues/$1.json"; }
+
+# relabel_handed_back N: a driver hands issue N back again (handed-back on,
+# parked off), without going through the gh log.
+relabel_handed_back() {
+  local f="${FAKE_GH_DIR:-/nonexistent}/issues/$1.json"
+  jq '.labels = ([.labels[] | select(.name != "parked")] + [{name: "handed-back"}] | unique_by(.name))' \
+    "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+}
