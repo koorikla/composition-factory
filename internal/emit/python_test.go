@@ -517,6 +517,8 @@ m.MessageToDict = lambda x: x
 sys.modules["google.protobuf.json_format"] = m
 m2 = types.ModuleType("crossplane.function.proto.v1")
 m2.run_function_pb2 = types.ModuleType("run_function_pb2")
+m2.run_function_pb2.RunFunctionRequest = object
+m2.run_function_pb2.RunFunctionResponse = object
 sys.modules["crossplane.function.proto.v1"] = m2
 sys.modules["crossplane.function.proto.v1.run_function_pb2"] = m2.run_function_pb2
 
