@@ -222,8 +222,8 @@ func TestLoadSourcesPipelineAndLockFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources with pipeline function failed: %v", err)
 	}
-	if len(got) == 0 {
-		t.Fatal("expected function CRDs to be loaded")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 function CRD, got %d", len(got))
 	}
 
 	// Pipeline step with explicit Package ref
@@ -241,8 +241,66 @@ func TestLoadSourcesPipelineAndLockFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources with explicit package failed: %v", err)
 	}
-	if len(gotPkg) == 0 {
-		t.Fatal("expected package CRDs to be loaded")
+	if len(gotPkg) != 1 {
+		t.Fatalf("expected 1 function CRD, got %d", len(gotPkg))
+	}
+}
+
+func TestLoadSourcesFunctionDeduplication(t *testing.T) {
+	bpDir := t.TempDir()
+	store := New(t.TempDir())
+
+	fnRef1 := "xpkg.crossplane.io/crossplane-contrib/function-patch-and-transform:v0.1.4"
+	fnCRDs1 := []schema.CRD{
+		{Group: "pt.fn.crossplane.io", Kind: "Input", Plural: "inputs"},
+	}
+	if err := store.SaveCRDs(fnRef1, "sha256:fn1", fnCRDs1); err != nil {
+		t.Fatal(err)
+	}
+
+	fnRef2 := "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.2.0"
+	fnCRDs2 := []schema.CRD{
+		{Group: "ar.fn.crossplane.io", Kind: "ReadyInput", Plural: "readyinputs"},
+	}
+	if err := store.SaveCRDs(fnRef2, "sha256:fn2", fnCRDs2); err != nil {
+		t.Fatal(err)
+	}
+
+	lock := &Lock{
+		Functions: []LockEntry{
+			{Ref: fnRef1, Digest: "sha256:fn1"},
+			{Ref: fnRef1, Digest: "sha256:fn1"}, // duplicate entry in lock
+			{Ref: fnRef2, Digest: "sha256:fn2"},
+		},
+	}
+	if err := lock.Write(filepath.Join(bpDir, ".cf.lock")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Multiple pipeline steps referencing same function fnRef1 (one by Package, one by FunctionRef)
+	// and fnRef2 in lockfile.
+	bp := &blueprint.Blueprint{
+		Spec: blueprint.Spec{
+			Pipeline: []blueprint.PipelineStep{
+				{
+					Name:    "pt1",
+					Package: fnRef1,
+				},
+				{
+					Name:        "pt2",
+					FunctionRef: "function-patch-and-transform",
+				},
+			},
+		},
+	}
+
+	got, err := LoadSources(store, bp, bpDir)
+	if err != nil {
+		t.Fatalf("LoadSources failed: %v", err)
+	}
+	// fnRef1 should be loaded once, fnRef2 should be loaded once -> exactly 2 CRDs
+	if len(got) != 2 {
+		t.Fatalf("expected 2 unique function CRDs, got %d", len(got))
 	}
 }
 

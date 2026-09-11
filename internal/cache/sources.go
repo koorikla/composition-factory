@@ -57,6 +57,7 @@ func LoadSources(store *Store, b *blueprint.Blueprint, blueprintDir string) ([]s
 		crds = append(crds, got...)
 	}
 
+	loadedFns := make(map[string]bool)
 	if b != nil && store != nil {
 		for _, step := range b.Spec.Pipeline {
 			pkgRef := step.Package
@@ -65,9 +66,20 @@ func LoadSources(store *Store, b *blueprint.Blueprint, blueprintDir string) ([]s
 					pkgRef = entry.Ref
 				}
 			}
-			if pkgRef != "" {
+			if pkgRef != "" && !loadedFns[pkgRef] {
 				if got, err := store.Load(pkgRef); err == nil {
 					crds = append(crds, got...)
+					loadedFns[pkgRef] = true
+					if lock != nil {
+						if entry, ok := lock.FindFunction(pkgRef); ok {
+							loadedFns[entry.Ref] = true
+						}
+						if step.FunctionRef != "" {
+							if entry, ok := lock.FindFunction(step.FunctionRef); ok {
+								loadedFns[entry.Ref] = true
+							}
+						}
+					}
 				}
 			}
 		}
@@ -75,8 +87,11 @@ func LoadSources(store *Store, b *blueprint.Blueprint, blueprintDir string) ([]s
 
 	if lock != nil && store != nil {
 		for _, f := range lock.Functions {
-			if got, err := store.Load(f.Ref); err == nil {
-				crds = append(crds, got...)
+			if f.Ref != "" && !loadedFns[f.Ref] {
+				if got, err := store.Load(f.Ref); err == nil {
+					crds = append(crds, got...)
+					loadedFns[f.Ref] = true
+				}
 			}
 		}
 	}
