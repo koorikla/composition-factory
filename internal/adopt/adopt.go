@@ -16,6 +16,7 @@ import (
 	"github.com/koorikla/compositionfactory/catalogue"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/schema"
 )
 
 // Options configures the adoption parser.
@@ -48,6 +49,11 @@ type Drop struct {
 // IsLossy returns true if any fields or actions were dropped.
 func (r *LossReport) IsLossy() bool {
 	return r != nil && len(r.Drops) > 0
+}
+
+// Lossy returns true if any fields or actions were dropped.
+func (r *LossReport) Lossy() bool {
+	return r.IsLossy()
 }
 
 // Record appends a drop entry.
@@ -376,6 +382,9 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 
 	// 6. Deduplicate and collect provider sources
 	collectSources(bp, opts.DefaultProviderRef)
+
+	// Prune unknown forProvider fields against CRD schema if store is available
+	pruneUnknownForProviderFields(bp, opts, report)
 
 	// No XRD alongside: the parameters above were inferred from their uses.
 	// Settle what the Composition proves and name the rest as lost.
@@ -2329,4 +2338,104 @@ func collectSources(bp *blueprint.Blueprint, defaultRef string) {
 		})
 	}
 	bp.Spec.Sources = newSources
+}
+
+func pruneUnknownForProviderFields(bp *blueprint.Blueprint, opts Options, report *LossReport) {
+	if bp == nil || opts.Store == nil {
+		return
+	}
+	wantNamespaced := bp.Spec.XRD.Scope == "Namespaced" || bp.Spec.XRD.Scope == ""
+
+	var allStoreCRDs []schema.CRD
+	allStoreCRDsLoaded := false
+	getAllStoreCRDs := func() []schema.CRD {
+		if allStoreCRDsLoaded {
+			return allStoreCRDs
+		}
+		allStoreCRDsLoaded = true
+		if list, err := opts.Store.List(); err == nil {
+			for _, ref := range list {
+				if got, err := opts.Store.Load(ref); err == nil {
+					allStoreCRDs = append(allStoreCRDs, got...)
+				}
+			}
+		}
+		return allStoreCRDs
+	}
+
+	for i := range bp.Spec.Resources {
+		r := &bp.Spec.Resources[i]
+		if r.Provider == blueprint.NativeProvider || strings.HasSuffix(r.Provider, ".yaml") || strings.HasSuffix(r.Provider, ".yml") {
+			continue
+		}
+		var crd *schema.CRD
+		if r.Provider != "" {
+			if got, err := opts.Store.Load(r.Provider); err == nil {
+				crd = resolveResourceCRD(got, *r, wantNamespaced)
+			}
+		}
+		if crd == nil {
+			crd = resolveResourceCRD(getAllStoreCRDs(), *r, wantNamespaced)
+		}
+		if crd == nil {
+			continue
+		}
+
+		nodes, err := crd.ForProvider()
+		if err != nil || len(nodes) == 0 {
+			continue
+		}
+
+		leaves := schema.Leaves(nodes, "")
+		known := make(map[string]bool, len(leaves)*2)
+		for _, l := range leaves {
+			known[l.Path] = true
+			for _, ancestor := range ancestorPaths(l.Path) {
+				known[ancestor] = true
+			}
+		}
+
+		var fNames []string
+		for k := range r.Fields {
+			if !strings.HasPrefix(k, "metadata.") {
+				fNames = append(fNames, k)
+			}
+		}
+		sort.Strings(fNames)
+
+		for _, fieldPath := range fNames {
+			fld := r.Fields[fieldPath]
+			if fld.From != "" || fld.Raw != "" || fld.Template != "" {
+				continue
+			}
+			basePath, _, isMap := blueprint.ParseFieldPath(fieldPath)
+			lookup := reArrayIdx.ReplaceAllString(fieldPath, "[0]")
+			if isMap {
+				lookup = reArrayIdx.ReplaceAllString(basePath, "[0]")
+			}
+			if known[lookup] || (isMap && (known[basePath] || known[reArrayIdx.ReplaceAllString(basePath, "[0]")])) {
+				continue
+			}
+
+			report.Record(
+				fmt.Sprintf("resource.%s.fields.%s", r.Name, fieldPath),
+				fmt.Sprintf("field %q is not in %s spec.forProvider (unknown field pruned by schema)", fieldPath, crd.Kind),
+			)
+			delete(r.Fields, fieldPath)
+		}
+	}
+}
+
+func ancestorPaths(path string) []string {
+	var out []string
+	for i := 0; i < len(path); i++ {
+		if path[i] == '.' {
+			prefix := path[:i]
+			out = append(out, prefix)
+			if trimmed, found := strings.CutSuffix(prefix, "[0]"); found {
+				out = append(out, trimmed)
+			}
+		}
+	}
+	return out
 }

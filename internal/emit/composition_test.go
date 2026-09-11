@@ -647,6 +647,26 @@ func TestWildlyUnknownFieldGetsNoBogusSuggestion(t *testing.T) {
 	}
 }
 
+// Multiple unknown fields on a resource must be reported together in one validation error.
+func TestMultipleUnknownForProviderFieldsAreReportedTogether(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Resources[0].Fields = map[string]blueprint.Field{
+		"visibilityTimeoutBogus":  {Value: "42"},
+		"nested.unknownFieldPath": {Value: "true"},
+	}
+	_, err := Composition(b, testCRDs(t))
+	if err == nil {
+		t.Fatal("Composition accepted unknown fields; expected validation error")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, `"visibilityTimeoutBogus"`) || !strings.Contains(errStr, `"nested.unknownFieldPath"`) {
+		t.Errorf("err = %q, want it to name all offending paths", errStr)
+	}
+	if !strings.Contains(errStr, `fields "nested.unknownFieldPath", "visibilityTimeoutBogus" are not in Queue spec.forProvider`) {
+		t.Errorf("err = %q, want it to list all unknown fields in error message", errStr)
+	}
+}
+
 // Known fields, including the required one, must still pass.
 func TestKnownForProviderFieldsAreAccepted(t *testing.T) {
 	b := testBlueprint()

@@ -500,6 +500,13 @@ func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths) // deterministic: the same blueprint names the same field first
+	type unknownField struct {
+		path     string
+		basePath string
+		target   string
+		isMap    bool
+	}
+	var unknowns []unknownField
 	for _, p := range paths {
 		basePath, _, isMap := blueprint.ParseFieldPath(p)
 		// The schema tree addresses array elements as [0] (every element
@@ -513,19 +520,38 @@ func checkFieldPaths(r blueprint.Resource, crd schema.CRD) error {
 		if isMap {
 			target = basePath
 		}
-		if p == "when" || (isMap && basePath == "when") {
-			return fmt.Errorf("resource %q: field %q is not in %s; when: is a resource-level field (placed directly under the resource, not under fields:)", r.Name, p, where)
+		unknowns = append(unknowns, unknownField{
+			path:     p,
+			basePath: basePath,
+			target:   target,
+			isMap:    isMap,
+		})
+	}
+	if len(unknowns) == 0 {
+		return nil
+	}
+	if len(unknowns) == 1 {
+		u := unknowns[0]
+		if u.path == "when" || (u.isMap && u.basePath == "when") {
+			return fmt.Errorf("resource %q: field %q is not in %s; when: is a resource-level field (placed directly under the resource, not under fields:)", r.Name, u.path, where)
 		}
-		if s := closestPath(arrayIdxRE.ReplaceAllString(target, "[0]"), suggestions); s != "" {
+		if s := closestPath(arrayIdxRE.ReplaceAllString(u.target, "[0]"), suggestions); s != "" {
 			return fmt.Errorf("resource %q: field %q is not in %s; did you mean %q? "+
 				"(an unknown field is silently pruned by the API server on apply, so it must be "+
-				"caught here)", r.Name, p, where, s)
+				"caught here)", r.Name, u.path, where, s)
 		}
 		return fmt.Errorf("resource %q: field %q is not in %s "+
 			"(an unknown field is silently pruned by the API server on apply, so it must be "+
-			"caught here)", r.Name, p, where)
+			"caught here)", r.Name, u.path, where)
 	}
-	return nil
+
+	quoted := make([]string, len(unknowns))
+	for i, u := range unknowns {
+		quoted[i] = fmt.Sprintf("%q", u.path)
+	}
+	return fmt.Errorf("resource %q: fields %s are not in %s "+
+		"(an unknown field is silently pruned by the API server on apply, so it must be "+
+		"caught here)", r.Name, strings.Join(quoted, ", "), where)
 }
 
 // templateFieldNindent is the inner-document column a template call's output

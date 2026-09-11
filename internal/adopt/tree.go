@@ -322,6 +322,8 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 
 	collectSources(bp, defaultProvider)
 
+	pruneUnknownForProviderFields(bp, opts, report)
+
 	// No XRD in the tree: the parameters were inferred from their uses in the
 	// Compositions. Settle what they prove and name the rest as lost.
 	if len(xrdDocs) == 0 {

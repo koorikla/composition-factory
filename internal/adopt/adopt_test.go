@@ -2172,3 +2172,210 @@ spec:
 		t.Errorf("expected non-lossy report for patch without transforms, got drops: %+v", report.Drops)
 	}
 }
+
+func TestAdoptUnknownForProviderFieldsReportedInLossReport(t *testing.T) {
+	crdYAML := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: queues.sqs.aws.upbound.io
+spec:
+  group: sqs.aws.upbound.io
+  scope: Namespaced
+  names:
+    kind: Queue
+    plural: queues
+    categories: [managed]
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+                  maxMessageSize: {type: number}
+`
+	crds, err := schema.ParseCRDs([][]byte{[]byte(crdYAML)})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	providerRef := "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
+	cacheDir := t.TempDir()
+	store := cache.New(cacheDir)
+	if err := store.SaveCRDs(providerRef, "sha256:test", crds); err != nil {
+		t.Fatalf("SaveCRDs: %v", err)
+	}
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-unknown-fields
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+                visibilityTimeoutBogus: 42
+                nested:
+                  unknownFieldPath: true
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		Store:    store,
+		CacheDir: cacheDir,
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if !report.Lossy() {
+		t.Fatalf("expected report.Lossy() to be true, got drops: %+v", report.Drops)
+	}
+
+	dropsByPath := make(map[string]string)
+	for _, d := range report.Drops {
+		dropsByPath[d.Path] = d.Reason
+	}
+
+	if _, ok := dropsByPath["resource.main-queue.fields.visibilityTimeoutBogus"]; !ok {
+		t.Errorf("expected drop for resource.main-queue.fields.visibilityTimeoutBogus, got drops: %+v", report.Drops)
+	}
+	if _, ok := dropsByPath["resource.main-queue.fields.nested.unknownFieldPath"]; !ok {
+		t.Errorf("expected drop for resource.main-queue.fields.nested.unknownFieldPath, got drops: %+v", report.Drops)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+	if _, ok := res.Fields["visibilityTimeoutBogus"]; ok {
+		t.Errorf("dropped field visibilityTimeoutBogus should not be present in res.Fields")
+	}
+	if _, ok := res.Fields["nested.unknownFieldPath"]; ok {
+		t.Errorf("dropped field nested.unknownFieldPath should not be present in res.Fields")
+	}
+	if fld, ok := res.Fields["region"]; !ok || fld.Value != "us-east-1" {
+		t.Errorf("expected known field region to be preserved, got: %+v", res.Fields["region"])
+	}
+}
+
+func TestAdoptClassicCompositionUnknownForProviderFieldsReportedInLossReport(t *testing.T) {
+	crdYAML := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: queues.sqs.aws.upbound.io
+spec:
+  group: sqs.aws.upbound.io
+  scope: Namespaced
+  names:
+    kind: Queue
+    plural: queues
+    categories: [managed]
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+                  maxMessageSize: {type: number}
+`
+	crds, err := schema.ParseCRDs([][]byte{[]byte(crdYAML)})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	providerRef := "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
+	cacheDir := t.TempDir()
+	store := cache.New(cacheDir)
+	if err := store.SaveCRDs(providerRef, "sha256:test", crds); err != nil {
+		t.Fatalf("SaveCRDs: %v", err)
+	}
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-classic-unknown-fields
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  resources:
+    - name: classic-queue
+      base:
+        apiVersion: sqs.aws.upbound.io/v1beta1
+        kind: Queue
+        spec:
+          forProvider:
+            region: us-east-1
+            visibilityTimeoutBogus: 42
+            nested:
+              unknownFieldPath: true
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		Store:    store,
+		CacheDir: cacheDir,
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if !report.Lossy() {
+		t.Fatalf("expected report.Lossy() to be true, got drops: %+v", report.Drops)
+	}
+
+	dropsByPath := make(map[string]string)
+	for _, d := range report.Drops {
+		dropsByPath[d.Path] = d.Reason
+	}
+
+	if _, ok := dropsByPath["resource.classic-queue.fields.visibilityTimeoutBogus"]; !ok {
+		t.Errorf("expected drop for resource.classic-queue.fields.visibilityTimeoutBogus, got drops: %+v", report.Drops)
+	}
+	if _, ok := dropsByPath["resource.classic-queue.fields.nested.unknownFieldPath"]; !ok {
+		t.Errorf("expected drop for resource.classic-queue.fields.nested.unknownFieldPath, got drops: %+v", report.Drops)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+	if _, ok := res.Fields["visibilityTimeoutBogus"]; ok {
+		t.Errorf("dropped field visibilityTimeoutBogus should not be present in res.Fields")
+	}
+	if _, ok := res.Fields["nested.unknownFieldPath"]; ok {
+		t.Errorf("dropped field nested.unknownFieldPath should not be present in res.Fields")
+	}
+	if fld, ok := res.Fields["region"]; !ok || fld.Value != "us-east-1" {
+		t.Errorf("expected known field region to be preserved, got: %+v", res.Fields["region"])
+	}
+}
