@@ -6,7 +6,11 @@ BLUEPRINT ?= testdata/xqueue.cf.yaml
 OUT       ?= out
 STATICCHECK := v0.8.1
 
-# Heavy gates share this many machine-wide slots (scripts/driver/lock.sh). Measured 2026-09-11: 4 concurrent e2e suites flaked most, 3 and 2 were indistinguishable while other gates ran unpooled; memory never bound (>=32% free).
+# Heavy gates share this many machine-wide slots (scripts/driver/lock.sh).
+# Measured 2026-09-11: 4 concurrent e2e suites flaked most, 3 and 2 were
+# indistinguishable while other gates ran unpooled; memory never bound
+# (>=32% free).
+# Bypass the pool with CF_GATE_SLOTS=off (not GATE_SLOTS=off).
 GATE_SLOTS ?= 3
 GATE := ./scripts/driver/lock.sh gate $(GATE_SLOTS) --
 
