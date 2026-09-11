@@ -7,6 +7,46 @@ CLAIM="$DRIVER_DIR/claim.sh"
 labels_of() { jq -r '[.labels[].name] | sort | join(",")' "$FAKE_GH_DIR/issues/$1.json"; }
 calls() { cat "$FAKE_GH_DIR/calls.log"; }
 
+# pad_comments ISSUE BEFORE AFTER: put BEFORE filler comments ahead of the
+# issue's comments and AFTER filler comments behind them.
+pad_comments() {
+  local f="$FAKE_GH_DIR/issues/$1.json"
+  jq --argjson b "$2" --argjson a "$3" '
+    [range($b) | {body: "note", createdAt: "2026-09-11T01:00:00Z"}] as $pre
+    | [range($a) | {body: "note", createdAt: "2026-09-11T05:55:00Z"}] as $post
+    | .comments = $pre + .comments + $post' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+}
+
+# real_gh_shim [ISSUE...]: a gh ahead of the fake that, like real gh, returns
+# only each issue's first 100 comments from `issue list`, and reports the given
+# issues CLOSED from `issue view` (closed after the list was read). Everything
+# else, and the fake's exit status, passes through.
+real_gh_shim() {
+  mkdir -p "$SANDBOX/shim"
+  : > "$SANDBOX/shim/closed-on-view"
+  [ $# -eq 0 ] || printf '%s\n' "$@" > "$SANDBOX/shim/closed-on-view"
+  {
+    echo '#!/bin/bash'
+    echo 'set -o pipefail'
+    printf 'fake=%q\nclosed=%q\n' "$TEST_DIR/fakebin/gh" "$SANDBOX/shim/closed-on-view"
+    cat <<'EOF'
+case "$1 ${2:-}" in
+  "issue list") "$fake" "$@" | jq '[.[] | .comments |= .[:100]]' ;;
+  "issue view")
+    if grep -qx -- "${3:-}" "$closed"; then
+      "$fake" "$@" | jq '.state = "CLOSED"'
+    else
+      exec "$fake" "$@"
+    fi
+    ;;
+  *) exec "$fake" "$@" ;;
+esac
+EOF
+  } > "$SANDBOX/shim/gh"
+  chmod +x "$SANDBOX/shim/gh"
+  export PATH="$SANDBOX/shim:$PATH"
+}
+
 test_option_like_file_is_rejected() {
   new_sandbox
   issue_fixture 14 OPEN "in-progress" \
@@ -72,13 +112,26 @@ test_remove_parked_only_when_present() {
 
 test_held_issue_with_many_comments_is_reread() {
   new_sandbox
-  issue_fixture 60 OPEN "in-progress"
-  jq --arg b "taking — CF-260-v · driver d05-0200Z · lease until $(iso_at 45) · files: internal/v.go" \
-    '.comments = ([range(100) | {body: "note", createdAt: "2026-09-11T01:00:00Z"}] + [{body: $b, createdAt: "2026-09-11T05:00:00Z"}])' \
-    "$FAKE_GH_DIR/issues/60.json" > "$FAKE_GH_DIR/issues/60.tmp" && mv "$FAKE_GH_DIR/issues/60.tmp" "$FAKE_GH_DIR/issues/60.json"
+  real_gh_shim
+  issue_fixture 60 OPEN "in-progress" \
+    "taking — CF-260-v · driver d05-0200Z · lease until $(iso_at 45) · files: internal/v.go" 10
+  pad_comments 60 100 0 # the claim is comment #101, cut from `issue list`
   issue_fixture 61 OPEN ""
   local out rc
   out="$("$CLAIM" 61 CF-261-w d06-0300Z internal/v.go)"; rc=$?
-  assert_eq "4 OVERLAP #60 internal/v.go" "$rc $out" "the newest claim of a busy issue still holds its files" &&
+  assert_eq "4 OVERLAP #60 internal/v.go" "$rc $out" "a claim past the first 100 comments still holds its files" &&
     assert_contains "$(calls)" "issue view 60 " "an issue with 100+ comments is re-read with issue view"
+}
+
+test_holder_closed_on_reread_does_not_hold() {
+  new_sandbox
+  real_gh_shim 62
+  issue_fixture 62 OPEN "in-progress" \
+    "taking — CF-262-x · driver d05-0200Z · lease until $(iso_at 45) · files: internal/w.go" 60
+  pad_comments 62 0 100 # the claim is comment #1, visible in `issue list`
+  issue_fixture 63 OPEN ""
+  local out rc
+  out="$("$CLAIM" 63 CF-263-y d06-0300Z internal/w.go)"; rc=$?
+  assert_eq "0 CLAIMED" "$rc $out" "a holder closed by the time it is re-read holds nothing" &&
+    assert_contains "$(calls)" "issue view 62 " "the listed-open holder was re-read"
 }
