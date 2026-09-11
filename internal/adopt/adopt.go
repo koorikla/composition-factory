@@ -1003,6 +1003,7 @@ var (
 	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$env\.([a-zA-Z0-9_.-]+)|\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\))\)\s*-?\}\}`)
 	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(index\s+\$?[.]observed\.resources\s+"([^"]+)"\)\.resource\.status\.([a-zA-Z0-9_.-]+)|\$?[.]observed\.resources\.([a-zA-Z0-9_-]+)\.resource\.status\.([a-zA-Z0-9_.-]+))\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
+	reTemplateInclude    = regexp.MustCompile(`^\{\{-?\s*include\s+["']([^"']+)["'](?:\s+[^}]*)?-?\}\}$`)
 	reDocSeparator       = regexp.MustCompile(`(?m)^\s*---\s*$`)
 	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+(?:\(printf\s+"([^"]+)"|"([^"]+)")`)
 	reChunkResNameAnn    = regexp.MustCompile(`["']crossplane\.io/composition-resource-name["']\s*:\s*["']?([a-zA-Z0-9._-]+)["']?`)
@@ -1018,6 +1019,22 @@ var (
 		"on": true, "off": true, "null": true, "y": true, "n": true,
 	}
 )
+
+func matchTemplateInclude(s string) string {
+	m := reTemplateInclude.FindStringSubmatch(strings.TrimSpace(s))
+	if len(m) >= 2 {
+		return m[1]
+	}
+	return ""
+}
+
+func templateExists(bp *blueprint.Blueprint, name string) bool {
+	if bp == nil || bp.Spec.Templates == nil {
+		return false
+	}
+	_, ok := bp.Spec.Templates[name]
+	return ok
+}
 
 func matchEnvVar(s string) string {
 	if m := reEnvVar.FindStringSubmatch(s); len(m) > 1 {
@@ -2060,6 +2077,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 		Annotations: make(map[string]blueprint.Field),
 		Envelope:    make(map[string]blueprint.Field),
 	}
+	isNative := res.Provider == blueprint.NativeProvider
 
 	meta, _ := m["metadata"].(map[string]any)
 	// Extract annotations
@@ -2131,6 +2149,16 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 						srcRes = normalizeDNSLabel(srcRes)
 					}
 					res.Annotations[rawK] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
+				} else if tmplName := matchTemplateInclude(rawStr); tmplName != "" {
+					if templateExists(bp, tmplName) {
+						res.Annotations[rawK] = blueprint.Field{Template: tmplName}
+					} else {
+						if report != nil {
+							report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK),
+								fmt.Sprintf("template %q referenced by include is not defined", tmplName))
+						}
+						res.Annotations[rawK] = blueprint.Field{Raw: rawStr}
+					}
 				} else if strings.Contains(rawStr, "{{") {
 					res.Annotations[rawK] = blueprint.Field{Raw: rawStr}
 				} else {
@@ -2154,8 +2182,8 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 			otherMeta[k] = v
 		}
 		if len(otherMeta) > 0 {
-			if res.Provider == blueprint.NativeProvider {
-				extractFields("metadata", otherMeta, res.Fields, placeholders, res.Name, report, nameMapping, bp)
+			if isNative {
+				extractFields("metadata", otherMeta, res.Fields, placeholders, res.Name, report, nameMapping, bp, isNative)
 			} else {
 				keys := make([]string, 0, len(otherMeta))
 				for k := range otherMeta {
@@ -2193,13 +2221,13 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 		otherTop[k] = v
 	}
 	if len(otherTop) > 0 {
-		extractFields("", otherTop, res.Fields, placeholders, res.Name, report, nameMapping, bp)
+		extractFields("", otherTop, res.Fields, placeholders, res.Name, report, nameMapping, bp, isNative)
 	}
 
 	// Extract spec fields
 	if spec, ok := m["spec"].(map[string]any); ok {
 		if forProvider, ok := spec["forProvider"].(map[string]any); ok {
-			extractFields("", forProvider, res.Fields, placeholders, res.Name, report, nameMapping, bp)
+			extractFields("", forProvider, res.Fields, placeholders, res.Name, report, nameMapping, bp, isNative)
 			specKeys := make([]string, 0, len(spec))
 			for k := range spec {
 				specKeys = append(specKeys, k)
@@ -2229,7 +2257,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 				extractEnvelopeFields("", map[string]any{k: v}, res.Envelope, placeholders, res.Name, report, nameMapping, bp)
 			}
 		} else {
-			extractFields("spec", spec, res.Fields, placeholders, res.Name, report, nameMapping, bp)
+			extractFields("spec", spec, res.Fields, placeholders, res.Name, report, nameMapping, bp, isNative)
 		}
 	}
 
@@ -2377,7 +2405,7 @@ func isMapFieldPrefix(prefix, nextKey string) bool {
 	return false
 }
 
-func extractFields(prefix string, obj map[string]any, out map[string]blueprint.Field, placeholders []string, resName string, report *LossReport, nameMapping map[string]string, bp *blueprint.Blueprint) {
+func extractFields(prefix string, obj map[string]any, out map[string]blueprint.Field, placeholders []string, resName string, report *LossReport, nameMapping map[string]string, bp *blueprint.Blueprint, isNative bool) {
 	keys := make([]string, 0, len(obj))
 	for k := range obj {
 		keys = append(keys, k)
@@ -2408,7 +2436,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 		}
 		switch val := v.(type) {
 		case map[string]any:
-			extractFields(path, val, out, placeholders, resName, report, nameMapping, bp)
+			extractFields(path, val, out, placeholders, resName, report, nameMapping, bp, isNative)
 		case string:
 			rawStr := unmaskString(val, placeholders)
 			if err := checkScalarClean(rawStr); err != nil {
@@ -2452,6 +2480,16 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 					srcRes = normalizeDNSLabel(srcRes)
 				}
 				out[path] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
+			} else if tmplName := matchTemplateInclude(rawStr); tmplName != "" && !isNative {
+				if templateExists(bp, tmplName) {
+					out[path] = blueprint.Field{Template: tmplName}
+				} else {
+					if report != nil {
+						report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path),
+							fmt.Sprintf("template %q referenced by include is not defined", tmplName))
+					}
+					out[path] = blueprint.Field{Raw: rawStr}
+				}
 			} else if strings.Contains(rawStr, "{{") {
 				out[path] = blueprint.Field{Raw: rawStr}
 			} else {
@@ -2462,7 +2500,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 				elemPath := fmt.Sprintf("%s[%d]", path, elemIdx)
 				switch elemVal := item.(type) {
 				case map[string]any:
-					extractFields(elemPath, elemVal, out, placeholders, resName, report, nameMapping, bp)
+					extractFields(elemPath, elemVal, out, placeholders, resName, report, nameMapping, bp, isNative)
 				case string:
 					rawStr := unmaskString(elemVal, placeholders)
 					if err := checkScalarClean(rawStr); err != nil {
@@ -2506,6 +2544,16 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 							srcRes = normalizeDNSLabel(srcRes)
 						}
 						out[elemPath] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
+					} else if tmplName := matchTemplateInclude(rawStr); tmplName != "" && !isNative {
+						if templateExists(bp, tmplName) {
+							out[elemPath] = blueprint.Field{Template: tmplName}
+						} else {
+							if report != nil {
+								report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath),
+									fmt.Sprintf("template %q referenced by include is not defined", tmplName))
+							}
+							out[elemPath] = blueprint.Field{Raw: rawStr}
+						}
 					} else if strings.Contains(rawStr, "{{") {
 						out[elemPath] = blueprint.Field{Raw: rawStr}
 					} else {

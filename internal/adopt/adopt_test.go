@@ -3836,3 +3836,248 @@ spec:
 		t.Fatalf("expected drop for template.body, got drops: %+v", report.Drops)
 	}
 }
+
+func TestAdopt_TemplateIncludeFieldPreserved(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xroles.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XRole
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- define "trust-policy" }}
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}
+            {{- end }}
+            ---
+            apiVersion: iam.aws.upbound.io/v1beta1
+            kind: Role
+            metadata:
+              name: main-role
+              annotations:
+                policy-type: '{{ include "trust-policy" . }}'
+            spec:
+              forProvider:
+                assumeRolePolicy: '{{ include "trust-policy" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "role" "field" "assumeRolePolicy") | trim | nindent 6 }}'
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-iam:v1.14.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report != nil && report.HasTrueLoss() {
+		t.Fatalf("unexpected loss: %+v", report.Drops)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+	f, ok := r.Fields["assumeRolePolicy"]
+	if !ok {
+		t.Fatalf("expected assumeRolePolicy field on resource, got fields: %+v", r.Fields)
+	}
+	if f.Template != "trust-policy" {
+		t.Errorf("expected assumeRolePolicy.Template == 'trust-policy', got %q (Raw: %q)", f.Template, f.Raw)
+	}
+	if f.Raw != "" {
+		t.Errorf("expected assumeRolePolicy.Raw == '', got %q", f.Raw)
+	}
+	ann, ok := r.Annotations["policy-type"]
+	if !ok {
+		t.Fatalf("expected policy-type annotation on resource, got annotations: %+v", r.Annotations)
+	}
+	if ann.Template != "trust-policy" {
+		t.Errorf("expected policy-type.Template == 'trust-policy', got %q (Raw: %q)", ann.Template, ann.Raw)
+	}
+	if ann.Raw != "" {
+		t.Errorf("expected policy-type.Raw == '', got %q", ann.Raw)
+	}
+
+	// Verify round-trip: emit blueprint to composition, then re-adopt
+	crdDoc := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: roles.iam.aws.upbound.io
+spec:
+  group: iam.aws.upbound.io
+  scope: Namespaced
+  names:
+    kind: Role
+    plural: roles
+    categories:
+      - crossplane
+      - managed
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                forProvider:
+                  type: object
+                  properties:
+                    assumeRolePolicy: {type: string}
+`
+	crds, err := schema.ParseCRDs(blueprint.SplitDocs([]byte(crdDoc)))
+	if err != nil {
+		t.Fatalf("parse CRD: %v", err)
+	}
+	outputs, err := emit.Generate(bp, crds, "")
+	if err != nil {
+		t.Fatalf("emit.Generate failed: %v", err)
+	}
+	var compYAML []byte
+	for _, o := range outputs {
+		if strings.Contains(o.Path, "compositions") {
+			compYAML = o.Body
+			break
+		}
+	}
+	if len(compYAML) == 0 {
+		t.Fatalf("no composition generated in outputs")
+	}
+	reAdopted, reReport, err := Adopt(compYAML, Options{
+		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-iam:v1.14.0",
+	})
+	if err != nil {
+		t.Fatalf("re-Adopt failed: %v", err)
+	}
+	if reReport != nil && reReport.HasTrueLoss() {
+		t.Fatalf("unexpected loss on re-adopt: %+v", reReport.Drops)
+	}
+	if len(reAdopted.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource on re-adopt, got %d", len(reAdopted.Spec.Resources))
+	}
+	reF := reAdopted.Spec.Resources[0].Fields["assumeRolePolicy"]
+	if reF.Template != "trust-policy" || reF.Raw != "" {
+		t.Fatalf("round-trip failed: expected Template == 'trust-policy' and Raw == '', got %+v", reF)
+	}
+}
+
+func TestAdopt_TemplateIncludeUndefinedReported(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xroles.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XRole
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: iam.aws.upbound.io/v1beta1
+            kind: Role
+            metadata:
+              name: main-role
+            spec:
+              forProvider:
+                assumeRolePolicy: '{{ include "undefined-policy" . }}'
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-iam:v1.14.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+	f := r.Fields["assumeRolePolicy"]
+	if f.Template != "" {
+		t.Errorf("expected assumeRolePolicy.Template == '', got %q", f.Template)
+	}
+	if !strings.Contains(f.Raw, "undefined-policy") {
+		t.Errorf("expected assumeRolePolicy.Raw to preserve raw expression, got %q", f.Raw)
+	}
+	if report == nil || !report.HasTrueLoss() {
+		t.Fatalf("expected loss report for undefined template, got: %+v", report)
+	}
+	foundLoss := false
+	for _, d := range report.Drops {
+		if strings.Contains(d.Path, "assumeRolePolicy") && strings.Contains(d.Reason, "undefined-policy") {
+			foundLoss = true
+			break
+		}
+	}
+	if !foundLoss {
+		t.Fatalf("expected drop mentioning undefined-policy on assumeRolePolicy, got drops: %+v", report.Drops)
+	}
+}
+
+func TestAdopt_TemplateIncludeOnNativeResourcePreservesRaw(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xconfigs.k8s.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XConfig
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- define "cm-data" }}
+            key: value
+            {{- end }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: main-cm
+            data:
+              config: '{{ include "cm-data" . }}'
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report != nil && report.HasTrueLoss() {
+		t.Fatalf("unexpected loss: %+v", report.Drops)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+	f := r.Fields["data[config]"]
+	if f.Template != "" {
+		t.Errorf("expected native resource field Template == '', got %q", f.Template)
+	}
+	if !strings.Contains(f.Raw, "cm-data") {
+		t.Errorf("expected native resource field Raw to contain 'cm-data', got %q", f.Raw)
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate failed: %v", err)
+	}
+}
