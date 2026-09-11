@@ -54,10 +54,11 @@ type generateOutput struct {
 // disk — a dry-run preview for the canvas, body included so the canvas can
 // render the output pane straight from the preview. write:true additionally
 // writes every output through the exact same os.MkdirAll+os.WriteFile
-// sequence cmd/cf/gen.go's run uses for a non-check `cf gen`, so a
-// generation triggered from the canvas leaves the output tree in the
-// identical state a CLI run would have; its response carries the same
-// bodies as write:false, since a write does not change what was rendered.
+// sequence cmd/cf/gen.go's run uses for a non-check `cf gen` and prunes
+// orphaned files in managed scopes, so a generation triggered from the
+// canvas leaves the output tree in the identical state a CLI run would have;
+// its response carries the same bodies as write:false, since a write does
+// not change what was rendered.
 //
 // Every failure here — a blueprint that no longer validates, a provider not
 // yet in the cache, a field that does not exist on its resolved CRD — is
@@ -120,6 +121,10 @@ func (srv *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
+		}
+		if _, err := emit.PruneOrphanedOutputs(srv.OutDir, outputs); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 	}
 

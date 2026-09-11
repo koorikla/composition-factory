@@ -158,23 +158,12 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 	}
 
 	// Clean up orphaned/stale files in managed locations
-	existingFiles, _ := c.findExistingManagedFiles()
-	for _, path := range existingFiles {
-		if !expected[path] {
-			if err := os.Remove(path); err == nil {
-				fmt.Fprintf(out, "removed %s\n", path)
-				// Prune empty parent directory if inside managed scope
-				dir := filepath.Dir(path)
-				for dir != "." && dir != c.Out && dir != "/" {
-					if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
-						_ = os.Remove(dir)
-						dir = filepath.Dir(dir)
-					} else {
-						break
-					}
-				}
-			}
-		}
+	removed, err := emit.PruneOrphanedOutputs(c.Out, outputs)
+	if err != nil {
+		return 1, err
+	}
+	for _, path := range removed {
+		fmt.Fprintf(out, "removed %s\n", path)
 	}
 
 	for _, o := range outputs {
@@ -186,28 +175,5 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 }
 
 func (c *GenCmd) findExistingManagedFiles() ([]string, error) {
-	cleanOut := filepath.Clean(c.Out)
-	var found []string
-
-	managedDirs := []string{"compositions", "xrds", "providerconfigs", "runtime", "templates", "environmentconfigs"}
-	for _, d := range managedDirs {
-		dir := filepath.Join(cleanOut, d)
-		if _, err := os.Stat(dir); err == nil {
-			_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-				if err != nil || info.IsDir() {
-					return nil
-				}
-				found = append(found, filepath.Clean(path))
-				return nil
-			})
-		}
-	}
-	topFiles := []string{"functions.yaml", "rbac.yaml"}
-	for _, f := range topFiles {
-		file := filepath.Join(cleanOut, f)
-		if _, err := os.Stat(file); err == nil {
-			found = append(found, filepath.Clean(file))
-		}
-	}
-	return found, nil
+	return emit.FindExistingManagedFiles(c.Out)
 }
