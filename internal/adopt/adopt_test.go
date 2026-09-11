@@ -3612,3 +3612,101 @@ spec:
 		t.Fatalf("emit.Generate() failed: %v", err)
 	}
 }
+
+func TestAdoptStatusForEachPreserved(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueuefans.platform.sparky.ee
+spec:
+  compositeTypeRef:
+    apiVersion: platform.sparky.ee/v1alpha1
+    kind: XQueueFan
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            {{- $xr := .observed.composite.resource.metadata.name -}}
+            {{- $xrMeta := .observed.composite.resource.metadata -}}
+            ---
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              annotations:
+                {{ setResourceNameAnnotation "main-queue" }}
+            spec:
+              forProvider:
+                region: 'eu-north-1'
+            {{- if hasKey (dig "resources" "main-queue" "resource" "status" "atProvider" dict $.observed) "maxMessageSize" }}
+            {{- range $i := until (int (index $.observed.resources "main-queue").resource.status.atProvider.maxMessageSize) }}
+            ---
+            apiVersion: sqs.aws.m.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              annotations:
+                {{ setResourceNameAnnotation (printf "replica-queue-%d" $i) }}
+            spec:
+              forProvider:
+                region: 'eu-north-1'
+            {{- end }}
+            {{- end }}
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(bp.Spec.Resources))
+	}
+	var replica *blueprint.Resource
+	for i := range bp.Spec.Resources {
+		if bp.Spec.Resources[i].Name == "replica-queue" {
+			replica = &bp.Spec.Resources[i]
+			break
+		}
+	}
+	if replica == nil {
+		t.Fatalf("replica-queue resource not found in adopted blueprint: %+v", bp.Spec.Resources)
+	}
+	wantForEach := "resources.main-queue.status.atProvider.maxMessageSize"
+	if replica.ForEach != wantForEach {
+		t.Errorf("replica-queue.ForEach = %q, want %q", replica.ForEach, wantForEach)
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed on adopted blueprint: %v", err)
+	}
+
+	// Also test dot notation syntax:
+	// {{- range $i := until (int $.observed.resources.main-queue.resource.status.atProvider.maxMessageSize) }}
+	manifestDot := strings.Replace(manifest, `(index $.observed.resources "main-queue")`, `$.observed.resources.main-queue`, 1)
+	bpDot, _, err := Adopt([]byte(manifestDot), Options{
+		DefaultProviderRef: "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt dot notation failed: %v", err)
+	}
+	var replicaDot *blueprint.Resource
+	for i := range bpDot.Spec.Resources {
+		if bpDot.Spec.Resources[i].Name == "replica-queue" {
+			replicaDot = &bpDot.Spec.Resources[i]
+			break
+		}
+	}
+	if replicaDot == nil || replicaDot.ForEach != wantForEach {
+		t.Errorf("replicaDot.ForEach = %v, want %q", replicaDot, wantForEach)
+	}
+}
