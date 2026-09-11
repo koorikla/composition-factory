@@ -4479,6 +4479,7 @@ metadata:
   name: queues.sqs.aws.upbound.io
 spec:
   group: sqs.aws.upbound.io
+  scope: Namespaced
   names:
     kind: Queue
     plural: queues
@@ -4577,11 +4578,21 @@ spec:
 	}
 
 	// 4. Round-trip through emit.Generate
-	genOut, err := emit.Generate(bp)
+	outputs, err := emit.Generate(bp, crds, "")
 	if err != nil {
 		t.Fatalf("emit.Generate failed: %v", err)
 	}
-	if !strings.Contains(string(genOut.Composition), "tags") {
-		t.Errorf("expected Composition output to contain tags, got:\n%s", string(genOut.Composition))
+	var compYAML []byte
+	for _, o := range outputs {
+		if strings.Contains(o.Path, "compositions") {
+			compYAML = o.Body
+			break
+		}
+	}
+	if len(compYAML) == 0 {
+		t.Fatalf("no composition generated")
+	}
+	if !strings.Contains(string(compYAML), "tags") {
+		t.Errorf("expected Composition output to contain tags, got:\n%s", string(compYAML))
 	}
 }

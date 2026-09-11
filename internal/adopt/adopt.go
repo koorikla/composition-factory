@@ -1914,6 +1914,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 
 		if strings.HasPrefix(toPath, "spec.forProvider.") {
 			targetField := strings.TrimPrefix(toPath, "spec.forProvider.")
+			targetField = normalizeMapFieldPath(targetField)
 			if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
 				if res.Fields == nil {
 					res.Fields = make(map[string]blueprint.Field)
@@ -1931,6 +1932,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 				fmt.Sprintf("unsupported toFieldPath %q in patch (initProvider is not supported in blueprint)", toPath))
 		} else if strings.HasPrefix(toPath, "spec.") {
 			targetField := strings.TrimPrefix(toPath, "spec.")
+			targetField = normalizeMapFieldPath(targetField)
 			if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
 				if res.Envelope == nil {
 					res.Envelope = make(map[string]blueprint.Field)
@@ -2426,7 +2428,8 @@ func extractEnvelopeFields(prefix string, obj map[string]any, out map[string]blu
 }
 
 func isMapFieldPrefix(prefix, nextKey string) bool {
-	if prefix == "data" || prefix == "stringData" || prefix == "binaryData" || prefix == "tags" {
+	lower := strings.ToLower(prefix)
+	if prefix == "data" || prefix == "stringData" || prefix == "binaryData" || lower == "tags" {
 		return true
 	}
 	if prefix == "spec.selector" {
@@ -2435,8 +2438,33 @@ func isMapFieldPrefix(prefix, nextKey string) bool {
 		}
 		return true
 	}
-	if strings.HasSuffix(prefix, "Labels") || strings.HasSuffix(prefix, "labels") || strings.HasSuffix(prefix, "annotations") || strings.HasSuffix(prefix, "tags") || strings.HasSuffix(prefix, "matchLabels") || strings.HasSuffix(prefix, "nodeSelector") {
+	if strings.HasSuffix(lower, "labels") || strings.HasSuffix(lower, "annotations") || strings.HasSuffix(lower, "tags") || strings.HasSuffix(lower, "matchlabels") || strings.HasSuffix(lower, "nodeselector") {
 		return true
+	}
+	return false
+}
+
+func normalizeMapFieldPath(fieldPath string) string {
+	if strings.Contains(fieldPath, "[") {
+		return fieldPath
+	}
+	idx := strings.LastIndex(fieldPath, ".")
+	if idx == -1 {
+		return fieldPath
+	}
+	prefix := fieldPath[:idx]
+	key := fieldPath[idx+1:]
+	if isMapFieldPrefix(prefix, key) {
+		return fmt.Sprintf("%s[%s]", prefix, key)
+	}
+	return fieldPath
+}
+
+func isMapField(leaves []schema.Leaf, path string) bool {
+	for _, l := range leaves {
+		if l.Path == path && l.Node.Type == "map" {
+			return true
+		}
 	}
 	return false
 }
@@ -2836,6 +2864,20 @@ func pruneUnknownForProviderFields(bp *blueprint.Blueprint, opts Options, report
 			}
 			if known[lookup] || (isMap && (known[basePath] || known[reArrayIdx.ReplaceAllString(basePath, "[0]")])) {
 				continue
+			}
+
+			// Dot-notation map field: convert to bracket notation if map property exists in CRD schema
+			if !isMap && strings.Contains(fieldPath, ".") {
+				lastDot := strings.LastIndex(fieldPath, ".")
+				prefix := fieldPath[:lastDot]
+				key := fieldPath[lastDot+1:]
+				lookupPrefix := reArrayIdx.ReplaceAllString(prefix, "[0]")
+				if isMapField(leaves, lookupPrefix) || isMapFieldPrefix(prefix, key) {
+					newPath := fmt.Sprintf("%s[%s]", prefix, key)
+					r.Fields[newPath] = r.Fields[fieldPath]
+					delete(r.Fields, fieldPath)
+					continue
+				}
 			}
 
 			report.Record(
