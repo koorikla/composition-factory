@@ -146,13 +146,29 @@ function buildTree() {
 
   var genFailed = !store.state.lastGenerate || !!store.state.generateError;
 
-  var totalFiles = 0;
+  var genCount = 0;
+  var previewCount = 0;
   if (genFailed) {
-    totalFiles = 1; // only the blueprint file exists/is valid
+    if (el.treeCount) el.treeCount.textContent = "1 file";
   } else {
-    categories.forEach(function (c) { totalFiles += c.items.length; });
+    categories.forEach(function (c) {
+      if (c.id === "meta") {
+        previewCount += c.items.length;
+      } else {
+        genCount += c.items.length;
+      }
+    });
+    var isWritten = !!(store.state.lastGenerate && store.state.lastGenerate.written);
+    if (el.treeCount) {
+      if (previewCount > 0) {
+        var genLabel = isWritten ? (genCount + " written") : (genCount + " file" + (genCount === 1 ? "" : "s"));
+        el.treeCount.textContent = genLabel + " · " + previewCount + " preview" + (previewCount === 1 ? "" : "s");
+      } else {
+        var total = genCount;
+        el.treeCount.textContent = total + " file" + (total === 1 ? "" : "s");
+      }
+    }
   }
-  if (el.treeCount) el.treeCount.textContent = totalFiles + " file" + (totalFiles === 1 ? "" : "s");
 
   var h = "";
   categories.forEach(function (cat) {
@@ -709,16 +725,18 @@ function drawTopbar(doc) {
   if (bp) bp.textContent = bpTabLabel(doc);
 }
 
-function chipOk(n, written) {
+function chipOk(n, written, previewCount) {
   if (!el.valid) return;
   var count = typeof n === "number" ? n : 0;
+  var pCount = typeof previewCount === "number" ? previewCount : 3;
   var prefix = written ? "written" : "preview";
-  el.valid.textContent = prefix + " · " + count + " file" + (count === 1 ? "" : "s");
+  var previewSuffix = pCount > 0 ? " · " + pCount + " preview" + (pCount === 1 ? "" : "s") : "";
+  el.valid.textContent = prefix + " · " + count + " file" + (count === 1 ? "" : "s") + previewSuffix;
   el.valid.title = "";
   el.valid.style.color = "";
   var srText = written
-    ? "Generated " + count + " manifest" + (count === 1 ? "" : "s")
-    : "Preview: " + count + " file" + (count === 1 ? "" : "s");
+    ? "Generated " + count + " manifest" + (count === 1 ? "" : "s") + (pCount > 0 ? ", " + pCount + " previews" : "")
+    : "Preview: " + count + " file" + (count === 1 ? "" : "s") + (pCount > 0 ? ", " + pCount + " previews" : "");
   el.valid.setAttribute("aria-label", srText);
 }
 
