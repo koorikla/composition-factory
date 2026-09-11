@@ -373,7 +373,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	// 5. Parse Pipeline or Classic Resources
 	nameMapping := make(map[string]string)
 	if pipeline, ok := spec["pipeline"].([]any); ok && len(pipeline) > 0 {
-		if err := parsePipelineComposition(pipeline, bp, opts, report, nameMapping); err != nil {
+		if err := parsePipelineComposition(pipeline, bp, opts, report, nameMapping, xrdDoc != nil); err != nil {
 			return nil, nil, err
 		}
 	} else if resources, ok := spec["resources"].([]any); ok && len(resources) > 0 {
@@ -1364,8 +1364,12 @@ func cleanFormatString(fmtStr string) string {
 	return ""
 }
 
-func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
-	var otherSteps []blueprint.PipelineStep
+func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string, hasXRD bool) error {
+	type parsedStep struct {
+		step       blueprint.PipelineStep
+		pkgAssumed bool
+	}
+	var otherSteps []parsedStep
 	seenEngineStep := false
 
 	for _, stepRaw := range pipeline {
@@ -1432,7 +1436,9 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 					pkg = p
 				}
 			}
+			pkgAssumed := false
 			if pkg == "" {
+				pkgAssumed = true
 				if fnName == "function-auto-ready" {
 					pkg = "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0"
 				} else {
@@ -1443,17 +1449,21 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 			if !seenEngineStep {
 				pos = "before"
 			}
-			otherSteps = append(otherSteps, blueprint.PipelineStep{
-				Name:        stepName,
-				FunctionRef: fnName,
-				Package:     pkg,
-				Input:       inputYAML,
-				Position:    pos,
+			otherSteps = append(otherSteps, parsedStep{
+				step: blueprint.PipelineStep{
+					Name:        stepName,
+					FunctionRef: fnName,
+					Package:     pkg,
+					Input:       inputYAML,
+					Position:    pos,
+				},
+				pkgAssumed: pkgAssumed,
 			})
 		}
 	}
 
-	for _, s := range otherSteps {
+	for _, ps := range otherSteps {
+		s := ps.step
 		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName && len(bp.Spec.EnvironmentConfigs) == 0 && s.Input != "" {
 			type envConfigEntry struct {
 				Type string `json:"type"`
@@ -1528,7 +1538,8 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 	}
 
 	hasOtherCustomSteps := false
-	for _, s := range otherSteps {
+	for _, ps := range otherSteps {
+		s := ps.step
 		if isEnvConfigsStep(s) {
 			continue
 		}
@@ -1541,9 +1552,23 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 	}
 
 	var finalSteps []blueprint.PipelineStep
-	for _, s := range otherSteps {
+	for _, ps := range otherSteps {
+		s := ps.step
 		if isEnvConfigsStep(s) {
 			continue
+		}
+		if ps.pkgAssumed && report != nil {
+			isAutoReadyStep := (s.FunctionRef == "function-auto-ready" || s.Name == "auto-ready")
+			if !isAutoReadyStep || !hasXRD {
+				stepID := s.Name
+				if stepID == "" {
+					stepID = s.FunctionRef
+				}
+				if stepID == "" {
+					stepID = "step"
+				}
+				report.Record("pipeline."+stepID, fmt.Sprintf("without functions.yaml, function package could not be recovered (assumed default %s)", s.Package))
+			}
 		}
 		if !hasOtherCustomSteps && (s.FunctionRef == "function-auto-ready" || s.Name == "auto-ready") && s.Input == "" &&
 			(s.Package == "" || s.Package == "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0") {

@@ -270,7 +270,7 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 			}
 		}
 		if pipeline, ok := spec["pipeline"].([]any); ok && len(pipeline) > 0 {
-			if err := parsePipelineComposition(pipeline, bp, opts, report, nameMapping); err != nil {
+			if err := parsePipelineComposition(pipeline, bp, opts, report, nameMapping, len(xrdDocs) > 0); err != nil {
 				return nil, nil, err
 			}
 		} else if resources, ok := spec["resources"].([]any); ok && len(resources) > 0 {
