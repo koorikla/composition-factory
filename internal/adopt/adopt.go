@@ -330,6 +330,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	if bp.Spec.XRD.Scope == "" {
 		bp.Spec.XRD.Scope = "Namespaced"
 	}
+	synthesized := map[string]bool{}
 	if bp.Spec.XRD.Scope == "Namespaced" {
 		if _, ok := bp.Spec.XRD.Parameters["providerName"]; !ok {
 			bp.Spec.XRD.Parameters["providerName"] = blueprint.Parameter{
@@ -337,6 +338,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 				Required:    true,
 				Description: "Crossplane ProviderConfig name to use for managed resources",
 			}
+			synthesized["providerName"] = true
 		}
 	}
 
@@ -356,6 +358,12 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 
 	// Rewrite status references with normalized names
 	rewriteStatusReferences(bp, nameMapping)
+
+	// No XRD alongside: the parameters above were inferred from their uses.
+	// Settle what the Composition proves and name the rest as lost.
+	if xrdDoc == nil {
+		applyXRDlessEvidence(bp, []map[string]any{compDoc}, synthesized, report)
+	}
 
 	// 5. Deduplicate and collect provider sources
 	collectSources(bp, opts.DefaultProviderRef)

@@ -8,6 +8,19 @@ import (
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 )
 
+// dropsBeyondXRDless returns the drops that are not the per-parameter
+// "without the XRD" entries an XRD-less adoption always records (CF-108).
+func dropsBeyondXRDless(report *LossReport) []Drop {
+	var out []Drop
+	for _, d := range report.Drops {
+		if strings.HasPrefix(d.Path, "xrd.parameters.") && strings.HasPrefix(d.Reason, "without the XRD") {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
 func TestAdoptGoTemplatingComposition(t *testing.T) {
 	manifest := `
 apiVersion: apiextensions.crossplane.io/v1
@@ -54,8 +67,8 @@ spec:
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
-	if report.IsLossy() {
-		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
 	}
 
 	if bp.Metadata.Name != "xqueues.aws.example.org" {
@@ -133,8 +146,8 @@ spec:
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
-	if report.IsLossy() {
-		t.Errorf("expected non-lossy adopt, got: %+v", report.Drops)
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
 	}
 
 	if bp.Spec.XRD.Kind != "XRQueue" {
@@ -194,8 +207,8 @@ spec:
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
-	if report.IsLossy() {
-		t.Errorf("expected non-lossy adopt, got: %+v", report.Drops)
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
 	}
 
 	if len(bp.Spec.Resources) != 1 {
@@ -289,8 +302,8 @@ spec:
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
-	if report.IsLossy() {
-		t.Errorf("expected non-lossy adopt, got: %+v", report.Drops)
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
 	}
 
 	// Flat parameters parsed under spec
@@ -764,8 +777,8 @@ spec:
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
-	if report.IsLossy() {
-		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
 	}
 	if len(bp.Spec.Resources) != 1 {
 		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
@@ -828,8 +841,8 @@ spec:
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
-	if report.IsLossy() {
-		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
 	}
 	policy := bp.ResourceNamed("queue-policy")
 	if policy == nil {
@@ -893,8 +906,8 @@ spec:
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
-	if report.IsLossy() {
-		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
 	}
 	policy := bp.ResourceNamed("queue-policy")
 	if policy == nil {
@@ -953,8 +966,8 @@ spec:
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
-	if report.IsLossy() {
-		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
 	}
 
 	if len(bp.Spec.Pipeline) != 2 {
@@ -1097,8 +1110,8 @@ spec:
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
-	if report.IsLossy() {
-		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
 	}
 
 	sa := bp.ResourceNamed("sa")
@@ -1160,8 +1173,8 @@ spec:
 	if err != nil {
 		t.Fatalf("Adopt failed: %v", err)
 	}
-	if report.IsLossy() {
-		t.Errorf("expected non-lossy adopt, got drops: %+v", report.Drops)
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
 	}
 
 	sa := bp.ResourceNamed("my-sa")
@@ -1290,6 +1303,136 @@ spec:
 		}
 		if !strings.Contains(err.Error(), "function-go-templating") || !strings.Contains(err.Error(), engine) {
 			t.Errorf("expected error to name %s and supported engines, got: %v", engine, err)
+		}
+	}
+}
+
+// CF-108 (#6): adopting a Composition without its XRD alongside must not
+// silently retype every parameter as string and drop required/default/enum/
+// description. The adopter must recover what the Composition itself proves
+// (an unguarded reference is required, a quoted render is a string, a hasKey
+// guard is optional) and name, per parameter, what it could not recover.
+func TestCF108AdoptWithoutXRDNamesUnrecoveredParameterFacts(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xdatabases.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XDatabase
+  mode: Pipeline
+  pipeline:
+    - step: render-resources
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            {{- $xr := .observed.composite.resource.metadata.name -}}
+            ---
+            apiVersion: rds.aws.upbound.io/v1beta1
+            kind: Instance
+            metadata:
+              name: {{ $xr }}-db
+              annotations:
+                {{ setResourceNameAnnotation "db" }}
+            spec:
+              forProvider:
+                region: {{ $spec.region | quote }}
+                {{- if hasKey $spec "storageGB" }}
+                allocatedStorage: {{ $spec.storageGB }}
+                {{- end }}
+                {{- if hasKey $spec "engineVersion" }}
+                engineVersion: {{ $spec.engineVersion | quote }}
+                {{- end }}
+                {{- if hasKey $spec "deletionProtection" }}
+                deletionProtection: {{ $spec.deletionProtection }}
+                {{- end }}
+              providerConfigRef:
+                name: {{ $spec.providerName | quote }}
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-rds:v1.14.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if !report.HasTrueLoss() {
+		t.Fatalf("adopting without the XRD must be reported as a true loss; report: %+v", report.Drops)
+	}
+
+	reasons := map[string]string{}
+	for _, d := range report.Drops {
+		if strings.HasPrefix(d.Path, "xrd.parameters.") {
+			reasons[strings.TrimPrefix(d.Path, "xrd.parameters.")] = d.Reason
+		}
+	}
+	if _, ok := reasons["providerName"]; ok {
+		t.Errorf("providerName is synthesised by the adopter, not lost: %q", reasons["providerName"])
+	}
+	for _, name := range []string{"region", "storageGB", "engineVersion", "deletionProtection"} {
+		reason, ok := reasons[name]
+		if !ok {
+			t.Errorf("no loss entry for xrd.parameters.%s; drops: %+v", name, report.Drops)
+			continue
+		}
+		if !strings.Contains(reason, "XRD") {
+			t.Errorf("xrd.parameters.%s: reason must say the XRD was absent, got %q", name, reason)
+		}
+		for _, facet := range []string{"description", "default", "enum"} {
+			if !strings.Contains(reason, facet) {
+				t.Errorf("xrd.parameters.%s: reason must name %s as unrecovered, got %q", name, facet, reason)
+			}
+		}
+	}
+
+	// region is dereferenced unguarded and rendered quoted: required, string.
+	region := bp.Spec.XRD.Parameters["region"]
+	if !region.Required {
+		t.Errorf("region is referenced without a hasKey guard, so it must be recovered as required; got %+v", region)
+	}
+	if region.Type != "string" {
+		t.Errorf("region renders quoted, so its type is string; got %q", region.Type)
+	}
+	if strings.Contains(reasons["region"], "type") || strings.Contains(reasons["region"], "required") {
+		t.Errorf("region's type and required are recoverable and must not be reported lost: %q", reasons["region"])
+	}
+
+	// engineVersion is guarded and quoted: optional, string; enum/default lost.
+	ev := bp.Spec.XRD.Parameters["engineVersion"]
+	if ev.Required || ev.Type != "string" {
+		t.Errorf("engineVersion = %+v, want optional string", ev)
+	}
+	if strings.Contains(reasons["engineVersion"], "type") {
+		t.Errorf("engineVersion renders quoted; its type must not be reported lost: %q", reasons["engineVersion"])
+	}
+
+	// storageGB and deletionProtection render unquoted: not strings, and the
+	// exact type is not recoverable without the XRD. That must be said.
+	for _, name := range []string{"storageGB", "deletionProtection"} {
+		p := bp.Spec.XRD.Parameters[name]
+		if p.Required {
+			t.Errorf("%s is hasKey-guarded, so it is optional; got %+v", name, p)
+		}
+		if !strings.Contains(reasons[name], "type") {
+			t.Errorf("%s renders unquoted; the report must say its type could not be recovered, got %q", name, reasons[name])
+		}
+	}
+
+	// The on-screen form names every parameter.
+	out := report.String()
+	for _, name := range []string{"region", "storageGB", "engineVersion", "deletionProtection"} {
+		if !strings.Contains(out, "xrd.parameters."+name) {
+			t.Errorf("report.String() must name xrd.parameters.%s:\n%s", name, out)
 		}
 	}
 }

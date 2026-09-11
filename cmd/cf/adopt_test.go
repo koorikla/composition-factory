@@ -59,12 +59,17 @@ spec:
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if code != 0 {
-		t.Errorf("exit code = %d, want 0", code)
+	// No XRD alongside: the parameter schema is lost, which is a true loss
+	// (exit 2) and is named on screen (CF-108).
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
 	}
 
 	if !strings.Contains(out.String(), "Adopted blueprint written to") {
 		t.Errorf("stdout = %q, want mention of written blueprint", out.String())
+	}
+	if !strings.Contains(out.String(), "xrd.parameters.region") {
+		t.Errorf("stdout = %q, want the XRD-less loss named for region", out.String())
 	}
 
 	bpBytes, err := os.ReadFile(outBlueprintPath)
@@ -332,6 +337,35 @@ spec:
 	if err := os.WriteFile(filepath.Join(configDir, "composition.yaml"), []byte(compYaml), 0644); err != nil {
 		t.Fatalf("write composition: %v", err)
 	}
+	// The XRD travels with the tree so the import is lossless; without it the
+	// parameter schema is a named loss and the command exits 2 (CF-108).
+	xrdYaml := `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  group: aws.example.org
+  names:
+    kind: XQueue
+    plural: xqueues
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [region]
+              properties:
+                region:
+                  type: string
+`
+	if err := os.WriteFile(filepath.Join(configDir, "definition.yaml"), []byte(xrdYaml), 0644); err != nil {
+		t.Fatalf("write xrd: %v", err)
+	}
 
 	outBlueprintPath := filepath.Join(tmpDir, "blueprint.yaml")
 
@@ -356,5 +390,84 @@ spec:
 
 	if _, err := os.Stat(outBlueprintPath); err != nil {
 		t.Fatalf("output blueprint not created: %v", err)
+	}
+}
+
+// CF-108 (#6): `cf adopt <composition.yaml>` with no XRD alongside must name,
+// on screen, what it could not recover per parameter, and exit 2.
+func TestCF108AdoptCLIWithoutXRDPrintsLossPerParameter(t *testing.T) {
+	tmpDir := t.TempDir()
+	compPath := filepath.Join(tmpDir, "composition.yaml")
+	outBlueprintPath := filepath.Join(tmpDir, "adopted.cf.yaml")
+
+	compContent := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xdatabases.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XDatabase
+  mode: Pipeline
+  pipeline:
+    - step: render-resources
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            ---
+            apiVersion: rds.aws.upbound.io/v1beta1
+            kind: Instance
+            metadata:
+              name: db
+            spec:
+              forProvider:
+                region: {{ $spec.region | quote }}
+                {{- if hasKey $spec "storageGB" }}
+                allocatedStorage: {{ $spec.storageGB }}
+                {{- end }}
+`
+	if err := os.WriteFile(compPath, []byte(compContent), 0644); err != nil {
+		t.Fatalf("write composition: %v", err)
+	}
+
+	cmd := &AdoptCmd{
+		Composition: compPath,
+		Out:         outBlueprintPath,
+		Provider:    "xpkg.upbound.io/upbound/provider-aws-rds:v1.14.0",
+		CacheDir:    filepath.Join(tmpDir, "cache"),
+	}
+	var out bytes.Buffer
+	code, err := cmd.run(&out)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2: adopting without the XRD loses parameter facts", code)
+	}
+	screen := out.String()
+	for _, want := range []string{"Adopt loss report", "xrd.parameters.region", "xrd.parameters.storageGB", "XRD"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("screen output must contain %q, got:\n%s", want, screen)
+		}
+	}
+
+	bpBytes, err := os.ReadFile(outBlueprintPath)
+	if err != nil {
+		t.Fatalf("read blueprint: %v", err)
+	}
+	bpStr := string(bpBytes)
+	if !strings.Contains(bpStr, "# adopt: dropped xrd.parameters.storageGB") {
+		t.Errorf("blueprint must carry the per-parameter loss comment:\n%s", bpStr)
+	}
+	// region is dereferenced unguarded: it must regenerate as required.
+	if !strings.Contains(bpStr, "region:\n    required: true") && !strings.Contains(bpStr, "region:\n        required: true") {
+		t.Errorf("region must be adopted as required: true:\n%s", bpStr)
 	}
 }
