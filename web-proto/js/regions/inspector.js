@@ -743,6 +743,13 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
       }
     } else if (m === "r") {
       h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", false, res, params, otherResources, otherStatusMap);
+    } else if (f.type === "boolean") {
+      var bVal = (dm === "v" && entry && entry.value !== undefined && entry.value !== null) ? String(entry.value).toLowerCase() : "";
+      h += '<select class="val tsel" data-v="' + esc(f.path) + '">' +
+        '<option value=""' + (bVal === "" ? " selected" : "") + '>unset &#8212; omitted from output</option>' +
+        '<option value="true"' + (bVal === "true" ? " selected" : "") + '>true</option>' +
+        '<option value="false"' + (bVal === "false" ? " selected" : "") + '>false</option>' +
+        '</select>';
     } else {
       h += '<input class="val" data-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
         '" placeholder="' + (isReq ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from output") + '">';
@@ -785,6 +792,13 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
     }
   } else if (m === "r") {
     h += rawEditorHtml(f.path, (dm === "r" && entry) ? entry.raw : "", true, res, params, otherResources, otherStatusMap);
+  } else if (f.type === "boolean") {
+    var ebVal = (dm === "v" && entry && entry.value !== undefined && entry.value !== null) ? String(entry.value).toLowerCase() : "";
+    h += '<select class="val tsel" data-env-v="' + esc(f.path) + '">' +
+      '<option value=""' + (ebVal === "" ? " selected" : "") + '>unset &#8212; omitted from envelope</option>' +
+      '<option value="true"' + (ebVal === "true" ? " selected" : "") + '>true</option>' +
+      '<option value="false"' + (ebVal === "false" ? " selected" : "") + '>false</option>' +
+      '</select>';
   } else {
     var ph = f.path === "providerConfigRef.name"
       ? "auto: ClusterProviderConfig / $spec.providerName"
