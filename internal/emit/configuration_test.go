@@ -120,3 +120,39 @@ func TestConfigurationMetaPipelineFunctions(t *testing.T) {
 		t.Errorf("pipeline function missing from dependsOn:\n%s", got)
 	}
 }
+
+func TestConfigurationMetaDeduplicatesDependsOn(t *testing.T) {
+	bp := configFixture()
+	bp.Spec.Sources = []blueprint.Source{
+		{Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0"},
+		{Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0"},
+	}
+	bp.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "fn-pt-1",
+			FunctionRef: "fn-pt-1",
+			Package:     "xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.8.1",
+		},
+		{
+			Name:        "fn-pt-2",
+			FunctionRef: "fn-pt-2",
+			Package:     "xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.8.1",
+		},
+	}
+
+	got, err := ConfigurationMeta(bp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(got)
+
+	providerCount := strings.Count(s, "package: xpkg.upbound.io/upbound/provider-aws-sqs")
+	if providerCount != 1 {
+		t.Errorf("expected provider package to appear exactly once, got %d:\n%s", providerCount, s)
+	}
+
+	functionCount := strings.Count(s, "package: xpkg.upbound.io/crossplane-contrib/function-patch-and-transform")
+	if functionCount != 1 {
+		t.Errorf("expected function package to appear exactly once, got %d:\n%s", functionCount, s)
+	}
+}

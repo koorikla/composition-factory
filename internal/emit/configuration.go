@@ -68,10 +68,10 @@ func splitRef(ref string) (pkg, version string) {
 }
 
 // ConfigurationMeta renders crossplane.yaml, the meta document of a
-// Crossplane Configuration package: one Provider dependency per declared
-// source, one Function dependency per functions.yaml entry, and — when the
-// caller supplies it — the blueprint source embedded verbatim under a
-// block-scalar annotation, the same recovery story as the cf gen headers.
+// Crossplane Configuration package: one Provider dependency per distinct
+// provider package, one Function dependency per distinct function package, and
+// — when the caller supplies it — the blueprint source embedded verbatim under
+// a block-scalar annotation, the same recovery story as the cf gen headers.
 func ConfigurationMeta(b *blueprint.Blueprint, source []byte) ([]byte, error) {
 	fns, err := functionList(b)
 	if err != nil {
@@ -100,11 +100,16 @@ func ConfigurationMeta(b *blueprint.Blueprint, source []byte) ([]byte, error) {
 	d.Line(1, "crossplane:")
 	d.Line(2, "version: %s", quoteYAML(">=v2.0.0"))
 	d.Line(1, "dependsOn:")
+	seenProviders := make(map[string]bool)
 	for _, src := range b.Spec.Sources {
 		if src.Provider == "" {
 			continue // a crds: source is a scanned manifest, not an installable package
 		}
 		pkg, version := splitRef(src.Provider)
+		if seenProviders[pkg] {
+			continue
+		}
+		seenProviders[pkg] = true
 		d.Line(1, "- apiVersion: pkg.crossplane.io/v1")
 		d.Line(2, "kind: Provider")
 		d.Line(2, "package: %s", pkg)
@@ -112,8 +117,13 @@ func ConfigurationMeta(b *blueprint.Blueprint, source []byte) ([]byte, error) {
 			d.Line(2, "version: %s", quoteYAML(version))
 		}
 	}
+	seenFunctions := make(map[string]bool)
 	for _, f := range fns {
 		pkg, version := splitRef(f.pkg)
+		if seenFunctions[pkg] {
+			continue
+		}
+		seenFunctions[pkg] = true
 		d.Line(1, "- apiVersion: pkg.crossplane.io/v1")
 		d.Line(2, "kind: Function")
 		d.Line(2, "package: %s", pkg)
