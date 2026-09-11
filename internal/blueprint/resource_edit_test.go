@@ -173,3 +173,23 @@ func TestDeleteResourceRefusesWhileRawReferencesExist(t *testing.T) {
 		t.Errorf("error %q should mention queue-policy", err.Error())
 	}
 }
+
+func TestDeleteResourceAllowsSelfRawReference(t *testing.T) {
+	b := wiredBlueprint(func(b *Blueprint) {
+		b.Spec.Resources[1].Fields["queueUrl"] = Field{Value: "static"}
+		b.Spec.Resources[0].Fields["selfTag"] = Field{
+			Raw: `"main-queue"`,
+		}
+	})
+
+	refs := b.StatusReferencingResources("main-queue")
+	for _, r := range refs {
+		if r == "main-queue" {
+			t.Errorf("StatusReferencingResources returned target resource itself: %v", refs)
+		}
+	}
+
+	if err := b.DeleteResource("main-queue"); err != nil {
+		t.Fatalf("DeleteResource failed: %v", err)
+	}
+}
