@@ -452,3 +452,237 @@ spec:
 		t.Fatalf("error %q does not contain expected substring %q", err.Error(), expectedSubstr)
 	}
 }
+
+func TestValidateRenderedObjectWithPropertiesAndAdditionalProperties(t *testing.T) {
+	crds := []schema.CRD{
+		{
+			Group:  "example.org",
+			Kind:   "ExtensibleConfig",
+			Plural: "extensibleconfigs",
+			Scope:  "Namespaced",
+			Versions: []schema.Version{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Properties: map[string]any{
+						"spec": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"forProvider": map[string]any{
+									"type":     "object",
+									"required": []any{"name"},
+									"properties": map[string]any{
+										"name": map[string]any{"type": "string"},
+										"port": map[string]any{"type": "integer"},
+									},
+									"additionalProperties": true,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	stream := `---
+apiVersion: example.org/v1alpha1
+kind: ExtensibleConfig
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: my-cfg
+spec:
+  forProvider:
+    port: "not-an-int"
+`
+	err := ValidateRendered([]byte(stream), crds)
+	if err == nil {
+		t.Fatal("expected validation error for invalid port type and missing required name, got nil")
+	}
+}
+
+func TestValidateRenderedObjectWithPropertiesAndAdditionalPropertiesMap(t *testing.T) {
+	crds := []schema.CRD{
+		{
+			Group:  "example.org",
+			Kind:   "ExtensibleConfig",
+			Plural: "extensibleconfigs",
+			Scope:  "Namespaced",
+			Versions: []schema.Version{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Properties: map[string]any{
+						"spec": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"forProvider": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"port": map[string]any{"type": "integer"},
+									},
+									"additionalProperties": map[string]any{
+										"type": "string",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// 1. Valid: port is int, undeclared extra is string
+	validStream := `---
+apiVersion: example.org/v1alpha1
+kind: ExtensibleConfig
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: my-cfg
+spec:
+  forProvider:
+    port: 8080
+    extra: "custom-value"
+`
+	if err := ValidateRendered([]byte(validStream), crds); err != nil {
+		t.Fatalf("expected valid stream to pass, got: %v", err)
+	}
+
+	// 2. Invalid declared property: port is string (which would match additionalProperties, but must be validated against port schema)
+	invalidPortStream := `---
+apiVersion: example.org/v1alpha1
+kind: ExtensibleConfig
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: my-cfg
+spec:
+  forProvider:
+    port: "8080"
+`
+	if err := ValidateRendered([]byte(invalidPortStream), crds); err == nil {
+		t.Fatal("expected error for port being string instead of integer, got nil")
+	}
+
+	// 3. Invalid undeclared property: extra is integer, should fail additionalProperties string schema
+	invalidExtraStream := `---
+apiVersion: example.org/v1alpha1
+kind: ExtensibleConfig
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: my-cfg
+spec:
+  forProvider:
+    port: 8080
+    extra: 12345
+`
+	if err := ValidateRendered([]byte(invalidExtraStream), crds); err == nil {
+		t.Fatal("expected error for extra being integer instead of string, got nil")
+	}
+}
+
+func TestValidateRenderedObjectAdditionalPropertiesFalse(t *testing.T) {
+	crds := []schema.CRD{
+		{
+			Group:  "example.org",
+			Kind:   "StrictConfig",
+			Plural: "strictconfigs",
+			Scope:  "Namespaced",
+			Versions: []schema.Version{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Properties: map[string]any{
+						"spec": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"forProvider": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"name": map[string]any{"type": "string"},
+									},
+									"additionalProperties": false,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	validStream := `---
+apiVersion: example.org/v1alpha1
+kind: StrictConfig
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: strict-cfg
+spec:
+  forProvider:
+    name: "valid"
+`
+	if err := ValidateRendered([]byte(validStream), crds); err != nil {
+		t.Fatalf("expected valid stream to pass, got: %v", err)
+	}
+
+	invalidStream := `---
+apiVersion: example.org/v1alpha1
+kind: StrictConfig
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: strict-cfg
+spec:
+  forProvider:
+    name: "valid"
+    unexpected: "rejected"
+`
+	if err := ValidateRendered([]byte(invalidStream), crds); err == nil {
+		t.Fatal("expected error for unexpected field when additionalProperties: false, got nil")
+	}
+}
+
+func TestValidateRenderedObjectPropertylessAdditionalPropertiesFalse(t *testing.T) {
+	crds := []schema.CRD{
+		{
+			Group:  "example.org",
+			Kind:   "EmptyConfig",
+			Plural: "emptyconfigs",
+			Scope:  "Namespaced",
+			Versions: []schema.Version{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Properties: map[string]any{
+						"spec": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"forProvider": map[string]any{
+									"type":                 "object",
+									"additionalProperties": false,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	stream := `---
+apiVersion: example.org/v1alpha1
+kind: EmptyConfig
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: empty-cfg
+spec:
+  forProvider:
+    anyField: "value"
+`
+	if err := ValidateRendered([]byte(stream), crds); err == nil {
+		t.Fatal("expected error for any field when properties is empty and additionalProperties: false, got nil")
+	}
+}
