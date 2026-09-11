@@ -526,6 +526,9 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .warnbar{display:flex;align-items:center;gap:7px;padding:5px 12px;font-size:11px;
   background:var(--wire-ref-soft);color:var(--warn);border-bottom:1px solid var(--rule)}
 .warnbar code{font-family:var(--mono);background:rgba(0,0,0,.06);padding:0 3px;border-radius:2px}
+.warnbar-field{background:transparent;border:none;padding:0;margin:0;font:inherit;color:inherit;cursor:pointer;display:inline}
+.warnbar-field code{text-decoration:underline;text-underline-offset:2px}
+.warnbar-field:hover code{color:var(--ink);background:rgba(0,0,0,.12)}
 
 .note{max-width:820px;margin:22px auto 0;padding:0 18px 30px;color:var(--ink-2);font-size:13.5px;line-height:1.62}
 .note h2{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:22px 0 7px;color:var(--ink);text-wrap:balance}

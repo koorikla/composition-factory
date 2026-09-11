@@ -16,8 +16,8 @@ import { mapResourceCoordinates } from "../utils.js";
  *      fallback); the third tab renders store.state.doc as YAML via a tiny
  *      JSON-to-YAML indent walk (no library).
  *  - meta caption: "<N> lines · deterministic" (prototype copy).
- *  - warnbar: the prototype's exact raw-template copy, count = fields in the
- *    doc whose form is {raw} (server pads absent keys with "" — "" = absent).
+ *  - warnbar: raw-template warning with field links and CRD schema notice,
+ *    counting {raw} fields across resources, envelope, and annotations.
  *  - regenerate: debounced 300ms on every "doc" emit. The store already PUTs;
  *    this region ONLY generates.
  *  - topbar: crumb = blueprints/<name>.cf.yaml from doc metadata, #ver from
@@ -631,19 +631,54 @@ function showWarn(message) {
   }
 }
 
-/* ---------- raw-template warnbar (prototype's exact copy) ---------- */
+/* ---------- raw-template warnbar ---------- */
 
-function countRaws(doc) {
-  var n = 0;
-  var resources = doc && doc.spec && doc.spec.resources || [];
+function collectRawFields(doc) {
+  var raws = [];
+  var resources = (doc && doc.spec && doc.spec.resources) || [];
   resources.forEach(function (r) {
-    var fields = r.fields || {};
-    Object.keys(fields).forEach(function (k) {
-      var f = fields[k];
-      if (f && typeof f.raw === "string" && f.raw !== "") n++;
-    });
+    var resName = r.name || "resource";
+    if (r.fields) {
+      Object.keys(r.fields).forEach(function (k) {
+        var f = r.fields[k];
+        if (f && typeof f.raw === "string" && f.raw.trim() !== "") {
+          raws.push({
+            resource: resName,
+            field: k,
+            section: "fields",
+            display: resName + "." + k
+          });
+        }
+      });
+    }
+    if (r.envelope) {
+      Object.keys(r.envelope).forEach(function (k) {
+        var f = r.envelope[k];
+        if (f && typeof f.raw === "string" && f.raw.trim() !== "") {
+          raws.push({
+            resource: resName,
+            field: k,
+            section: "envelope",
+            display: resName + ".envelope." + k
+          });
+        }
+      });
+    }
+    if (r.annotations) {
+      Object.keys(r.annotations).forEach(function (k) {
+        var f = r.annotations[k];
+        if (f && typeof f.raw === "string" && f.raw.trim() !== "") {
+          raws.push({
+            resource: resName,
+            field: k,
+            section: "annotations",
+            display: resName + ".annotations[" + k + "]"
+          });
+        }
+      });
+    }
   });
-  return n;
+  return raws;
 }
 
 function drawWarn(doc) {
@@ -651,13 +686,26 @@ function drawWarn(doc) {
     if (el.warn) el.warn.hidden = true;
     return;
   }
-  var raws = countRaws(doc);
-  if (raws) {
+  if (!el.warn) return;
+  var raws = collectRawFields(doc);
+  if (raws.length) {
     el.warn.hidden = false;
-    el.warn.innerHTML = "<span>▲</span><span>" + raws + " field" + (raws > 1 ? "s" : "") +
-      ' use a raw template — the canvas can show them but not validate them. <code>missingkey=error</code> still guards them.</span>';
+    var count = raws.length;
+    var linksHtml = raws.map(function (rf) {
+      return '<button type="button" class="warnbar-field" data-resource="' + esc(rf.resource) +
+        '" data-field="' + esc(rf.field) +
+        '" data-section="' + esc(rf.section) +
+        '" title="Inspect ' + esc(rf.display) + '"><code>' + esc(rf.display) + '</code></button>';
+    }).join(", ");
+
+    var noun = count === 1 ? "1 field uses a raw template" : (count + " fields use raw templates");
+    var pronoun = count === 1 ? "it" : "them";
+
+    el.warn.innerHTML = "<span>▲</span><span>" + noun + " (" + linksHtml +
+      ") — raw values bypass CRD schema validation; <code>missingkey=error</code> still guards " + pronoun + ".</span>";
   } else {
     el.warn.hidden = true;
+    el.warn.innerHTML = "";
   }
 }
 
@@ -987,6 +1035,46 @@ function bindOutputEvents() {
     selectTab(b.getAttribute("data-t"));
     if (onTabSelected) onTabSelected(tab);
   });
+
+  if (el.warn) {
+    el.warn.addEventListener("click", function (e) {
+      var btn = e.target.closest(".warnbar-field");
+      if (!btn) return;
+      e.preventDefault();
+      var resName = btn.getAttribute("data-resource");
+      var fieldPath = btn.getAttribute("data-field");
+      var fieldSec = btn.getAttribute("data-section");
+      if (!resName) return;
+
+      store.select(resName);
+
+      var insp = document.getElementById("region-inspector") || document.getElementById("insp");
+      if (insp) {
+        var safePath = (window.CSS && CSS.escape) ? CSS.escape(fieldPath) : fieldPath.replace(/(["\\])/g, "\\$1");
+        var selector;
+        if (fieldSec === "envelope") {
+          selector = 'textarea[data-env-raw="' + safePath + '"]';
+        } else if (fieldSec === "annotations") {
+          selector = '[data-ann-del="' + safePath + '"]';
+        } else {
+          selector = 'textarea[data-raw="' + safePath + '"]';
+        }
+        var target = insp.querySelector(selector);
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+          if (target.focus) target.focus();
+        }
+      }
+
+      if (tab === "comp" || tab === "bp") {
+        var idx = anchorLine(currentText(), resName);
+        if (idx >= 0 && el.code) {
+          var lh = parseFloat(getComputedStyle(el.code).lineHeight) || 16;
+          el.code.scrollTo({ top: Math.max(0, idx * lh - 40), behavior: "smooth" });
+        }
+      }
+    });
+  }
 
   el.themeBtn.addEventListener("click", function () {
     var cur = document.documentElement.getAttribute("data-theme") || "system";
