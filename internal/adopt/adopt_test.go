@@ -5929,3 +5929,240 @@ spec:
 		t.Errorf("expected parameter 'count' in bpForEachSingle.Spec.XRD.Parameters, got: %+v (drops: %+v)", bpForEachSingle.Spec.XRD.Parameters, reportForEachSingle.Drops)
 	}
 }
+
+func TestAdoptObservedStatus(t *testing.T) {
+	t.Run("AcceptanceScenario", func(t *testing.T) {
+		manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: iam.aws.upbound.io/v1beta1
+            kind: Role
+            metadata:
+              name: role
+              annotations:
+                crossplane.io/composition-resource-name: role
+            spec:
+              forProvider:
+                assumeRolePolicy: '{}'
+            ---
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              name: bucket
+              annotations:
+                crossplane.io/composition-resource-name: bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            ---
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: queue
+              annotations:
+                crossplane.io/composition-resource-name: queue
+            spec:
+              forProvider:
+                region: us-east-1
+                redrivePolicy: '{{ (index .observed.resources "bucket").resource.status.atProvider.arn }}'
+            ---
+            apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: sa
+              annotations:
+                crossplane.io/composition-resource-name: sa
+                eks.amazonaws.com/role-arn: '{{ (index .observed.resources "role").resource.status.atProvider.arn }}'
+`
+		bp, _, err := Adopt([]byte(manifest), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+
+		queue := bp.ResourceNamed("queue")
+		if queue == nil {
+			t.Fatalf("resource queue not found in adopted blueprint")
+		}
+		if got := queue.Fields["redrivePolicy"]; got.From != "resources.bucket.status.atProvider.arn" || got.Raw != "" {
+			t.Errorf("queue.Fields[redrivePolicy] = %+v, want From: resources.bucket.status.atProvider.arn, Raw empty", got)
+		}
+
+		sa := bp.ResourceNamed("sa")
+		if sa == nil {
+			t.Fatalf("resource sa not found in adopted blueprint")
+		}
+		if got := sa.Annotations["eks.amazonaws.com/role-arn"]; got.From != "resources.role.status.atProvider.arn" || got.Raw != "" {
+			t.Errorf("sa.Annotations[eks.amazonaws.com/role-arn] = %+v, want From: resources.role.status.atProvider.arn, Raw empty", got)
+		}
+
+		// Multi-engine check: verify that adopting structured status wires allows KCL validation/planning
+		bp.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+		for _, r := range bp.Spec.Resources {
+			for fName, f := range r.Fields {
+				if strings.Contains(f.Raw, "{{") {
+					t.Errorf("resource %q field %q leaked Go-template raw string %q", r.Name, fName, f.Raw)
+				}
+			}
+			for aName, a := range r.Annotations {
+				if strings.Contains(a.Raw, "{{") {
+					t.Errorf("resource %q annotation %q leaked Go-template raw string %q", r.Name, aName, a.Raw)
+				}
+			}
+			for eName, e := range r.Envelope {
+				if strings.Contains(e.Raw, "{{") {
+					t.Errorf("resource %q envelope %q leaked Go-template raw string %q", r.Name, eName, e.Raw)
+				}
+			}
+		}
+	})
+
+	t.Run("PrefixVariants", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			prefix string // e.g. ".observed.resources", "$.observed.resources", "$observed.resources"
+		}{
+			{name: "DotObservedResources", prefix: ".observed.resources"},
+			{name: "DollarDotObservedResources", prefix: "$.observed.resources"},
+			{name: "DollarObservedResources", prefix: "$observed.resources"},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				manifest := fmt.Sprintf(`
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              name: target-bucket
+              annotations:
+                crossplane.io/composition-resource-name: target-bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            ---
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: test-queue
+              annotations:
+                crossplane.io/composition-resource-name: test-queue
+                example.com/status-wire: '{{ (index %s "target-bucket").resource.status.atProvider.arn }}'
+            spec:
+              forProvider:
+                region: us-east-1
+                redrivePolicy: '{{ (index %s "target-bucket").resource.status.atProvider.arn }}'
+`, tc.prefix, tc.prefix)
+
+				bp, _, err := Adopt([]byte(manifest), Options{})
+				if err != nil {
+					t.Fatalf("Adopt failed: %v", err)
+				}
+
+				res := bp.ResourceNamed("test-queue")
+				if res == nil {
+					t.Fatalf("test-queue not found in adopted blueprint")
+				}
+
+				if got := res.Fields["redrivePolicy"]; got.From != "resources.target-bucket.status.atProvider.arn" || got.Raw != "" {
+					t.Errorf("[%s] Fields[redrivePolicy] = %+v, want From: resources.target-bucket.status.atProvider.arn, Raw empty", tc.name, got)
+				}
+				if got := res.Annotations["example.com/status-wire"]; got.From != "resources.target-bucket.status.atProvider.arn" || got.Raw != "" {
+					t.Errorf("[%s] Annotations[example.com/status-wire] = %+v, want From: resources.target-bucket.status.atProvider.arn, Raw empty", tc.name, got)
+				}
+			})
+		}
+	})
+
+	t.Run("DotAccessSyntax", func(t *testing.T) {
+		manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              name: target-bucket
+              annotations:
+                crossplane.io/composition-resource-name: target-bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            ---
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: test-queue
+              annotations:
+                crossplane.io/composition-resource-name: test-queue
+                example.com/dot-wire: '{{ .observed.resources.target_bucket.resource.status.atProvider.arn }}'
+            spec:
+              forProvider:
+                region: us-east-1
+                redrivePolicy: '{{ .observed.resources.target_bucket.resource.status.atProvider.arn }}'
+`
+		bp, _, err := Adopt([]byte(manifest), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+
+		res := bp.ResourceNamed("test-queue")
+		if res == nil {
+			t.Fatalf("test-queue not found in adopted blueprint")
+		}
+
+		if got := res.Fields["redrivePolicy"]; got.From != "resources.target-bucket.status.atProvider.arn" || got.Raw != "" {
+			t.Errorf("Fields[redrivePolicy] = %+v, want From: resources.target-bucket.status.atProvider.arn", got)
+		}
+		if got := res.Annotations["example.com/dot-wire"]; got.From != "resources.target-bucket.status.atProvider.arn" || got.Raw != "" {
+			t.Errorf("Annotations[example.com/dot-wire] = %+v, want From: resources.target-bucket.status.atProvider.arn", got)
+		}
+	})
+}

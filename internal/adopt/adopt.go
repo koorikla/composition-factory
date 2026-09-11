@@ -993,7 +993,7 @@ var (
 	reDefine             = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
 	reParamVar           = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reEnvVar             = regexp.MustCompile(`\{\{-?\s*(?:default\s+(?:"[^"]*"|\S+)\s+)?(?:\$env\.([a-zA-Z0-9_.-]+?)|\(index\s+\$env\s+"([a-zA-Z0-9_.-]+?)"\)|index\s+\$env\s+"([a-zA-Z0-9_.-]+?)")(?:\s*\|\s*quote)?\s*-?\}\}`)
-	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*(?:\(index\s+(?:\$\.?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)|(?:\$\.?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+))\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*(?:\(index\s+(?:\$?[.]?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)|(?:\$?[.]?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+))\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reXRResourceRef      = regexp.MustCompile(`\{\{-?\s*\$xr\s*-?\}\}-([a-zA-Z0-9-]+)`)
 	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
 	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+eq\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]+)"\s*-?\}\}`)
