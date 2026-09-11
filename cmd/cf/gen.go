@@ -2,10 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -33,6 +33,9 @@ type GenCmd struct {
 	Engine string `help:"Composition rendering engine: go-templating, kcl, or python (defaults to blueprint setting)."`
 	// GroupSuffix appends a workspace isolation suffix to the XRD group.
 	GroupSuffix string `help:"Suffix to append to the XRD group (e.g. .cf-slug for workspace isolation in a shared cluster)."`
+
+	// renderOpts is swapped in tests so --validate can be exercised without Docker.
+	renderOpts emit.RenderOptions
 }
 
 func (c *GenCmd) Run(out io.Writer) error {
@@ -94,59 +97,19 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 	}
 
 	if c.Validate {
-		if _, err := exec.LookPath("crossplane"); err != nil {
-			return 1, fmt.Errorf("crossplane CLI not found on PATH: %w", err)
-		}
-		tempDir, err := os.MkdirTemp("", "cf-gen-validate-")
+		opts := c.renderOpts
+		res, err := emit.RenderCheck(context.Background(), b, crds, opts)
 		if err != nil {
 			return 1, err
 		}
-		defer os.RemoveAll(tempDir)
-
-		tempOutputs, err := emit.Generate(b, crds, tempDir)
-		if err != nil {
-			return 1, err
+		if res.Unavailable != "" {
+			return 1, fmt.Errorf("render check unavailable: %s", res.Unavailable)
 		}
-
-		var compPath, fnsPath, xrdPath string
-		for _, o := range tempOutputs {
-			if err := os.MkdirAll(filepath.Dir(o.Path), 0o755); err != nil {
-				return 1, err
+		if res.Error != "" {
+			if res.ValidationFailed {
+				return 1, fmt.Errorf("render validation failed:\n%s", res.Error)
 			}
-			if err := os.WriteFile(o.Path, o.Body, 0o644); err != nil {
-				return 1, err
-			}
-			switch {
-			case filepath.Base(filepath.Dir(o.Path)) == "compositions":
-				compPath = o.Path
-			case filepath.Base(filepath.Dir(o.Path)) == "xrds":
-				xrdPath = o.Path
-			case filepath.Base(o.Path) == "functions.yaml":
-				fnsPath = o.Path
-			}
-		}
-
-		sampleXRBytes, err := emit.SampleXR(b)
-		if err != nil {
-			return 1, err
-		}
-		xrPath := filepath.Join(tempDir, "xr.yaml")
-		if err := os.WriteFile(xrPath, sampleXRBytes, 0o644); err != nil {
-			return 1, err
-		}
-
-		cmd := exec.Command("crossplane", "composition", "render", xrPath, compPath, fnsPath, "--xrd", xrdPath, "--timeout", "5m")
-		renderOut, err := cmd.CombinedOutput()
-		if err != nil {
-			msg := strings.TrimSpace(string(renderOut))
-			if msg == "" {
-				msg = err.Error()
-			}
-			return 1, fmt.Errorf("render failed: %s", msg)
-		}
-
-		if err := emit.ValidateRenderedWithBlueprint(renderOut, crds, b); err != nil {
-			return 1, fmt.Errorf("render validation failed:\n%w", err)
+			return 1, fmt.Errorf("render failed: %s", res.Error)
 		}
 		fmt.Fprintln(out, "render validation ok")
 	}

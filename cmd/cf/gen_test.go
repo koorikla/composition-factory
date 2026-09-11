@@ -503,3 +503,45 @@ func TestCheckRequiredFieldsOnRealCRD(t *testing.T) {
 		t.Fatalf("expected error mentioning required field \"region\" and resource \"bucket\", got: %v", err)
 	}
 }
+
+func TestCF180GenValidateDockerUnavailable(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	out := filepath.Join(dir, "out")
+
+	// Set up a fake crossplane binary that mimics a stopped Docker daemon.
+	fakeBinDir := t.TempDir()
+	fakeCrossplane := filepath.Join(fakeBinDir, "crossplane")
+	const dockerDownMsg = "crossplane: error: cannot create Docker network for rendering: cannot create Docker network \"crossplane-render-2t87lbdb\": Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"
+	script := "#!/bin/sh\ncat << 'EOF'\n" + dockerDownMsg + "\nEOF\nexit 1\n"
+	if err := os.WriteFile(fakeCrossplane, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var buf bytes.Buffer
+	cmd := &GenCmd{
+		Blueprint: bp,
+		Out:       out,
+		CacheDir:  cacheDir,
+		Validate:  true,
+	}
+	code, err := cmd.run(&buf)
+	if code != 1 {
+		t.Errorf("code = %d, want 1", code)
+	}
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.HasPrefix(err.Error(), "render failed:") {
+		t.Errorf("got %q: stopped Docker daemon was reported as a composition failure ('render failed:'), want 'render check unavailable:'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "render check unavailable:") {
+		t.Errorf("got %q: expected error to contain 'render check unavailable:'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Cannot connect to the Docker daemon") {
+		t.Errorf("got %q: expected error to contain Docker daemon diagnostic", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Is the docker daemon running?") {
+		t.Errorf("got %q: expected error to contain guidance 'Is the docker daemon running?'", err.Error())
+	}
+}
