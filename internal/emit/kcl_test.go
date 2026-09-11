@@ -538,7 +538,7 @@ func TestKCLStatusWireEmitsConditionalGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(out)
-	if !strings.Contains(s, `if ocds?["main-queue"]?.Resource?.status?.atProvider?.url:`) {
+	if !strings.Contains(s, `if ocds?["main-queue"]?.Resource?.status?.atProvider?.url != None:`) {
 		t.Errorf("expected conditional status guard in KCL output:\n%s", s)
 	}
 }
@@ -751,5 +751,41 @@ spec:
 	}
 	if !strings.Contains(s, wantRetention) {
 		t.Errorf("KCL missing conditional guard for tuning.retention, got:\n%s", s)
+	}
+}
+
+func TestKCLStatusWireNoneCheck(t *testing.T) {
+	b := wireBlueprint()
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+	b.Spec.Resources[1].Annotations = map[string]blueprint.Field{
+		"example.com/url": {From: "resources.main-queue.status.atProvider.url"},
+	}
+	b.Spec.Resources = append(b.Spec.Resources, blueprint.Resource{
+		Name:     "sa",
+		Kind:     "ServiceAccount",
+		Provider: blueprint.NativeProvider,
+		Fields: map[string]blueprint.Field{
+			"metadata.name": {From: "resources.main-queue.status.atProvider.url"},
+		},
+	})
+
+	crds := append(nativeTestCRDs(t), wireCRDs(t)...)
+	out, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(out)
+
+	// Status wire conditions in KCL must check `!= None:` rather than truthiness,
+	// so falsy status values (such as false, 0, "") are preserved and not dropped (CF-286).
+	wantGuard := `if ocds?["main-queue"]?.Resource?.status?.atProvider?.url != None:`
+	if !strings.Contains(s, wantGuard) {
+		t.Errorf("expected None guard for status wire %q in KCL output, got:\n%s", wantGuard, s)
+	}
+
+	// Verify that bare truthiness guards (which drop falsy values) are NOT present.
+	unwantedGuard := `if ocds?["main-queue"]?.Resource?.status?.atProvider?.url:`
+	if strings.Contains(s, unwantedGuard) {
+		t.Errorf("found bare truthiness guard %q in KCL output (must use != None):\n%s", unwantedGuard, s)
 	}
 }
