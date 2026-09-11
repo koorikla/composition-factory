@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -163,6 +165,40 @@ func TestCatalogueTypeFilter(t *testing.T) {
 		if strings.HasPrefix(p.Name, "function-") {
 			t.Errorf("type=provider matched function: %s", p.Name)
 		}
+	}
+}
+
+// TestCatalogueRejectsUnknownTypeParameter verifies that invalid type parameter
+// values return HTTP 400 Bad Request while valid values return 200 OK (CF-239, #143).
+func TestCatalogueRejectsUnknownTypeParameter(t *testing.T) {
+	h := testHandler(t)
+
+	for _, invalid := range []string{"bogus", "functions"} {
+		t.Run("invalid_"+invalid, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/catalogue?type="+invalid, nil))
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("GET /api/catalogue?type=%s returned status %d, want 400", invalid, rec.Code)
+			}
+			var errBody errorBody
+			if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+				t.Fatalf("error response not JSON: %v (%s)", err, rec.Body)
+			}
+			wantMsg := fmt.Sprintf("invalid type: %q (must be \"function\" or \"provider\")", invalid)
+			if errBody.Error != wantMsg {
+				t.Errorf("error body = %q, want %q", errBody.Error, wantMsg)
+			}
+		})
+	}
+
+	for _, valid := range []string{"", "function", "provider", "Function", "PROVIDER"} {
+		t.Run("valid_"+valid, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/catalogue?type="+valid, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET /api/catalogue?type=%s returned status %d, want 200", valid, rec.Code)
+			}
+		})
 	}
 }
 
