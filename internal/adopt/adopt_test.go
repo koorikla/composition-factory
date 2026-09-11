@@ -2587,3 +2587,224 @@ spec:
 		t.Errorf("expected drop for unsupported patch transform inside patchSet, got drops: %+v", report.Drops)
 	}
 }
+
+func TestCF226_AdoptDynamicMapKeyExpressionsDroppedAndReported(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: repro-cf-expr
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  pipeline:
+    - step: go-templating
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+            data:
+              prefix-{{ .observed.composite.resource.spec.env }}: value
+              static-key: static-val
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if bp == nil {
+		t.Fatalf("expected blueprint, got nil")
+	}
+
+	// 1. Verify that __CF_EXPR never appears anywhere in the blueprint fields, envelope, annotations, or serialized YAML
+	bpYAML, err := FormatAdoptedYAML(bp, report)
+	if err != nil {
+		t.Fatalf("FormatAdoptedYAML failed: %v", err)
+	}
+	if strings.Contains(string(bpYAML), "__CF_EXPR") {
+		t.Errorf("adopted blueprint YAML contains leaked __CF_EXPR token: %s", string(bpYAML))
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+
+	for fName := range res.Fields {
+		if strings.Contains(fName, "__CF_EXPR") {
+			t.Errorf("field path %q contains leaked __CF_EXPR token", fName)
+		}
+	}
+
+	// 2. The dynamic map key is dropped from blueprint fields
+	for fName := range res.Fields {
+		if strings.Contains(fName, "prefix-") {
+			t.Errorf("dynamic map key should have been dropped, but found field %q", fName)
+		}
+	}
+	if val, ok := res.Fields["data[static-key]"]; !ok || val.Value != "static-val" {
+		t.Errorf("expected static key to be preserved, got: %+v", val)
+	}
+
+	// 3. The dynamic map key is reported in LossReport
+	if !report.Lossy() {
+		t.Fatalf("expected report.Lossy() to be true, got drops: %+v", report.Drops)
+	}
+
+	dropsByPath := make(map[string]string)
+	for _, d := range report.Drops {
+		if strings.Contains(d.Path, "__CF_EXPR") {
+			t.Errorf("loss report drop path %q contains leaked __CF_EXPR token", d.Path)
+		}
+		dropsByPath[d.Path] = d.Reason
+	}
+
+	expectedDropPath := "resource.test-cm.fields.data[prefix-{{ .observed.composite.resource.spec.env }}]"
+	reason, ok := dropsByPath[expectedDropPath]
+	if !ok {
+		t.Errorf("expected drop for %q, got drops: %+v", expectedDropPath, report.Drops)
+	} else if !strings.Contains(reason, "not supported in blueprint") {
+		t.Errorf("expected reason to explain unsupported in blueprint, got %q", reason)
+	}
+}
+
+func TestCF226_AdoptDynamicMapKeyExpressionsInManagedResource(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: repro-cf-expr-mr
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  pipeline:
+    - step: go-templating
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            ---
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: test-queue
+              annotations:
+                prefix-{{ .observed.composite.resource.spec.env }}: ann-val
+                static-ann: static-ann-val
+            spec:
+              forProvider:
+                region: us-east-1
+                dynamic-{{ .observed.composite.resource.spec.env }}: dyn-val
+                tags:
+                  tag-{{ .observed.composite.resource.spec.env }}: custom
+                  static-tag: static-val
+              envelope-{{ .observed.composite.resource.spec.env }}: env-val
+              staticEnvelope: static-env-val
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if bp == nil {
+		t.Fatalf("expected blueprint, got nil")
+	}
+
+	// 1. Verify that __CF_EXPR never appears in YAML
+	bpYAML, err := FormatAdoptedYAML(bp, report)
+	if err != nil {
+		t.Fatalf("FormatAdoptedYAML failed: %v", err)
+	}
+	if strings.Contains(string(bpYAML), "__CF_EXPR") {
+		t.Errorf("adopted blueprint YAML contains leaked __CF_EXPR token: %s", string(bpYAML))
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+
+	for fName := range res.Fields {
+		if strings.Contains(fName, "__CF_EXPR") {
+			t.Errorf("field path %q contains leaked __CF_EXPR token", fName)
+		}
+	}
+	for aName := range res.Annotations {
+		if strings.Contains(aName, "__CF_EXPR") {
+			t.Errorf("annotation key %q contains leaked __CF_EXPR token", aName)
+		}
+	}
+	for eName := range res.Envelope {
+		if strings.Contains(eName, "__CF_EXPR") {
+			t.Errorf("envelope key %q contains leaked __CF_EXPR token", eName)
+		}
+	}
+
+	// 2. Static fields/annotations/envelope are preserved
+	if val, ok := res.Annotations["static-ann"]; !ok || val.Value != "static-ann-val" {
+		t.Errorf("expected static annotation preserved, got: %+v", val)
+	}
+	if val, ok := res.Fields["region"]; !ok || val.Value != "us-east-1" {
+		t.Errorf("expected region field preserved, got: %+v", val)
+	}
+	if val, ok := res.Fields["tags[static-tag]"]; !ok || val.Value != "static-val" {
+		t.Errorf("expected static tag preserved, got: %+v", val)
+	}
+	if val, ok := res.Envelope["staticEnvelope"]; !ok || val.Value != "static-env-val" {
+		t.Errorf("expected static envelope preserved, got: %+v", val)
+	}
+
+	// 3. Dynamic map keys are dropped from blueprint
+	for fName := range res.Fields {
+		if strings.Contains(fName, "dynamic-") || strings.Contains(fName, "tag-") {
+			t.Errorf("dynamic map key should have been dropped, but found field %q", fName)
+		}
+	}
+	for aName := range res.Annotations {
+		if strings.Contains(aName, "prefix-") {
+			t.Errorf("dynamic annotation key should have been dropped, but found %q", aName)
+		}
+	}
+	for eName := range res.Envelope {
+		if strings.Contains(eName, "envelope-") {
+			t.Errorf("dynamic envelope key should have been dropped, but found %q", eName)
+		}
+	}
+
+	// 4. Dynamic keys reported in LossReport without __CF_EXPR
+	dropsByPath := make(map[string]string)
+	for _, d := range report.Drops {
+		if strings.Contains(d.Path, "__CF_EXPR") {
+			t.Errorf("loss report drop path %q contains leaked __CF_EXPR token", d.Path)
+		}
+		dropsByPath[d.Path] = d.Reason
+	}
+
+	expectedDrops := []string{
+		"resource.test-queue.annotations[prefix-{{ .observed.composite.resource.spec.env }}]",
+		"resource.test-queue.fields.dynamic-{{ .observed.composite.resource.spec.env }}",
+		"resource.test-queue.fields.tags[tag-{{ .observed.composite.resource.spec.env }}]",
+		"resource.test-queue.envelope.envelope-{{ .observed.composite.resource.spec.env }}",
+	}
+	for _, expectedPath := range expectedDrops {
+		reason, ok := dropsByPath[expectedPath]
+		if !ok {
+			t.Errorf("expected drop for %q, got drops: %+v", expectedPath, report.Drops)
+		} else if !strings.Contains(reason, "not supported in blueprint") {
+			t.Errorf("expected reason for %q to mention unsupported in blueprint, got %q", expectedPath, reason)
+		}
+	}
+}

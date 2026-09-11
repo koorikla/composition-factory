@@ -1989,30 +1989,40 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 	// Extract annotations
 	if meta != nil {
 		if anns, ok := meta["annotations"].(map[string]any); ok {
-			for k, v := range anns {
+			annKeys := make([]string, 0, len(anns))
+			for k := range anns {
+				annKeys = append(annKeys, k)
+			}
+			sort.Strings(annKeys)
+			for _, k := range annKeys {
+				v := anns[k]
 				rawK := unmaskString(fmt.Sprint(k), placeholders)
 				rawStr := unmaskString(fmt.Sprint(v), placeholders)
 				if k == "crossplane.io/composition-resource-name" || strings.Contains(rawK, "setResourceNameAnnotation") || strings.Contains(rawStr, "setResourceNameAnnotation") {
 					continue
 				}
+				if rePlaceholder.MatchString(fmt.Sprint(k)) {
+					report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "dynamic map key with template expression is not supported in blueprint")
+					continue
+				}
 				if err := checkScalarClean(rawStr); err != nil {
-					report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, k), "contains newlines or control characters")
+					report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "contains newlines or control characters")
 					continue
 				}
 				if m := reParamVar.FindStringSubmatch(rawStr); len(m) >= 2 {
 					if isValidParamIdentifier(m[1]) {
-						res.Annotations[k] = blueprint.Field{From: "params." + m[1]}
+						res.Annotations[rawK] = blueprint.Field{From: "params." + m[1]}
 					} else {
-						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, k), "invalid parameter reference")
+						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "invalid parameter reference")
 					}
 				} else if key := matchEnvVar(rawStr); key != "" {
 					if isValidParamIdentifier(key) {
-						res.Annotations[k] = blueprint.Field{From: "env." + key}
+						res.Annotations[rawK] = blueprint.Field{From: "env." + key}
 						if bp != nil {
 							ensureEnvDeclared(bp, key, "string")
 						}
 					} else {
-						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, k), "invalid environment reference")
+						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "invalid environment reference")
 					}
 				} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 5 {
 					srcRes := m[1]
@@ -2036,7 +2046,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 					} else {
 						fromPath = "resources." + srcRes + ".metadata." + targetField
 					}
-					res.Annotations[k] = blueprint.Field{From: fromPath}
+					res.Annotations[rawK] = blueprint.Field{From: fromPath}
 				} else if m := reXRResourceRef.FindStringSubmatch(rawStr); len(m) >= 2 {
 					srcRes := m[1]
 					if nameMapping != nil && nameMapping[srcRes] != "" {
@@ -2044,9 +2054,9 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 					} else {
 						srcRes = normalizeDNSLabel(srcRes)
 					}
-					res.Annotations[k] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
+					res.Annotations[rawK] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
 				} else {
-					res.Annotations[k] = blueprint.Field{Value: rawStr}
+					res.Annotations[rawK] = blueprint.Field{Value: rawStr}
 				}
 			}
 		}
@@ -2075,6 +2085,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 				}
 				sort.Strings(keys)
 				for _, k := range keys {
+					rawK := unmaskString(k, placeholders)
 					if subMap, ok := otherMeta[k].(map[string]any); ok {
 						subKeys := make([]string, 0, len(subMap))
 						for sk := range subMap {
@@ -2082,12 +2093,13 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 						}
 						sort.Strings(subKeys)
 						for _, sk := range subKeys {
-							report.Record(fmt.Sprintf("resource.%s.metadata.%s[%s]", res.Name, k, sk),
-								fmt.Sprintf("managed resource metadata field %q is not supported in blueprint", k+"."+sk))
+							rawSK := unmaskString(sk, placeholders)
+							report.Record(fmt.Sprintf("resource.%s.metadata.%s[%s]", res.Name, rawK, rawSK),
+								fmt.Sprintf("managed resource metadata field %q is not supported in blueprint", rawK+"."+rawSK))
 						}
 					} else {
-						report.Record(fmt.Sprintf("resource.%s.metadata.%s", res.Name, k),
-							fmt.Sprintf("managed resource metadata field %q is not supported in blueprint", k))
+						report.Record(fmt.Sprintf("resource.%s.metadata.%s", res.Name, rawK),
+							fmt.Sprintf("managed resource metadata field %q is not supported in blueprint", rawK))
 					}
 				}
 			}
@@ -2095,8 +2107,19 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 	}
 
 	// Extract other top-level fields (e.g. data in ConfigMap, automountServiceAccountToken in ServiceAccount)
-	for k, v := range m {
+	topKeys := make([]string, 0, len(m))
+	for k := range m {
+		topKeys = append(topKeys, k)
+	}
+	sort.Strings(topKeys)
+	for _, k := range topKeys {
+		v := m[k]
 		if k == "apiVersion" || k == "kind" || k == "metadata" || k == "spec" || k == "status" {
+			continue
+		}
+		if rePlaceholder.MatchString(k) {
+			rawK := unmaskString(k, placeholders)
+			report.Record(fmt.Sprintf("resource.%s.fields.%s", res.Name, rawK), "dynamic map key with template expression is not supported in blueprint")
 			continue
 		}
 		if mapVal, ok := v.(map[string]any); ok {
@@ -2115,8 +2138,19 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 	if spec, ok := m["spec"].(map[string]any); ok {
 		if forProvider, ok := spec["forProvider"].(map[string]any); ok {
 			extractFields("", forProvider, res.Fields, placeholders, res.Name, report, nameMapping, bp)
-			for k, v := range spec {
+			specKeys := make([]string, 0, len(spec))
+			for k := range spec {
+				specKeys = append(specKeys, k)
+			}
+			sort.Strings(specKeys)
+			for _, k := range specKeys {
+				v := spec[k]
 				if k == "forProvider" || k == "initProvider" {
+					continue
+				}
+				if rePlaceholder.MatchString(k) {
+					rawK := unmaskString(k, placeholders)
+					report.Record(fmt.Sprintf("resource.%s.envelope.%s", res.Name, rawK), "dynamic map key with template expression is not supported in blueprint")
 					continue
 				}
 				if k == "providerConfigRef" {
@@ -2141,7 +2175,22 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 }
 
 func extractEnvelopeFields(prefix string, obj map[string]any, out map[string]blueprint.Field, placeholders []string, resName string, report *LossReport, nameMapping map[string]string, bp *blueprint.Blueprint) {
-	for k, v := range obj {
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := obj[k]
+		if rePlaceholder.MatchString(k) {
+			rawK := unmaskString(k, placeholders)
+			path := rawK
+			if prefix != "" {
+				path = prefix + "." + rawK
+			}
+			report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path), "dynamic map key with template expression is not supported in blueprint")
+			continue
+		}
 		path := k
 		if prefix != "" {
 			path = prefix + "." + k
@@ -2267,7 +2316,26 @@ func isMapFieldPrefix(prefix, nextKey string) bool {
 }
 
 func extractFields(prefix string, obj map[string]any, out map[string]blueprint.Field, placeholders []string, resName string, report *LossReport, nameMapping map[string]string, bp *blueprint.Blueprint) {
-	for k, v := range obj {
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := obj[k]
+		if rePlaceholder.MatchString(k) {
+			rawK := unmaskString(k, placeholders)
+			path := rawK
+			if prefix != "" {
+				if isMapFieldPrefix(prefix, rawK) {
+					path = fmt.Sprintf("%s[%s]", prefix, rawK)
+				} else {
+					path = prefix + "." + rawK
+				}
+			}
+			report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "dynamic map key with template expression is not supported in blueprint")
+			continue
+		}
 		path := k
 		if prefix != "" {
 			if isMapFieldPrefix(prefix, k) {
