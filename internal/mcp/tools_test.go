@@ -94,3 +94,22 @@ func TestEmptyIdentifierArgumentsRejected(t *testing.T) {
 		})
 	}
 }
+
+func TestAddResourceNameMismatchRejected(t *testing.T) {
+	s := newStack(t)
+	text, isErr := s.callTool(t, "add_resource", map[string]any{
+		"name": "res-a",
+		"resource": map[string]any{
+			"name":     "res-b",
+			"kind":     "Queue",
+			"provider": testProviderRef,
+		},
+	})
+	if !isErr {
+		t.Fatalf("add_resource with mismatched name succeeded (%s), want isError: true", text)
+	}
+	want := `resource name in body "res-b" does not match name argument "res-a"`
+	if !strings.Contains(text, want) {
+		t.Errorf("add_resource error %q does not contain %q", text, want)
+	}
+}
