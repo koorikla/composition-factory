@@ -58,27 +58,18 @@ test.describe('CF-261 Pipeline Step Nested Input Preservation', () => {
       '  extraField: "preserved"'
     ].join('\n');
 
-    // Seed doc with custom pipeline step
-    await request.put(ENGINE + '/api/blueprint', {
-      data: {
-        apiVersion: 'factory.crossplane.io/v1alpha1',
-        kind: 'Blueprint',
-        metadata: { name: 'test-pipe-nested' },
-        spec: {
-          xrd: {
-            parameters: {}
-          },
-          pipeline: [
-            {
-              name: 'cel-filter',
-              functionRef: 'function-cel-filter',
-              package: 'xpkg.crossplane.io/crossplane-contrib/function-cel-filter:v0.2.0',
-              input: rawInput
-            }
-          ]
-        }
+    // Fetch existing doc and update its pipeline
+    const doc = await (await request.get(ENGINE + '/api/blueprint')).json();
+    doc.spec.pipeline = [
+      {
+        name: 'cel-filter',
+        functionRef: 'function-cel-filter',
+        package: 'xpkg.crossplane.io/crossplane-contrib/function-cel-filter:v0.2.0',
+        input: rawInput
       }
-    });
+    ];
+    const putRes = await request.put(ENGINE + '/api/blueprint', { data: doc });
+    expect(putRes.ok()).toBeTruthy();
 
     // Mock kinds fields endpoint so the inspector renders form mode with spec.filter
     await page.route(/\/api\/kinds\/.*\/fields/, async route => {
@@ -109,8 +100,8 @@ test.describe('CF-261 Pipeline Step Nested Input Preservation', () => {
 
     // Verify backend doc retains both updated filter and preserved extraField
     await expect.poll(async () => {
-      const doc = await (await request.get(ENGINE + '/api/blueprint')).json();
-      return doc.spec.pipeline?.[0]?.input || '';
+      const bDoc = await (await request.get(ENGINE + '/api/blueprint')).json();
+      return bDoc.spec.pipeline?.[0]?.input || '';
     }).toContain('extraField');
 
     const finalDoc = await (await request.get(ENGINE + '/api/blueprint')).json();

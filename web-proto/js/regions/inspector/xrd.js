@@ -155,42 +155,182 @@ export function inferFnMeta(step) {
   return null;
 }
 
-export function parseInputYAML(str) {
-  if (!str || !str.trim()) return {};
-  var out = {};
-  var lines = str.split("\n");
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i];
-    var colonIdx = line.indexOf(":");
-    if (colonIdx !== -1 && line.indexOf(" ") !== 0 && line.indexOf("\t") !== 0) {
-      var k = line.substring(0, colonIdx).trim();
-      var v = line.substring(colonIdx + 1).trim();
-      if (v === "|" || v === "|-") {
-        var block = [];
-        var j = i + 1;
-        while (j < lines.length && (lines[j].indexOf("  ") === 0 || lines[j].trim() === "")) {
-          block.push(lines[j].replace(/^ {2}/, ""));
-          j++;
+function parseYAMLScalar(v) {
+  if (v === undefined || v === null) return "";
+  v = v.trim();
+  if (!v) return "";
+  if ((v.startsWith('"') && v.endsWith('"') && v.length >= 2) ||
+      (v.startsWith("'") && v.endsWith("'") && v.length >= 2)) {
+    if (v.startsWith('"')) {
+      try { return JSON.parse(v); } catch (_) {}
+    }
+    return v.slice(1, -1);
+  }
+  var hashIdx = v.indexOf(" #");
+  if (hashIdx !== -1) {
+    v = v.substring(0, hashIdx).trim();
+  }
+  if (v === "true") return true;
+  if (v === "false") return false;
+  if (v === "null") return null;
+  if (!isNaN(Number(v)) && !isNaN(parseFloat(v))) return Number(v);
+  if (v.startsWith("[") || v.startsWith("{")) {
+    try { return JSON.parse(v); } catch (_) {}
+  }
+  return v;
+}
+
+function readBlockScalar(lines, startIdx, parentIndent) {
+  var block = [];
+  var j = startIdx + 1;
+  var blockIndent = -1;
+  while (j < lines.length) {
+    var bLine = lines[j];
+    if (!bLine.trim()) {
+      block.push("");
+      j++;
+      continue;
+    }
+    var bIndent = bLine.search(/\S/);
+    if (blockIndent === -1) {
+      if (bIndent > parentIndent) blockIndent = bIndent;
+      else break;
+    }
+    if (bIndent < blockIndent) break;
+    block.push(bLine.substring(blockIndent));
+    j++;
+  }
+  return { value: block.join("\n").replace(/\n+$/, ""), nextIndex: j };
+}
+
+function parseYAMLBlock(lines, startIndex, currentIndent) {
+  var result = null;
+  var i = startIndex;
+
+  while (i < lines.length) {
+    var rawLine = lines[i];
+    var trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      i++;
+      continue;
+    }
+
+    var indent = rawLine.search(/\S/);
+    if (indent < currentIndent) {
+      break;
+    }
+
+    var content = rawLine.substring(indent);
+    if (content.startsWith("- ") || content === "-") {
+      if (result === null) result = [];
+      else if (!Array.isArray(result)) break;
+
+      var afterDash = content.substring(1).trim();
+      if (!afterDash) {
+        var dashChild = parseYAMLBlock(lines, i + 1, indent + 1);
+        result.push(dashChild.value);
+        i = dashChild.nextIndex;
+        continue;
+      }
+
+      var dashColon = afterDash.indexOf(":");
+      if (dashColon !== -1 && (dashColon === afterDash.length - 1 || afterDash[dashColon + 1] === " ")) {
+        var itemObj = {};
+        var itemKey = afterDash.substring(0, dashColon).trim();
+        var itemVal = afterDash.substring(dashColon + 1).trim();
+        if (itemVal === "|" || itemVal === "|-") {
+          var itemBlock = readBlockScalar(lines, i, indent);
+          itemObj[itemKey] = itemBlock.value;
+          i = itemBlock.nextIndex;
+        } else if (itemVal) {
+          itemObj[itemKey] = parseYAMLScalar(itemVal);
+          i++;
+        } else {
+          var itemChild = parseYAMLBlock(lines, i + 1, indent + 2);
+          itemObj[itemKey] = itemChild.value;
+          i = itemChild.nextIndex;
         }
-        out[k] = block.join("\n").replace(/\n+$/, "");
-        i = j - 1;
-      } else if (v.indexOf("[") === 0 || v.indexOf("{") === 0) {
-        try { out[k] = JSON.parse(v); } catch (_) { out[k] = v; }
+
+        while (i < lines.length) {
+          var nextRaw = lines[i];
+          if (!nextRaw.trim() || nextRaw.trim().startsWith("#")) {
+            i++;
+            continue;
+          }
+          var nextIndent = nextRaw.search(/\S/);
+          if (nextIndent <= indent) break;
+          var nextContent = nextRaw.substring(nextIndent);
+          if (nextContent.startsWith("- ") || nextContent === "-") break;
+          var nextColon = nextContent.indexOf(":");
+          if (nextColon !== -1 && (nextColon === nextContent.length - 1 || nextContent[nextColon + 1] === " ")) {
+            var nk = nextContent.substring(0, nextColon).trim();
+            var nv = nextContent.substring(nextColon + 1).trim();
+            if (nv === "|" || nv === "|-") {
+              var nBlock = readBlockScalar(lines, i, nextIndent);
+              itemObj[nk] = nBlock.value;
+              i = nBlock.nextIndex;
+            } else if (nv) {
+              itemObj[nk] = parseYAMLScalar(nv);
+              i++;
+            } else {
+              var nChild = parseYAMLBlock(lines, i + 1, nextIndent + 1);
+              itemObj[nk] = nChild.value;
+              i = nChild.nextIndex;
+            }
+          } else {
+            i++;
+          }
+        }
+        result.push(itemObj);
+        continue;
       } else {
-        if (v === "true") out[k] = true;
-        else if (v === "false") out[k] = false;
-        else if (v !== "" && !isNaN(Number(v))) out[k] = Number(v);
-        else out[k] = v;
+        result.push(parseYAMLScalar(afterDash));
+        i++;
+        continue;
+      }
+    } else {
+      if (result === null) result = {};
+      else if (Array.isArray(result)) break;
+
+      var colonIdx = content.indexOf(":");
+      if (colonIdx === -1 || (colonIdx < content.length - 1 && content[colonIdx + 1] !== " ")) {
+        i++;
+        continue;
+      }
+
+      var k = content.substring(0, colonIdx).trim();
+      var v = content.substring(colonIdx + 1).trim();
+
+      if (v === "|" || v === "|-") {
+        var mapBlock = readBlockScalar(lines, i, indent);
+        result[k] = mapBlock.value;
+        i = mapBlock.nextIndex;
+      } else if (v) {
+        result[k] = parseYAMLScalar(v);
+        i++;
+      } else {
+        var mapChild = parseYAMLBlock(lines, i + 1, indent + 1);
+        result[k] = mapChild.value !== null ? mapChild.value : "";
+        i = mapChild.nextIndex;
       }
     }
   }
-  return out;
+
+  return { value: result !== null ? result : {}, nextIndex: i };
+}
+
+export function parseInputYAML(str) {
+  if (!str || !str.trim()) return {};
+  var lines = str.split("\n");
+  var res = parseYAMLBlock(lines, 0, 0);
+  return (res.value && typeof res.value === "object" && !Array.isArray(res.value)) ? res.value : {};
 }
 
 export function serializeInputYAML(obj, indent) {
   indent = indent || 0;
   var pad = " ".repeat(indent);
   var lines = [];
+  if (!obj || typeof obj !== "object") return "";
   var keys = Object.keys(obj);
   if (indent === 0) {
     keys.sort(function (a, b) {
@@ -207,7 +347,40 @@ export function serializeInputYAML(obj, indent) {
         lines.push(pad + k + ":\n" + nested);
       }
     } else if (Array.isArray(v)) {
-      lines.push(pad + k + ": " + JSON.stringify(v));
+      if (v.length === 0) {
+        lines.push(pad + k + ": []");
+      } else {
+        var arrLines = [];
+        v.forEach(function (item) {
+          if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+            var itemKeys = Object.keys(item);
+            if (itemKeys.length === 0) {
+              arrLines.push(pad + "  - {}");
+            } else {
+              var first = true;
+              itemKeys.forEach(function (ik) {
+                var iv = item[ik];
+                if (iv === undefined) return;
+                var prefix = first ? (pad + "  - ") : (pad + "    ");
+                first = false;
+                if (typeof iv === "object" && !Array.isArray(iv)) {
+                  var nested = serializeInputYAML(iv, indent + 4);
+                  arrLines.push(prefix + ik + ":\n" + nested);
+                } else if (Array.isArray(iv)) {
+                  arrLines.push(prefix + ik + ": " + JSON.stringify(iv));
+                } else if (typeof iv === "string" && iv.indexOf("\n") !== -1) {
+                  arrLines.push(prefix + ik + ": |\n" + iv.split("\n").map(function (l) { return pad + "      " + l; }).join("\n"));
+                } else {
+                  arrLines.push(prefix + ik + ": " + iv);
+                }
+              });
+            }
+          } else {
+            arrLines.push(pad + "  - " + item);
+          }
+        });
+        lines.push(pad + k + ":\n" + arrLines.join("\n"));
+      }
     } else if (typeof v === "string" && v.indexOf("\n") !== -1) {
       lines.push(pad + k + ": |\n" + v.split("\n").map(function (l) { return pad + "  " + l; }).join("\n"));
     } else {
