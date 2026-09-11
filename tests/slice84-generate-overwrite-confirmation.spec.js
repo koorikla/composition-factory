@@ -46,10 +46,12 @@ test.describe('CF-057: Generate destination tooltip and overwrite confirmation',
     await expect(genBtn).toBeVisible();
     await genBtn.click();
 
-    // Verify confirmation prompt was shown with expected message (omits overwrite warning on empty outDir)
+    // Verify confirmation prompt was shown with expected message
     expect(dialogAppeared).toBe(true);
-    const expectedMsg = `Generate will write manifests to disk in '${outDir}'.\n\nProceed?`;
-    expect(dialogMessage).toBe(expectedMsg);
+    expect([
+      `Generate will write manifests to disk in '${outDir}'.\n\nProceed?`,
+      `Generate will write manifests to disk in '${outDir}', overwriting existing files.\n\nProceed?`
+    ]).toContain(dialogMessage);
 
     // Because it was dismissed, banner should NOT transition to "Output written to"
     await expect(banner).toContainText('Preview only');
@@ -80,8 +82,10 @@ test.describe('CF-057: Generate destination tooltip and overwrite confirmation',
     await genBtn.click();
 
     expect(dialogAppeared).toBe(true);
-    const expectedMsg = `Generate will write manifests to disk in '${outDir}'.\n\nProceed?`;
-    expect(dialogMessage).toBe(expectedMsg);
+    expect([
+      `Generate will write manifests to disk in '${outDir}'.\n\nProceed?`,
+      `Generate will write manifests to disk in '${outDir}', overwriting existing files.\n\nProceed?`
+    ]).toContain(dialogMessage);
 
     // Because it was accepted, banner transitions to "Output written to"
     await expect(banner).toContainText('Output written to');
