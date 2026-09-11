@@ -153,4 +153,55 @@ test.describe('Select and delete wires on canvas', () => {
     await expect(page.locator('svg.wires path.wire-path')).toHaveCount(2);
     await expect(ctxMenu).not.toBeVisible();
   });
+
+  test('pressing Delete or Backspace removes wire even after an input had focus', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.node')).toHaveCount(3);
+    await expect(page.locator('svg.wires path.wire-path')).toHaveCount(3);
+    await canvasSettled(page);
+
+    // Focus the palette search input
+    const searchInput = page.locator('#psearch');
+    await searchInput.focus();
+    await expect(searchInput).toBeFocused();
+
+    // Click the first wire
+    await clickWire(page, 0);
+    await expect(page.locator('svg.wires path.wire-path.wire-selected')).toHaveCount(1);
+
+    // Press Delete key
+    await page.keyboard.press('Delete');
+
+    // Wire is deleted
+    await expect.poll(async () => await page.locator('svg.wires path.wire-path').count()).toBe(2);
+  });
+
+  test('pressing Delete or Backspace removes wire even when window text selection exists', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.node')).toHaveCount(3);
+    await expect(page.locator('svg.wires path.wire-path')).toHaveCount(3);
+    await canvasSettled(page);
+
+    // Create a window text selection
+    await page.evaluate(() => {
+      const el = document.querySelector('.legend');
+      if (el) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+
+    // Click the first wire
+    await clickWire(page, 0);
+    await expect(page.locator('svg.wires path.wire-path.wire-selected')).toHaveCount(1);
+
+    // Press Backspace key
+    await page.keyboard.press('Backspace');
+
+    // Wire is deleted
+    await expect.poll(async () => await page.locator('svg.wires path.wire-path').count()).toBe(2);
+  });
 });

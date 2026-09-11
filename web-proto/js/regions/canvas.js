@@ -1179,7 +1179,6 @@ function onKeyDown(e) {
     return;
   }
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-  if (String(window.getSelection && window.getSelection())) return; // real text copy wins
 
   // Keyboard selection on focused card (.node)
   const nodeEl = t && t.closest && t.closest(".node");
@@ -1202,6 +1201,10 @@ function onKeyDown(e) {
         e.preventDefault();
         selectedWire = ws[idx];
         drawWires();
+        const p = wiresEl && wiresEl.querySelector('.wire-path[data-wire-idx="' + idx + '"]');
+        if (p && typeof p.focus === "function") {
+          p.focus();
+        }
         return;
       }
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -1232,8 +1235,10 @@ function onKeyDown(e) {
   const d = doc();
   const res = d && (d.spec.resources || []).find(function (r) { return r.name === sel; });
   const mod = e.metaKey || e.ctrlKey;
-  if (mod && e.key === "c" && res) { copiedResource = JSON.parse(JSON.stringify(res)); }
-  else if (mod && e.key === "v" && copiedResource) { e.preventDefault(); duplicateResource(copiedResource); }
+  if (mod && e.key === "c") {
+    if (String(window.getSelection && window.getSelection())) return; // real text copy wins
+    if (res) { copiedResource = JSON.parse(JSON.stringify(res)); }
+  } else if (mod && e.key === "v" && copiedResource) { e.preventDefault(); duplicateResource(copiedResource); }
   else if ((e.key === "Delete" || e.key === "Backspace") && res) { e.preventDefault(); removeResource(sel); }
 }
 
@@ -1254,8 +1259,15 @@ function onCwClick(e) {
     const ws = listWires(doc());
     if (ws[idx]) {
       selectedWire = ws[idx];
+      if (document.activeElement && typeof document.activeElement.blur === "function") {
+        document.activeElement.blur();
+      }
       S.select(null);
       drawWires();
+      const p = wiresEl && wiresEl.querySelector('.wire-path[data-wire-idx="' + idx + '"]');
+      if (p && typeof p.focus === "function") {
+        p.focus();
+      }
     }
     e.stopPropagation();
     return;
