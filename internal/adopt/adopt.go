@@ -2090,31 +2090,15 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 	}
 
 	// Extract other top-level fields (e.g. data in ConfigMap, automountServiceAccountToken in ServiceAccount)
-	topKeys := make([]string, 0, len(m))
-	for k := range m {
-		topKeys = append(topKeys, k)
-	}
-	sort.Strings(topKeys)
-	for _, k := range topKeys {
-		v := m[k]
+	otherTop := make(map[string]any)
+	for k, v := range m {
 		if k == "apiVersion" || k == "kind" || k == "metadata" || k == "spec" || k == "status" {
 			continue
 		}
-		if rePlaceholder.MatchString(k) {
-			rawK := unmaskString(k, placeholders)
-			report.Record(fmt.Sprintf("resource.%s.fields.%s", res.Name, rawK), "dynamic map key with template expression is not supported in blueprint")
-			continue
-		}
-		if mapVal, ok := v.(map[string]any); ok {
-			extractFields(k, mapVal, res.Fields, placeholders, res.Name, report, nameMapping, bp)
-		} else {
-			rawStr := unmaskString(formatScalarValue(v), placeholders)
-			if err := checkScalarClean(rawStr); err != nil {
-				report.Record(fmt.Sprintf("resource.%s.fields.%s", res.Name, k), "contains newlines or control characters")
-				continue
-			}
-			res.Fields[k] = blueprint.Field{Value: rawStr}
-		}
+		otherTop[k] = v
+	}
+	if len(otherTop) > 0 {
+		extractFields("", otherTop, res.Fields, placeholders, res.Name, report, nameMapping, bp)
 	}
 
 	// Extract spec fields

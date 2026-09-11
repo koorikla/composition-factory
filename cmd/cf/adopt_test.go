@@ -728,3 +728,100 @@ spec:
 		t.Errorf("missing drop comment in output blueprint:\n%s", string(bpBytes))
 	}
 }
+
+func TestAdoptCLINativeTopLevelWires(t *testing.T) {
+	tmpDir := t.TempDir()
+	compPath := filepath.Join(tmpDir, "irsa-like.yaml")
+	outBPPath := filepath.Join(tmpDir, "adopted.cf.yaml")
+	genOutDir := filepath.Join(tmpDir, "gen")
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xisas.platform.sparky.ee
+spec:
+  group: platform.sparky.ee
+  names:
+    kind: XIsa
+    plural: xisas
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                automountToken:
+                  type: boolean
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xisas.platform.sparky.ee
+spec:
+  compositeTypeRef:
+    apiVersion: platform.sparky.ee/v1alpha1
+    kind: XIsa
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            ---
+            apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: sa
+            automountServiceAccountToken: {{ $spec.automountToken }}
+`
+	if err := os.WriteFile(compPath, []byte(manifest), 0644); err != nil {
+		t.Fatalf("write composition: %v", err)
+	}
+
+	cmd := &AdoptCmd{
+		Composition: compPath,
+		Out:         outBPPath,
+	}
+	var out bytes.Buffer
+	code, err := cmd.run(&out)
+	if err != nil {
+		t.Fatalf("run adopt: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout:\n%s", code, out.String())
+	}
+
+	bpBytes, err := os.ReadFile(outBPPath)
+	if err != nil {
+		t.Fatalf("read adopted blueprint: %v", err)
+	}
+	bpStr := string(bpBytes)
+	if !strings.Contains(bpStr, "from: params.automountToken") {
+		t.Errorf("adopted blueprint missing 'from: params.automountToken', got:\n%s", bpStr)
+	}
+	if strings.Contains(bpStr, "value: '{{ $spec.automountToken }}'") || strings.Contains(bpStr, `value: "{{ $spec.automountToken }}"`) {
+		t.Errorf("adopted blueprint contains literal un-extracted template expression, got:\n%s", bpStr)
+	}
+
+	// Now run GenCmd on the adopted blueprint; before CF-233, this failed with:
+	// "resource "sa" field "automountServiceAccountToken": value "{{ $spec.automountToken }}" is not a valid boolean"
+	genCmd := &GenCmd{
+		Blueprint: outBPPath,
+		Out:       genOutDir,
+	}
+	var genOut bytes.Buffer
+	if err := genCmd.Run(&genOut); err != nil {
+		t.Fatalf("gen on adopted blueprint failed: %v\noutput:\n%s", err, genOut.String())
+	}
+}

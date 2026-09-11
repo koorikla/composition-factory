@@ -12,6 +12,7 @@ import (
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/schema"
+	"github.com/koorikla/compositionfactory/internal/schema/k8s"
 )
 
 // dropsBeyondXRDless returns the drops that are not the per-parameter
@@ -2999,5 +3000,122 @@ spec:
 	}
 	if !strings.Contains(string(reComp), "messageRetentionSeconds: 1209600") {
 		t.Errorf("regenerated composition missing 'messageRetentionSeconds: 1209600':\n%s", string(reComp))
+	}
+}
+
+func TestAdoptNativeTopLevelWires(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: sa-wires-demo
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            apiVersion: iam.aws.upbound.io/v1beta1
+            kind: Role
+            metadata:
+              name: app-role
+            spec:
+              forProvider:
+                assumeRolePolicy: {}
+            ---
+            apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: app-sa
+            automountServiceAccountToken: {{ $spec.automountToken }}
+            customStatusWire: {{ (index $observed "app-role").resource.status.atProvider.arn }}
+            customEnvWire: {{ $env.myFlag }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	sa := bp.ResourceNamed("app-sa")
+	if sa == nil {
+		t.Fatal("resource app-sa not found")
+	}
+
+	if got := sa.Fields["automountServiceAccountToken"].From; got != "params.automountToken" {
+		t.Errorf("automountServiceAccountToken wire = %+v, want From: params.automountToken", sa.Fields["automountServiceAccountToken"])
+	}
+	if got := sa.Fields["customStatusWire"].From; got != "resources.app-role.status.atProvider.arn" {
+		t.Errorf("customStatusWire wire = %+v, want From: resources.app-role.status.atProvider.arn", sa.Fields["customStatusWire"])
+	}
+	if got := sa.Fields["customEnvWire"].From; got != "env.myFlag" {
+		t.Errorf("customEnvWire wire = %+v, want From: env.myFlag", sa.Fields["customEnvWire"])
+	}
+
+	// Round-trip verification: emitting an adopted blueprint with a boolean parameter wired to
+	// automountServiceAccountToken must succeed without structured emission errors (CF-233).
+	nativeCRDs, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+	origBP := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "sa-rt"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XSa", Plural: "xsas",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"automountToken": {Type: "boolean", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "sa", Kind: "ServiceAccount", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"automountServiceAccountToken": {From: "params.automountToken"},
+					},
+				},
+			},
+		},
+	}
+	outputs, err := emit.Generate(origBP, nativeCRDs, "")
+	if err != nil {
+		t.Fatalf("emit.Generate origBP: %v", err)
+	}
+	var compYAML []byte
+	for _, o := range outputs {
+		if strings.Contains(o.Path, "compositions") {
+			compYAML = o.Body
+			break
+		}
+	}
+	if len(compYAML) == 0 {
+		t.Fatalf("no composition generated for origBP")
+	}
+
+	adopted, _, err := Adopt(compYAML, Options{})
+	if err != nil {
+		t.Fatalf("Adopt generated composition: %v", err)
+	}
+	adoptedSA := adopted.ResourceNamed("sa")
+	if adoptedSA == nil {
+		t.Fatal("resource sa not found in adopted blueprint")
+	}
+	if got := adoptedSA.Fields["automountServiceAccountToken"].From; got != "params.automountToken" {
+		t.Errorf("roundtrip adopted automountServiceAccountToken wire = %+v, want From: params.automountToken", adoptedSA.Fields["automountServiceAccountToken"])
+	}
+	// Re-generation from adopted blueprint must succeed (the emitter refused the literal value {{ $spec.automountToken }} on boolean field)
+	if _, err := emit.Generate(adopted, nativeCRDs, ""); err != nil {
+		t.Fatalf("emit.Generate on adopted blueprint failed: %v", err)
 	}
 }
