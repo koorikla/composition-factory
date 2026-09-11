@@ -52,8 +52,7 @@ Both routines audit open Dependabot pull requests (`gh pr list --search "author:
 3. **Vulnerability correlation**: Cross-reference open PRs with `govulncheck` output. If an open Dependabot PR resolves a vulnerability identified in required modules, flag it with high priority in the run report for the driver.
 4. **Report inclusion**: The routine PR includes a dedicated `Dependabot PRs` section listing PR numbers, dependency names, old/new versions, CI check states, and recommended driver actions.
 
-The driver routine (`issue-driver.md`) runs later the same day and resolves what the oracle
-filed. Docker is absent in the cloud environment, so Validate reads "unavailable" there; that
+Drivers (`issue-driver.md`) run around the clock and resolve what the oracle filed. Docker is absent in the cloud environment, so Validate reads "unavailable" there; that
 is environment, not a finding (CF-093).
 
 The full prompt lives in the routine itself; keep this file in step with it when either changes.

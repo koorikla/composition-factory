@@ -33,6 +33,7 @@ To prevent concurrent processes and test runners from trampling each other or th
 - **Dynamic Worktree Port (18000–27999)**: Automated Playwright e2e test suite (`make test-e2e`, managed via `playwright.config.js` and `tests/helpers.js` hashing the git worktree path; overridable via `CF_E2E_PORT`). The engine runs against its own scratch cache (`.testrun-<hash>/cache`), leaving `~/Library/Caches/compositionfactory` untouched.
 - **Dynamic Demo Port (28000–37999)**: Headless demo GIF recorder instance (`scripts/record-demos/`; overridable via `CF_DEMO_PORT`).
 - **Cluster Namespace & Group Isolation**: When running in a shared kind cluster, each workspace uses namespace `cf-<slug>` and appends `--group-suffix=w<hash>.cf-test` to XRD groups (`platform.w<hash>.cf-test`) to prevent cluster-scoped CRD/XRD collisions. The group suffix carries only the 6-char path hash, not the full slug: Crossplane copies the Composition name into a CompositionRevision *label*, and label values cap at 63 characters, so a longer suffix silently stops revisions (and therefore all composition) from being created.
+- **Machine Lock Pools** (`scripts/driver/lock.sh`): `claim` (1 slot, held by `scripts/driver/claim.sh`), `merge` (1 slot, held by `scripts/driver/land.sh` through CI and any revert) and `gate` (`GATE_SLOTS`, default 3, held by `make test-race`, `make test-e2e` and `make test-docker`). Slot files live under `$(git rev-parse --git-common-dir)/cf-locks/` — one set per clone, shared by all of its worktrees; a separate clone does not coordinate with this one. The kernel holds a slot while the command or any descendant keeps its file open and frees it on exit, `kill -9` included; `lsof <slot file>` names a holder, and a leftover `cf serve` from an interrupted `make test-e2e` keeps its gate slot until it is stopped. Never delete a slot file: a recreated file is a new lock. `GATE_SLOTS` is a make variable (also read from the environment); callers passing different values get the largest of them. `CF_GATE_SLOTS=off` bypasses the gate pool only, never `claim` or `merge`, and is for humans only — never drivers or subagents. Without `lockf` every pool runs unlocked with a warning; that is for Linux CI only, and drivers run where `lockf` exists.
 
 Never run test suites or recording harnesses against port 8080.
 
@@ -44,9 +45,10 @@ The standard developer and CI workflows are encapsulated in `Makefile`:
 
 - `make build`: Compile `bin/cf` with git version ldflags.
 - `make test`: Fast unit tests (`go test ./... -short -count=1`).
-- `make test-race`: Fast unit tests with race detector enabled (`go test ./... -short -race -count=1`).
-- `make test-docker`: Acceptance tests requiring Docker and `crossplane` CLI (`go test ./... -run Acceptance -v -count=1`).
-- `make test-e2e`: Playwright browser test suite against workspace-isolated engine (`npx playwright test`).
+- `make test-race`: Fast unit tests with race detector enabled (`go test ./... -short -race -count=1`). Waits for a `gate` slot (§2).
+- `make test-docker`: Acceptance tests requiring Docker and `crossplane` CLI (`go test ./... -run Acceptance -v -count=1`). Waits for a `gate` slot (§2).
+- `make test-e2e`: Playwright browser test suite against workspace-isolated engine (`npx playwright test`). Waits for a `gate` slot (§2).
+- `make test-driver`: Shell tests for `scripts/driver` (`lock.sh`, `claim.sh`, `land.sh`) against a fake `gh`; the `lock.sh` tests skip where `lockf` is absent.
 - `make cluster`: Idempotently create local kind cluster with Crossplane and required functions.
 - `make cluster-down`: Tear down local kind cluster.
 - `make deploy`: Deploy canvas to workspace namespace in the kind cluster via Skaffold.
@@ -71,13 +73,17 @@ To prevent regressions and collisions between concurrent automation agents:
   never reused (next id = max over open+closed issue titles, `docs/tasks/`, and
   `docs/backlog-archive.md`, plus one). Labels carry the triage: `severity:P0..P3`,
   `scale:engine` or `scale:ux`, `verified` (re-verified by hand), `brief-ready` (a brief
-  exists in `docs/tasks/`), `in-progress` (an agent has taken it), `lane:floci`. Filing an
+  exists in `docs/tasks/`), `in-progress` (claimed), `handed-back` (branch pushed, handover
+  on the issue, awaiting `land.sh`), `parked` (branch pushed but not landable yet; the issue
+  says why), `lane:floci`. Filing an
   item is `.claude/skills/backlog-authoring/`. `BACKLOG.md` is a pointer, not a list;
   `docs/backlog-archive.md` is frozen history from before the migration.
 
-- **Taking an item**: comment `taking — <branch>` on the issue and add `in-progress` before
-  you start; remove the label if you stop without merging. Two agents on one issue is the
-  collision this exists to prevent.
+- **Taking an item**: only through `scripts/driver/claim.sh`, which adds `in-progress` and
+  posts the claim `taking — <branch> · driver <driver-id> · lease until <YYYY-MM-DDTHH:MMZ> ·
+  files: <paths>` — a 120-minute lease, refused while a live claim or a handed-back branch
+  holds one of those files. Work that stops without landing is parked, not unlabelled. Two
+  agents on one issue is the collision this exists to prevent.
 
 - **Task Briefs & The Execution Contract**:
   Work is dispatched as a brief in `docs/tasks/CF-NNN-<slug>.md`, linked from the issue and
@@ -88,18 +94,19 @@ To prevent regressions and collisions between concurrent automation agents:
   worktree isolation, port allocation, the test-first loop, the gates, and the handover.
   The authoring side of that loop is `.claude/skills/backlog-authoring/`.
 
-- **One-Driver Rule**: Exactly one driver merges to `main`. The scheduled driver is described in
-  [`docs/routines/issue-driver.md`](docs/routines/issue-driver.md) (selection, parallel waves by
-  disjoint file sets, merge-then-CI-then-close, the 5-hour budget); the scheduled oracle that
+- **One Merge at a Time**: Many drivers may run at once. They are described in
+  [`docs/routines/issue-driver.md`](docs/routines/issue-driver.md) (claiming, subagents in
+  parallel by disjoint file sets, landing, the global cap and shift reports on the pinned Driver
+  log issue); the scheduled oracle that
   files and re-verifies issues (and audits Dependabot MR-s/PRs) is [`docs/routines/oracle.md`](docs/routines/oracle.md)
-  (skill in `.claude/skills/oracle/`). All other agents work in isolated topic branch worktrees and hand over PRs or clean branches.
-- **Pre-Merge Synchronization**: Always run `git fetch && git log main..origin/main` before any merge to ensure no stale assumptions.
-- **Post-Merge CI Check**: The driver that merges to `main` must watch the resulting `ci` run to completion (`gh run watch <id> --exit-status`) and fix or revert what it broke — a merge is not done until CI is green. Two of the five jobs (`cluster`, `e2e`) exercise a real kind cluster and a browser and cannot be reproduced by unit tests, so a locally-green tree says nothing about them. If `e2e` fails, rerun it once before treating it as a regression: its canvas drag tests are flaky in CI. Subagents working in topic-branch worktrees are exempt — they hand over branches and the driver owns the merge and its CI.
+  (skill in `.claude/skills/oracle/`). Only `scripts/driver/land.sh` pushes `main`, one landing at a time: it holds the merge lock for its whole run, through the landing's CI and any revert. All other agents work in isolated topic branch worktrees, push only their own topic branch, and hand back on the issue.
+- **Pre-Merge Synchronization**: `land.sh` fetches and pins `origin/main` before it rebases a branch; branch from `origin/main`, never from local `main`.
+- **Post-Merge CI Check**: `scripts/driver/land.sh` watches the landing's `ci` run to completion and reverts the landing if it is red — a landing is not done until CI is green, and the driver acts on the result line `land.sh` prints. Two of the five jobs (`cluster`, `e2e`) exercise a real kind cluster and a browser and cannot be reproduced by unit tests, so a locally-green tree says nothing about them. If `e2e` is the only failed job, `land.sh` reruns it once before treating it as a regression: its canvas drag tests are flaky in CI. No other job, `acceptance` included, is ever rerun, and nothing is rerun twice. Subagents working in topic-branch worktrees are exempt — they hand back branches and the driver lands them through `land.sh`.
 - **Test-First Backlog Ticking**: Never tick a backlog item without an automated test that fails without the change.
-- **Closing a Backlog Item**: only the driver that merged it closes the issue, after CI is green,
-  with a comment naming the merge commit and the test that guards it (`gh issue close <n>
-  --comment "completed in <sha>; guarded by <test>"`). Reference the issue in the fix commit
-  (`(CF-NNN, #n)`). Do not close from a topic branch; do not close without a guarding test.
+- **Closing a Backlog Item**: only the driver whose `land.sh` reported `LANDED` closes the issue,
+  with a comment naming the landed commit and the test that guards it (`gh issue close <n>
+  --comment "completed in <sha>; guarded by <test>"`). `land.sh` puts the issue reference
+  (`(CF-NNN, #n)`) in the landed commit's subject. Do not close from a topic branch; do not close without a guarding test.
   Half-fixes are not closed: file the residue as a new id and close the original pointing at it.
 - **No AI Attribution**: Commit messages and code comments must remain strictly professional and standard. Never add AI attribution tags (e.g., `Co-authored-by: Claude`, `Generated by AI`, etc.).
 
