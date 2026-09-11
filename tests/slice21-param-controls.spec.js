@@ -21,6 +21,16 @@ test('an unused parameter can be removed from the SHARED rail', async ({ page, r
   expect(doc.spec.xrd.parameters.scratch).toBeUndefined()
 })
 
+test('removing a wired parameter unwires referencers and removes it from the SHARED rail', async ({ page, request }) => {
+  await page.goto('/')
+  await page.click('#rtabs button[data-r="shared"]')
+  page.on('dialog', d => d.accept())
+  await page.click('.card:has-text("$region") [data-param-del]')
+  await expect(page.locator('#lrail').getByText('$region')).toHaveCount(0)
+  const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
+  expect(doc.spec.xrd.parameters.region).toBeUndefined()
+})
+
 test('cancelling unwire dialog for a wired parameter keeps it', async ({ page, request }) => {
   await page.goto('/')
   await page.click('#rtabs button[data-r="shared"]')
