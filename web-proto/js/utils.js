@@ -69,6 +69,23 @@ export function uniqueResourceName(d, kind) {
 }
 
 /**
+ * Clean engine DSL jargon from user-facing error messages.
+ * Translates internal mode names (from, value, raw, template) into user terms.
+ *
+ * @param {string} msg Raw error message
+ * @returns {string}
+ */
+export function humanizeError(msg) {
+  if (!msg || typeof msg !== "string") return msg;
+  var s = msg;
+  s = s.replace(/set exactly one of from, value, raw or template\s*\(got 0\)/gi, "requires a value or wire");
+  s = s.replace(/set exactly one of from, value, raw or template\s*\(got (\d+)\)/gi, "set only one value or wire (got $1)");
+  s = s.replace(/set exactly one of from, value, raw or template/gi, "requires a value or wire");
+  s = s.replace(/mapping with one of value, from, raw, or template/gi, "mapping with a value or wire");
+  return s;
+}
+
+/**
  * Map index-based spec.resources[N] coordinates in error messages to human-readable resource names.
  *
  * @param {string} msg Raw error message containing spec.resources[N]
@@ -77,7 +94,8 @@ export function uniqueResourceName(d, kind) {
  */
 export function mapResourceCoordinates(msg, storeOrDoc) {
   if (!msg || typeof msg !== "string") return msg;
-  return msg.replace(/spec\.resources\[(\d+)\]/g, function (match, indexStr) {
+  var cleaned = humanizeError(msg);
+  return cleaned.replace(/spec\.resources\[(\d+)\]/g, function (match, indexStr) {
     var idx = parseInt(indexStr, 10);
     var doc = (storeOrDoc && storeOrDoc.spec)
       ? storeOrDoc

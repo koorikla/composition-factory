@@ -15,6 +15,7 @@ import { startDrag } from "./drag.js";
 import { store } from "./store.js";
 import * as api from "./api.js";
 import { esc } from "./dom.js";
+import { mapResourceCoordinates } from "./utils.js";
 import { init as initPalette } from "./regions/palette.js";
 import { init as initCanvas } from "./regions/canvas.js";
 import { init as initInspector } from "./regions/inspector.js";
@@ -50,7 +51,7 @@ store.loadDoc();
 })();
 
 
-/* ---- global error toast for rejected store actions (CF-011) ---- */
+/* ---- global error toast for rejected store actions (CF-011, CF-136) ---- */
 let toastTimer = null;
 export function showErrorToast(msg) {
   if (!msg) return;
@@ -64,19 +65,39 @@ export function showErrorToast(msg) {
   }
   t.innerHTML = '<span style="color:var(--err)">⚠️</span> <span class="toast-msg" style="flex:1">' + esc(msg) + '</span> <button class="toast-close" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px;padding:0 4px">&times;</button>';
   t.querySelector(".toast-close").onclick = function () {
-    t.remove();
+    clearErrorToast();
   };
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(function () {
-    if (t.parentNode) t.remove();
-    toastTimer = null;
+    clearErrorToast();
   }, 6000);
 }
 
+export function clearErrorToast() {
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  let t = document.getElementById("canvas-error-toast");
+  if (t) {
+    t.remove();
+  }
+}
+window.clearErrorToast = clearErrorToast;
+
 store.subscribe("error", function (err) {
   if (err && err.message) {
-    showErrorToast(err.message);
+    showErrorToast(mapResourceCoordinates(err.message));
   }
+});
+
+// The toast must not outlive the next successful action (CF-136)
+store.subscribe("doc", function () {
+  clearErrorToast();
+});
+
+store.subscribe("generate", function () {
+  clearErrorToast();
 });
 
 /* ---- resizable side columns: drag handles, clamped, persisted ---- */

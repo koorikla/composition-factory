@@ -57,6 +57,8 @@ var uiMode = {};                 // path -> "v"|"w"|"r" local mode override (sel
 var pendingNewParam = null;      // field path currently showing the inline new-parameter form
 var pendingNewMapEntry = null;   // map field path currently showing the inline add-key form
 var pendingFocusParam = null;    // parameter name to focus and select in XRD inspector after render
+var annDraftKey = "";            // draft annotation key being entered (CF-136)
+var annDraftRes = "";            // resource name annDraftKey belongs to (CF-136)
 var renderToken = 0;
 
 var kindsPromise = null;         // cached GET /api/kinds
@@ -972,6 +974,11 @@ async function renderResource(res) {
   }
   if (t !== renderToken) return;
 
+  if (annDraftRes !== res.name) {
+    annDraftKey = "";
+    annDraftRes = res.name;
+  }
+
   var otherResources = (doc && doc.spec && doc.spec.resources || []).filter(function (r) {
     return r.name !== res.name && !r.forEach;
   });
@@ -1124,8 +1131,8 @@ async function renderResource(res) {
           '<button class="del" data-ann-del="' + esc(k) + '" title="Remove annotation">\u00d7</button></div>';
       }).join("") +
       '<div class="frow" style="margin-top:4px;margin-bottom:0">' +
-      '<input class="tin" data-ann-key placeholder="prefix/name" style="flex:1;min-width:0">' +
-      '<input class="tin" data-ann-value placeholder="value" style="flex:1;min-width:0">' +
+      '<input class="tin" data-ann-key placeholder="prefix/name" value="' + esc(annDraftKey || "") + '" style="flex:1;min-width:0">' +
+      '<input class="tin" data-ann-value placeholder="value (or placeholder to wire)" style="flex:1;min-width:0">' +
       '<button class="btn sm" data-ann-add>Add</button></div></div>';
 
     // Status outputs section
@@ -1700,8 +1707,29 @@ var boxClickActions = [
       var keyEl = box.querySelector("[data-ann-key]");
       var valEl = box.querySelector("[data-ann-value]");
       var selRes2 = selectedResource();
-      if (!selRes2 || !keyEl || !keyEl.value.trim()) return;
-      var annKey = keyEl.value.trim(), annVal = (valEl && valEl.value) || "";
+      if (!selRes2 || !keyEl) return;
+      var annKey = keyEl.value.trim();
+      if (!annKey) {
+        var kMsg = "Annotation key is required (e.g. prefix/name)";
+        warnMsg = kMsg;
+        store.emit("error", { message: kMsg });
+        render();
+        var kEl = box.querySelector("[data-ann-key]");
+        if (kEl) kEl.focus();
+        return;
+      }
+      var annVal = valEl ? valEl.value.trim() : "";
+      if (!annVal) {
+        annDraftKey = annKey;
+        var vMsg = 'Annotation "' + annKey + '" requires a value (or a temporary placeholder to wire later)';
+        warnMsg = vMsg;
+        store.emit("error", { message: vMsg });
+        render();
+        var vEl = box.querySelector("[data-ann-value]");
+        if (vEl) vEl.focus();
+        return;
+      }
+      annDraftKey = annKey;
       op(function () {
         return store.replaceDoc(function (d) {
           var r = d.spec.resources.find(function (x) { return x.name === selRes2.name; });
@@ -1709,6 +1737,11 @@ var boxClickActions = [
           r.annotations = r.annotations || {};
           r.annotations[annKey] = { value: annVal };
         });
+      }).then(function (res) {
+        if (res !== null) {
+          annDraftKey = "";
+          render();
+        }
       });
     }
   },
@@ -2452,12 +2485,21 @@ export function init(rootEl, deps) {
       return;
     }
     if (e.key === "Enter" && (t.tagName === "INPUT" || t.tagName === "SELECT")) {
+      if (t.matches && (t.matches("[data-ann-key]") || t.matches("[data-ann-value]"))) {
+        e.preventDefault();
+        var addBtn = box.querySelector("[data-ann-add]");
+        if (addBtn) addBtn.click();
+        return;
+      }
       e.preventDefault();
       t.blur();
     }
   });
   box.addEventListener("input", function (e) {
     var t = e.target;
+    if (t && t.matches && t.matches("[data-ann-key]")) {
+      annDraftKey = t.value;
+    }
     if (!t || !t.matches("textarea.raw")) return;
     var isEnv = t.hasAttribute("data-env-raw");
     var path = t.getAttribute(isEnv ? "data-env-raw" : "data-raw");

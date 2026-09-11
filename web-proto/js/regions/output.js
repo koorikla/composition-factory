@@ -765,6 +765,8 @@ function renderOk(resources) {
     ? (resources.resources || 0)
     : Number(resources || 0);
   showWarn("");
+  var errToast = document.getElementById("canvas-error-toast");
+  if (errToast) errToast.remove();
   el.valid.textContent = "valid · " + n + " resource" + (n === 1 ? "" : "s");
   el.valid.title = "";
   el.valid.style.color = "";
