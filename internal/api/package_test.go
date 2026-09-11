@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -91,5 +92,43 @@ func TestPackageDownloadYAML(t *testing.T) {
 	}
 	if !bytes.Equal(stream, rec.Body.Bytes()) {
 		t.Error("format=yaml differs from the xpkg's package.yaml")
+	}
+}
+
+func TestPackageInvalidMetadataNameIs400Not500(t *testing.T) {
+	cases := []struct {
+		name     string
+		badMeta  string
+		wantFrag string
+	}{
+		{"empty", "", "metadata.name is required"},
+		{"spaces", "My Blueprint", "not a valid DNS subdomain name"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, bpPath, _, _ := testServerParts(t)
+
+			content, err := os.ReadFile(bpPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Poison metadata.name directly in the file on disk to simulate pre-existing or hand-edited invalid state.
+			poisoned := strings.Replace(string(content), "name: xqueue\n", fmt.Sprintf("name: %q\n", tc.badMeta), 1)
+			if err := os.WriteFile(bpPath, []byte(poisoned), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			req := httptest.NewRequest("GET", "/api/package", nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != 400 {
+				t.Fatalf("status %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.wantFrag) {
+				t.Errorf("expected body to contain %q, got %q", tc.wantFrag, rec.Body.String())
+			}
+		})
 	}
 }

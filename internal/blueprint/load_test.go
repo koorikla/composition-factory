@@ -273,6 +273,7 @@ func validParamBlueprint(paramName string) *Blueprint {
 	return &Blueprint{
 		APIVersion: APIVersion,
 		Kind:       Kind,
+		Metadata:   Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
 				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",
@@ -490,6 +491,7 @@ func blueprintWithParam(p Parameter) *Blueprint {
 	return &Blueprint{
 		APIVersion: APIVersion,
 		Kind:       Kind,
+		Metadata:   Metadata{Name: "xqueue"},
 		Spec: Spec{
 			XRD: XRD{
 				Group: "platform.sparky.ee", Kind: "XQueue", Plural: "xqueues",

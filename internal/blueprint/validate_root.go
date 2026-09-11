@@ -14,8 +14,19 @@ func (b *Blueprint) validateRoot() error {
 		return fmt.Errorf("kind: %q is not valid (must be %q)", b.Kind, Kind)
 	}
 
+	if b.Metadata.Name == "" {
+		return fmt.Errorf("metadata.name is required")
+	}
 	if err := checkScalar("metadata.name", b.Metadata.Name); err != nil {
 		return err
+	}
+	if len(b.Metadata.Name) > 253 {
+		return fmt.Errorf("metadata.name: %q exceeds maximum length of 253 characters", b.Metadata.Name)
+	}
+	if !groupRE.MatchString(b.Metadata.Name) || yamlKeywords[strings.ToLower(b.Metadata.Name)] {
+		return fmt.Errorf("metadata.name: %q is not a valid DNS subdomain name "+
+			"(must be lowercase alphanumeric characters, '-' or '.', and start and end with an alphanumeric character)",
+			b.Metadata.Name)
 	}
 
 	if b.Spec.Emit != nil {
