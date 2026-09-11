@@ -223,7 +223,32 @@ func (srv *server) handleImportBlueprint(w http.ResponseWriter, r *http.Request)
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
-	if !srv.persistBlueprint(w, r, b) {
+	ctx := r.Context()
+	origProviders := append([]string(nil), srv.Providers...)
+	if err := srv.syncBlueprintSourcesLocked(ctx, b); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("failed to sync sources: %v", err))
+		return
+	}
+	crds, err := srv.loadSourceCRDs(b)
+	if err == nil {
+		if err := srv.validateBlueprintAgainstCRDs(b, crds); err != nil {
+			srv.Providers = origProviders
+			if rerr := srv.rebuildIndexLocked(); rerr != nil {
+				writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("validation failed (%v) and index restore failed: %v", err, rerr))
+				return
+			}
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
+		srv.Providers = origProviders
+		if rerr := srv.rebuildIndexLocked(); rerr != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write failed (%v) and index restore failed: %v", err, rerr))
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, b)

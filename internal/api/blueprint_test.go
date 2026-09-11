@@ -2063,3 +2063,47 @@ func TestCF214DecodeJSONRejectsTrailingContent(t *testing.T) {
 		t.Error("blueprint file changed despite 400 on parameter route with trailing content")
 	}
 }
+
+func TestCF219ImportBlueprintValidatesCRDSchema(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+
+	// 1. Valid import succeeds with HTTP 200 and persists to disk.
+	validYAML := strings.Replace(testBlueprintYAML, "name: xqueue", "name: xqueue-imported", 1)
+	rec := do(t, h, "POST", "/api/blueprint/import", validYAML)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid import status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	reloaded := mustLoadBlueprint(t, path)
+	if reloaded.Metadata.Name != "xqueue-imported" {
+		t.Fatalf("persisted metadata.name = %q, want xqueue-imported", reloaded.Metadata.Name)
+	}
+
+	// Snapshot disk state before invalid import.
+	snapshot, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+
+	// 2. Import with unknown field for a known resource returns HTTP 400 Bad Request
+	// and does not persist to disk.
+	invalidYAML := strings.Replace(validYAML, `region: {value: "eu-west-1"}`, `region: {value: "eu-west-1"}`+"\n        unknownBogusField: {value: \"test\"}", 1)
+	rec = do(t, h, "POST", "/api/blueprint/import", invalidYAML)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("import with unknown field status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	var errBody errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("error response not JSON: %v (%s)", err, rec.Body)
+	}
+	if !strings.Contains(errBody.Error, "unknownBogusField") {
+		t.Errorf("error body = %q, want mention of 'unknownBogusField'", errBody.Error)
+	}
+
+	afterInvalid, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after invalid import: %v", err)
+	}
+	if !bytes.Equal(snapshot, afterInvalid) {
+		t.Error("blueprint file changed on disk despite rejected import with unknown field")
+	}
+}
