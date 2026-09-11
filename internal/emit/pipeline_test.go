@@ -457,3 +457,110 @@ func TestValidatePipelineInputs_MismatchedAPIVersionOrKind(t *testing.T) {
 		t.Errorf("error %q should indicate schema mismatch", err.Error())
 	}
 }
+
+func TestPipelineDuplicateEnvironmentConfigsStep(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
+	b.Spec.Environment = map[string]blueprint.EnvironmentKey{
+		"region": {Type: "string"},
+	}
+	b.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "environment-configs",
+			FunctionRef: "function-auto-ready",
+			Package:     "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.4.0",
+		},
+	}
+
+	outputs, err := Generate(b, testCRDs(t), "out")
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var compBody []byte
+	for _, o := range outputs {
+		if strings.Contains(filepath.ToSlash(o.Path), "compositions/") {
+			compBody = o.Body
+			break
+		}
+	}
+	if compBody == nil {
+		t.Fatal("composition output not found")
+	}
+
+	var doc struct {
+		Spec struct {
+			Pipeline []struct {
+				Step string `json:"step"`
+			} `json:"pipeline"`
+		} `json:"spec"`
+	}
+	if err := yaml.Unmarshal(compBody, &doc); err != nil {
+		t.Fatalf("unmarshal emitted Composition: %v", err)
+	}
+
+	count := 0
+	for _, s := range doc.Spec.Pipeline {
+		if s.Step == "environment-configs" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("want exactly one step named %q in spec.pipeline, got %d", "environment-configs", count)
+	}
+}
+
+func TestPipelineDuplicateEnvironmentConfigsStep_SameFunction(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Resources[0].Fields["region"] = blueprint.Field{Value: "eu-central-1"}
+	b.Spec.Environment = map[string]blueprint.EnvironmentKey{
+		"region": {Type: "string"},
+	}
+	b.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "environment-configs",
+			FunctionRef: "function-environment-configs",
+			Package:     "xpkg.crossplane.io/crossplane-contrib/function-environment-configs:v0.4.0",
+		},
+	}
+
+	outputs, err := Generate(b, testCRDs(t), "out")
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var compBody []byte
+	for _, o := range outputs {
+		if strings.Contains(filepath.ToSlash(o.Path), "compositions/") {
+			compBody = o.Body
+			break
+		}
+	}
+	if compBody == nil {
+		t.Fatal("composition output not found")
+	}
+
+	var doc struct {
+		Spec struct {
+			Pipeline []struct {
+				Step        string `json:"step"`
+				FunctionRef struct {
+					Name string `json:"name"`
+				} `json:"functionRef"`
+			} `json:"pipeline"`
+		} `json:"spec"`
+	}
+	if err := yaml.Unmarshal(compBody, &doc); err != nil {
+		t.Fatalf("unmarshal emitted Composition: %v", err)
+	}
+
+	count := 0
+	for _, s := range doc.Spec.Pipeline {
+		if s.Step == "environment-configs" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("want exactly one step named %q in spec.pipeline, got %d", "environment-configs", count)
+	}
+}

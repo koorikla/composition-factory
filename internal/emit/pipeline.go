@@ -28,23 +28,41 @@ var defaultPipeline = []blueprint.PipelineStep{{
 // effectivePipeline resolves a blueprint's declared steps, falling back to
 // defaultPipeline. When spec.environment is non-empty, the function-environment-configs
 // step is auto-injected ahead of the templating step (if not already present).
+// If a step named "environment-configs" or referencing function-environment-configs
+// already exists, duplicate step injection is prevented and any missing configuration
+// is merged. Emitted step names are guaranteed to be unique.
 // Both Composition and Functions go through this one resolver so the pipeline they describe can never disagree.
 func effectivePipeline(b *blueprint.Blueprint) []blueprint.PipelineStep {
-	steps := b.Spec.Pipeline
-	if len(steps) == 0 {
-		steps = defaultPipeline
+	if b == nil {
+		return defaultPipeline
 	}
-	if len(b.Spec.Environment) > 0 || len(b.Spec.EnvironmentConfigs) > 0 {
+	steps := make([]blueprint.PipelineStep, len(b.Spec.Pipeline))
+	copy(steps, b.Spec.Pipeline)
+	if len(steps) == 0 {
+		steps = append([]blueprint.PipelineStep(nil), defaultPipeline...)
+	}
+	if b.HasEnvironment() {
 		hasEnvStep := false
-		for _, s := range steps {
-			if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
+		for i, s := range steps {
+			if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName || s.Name == blueprint.EnvironmentConfigsStepName {
 				hasEnvStep = true
+				if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
+					if steps[i].Input == "" {
+						steps[i].Input = b.EnvironmentConfigsInput()
+					}
+					if steps[i].Package == "" {
+						steps[i].Package = blueprint.EnvironmentConfigsFunctionPackage
+					}
+					if steps[i].Position == "" {
+						steps[i].Position = blueprint.PositionBefore
+					}
+				}
 				break
 			}
 		}
 		if !hasEnvStep {
 			envStep := blueprint.PipelineStep{
-				Name:        "environment-configs",
+				Name:        blueprint.EnvironmentConfigsStepName,
 				FunctionRef: blueprint.EnvironmentConfigsFunctionName,
 				Package:     blueprint.EnvironmentConfigsFunctionPackage,
 				Position:    blueprint.PositionBefore,
@@ -53,7 +71,21 @@ func effectivePipeline(b *blueprint.Blueprint) []blueprint.PipelineStep {
 			steps = append([]blueprint.PipelineStep{envStep}, steps...)
 		}
 	}
-	return steps
+
+	// Ensure step names are strictly unique across the effective pipeline.
+	seen := make(map[string]struct{}, len(steps))
+	deduped := make([]blueprint.PipelineStep, 0, len(steps))
+	for _, s := range steps {
+		if s.Name == blueprint.TemplatingStepName {
+			continue
+		}
+		if _, exists := seen[s.Name]; exists {
+			continue
+		}
+		seen[s.Name] = struct{}{}
+		deduped = append(deduped, s)
+	}
+	return deduped
 }
 
 // splitPipeline partitions steps around the templating step, preserving
@@ -117,7 +149,7 @@ func ValidatePipelineInputs(b *blueprint.Blueprint, crds []schema.CRD) (warnings
 	for _, step := range b.Spec.Pipeline {
 		expectedCRD, ver, found := findFunctionCRD(step, crds)
 		if !found {
-			if step.Name == "environment-configs" && step.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
+			if step.Name == blueprint.EnvironmentConfigsStepName && step.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
 				continue
 			}
 			if step.Input == "" {

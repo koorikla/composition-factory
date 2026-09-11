@@ -14,9 +14,16 @@ import (
 // because Validate needs them for collision checks and emit already imports
 // this package -- the reverse import would be a cycle.
 const (
-	TemplatingStepName     = "render-resources"
-	TemplatingFunctionName = "function-go-templating"
+	TemplatingStepName         = "render-resources"
+	TemplatingFunctionName     = "function-go-templating"
+	EnvironmentConfigsStepName = "environment-configs"
 )
+
+// HasEnvironment reports whether the blueprint declares an environment or
+// environment configs requiring the function-environment-configs pipeline step.
+func (b *Blueprint) HasEnvironment() bool {
+	return b != nil && (len(b.Spec.Environment) > 0 || len(b.Spec.EnvironmentConfigs) > 0)
+}
 
 // PositionBefore and PositionAfter are the two legal values of a pipeline
 // step's position field: which side of the templating step it lands on. An
