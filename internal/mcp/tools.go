@@ -27,6 +27,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -334,6 +335,12 @@ type kindFieldsInput struct {
 // kindFields mirrors GET
 // /api/kinds/{apiVersion}/{kind}/fields?prefix=&max_depth=&q=&required_only=&limit=&status=.
 func (s *server) kindFields(_ context.Context, _ *sdk.CallToolRequest, in kindFieldsInput) (*sdk.CallToolResult, any, error) {
+	if in.APIVersion == "" {
+		return nil, nil, errors.New("api_version is required")
+	}
+	if in.Kind == "" {
+		return nil, nil, errors.New("kind is required")
+	}
 	q := url.Values{}
 	if in.Prefix != "" {
 		q.Set("prefix", in.Prefix)
@@ -400,6 +407,9 @@ type updateParameterInput struct {
 
 // updateParameter mirrors PUT /api/blueprint/parameters/{name}.
 func (s *server) updateParameter(_ context.Context, _ *sdk.CallToolRequest, in updateParameterInput) (*sdk.CallToolResult, any, error) {
+	if in.Name == "" {
+		return nil, nil, errors.New("name is required")
+	}
 	body, err := json.Marshal(struct {
 		Parameter json.RawMessage `json:"parameter"`
 	}{Parameter: rawOrNull(in.Parameter)})
@@ -416,6 +426,12 @@ type renameParameterInput struct {
 
 // renameParameter mirrors POST /api/blueprint/parameters/{name}/rename.
 func (s *server) renameParameter(_ context.Context, _ *sdk.CallToolRequest, in renameParameterInput) (*sdk.CallToolResult, any, error) {
+	if in.Name == "" {
+		return nil, nil, errors.New("name is required")
+	}
+	if in.To == "" {
+		return nil, nil, errors.New("to is required")
+	}
 	body, err := json.Marshal(struct {
 		To string `json:"to"`
 	}{To: in.To})
@@ -431,6 +447,9 @@ type deleteParameterInput struct {
 
 // deleteParameter mirrors DELETE /api/blueprint/parameters/{name}.
 func (s *server) deleteParameter(_ context.Context, _ *sdk.CallToolRequest, in deleteParameterInput) (*sdk.CallToolResult, any, error) {
+	if in.Name == "" {
+		return nil, nil, errors.New("name is required")
+	}
 	return s.bridge(http.MethodDelete, "/api/blueprint/parameters/"+url.PathEscape(in.Name), nil)
 }
 
@@ -466,6 +485,9 @@ type updateResourceInput struct {
 
 // updateResource mirrors PUT /api/blueprint/resources/{name}.
 func (s *server) updateResource(_ context.Context, _ *sdk.CallToolRequest, in updateResourceInput) (*sdk.CallToolResult, any, error) {
+	if in.Name == "" {
+		return nil, nil, errors.New("name is required")
+	}
 	return s.bridge(http.MethodPut, "/api/blueprint/resources/"+url.PathEscape(in.Name), rawOrNull(in.Resource))
 }
 
@@ -476,6 +498,12 @@ type renameResourceInput struct {
 
 // renameResource mirrors POST /api/blueprint/resources/{name}/rename.
 func (s *server) renameResource(_ context.Context, _ *sdk.CallToolRequest, in renameResourceInput) (*sdk.CallToolResult, any, error) {
+	if in.Name == "" {
+		return nil, nil, errors.New("name is required")
+	}
+	if in.To == "" {
+		return nil, nil, errors.New("to is required")
+	}
 	body, err := json.Marshal(struct {
 		To string `json:"to"`
 	}{To: in.To})
@@ -491,6 +519,9 @@ type deleteResourceInput struct {
 
 // deleteResource mirrors DELETE /api/blueprint/resources/{name}.
 func (s *server) deleteResource(_ context.Context, _ *sdk.CallToolRequest, in deleteResourceInput) (*sdk.CallToolResult, any, error) {
+	if in.Name == "" {
+		return nil, nil, errors.New("name is required")
+	}
 	return s.bridge(http.MethodDelete, "/api/blueprint/resources/"+url.PathEscape(in.Name), nil)
 }
 
