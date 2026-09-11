@@ -247,6 +247,7 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 		if !ok {
 			continue
 		}
+		checkCompositionSpecFields(spec, report)
 		if ctr, ok := spec["compositeTypeRef"].(map[string]any); ok {
 			if k, ok := ctr["kind"].(string); ok && bp.Spec.XRD.Kind == "" {
 				bp.Spec.XRD.Kind = k

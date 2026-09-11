@@ -541,3 +541,88 @@ data:
 		t.Errorf("expected adopted blueprint to contain spec.environmentConfigs, got:\n%s", bpStr)
 	}
 }
+
+func TestCF207_AdoptCLI_DroppedCompositionSpecFields_ExitCode2(t *testing.T) {
+	tmpDir := t.TempDir()
+	compPath := filepath.Join(tmpDir, "composition.yaml")
+	outBlueprintPath := filepath.Join(tmpDir, "blueprint.yaml")
+
+	compContent := `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  group: platform.example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - providerName
+            properties:
+              providerName:
+                type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  writeConnectionSecretsToNamespace: crossplane-system
+  publishConnectionDetailsWithStoreConfigRef:
+    name: default
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: patch-and-transform
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+      - name: queue
+        base:
+          apiVersion: sqs.aws.m.upbound.io/v1beta1
+          kind: Queue
+          spec:
+            forProvider:
+              region: eu-west-1
+`
+	if err := os.WriteFile(compPath, []byte(compContent), 0644); err != nil {
+		t.Fatalf("write composition: %v", err)
+	}
+
+	cmd := &AdoptCmd{
+		Composition: compPath,
+		Out:         outBlueprintPath,
+	}
+
+	var out bytes.Buffer
+	code, err := cmd.run(&out)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "spec.writeConnectionSecretsToNamespace") {
+		t.Errorf("stdout missing spec.writeConnectionSecretsToNamespace: %s", outStr)
+	}
+	if !strings.Contains(outStr, "spec.publishConnectionDetailsWithStoreConfigRef") {
+		t.Errorf("stdout missing spec.publishConnectionDetailsWithStoreConfigRef: %s", outStr)
+	}
+}

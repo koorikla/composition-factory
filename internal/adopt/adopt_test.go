@@ -1839,3 +1839,99 @@ spec:
 		t.Errorf("resource 1 provider = %q, want %q", bpCacheOnly.Spec.Resources[1].Provider, ref)
 	}
 }
+
+func TestCF207_AdoptCompositionSpecUnsupportedFields_LossReport(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  group: platform.example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - providerName
+            properties:
+              providerName:
+                type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  writeConnectionSecretsToNamespace: crossplane-system
+  publishConnectionDetailsWithStoreConfigRef:
+    name: default
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: patch-and-transform
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+      - name: queue
+        base:
+          apiVersion: sqs.aws.m.upbound.io/v1beta1
+          kind: Queue
+          spec:
+            forProvider:
+              region: eu-west-1
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if bp == nil {
+		t.Fatalf("expected blueprint, got nil")
+	}
+
+	if !report.HasTrueLoss() {
+		t.Fatalf("expected true loss for unsupported Composition spec fields, got drops: %+v", report.Drops)
+	}
+
+	dropsByPath := make(map[string]string)
+	for _, d := range report.Drops {
+		dropsByPath[d.Path] = d.Reason
+	}
+
+	if reason, ok := dropsByPath["spec.writeConnectionSecretsToNamespace"]; !ok {
+		t.Errorf("expected drop for spec.writeConnectionSecretsToNamespace, got drops: %+v", report.Drops)
+	} else if !strings.Contains(reason, "not supported in blueprint") {
+		t.Errorf("unexpected reason for spec.writeConnectionSecretsToNamespace: %q", reason)
+	}
+
+	if reason, ok := dropsByPath["spec.publishConnectionDetailsWithStoreConfigRef"]; !ok {
+		t.Errorf("expected drop for spec.publishConnectionDetailsWithStoreConfigRef, got drops: %+v", report.Drops)
+	} else if !strings.Contains(reason, "not supported in blueprint") {
+		t.Errorf("unexpected reason for spec.publishConnectionDetailsWithStoreConfigRef: %q", reason)
+	}
+
+	outYAML, err := FormatAdoptedYAML(bp, report)
+	if err != nil {
+		t.Fatalf("FormatAdoptedYAML failed: %v", err)
+	}
+	if !strings.Contains(string(outYAML), "# adopt: dropped spec.writeConnectionSecretsToNamespace") {
+		t.Errorf("expected comment for spec.writeConnectionSecretsToNamespace in YAML:\n%s", string(outYAML))
+	}
+	if !strings.Contains(string(outYAML), "# adopt: dropped spec.publishConnectionDetailsWithStoreConfigRef") {
+		t.Errorf("expected comment for spec.publishConnectionDetailsWithStoreConfigRef in YAML:\n%s", string(outYAML))
+	}
+}

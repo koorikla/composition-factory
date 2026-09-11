@@ -304,6 +304,8 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		return nil, nil, fmt.Errorf("composition missing spec section")
 	}
 
+	checkCompositionSpecFields(spec, report)
+
 	if ctr, ok := spec["compositeTypeRef"].(map[string]any); ok {
 		if k, ok := ctr["kind"].(string); ok {
 			bp.Spec.XRD.Kind = k
@@ -410,6 +412,34 @@ func splitYAML(data []byte) ([]map[string]any, error) {
 		}
 	}
 	return docs, nil
+}
+
+// checkCompositionSpecFields inspects Composition.spec for unsupported fields and records them in report.
+func checkCompositionSpecFields(spec map[string]any, report *LossReport) {
+	if report == nil || spec == nil {
+		return
+	}
+	specKeys := make([]string, 0, len(spec))
+	for k := range spec {
+		specKeys = append(specKeys, k)
+	}
+	sort.Strings(specKeys)
+	for _, k := range specKeys {
+		if k == "compositeTypeRef" || k == "mode" || k == "pipeline" || k == "resources" {
+			continue
+		}
+		path := fmt.Sprintf("spec.%s", k)
+		alreadyRecorded := false
+		for _, d := range report.Drops {
+			if d.Path == path {
+				alreadyRecorded = true
+				break
+			}
+		}
+		if !alreadyRecorded {
+			report.Record(path, fmt.Sprintf("%s is not supported in blueprint", k))
+		}
+	}
 }
 
 // parseEnvironmentConfigDocs ingests EnvironmentConfig documents into bp.Spec.Environment

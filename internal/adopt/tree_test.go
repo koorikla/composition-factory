@@ -1182,3 +1182,97 @@ spec:
 		t.Errorf("resource 1 provider = %q, want %q", bpCacheOnly.Spec.Resources[1].Provider, ref)
 	}
 }
+
+func TestCF207_AdoptTree_CompositionSpecUnsupportedFields_LossReport(t *testing.T) {
+	treeDir := t.TempDir()
+
+	xrdYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  group: platform.example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - providerName
+            properties:
+              providerName:
+                type: string
+`
+	if err := os.WriteFile(filepath.Join(treeDir, "definition.yaml"), []byte(xrdYAML), 0o644); err != nil {
+		t.Fatalf("write definition.yaml: %v", err)
+	}
+
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  writeConnectionSecretsToNamespace: crossplane-system
+  publishConnectionDetailsWithStoreConfigRef:
+    name: default
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: patch-and-transform
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+      - name: queue
+        base:
+          apiVersion: sqs.aws.m.upbound.io/v1beta1
+          kind: Queue
+          spec:
+            forProvider:
+              region: eu-west-1
+`
+	if err := os.WriteFile(filepath.Join(treeDir, "composition.yaml"), []byte(compYAML), 0o644); err != nil {
+		t.Fatalf("write composition.yaml: %v", err)
+	}
+
+	bp, report, err := AdoptTree(treeDir, Options{})
+	if err != nil {
+		t.Fatalf("AdoptTree failed: %v", err)
+	}
+	if bp == nil {
+		t.Fatalf("expected blueprint, got nil")
+	}
+
+	if !report.HasTrueLoss() {
+		t.Fatalf("expected true loss for unsupported Composition spec fields, got drops: %+v", report.Drops)
+	}
+
+	dropsByPath := make(map[string]string)
+	for _, d := range report.Drops {
+		dropsByPath[d.Path] = d.Reason
+	}
+
+	if reason, ok := dropsByPath["spec.writeConnectionSecretsToNamespace"]; !ok {
+		t.Errorf("expected drop for spec.writeConnectionSecretsToNamespace, got drops: %+v", report.Drops)
+	} else if !strings.Contains(reason, "not supported in blueprint") {
+		t.Errorf("unexpected reason for spec.writeConnectionSecretsToNamespace: %q", reason)
+	}
+
+	if reason, ok := dropsByPath["spec.publishConnectionDetailsWithStoreConfigRef"]; !ok {
+		t.Errorf("expected drop for spec.publishConnectionDetailsWithStoreConfigRef, got drops: %+v", report.Drops)
+	} else if !strings.Contains(reason, "not supported in blueprint") {
+		t.Errorf("unexpected reason for spec.publishConnectionDetailsWithStoreConfigRef: %q", reason)
+	}
+}
