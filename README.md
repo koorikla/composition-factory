@@ -179,6 +179,7 @@ bin/cf provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
 bin/cf gen testdata/xqueue.cf.yaml -o out
 # wrote out/compositions/xqueues.platform.sparky.ee.yaml
 # wrote out/functions.yaml
+# wrote out/providerconfigs/aws.yaml
 # wrote out/xrds/xqueues.platform.sparky.ee.yaml
 ```
 
