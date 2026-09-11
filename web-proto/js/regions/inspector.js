@@ -1717,11 +1717,14 @@ function deleteEnvKey(keyName) {
   var doc = store.state.doc;
   var wires = findEnvWires(doc, keyName);
   if (wires.length > 0) {
-    var msg = 'delete environment key "' + keyName + '": still referenced by wire ' + wires.join(", ");
-    warnMsg = msg;
-    store.emit("error", { message: msg });
-    render();
-    return;
+    var prompt = 'Environment key "' + keyName + '" is wired into ' + wires.length + " field" + (wires.length === 1 ? "" : "s") + ". Delete it and unwire all referencing fields?";
+    if (!window.confirm(prompt)) {
+      var msg = 'delete environment key "' + keyName + '": still referenced by wire ' + wires.join(", ");
+      warnMsg = msg;
+      store.emit("error", { message: msg });
+      render();
+      return;
+    }
   }
   return op(function () {
     return store.replaceDoc(function (d) {

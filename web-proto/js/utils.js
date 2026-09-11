@@ -113,9 +113,109 @@ export function mapResourceCoordinates(msg, storeOrDoc) {
   });
 }
 
+function isEnvRef(ref, keyName) {
+  if (typeof ref !== "string" || !ref || !keyName) return false;
+  if (ref === "env." + keyName || ref.indexOf("env." + keyName + ".") === 0) return true;
+  if (ref === "$env." + keyName || ref.indexOf("$env." + keyName + ".") === 0) return true;
+  return false;
+}
+
+function isRawEnvRef(raw, keyName) {
+  if (typeof raw !== "string" || !raw || !keyName) return false;
+  var escaped = keyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  var re = new RegExp("(?:\\$env|\\.env|env)\\." + escaped + "(?:$|[^a-zA-Z0-9_])");
+  return re.test(raw);
+}
+
+function isObjectReferencingEnv(obj, keyName) {
+  if (!obj || typeof obj !== "object") return false;
+  for (var k of Object.keys(obj)) {
+    var v = obj[k];
+    if (typeof v === "string" && (isEnvRef(v, keyName) || isRawEnvRef(v, keyName))) return true;
+    if (typeof v === "object" && isObjectReferencingEnv(v, keyName)) return true;
+  }
+  return false;
+}
+
+function isWhenReferencingEnv(whenStr, keyName) {
+  if (!whenStr || typeof whenStr !== "string") return false;
+  if (isEnvRef(whenStr, keyName) || isRawEnvRef(whenStr, keyName)) return true;
+  var m = /^(?:env|\$env)\.([A-Za-z0-9_-]+)/.exec(whenStr);
+  if (m && m[1] === keyName) return true;
+  return false;
+}
+
+/**
+ * Remove all references to an environment key from resources in a blueprint doc
+ * (fields, envelope, annotations, connectionSecret, when, forEach).
+ *
+ * @param {Object} draft Blueprint document
+ * @param {string} keyName Environment key name
+ */
+export function cleanEnvRefs(draft, keyName) {
+  if (!draft || !draft.spec) return;
+  var resources = draft.spec.resources || [];
+  resources.forEach(function (r) {
+    if (r.fields) {
+      Object.keys(r.fields).forEach(function (k) {
+        var f = r.fields[k];
+        if (f && (isEnvRef(f.from, keyName) || isRawEnvRef(f.raw, keyName))) {
+          delete r.fields[k];
+        }
+      });
+    }
+    if (r.envelope) {
+      Object.keys(r.envelope).forEach(function (k) {
+        var f = r.envelope[k];
+        if (f && (isEnvRef(f.from, keyName) || isRawEnvRef(f.raw, keyName))) {
+          delete r.envelope[k];
+        }
+      });
+      if (Object.keys(r.envelope).length === 0) delete r.envelope;
+    }
+    if (r.annotations) {
+      Object.keys(r.annotations).forEach(function (k) {
+        var f = r.annotations[k];
+        if (f && (isEnvRef(f.from, keyName) || isRawEnvRef(f.raw, keyName))) {
+          delete r.annotations[k];
+        }
+      });
+      if (Object.keys(r.annotations).length === 0) delete r.annotations;
+    }
+    if (r.connectionSecret) {
+      if (typeof r.connectionSecret === "string") {
+        if (isEnvRef(r.connectionSecret, keyName) || isRawEnvRef(r.connectionSecret, keyName)) {
+          delete r.connectionSecret;
+        }
+      } else if (typeof r.connectionSecret === "object") {
+        if (Array.isArray(r.connectionSecret.keys)) {
+          r.connectionSecret.keys = r.connectionSecret.keys.filter(function (item) {
+            if (typeof item === "string") return !isEnvRef(item, keyName) && !isRawEnvRef(item, keyName);
+            if (item && typeof item === "object") {
+              if (item.from && (isEnvRef(item.from, keyName) || isRawEnvRef(item.from, keyName))) return false;
+              if (item.raw && isRawEnvRef(item.raw, keyName)) return false;
+              if (isObjectReferencingEnv(item, keyName)) return false;
+            }
+            return true;
+          });
+          if (r.connectionSecret.keys.length === 0) delete r.connectionSecret;
+        } else if (isObjectReferencingEnv(r.connectionSecret, keyName)) {
+          delete r.connectionSecret;
+        }
+      }
+    }
+    if (r.when && isWhenReferencingEnv(r.when, keyName)) {
+      delete r.when;
+    }
+    if (r.forEach && (isEnvRef(r.forEach, keyName) || isRawEnvRef(r.forEach, keyName))) {
+      delete r.forEach;
+    }
+  });
+}
+
 /**
  * Delete an environment key from a blueprint doc and remove it from all
- * environmentConfigs data maps. If no environment keys remain in spec.environment,
+ * environmentConfigs data maps and resource references. If no environment keys remain in spec.environment,
  * cleans up both spec.environment and spec.environmentConfigs so the document
  * remains valid under backend validation rules.
  *
@@ -124,6 +224,7 @@ export function mapResourceCoordinates(msg, storeOrDoc) {
  */
 export function deleteEnvKeyFromDoc(d, keyName) {
   if (!d || !d.spec) return;
+  cleanEnvRefs(d, keyName);
   if (d.spec.environment) {
     delete d.spec.environment[keyName];
     if (Object.keys(d.spec.environment).length === 0) {
@@ -147,4 +248,5 @@ export function deleteEnvKeyFromDoc(d, keyName) {
     }
   }
 }
+
 

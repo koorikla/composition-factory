@@ -153,7 +153,7 @@ test.describe('CF-197 — Deleting an environment key cleans up environmentConfi
     }).toEqual({ hasEnv: false, hasConfigs: false });
   });
 
-  test('refuses deletion in inspector when environment key is wired to a resource field', async ({ page, request }) => {
+  test('cancelling confirmation dialog in inspector preserves wired environment key and its wires', async ({ page, request }) => {
     const docWithEnv = JSON.parse(JSON.stringify(pristine));
     docWithEnv.spec.environment = {
       sharedRegion: { type: 'string', default: 'us-east-1' }
@@ -173,17 +173,24 @@ test.describe('CF-197 — Deleting an environment key cleans up environmentConfi
     const inspector = page.locator('#region-inspector');
     await expect(inspector.locator('[data-env-key="sharedRegion"]')).toBeVisible();
 
+    let dialogMessage = '';
+    page.on('dialog', async (dialog) => {
+      dialogMessage = dialog.message();
+      await dialog.dismiss();
+    });
+
     // Attempt to delete wired key
     await inspector.locator('button[data-env-del-key="sharedRegion"]').click();
 
-    // User feedback: warnbar or error toast mentions still referenced by wire work-queue.region
-    const toastOrWarn = page.locator('#errtoast, #region-inspector .warnbar');
-    await expect(toastOrWarn.first()).toBeVisible();
-    await expect(toastOrWarn.first()).toContainText('work-queue.region');
+    expect(dialogMessage).toBe('Environment key "sharedRegion" is wired into 1 field. Delete it and unwire all referencing fields?');
 
-    // Key still exists on server
+    // Key still visible in inspector
+    await expect(inspector.locator('[data-env-key="sharedRegion"]')).toBeVisible();
+
+    // Key still exists on server with wire intact
     const res = await request.get(`${ENGINE}/api/blueprint`);
     const doc = await res.json();
     expect(doc.spec.environment.sharedRegion).toBeDefined();
+    expect(doc.spec.resources[0].fields.region.from).toBe('env.sharedRegion');
   });
 });

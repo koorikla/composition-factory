@@ -171,13 +171,14 @@ export function envFanOut(doc, key) {
 export function findEnvWires(doc, key) {
   const wires = [];
   const ref = "env." + key;
+  const refDollar = "$env." + key;
   const resources = (doc && doc.spec && doc.spec.resources) || [];
   resources.forEach(function (r) {
     const checkDict = function (dict, prefix) {
       if (!dict) return;
       Object.keys(dict).forEach(function (p) {
         const f = dict[p];
-        if (f && f.from === ref) {
+        if (f && (f.from === ref || f.from === refDollar)) {
           wires.push(r.name + "." + (prefix ? prefix + "." : "") + p);
         }
       });
@@ -187,15 +188,30 @@ export function findEnvWires(doc, key) {
     if (r.annotations) {
       Object.keys(r.annotations).forEach(function (k) {
         const f = r.annotations[k];
-        if (f && f.from === ref) {
+        if (f && (f.from === ref || f.from === refDollar)) {
           wires.push(r.name + ".annotations." + k);
         }
       });
     }
-    if (r.when && (r.when === ref || r.when.startsWith(ref + " ") || r.when.startsWith(ref + "==") || r.when.startsWith(ref + "!="))) {
+    if (r.connectionSecret) {
+      if (typeof r.connectionSecret === "string") {
+        if (r.connectionSecret === ref || r.connectionSecret === refDollar) {
+          wires.push(r.name + ".connectionSecret");
+        }
+      } else if (typeof r.connectionSecret === "object" && Array.isArray(r.connectionSecret.keys)) {
+        r.connectionSecret.keys.forEach(function (item) {
+          if (typeof item === "string" && (item === ref || item === refDollar)) {
+            wires.push(r.name + ".connectionSecret");
+          } else if (item && typeof item === "object" && (item.from === ref || item.from === refDollar)) {
+            wires.push(r.name + ".connectionSecret");
+          }
+        });
+      }
+    }
+    if (r.when && (r.when === ref || r.when === refDollar || r.when.startsWith(ref + " ") || r.when.startsWith(refDollar + " ") || r.when.startsWith(ref + "==") || r.when.startsWith(refDollar + "==") || r.when.startsWith(ref + "!=") || r.when.startsWith(refDollar + "!="))) {
       wires.push(r.name + ".when");
     }
-    if (r.forEach && r.forEach === ref) {
+    if (r.forEach && (r.forEach === ref || r.forEach === refDollar)) {
       wires.push(r.name + ".forEach");
     }
   });

@@ -1220,14 +1220,12 @@ function bindPaletteEvents() {
     const edel = e.target.closest("[data-env-del]");
     if (edel) {
       const k = edel.getAttribute("data-env-del");
-      if (!window.confirm("Delete environment key $env." + k + "?")) return;
-      envErr = null;
       const wires = findEnvWires(store.state.doc, k);
-      if (wires.length > 0) {
-        envErr = 'delete environment key "' + k + '": still referenced by wire ' + wires.join(", ");
-        drawRail();
-        return;
-      }
+      var confirmMsg = wires.length > 0
+        ? 'Environment key "$env.' + k + '" is wired into ' + wires.length + " field" + (wires.length === 1 ? "" : "s") + ". Delete it and unwire all referencing fields?"
+        : "Delete environment key $env." + k + "?";
+      if (!window.confirm(confirmMsg)) return;
+      envErr = null;
       store.replaceDoc(function (d) {
         deleteEnvKeyFromDoc(d, k);
       });
