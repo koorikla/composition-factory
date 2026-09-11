@@ -152,23 +152,26 @@ into eight red tests, and red tests do not go stale.
 ## 7. Handing off
 
 Antigravity does not read `.claude/skills/`. What reaches a subagent is the task
-prompt and the files in the repo, so give it exactly three things:
+prompt and the files in the repo, so the prompt is exactly the four lines of
+`docs/routines/issue-driver.md` §4:
 
 ```
-Task CF-041. Brief: docs/tasks/CF-041-<slug>.md
+Task CF-041 (issue #n), branch <branch>, driver <driver-id>. Brief: docs/tasks/CF-041-<slug>.md
 Execution contract: docs/task-execution-contract.md (read it first)
+Time cap: 90 minutes wall-clock.
+Push your topic branch; hand back on the issue.
 ```
 
 Everything else it needs - isolation, ports, gates, handover - is in the contract,
-which `AGENTS.md` §4 also points at. If you find yourself adding a fourth line of
+which `AGENTS.md` §4 also points at. If you find yourself adding a fifth line of
 instruction, that instruction belongs in the brief or in the contract, not in a
 prompt that vanishes when the session ends.
 
 ## 8. After it lands
 
-You do not close issues and you do not merge. When the driver merges a task they close
-the issue with the merge commit and the guarding test named in the closing comment
-(`AGENTS.md` §4). The brief in `docs/tasks/` stays: it is the record of what was asked,
+You do not close issues and you do not merge. When a driver lands a task through
+`scripts/driver/land.sh` it closes the issue with the landed commit and the guarding test
+named in the closing comment (`AGENTS.md` §4). The brief in `docs/tasks/` stays: it is the record of what was asked,
 and it is the only thing that makes the merge reviewable a month later. A half-fix
 does not close the issue: file the residue under a new id and close the original
 pointing at it.

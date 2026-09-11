@@ -81,6 +81,7 @@ Adjacent bugs you notice belong in a handover note, not in this branch.
 
 ## Handover
 
-Branch `CF-NNN-<slug>`, committed, not pushed, not merged. In your final report:
+Branch `CF-NNN-<slug>`, committed and pushed (that branch only), not merged. In your
+handover comment on the issue (`docs/task-execution-contract.md` §7):
 the failing run and the passing run of the acceptance test, both pasted; every gate
 you ran; every judgement call you made where the brief was silent.
