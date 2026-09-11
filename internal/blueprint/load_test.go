@@ -1824,3 +1824,39 @@ spec:
 		})
 	}
 }
+
+func TestValidateAllowsConventionsOnNativeKinds(t *testing.T) {
+	// CF-174: Validate accepts blueprints with conventions alongside native kinds (provider "k8s").
+	// Refusal occurs during generation in internal/emit/composition.go (conventionFields),
+	// not at blueprint validation time.
+	bp := Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   Metadata{Name: "app"},
+		Spec: Spec{
+			XRD: XRD{
+				Group:   "example.org",
+				Kind:    "App",
+				Plural:  "apps",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+			},
+			Templates: map[string]string{
+				"app-replicas": "replicas: 1",
+			},
+			Conventions: []Convention{
+				{Match: "replicas", Template: "app-replicas"},
+			},
+			Resources: []Resource{
+				{
+					Name:     "deployment",
+					Kind:     "Deployment",
+					Provider: "k8s",
+				},
+			},
+		},
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("Validate unexpectedly rejected convention on native kind: %v", err)
+	}
+}

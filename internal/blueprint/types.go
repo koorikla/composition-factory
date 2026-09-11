@@ -86,15 +86,17 @@ type Spec struct {
 	Templates map[string]string `json:"templates,omitempty"`
 	// Conventions apply a template to every matching field a resource does
 	// NOT set explicitly. Match is a case-sensitive suffix of a top-level
-	// forProvider field name (e.g. "tags" matches tags; "Name" matches
+	// forProvider field name on managed kinds (e.g. "tags" matches tags; "Name" matches
 	// queueName); the first matching convention in list order wins for each
 	// field, and an explicit field always wins over any convention — that is
-	// the override mechanism. Conventions apply to MANAGED resources only:
-	// a native Kubernetes kind (provider "k8s") has no forProvider plan for
-	// them to fill, and its top-level spec is structural (replicas, selector,
-	// template...), where a silently defaulted field would change workload
-	// semantics — so Validate refuses the combination outright rather than
-	// guessing (see load.go).
+	// the override mechanism.
+	//
+	// Conventions apply to MANAGED resources only. Native Kubernetes kinds
+	// (provider "k8s") have no forProvider plan to fill, and their fields are
+	// structural; at generation time, internal/emit/composition.go refuses any
+	// convention that matches an un-overridden settable leaf of a native kind
+	// at any depth rather than silently misapplying it (see docs/dsl.md
+	// §Conventions).
 	Conventions []Convention `json:"conventions,omitempty"`
 	Resources   []Resource   `json:"resources"`
 	// Pipeline, when non-empty, fully declares the Composition pipeline steps
