@@ -5,8 +5,9 @@ const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
 guardPageErrors()
 const path = require('path')
 
-test.beforeEach(async ({ request }) => {
+test.beforeEach(async ({ request, page }) => {
   await resetDoc(request)
+  page.on('dialog', d => d.accept())
 })
 
 test('importing a blueprint yaml replaces the doc and is undoable', async ({ page, request }) => {

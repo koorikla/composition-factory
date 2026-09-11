@@ -454,10 +454,43 @@ store.subscribe("generate", function () {
 
 
 /* ---- import dsl.yaml: file picker -> server YAML gate -> doc replaced ---- */
+var cachedBlueprintName = "";
+
+function getTargetBlueprintName() {
+  if (cachedBlueprintName) return cachedBlueprintName;
+  var doc = store && store.state && store.state.doc;
+  var name = (doc && doc.metadata && doc.metadata.name) || "blueprint";
+  return name + ".cf.yaml";
+}
+
+function ensureBp() {
+  if (cachedBlueprintName) return Promise.resolve(cachedBlueprintName);
+  return api.getVersion().then(function (r) {
+    if (r && r.blueprint) {
+      var bp = r.blueprint;
+      var slashIdx = Math.max(bp.lastIndexOf("/"), bp.lastIndexOf("\\"));
+      cachedBlueprintName = slashIdx >= 0 ? bp.slice(slashIdx + 1) : bp;
+    }
+    return cachedBlueprintName;
+  }).catch(function () { return ""; });
+}
+
 (function () {
   var btn = document.getElementById("importBtn");
   var file = document.getElementById("importFile");
   if (!btn || !file) return;
+
+  function updateImportTooltip() {
+    var targetBp = cachedBlueprintName || getTargetBlueprintName();
+    btn.title = "Import a blueprint .yaml, or adopt an existing Crossplane Composition (replaces " + targetBp + " \u00b7 undoable)";
+  }
+
+  ensureBp().then(function () {
+    updateImportTooltip();
+  });
+  store.subscribe("doc", updateImportTooltip);
+  updateImportTooltip();
+
   btn.addEventListener("click", function () { file.click(); });
   store.subscribe("error", function (e) {
     if (!e || e.source !== "importBlueprint") return;
@@ -472,6 +505,13 @@ store.subscribe("generate", function () {
     var f = file.files && file.files[0];
     file.value = "";
     if (!f) return;
+
+    var targetBp = cachedBlueprintName || getTargetBlueprintName();
+    var ok = window.confirm("Import will replace " + targetBp + " (undoable).\n\nProceed?");
+    if (!ok) return;
+
+    var prevDoc = store.state.doc ? JSON.parse(JSON.stringify(store.state.doc)) : null;
+
     var reader = new FileReader();
     reader.onload = function () {
       var text = String(reader.result);
@@ -486,6 +526,7 @@ store.subscribe("generate", function () {
       op.then(function (doc) {
         if (!doc) return; // failures surface through the store's error topic
         store.select(null);
+        showImportToast(prevDoc, doc, isComp);
         if (isComp) {
           reportAdoptLoss();
         } else {
@@ -495,6 +536,166 @@ store.subscribe("generate", function () {
     };
     reader.readAsText(f);
   });
+
+  function summarizeChanges(prevDoc, nextDoc) {
+    var changes = [];
+    if (!prevDoc || !nextDoc) return changes;
+
+    // 1. metadata.name
+    var prevName = (prevDoc.metadata && prevDoc.metadata.name) || "untitled";
+    var nextName = (nextDoc.metadata && nextDoc.metadata.name) || "untitled";
+    if (prevName !== nextName) {
+      changes.push("name (" + prevName + " \u2192 " + nextName + ")");
+    }
+
+    // 2. spec.pipeline
+    var prevPipe = (prevDoc.spec && prevDoc.spec.pipeline) || [];
+    var nextPipe = (nextDoc.spec && nextDoc.spec.pipeline) || [];
+    if (prevPipe.length === 0 && nextPipe.length > 0) {
+      var stepNames = nextPipe.map(function (s) { return s.name || s.step; }).filter(Boolean).join(", ");
+      changes.push("pipeline materialized (" + (stepNames || "custom step") + ")");
+    } else if (prevPipe.length > 0 && nextPipe.length === 0) {
+      changes.push("pipeline reset to default");
+    } else if (JSON.stringify(prevPipe) !== JSON.stringify(nextPipe)) {
+      changes.push("pipeline updated");
+    }
+
+    // 3. spec.xrd.parameters
+    var prevParams = (prevDoc.spec && prevDoc.spec.xrd && prevDoc.spec.xrd.parameters) || {};
+    var nextParams = (nextDoc.spec && nextDoc.spec.xrd && nextDoc.spec.xrd.parameters) || {};
+    var allParamKeys = {};
+    Object.keys(prevParams).forEach(function (k) { allParamKeys[k] = true; });
+    Object.keys(nextParams).forEach(function (k) { allParamKeys[k] = true; });
+
+    Object.keys(allParamKeys).forEach(function (p) {
+      if (prevParams[p] && !nextParams[p]) {
+        changes.push("parameter $" + p + " removed");
+      } else if (!prevParams[p] && nextParams[p]) {
+        changes.push("parameter $" + p + " added");
+      } else if (prevParams[p] && nextParams[p]) {
+        var pp = prevParams[p];
+        var np = nextParams[p];
+        if ((pp.description || "") !== (np.description || "")) {
+          changes.push("parameter $" + p + " description rewritten");
+        }
+        if (pp.type !== np.type) {
+          changes.push("parameter $" + p + " type changed (" + pp.type + " \u2192 " + np.type + ")");
+        }
+        if (Boolean(pp.required) !== Boolean(np.required)) {
+          changes.push("parameter $" + p + " required changed");
+        }
+      }
+    });
+
+    // 4. spec.resources
+    var prevRes = (prevDoc.spec && prevDoc.spec.resources) || [];
+    var nextRes = (nextDoc.spec && nextDoc.spec.resources) || [];
+    var prevResMap = {};
+    var nextResMap = {};
+    prevRes.forEach(function (r) { if (r && r.name) prevResMap[r.name] = r; });
+    nextRes.forEach(function (r) { if (r && r.name) nextResMap[r.name] = r; });
+
+    var addedRes = [];
+    var removedRes = [];
+    var modifiedRes = [];
+
+    Object.keys(nextResMap).forEach(function (n) {
+      if (!prevResMap[n]) {
+        addedRes.push(n);
+      } else {
+        if (JSON.stringify(prevResMap[n]) !== JSON.stringify(nextResMap[n])) {
+          modifiedRes.push(n);
+        }
+      }
+    });
+    Object.keys(prevResMap).forEach(function (n) {
+      if (!nextResMap[n]) {
+        removedRes.push(n);
+      }
+    });
+
+    if (addedRes.length) changes.push("resources added (" + addedRes.join(", ") + ")");
+    if (removedRes.length) changes.push("resources removed (" + removedRes.join(", ") + ")");
+    if (modifiedRes.length) changes.push("resources modified (" + modifiedRes.join(", ") + ")");
+
+    return changes;
+  }
+
+  var importToastTimer = null;
+
+  function showImportToast(prevDoc, nextDoc, isComp) {
+    var old = document.getElementById("import-toast");
+    if (old) old.remove();
+    if (importToastTimer) {
+      clearTimeout(importToastTimer);
+      importToastTimer = null;
+    }
+
+    var docName = (nextDoc && nextDoc.metadata && nextDoc.metadata.name) || "blueprint";
+    var changes = summarizeChanges(prevDoc, nextDoc);
+
+    var r = store.state.lastAdoptReport;
+    var dropItems = (r && r.drops && r.drops.length) ? r.drops : [];
+
+    var parts = [];
+    if (changes.length > 0) {
+      parts.push("changed: " + changes.join("; "));
+    }
+    if (dropItems.length > 0) {
+      parts.push("could not carry " + dropItems.length + " dropped item" + (dropItems.length === 1 ? "" : "s") + ": " + dropItems.map(function (d) { return d.path + " (" + d.reason + ")"; }).join(", "));
+    }
+
+    var msg = (isComp ? "Adopted " : "Imported ") + docName;
+    if (parts.length > 0) {
+      msg += " \u2014 " + parts.join(" | ");
+    }
+
+    var toast = document.createElement("div");
+    toast.id = "import-toast";
+    toast.className = "toast-bar";
+    toast.setAttribute("role", "status");
+
+    var iconSpan = document.createElement("span");
+    iconSpan.textContent = "\ud83d\udce5";
+    toast.appendChild(iconSpan);
+
+    var msgSpan = document.createElement("span");
+    msgSpan.className = "toast-msg";
+    msgSpan.style.flex = "1";
+    msgSpan.textContent = msg;
+    toast.appendChild(msgSpan);
+
+    var undoBtn = document.createElement("button");
+    undoBtn.type = "button";
+    undoBtn.className = "toast-link";
+    undoBtn.style.background = "none";
+    undoBtn.style.border = "none";
+    undoBtn.style.padding = "0";
+    undoBtn.style.font = "inherit";
+    undoBtn.textContent = "Undo (\u21a9)";
+    undoBtn.onclick = function () {
+      store.undo();
+      if (toast.parentNode) toast.remove();
+    };
+    toast.appendChild(undoBtn);
+
+    var closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "del modal-close";
+    closeBtn.style.marginLeft = "6px";
+    closeBtn.setAttribute("aria-label", "Dismiss");
+    closeBtn.textContent = "\u00d7";
+    closeBtn.onclick = function () {
+      if (toast.parentNode) toast.remove();
+    };
+    toast.appendChild(closeBtn);
+
+    document.body.appendChild(toast);
+    importToastTimer = setTimeout(function () {
+      if (toast.parentNode) toast.remove();
+      importToastTimer = null;
+    }, 12000);
+  }
 
   /**
    * True when the YAML stream is a Crossplane Composition to be adopted rather
@@ -648,14 +849,6 @@ function notice(text, isError, persistent) {
   if (!btn || !overlay || !grid) return;
 
   var cachedExamples = null;
-  var cachedBlueprintName = "";
-
-  function getTargetBlueprintName() {
-    if (cachedBlueprintName) return cachedBlueprintName;
-    var doc = store && store.state && store.state.doc;
-    var name = (doc && doc.metadata && doc.metadata.name) || "blueprint";
-    return name + ".cf.yaml";
-  }
 
   function renderExamples(list) {
     if (!list || !list.length) {
@@ -706,18 +899,6 @@ function notice(text, isError, persistent) {
   }
 
   function loadExamples() {
-    function ensureBp() {
-      if (cachedBlueprintName) return Promise.resolve(cachedBlueprintName);
-      return api.getVersion().then(function (r) {
-        if (r && r.blueprint) {
-          var bp = r.blueprint;
-          var slashIdx = Math.max(bp.lastIndexOf("/"), bp.lastIndexOf("\\"));
-          cachedBlueprintName = slashIdx >= 0 ? bp.slice(slashIdx + 1) : bp;
-        }
-        return cachedBlueprintName;
-      }).catch(function () { return ""; });
-    }
-
     if (cachedExamples) {
       ensureBp().then(function () {
         renderExamples(cachedExamples);

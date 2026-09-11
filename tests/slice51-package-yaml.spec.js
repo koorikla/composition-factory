@@ -4,8 +4,9 @@ const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
 guardPageErrors()
 
 test.describe('package.yaml in and out', () => {
-  test.beforeEach(async ({ request }) => {
+  test.beforeEach(async ({ request, page }) => {
     await resetDoc(request);
+    page.on('dialog', d => d.accept());
   });
 
   test('the package.yaml tab shows the Configuration stream', async ({ page }) => {

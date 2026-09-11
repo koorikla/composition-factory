@@ -47,6 +47,7 @@ test('importing a generated Composition does not materialize auto-ready as custo
   })
 
   await page.goto('/')
+  page.on('dialog', d => d.accept())
   await expect(page.locator('.node')).toHaveCount(3)
 
   // Hand the generated composition to the import input
