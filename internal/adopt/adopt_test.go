@@ -7274,3 +7274,400 @@ func TestAdoptGoTemplate_ConditionalResources_EmptyStringComparison_RoundTrip(t 
 		}
 	}
 }
+
+func TestAdoptGoTemplate_ReversedWhenGuard(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: reversed-when-guard
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XReversed
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- if eq "prod" $.spec.tier }}
+            ---
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: pro-bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            {{- end }}
+            {{- if ne "basic" $.observed.composite.resource.spec.tier }}
+            ---
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: nonbasic-bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            {{- end }}
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	var proBucket, nonbasicBucket *blueprint.Resource
+	for i := range bp.Spec.Resources {
+		switch bp.Spec.Resources[i].Name {
+		case "pro-bucket":
+			proBucket = &bp.Spec.Resources[i]
+		case "nonbasic-bucket":
+			nonbasicBucket = &bp.Spec.Resources[i]
+		}
+	}
+
+	if proBucket == nil {
+		t.Fatalf("pro-bucket resource not found: %+v", bp.Spec.Resources)
+	}
+	if proBucket.When != `params.tier == "prod"` {
+		t.Errorf("proBucket.When = %q, want %q", proBucket.When, `params.tier == "prod"`)
+	}
+
+	if nonbasicBucket == nil {
+		t.Fatalf("nonbasic-bucket resource not found: %+v", bp.Spec.Resources)
+	}
+	if nonbasicBucket.When != `params.tier != "basic"` {
+		t.Errorf("nonbasicBucket.When = %q, want %q", nonbasicBucket.When, `params.tier != "basic"`)
+	}
+}
+
+func TestAdoptGoTemplate_ReversedWhenGuard_AllVariants(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition string
+		wantWhen  string
+		wantParam string
+		wantEnv   string
+	}{
+		// Param eq/ne with all prefix variants
+		{
+			name:      "param eq reversed $spec",
+			condition: `eq "prod" $spec.tier`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param eq reversed $.spec",
+			condition: `eq "prod" $.spec.tier`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param eq reversed .spec",
+			condition: `eq "prod" .spec.tier`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param eq reversed $.observed.composite.resource.spec",
+			condition: `eq "prod" $.observed.composite.resource.spec.tier`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param eq reversed .observed.composite.resource.spec",
+			condition: `eq "prod" .observed.composite.resource.spec.tier`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param ne reversed $spec",
+			condition: `ne "dev" $spec.tier`,
+			wantWhen:  `params.tier != "dev"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param ne reversed $.spec",
+			condition: `ne "dev" $.spec.tier`,
+			wantWhen:  `params.tier != "dev"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param ne reversed .spec",
+			condition: `ne "dev" .spec.tier`,
+			wantWhen:  `params.tier != "dev"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param ne reversed $.observed.composite.resource.spec",
+			condition: `ne "dev" $.observed.composite.resource.spec.tier`,
+			wantWhen:  `params.tier != "dev"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param ne reversed .observed.composite.resource.spec",
+			condition: `ne "dev" .observed.composite.resource.spec.tier`,
+			wantWhen:  `params.tier != "dev"`,
+			wantParam: "tier",
+		},
+		// Empty string comparisons
+		{
+			name:      "param eq empty reversed",
+			condition: `eq "" $.spec.customDomain`,
+			wantWhen:  `params.customDomain == ""`,
+			wantParam: "customDomain",
+		},
+		{
+			name:      "param ne empty reversed",
+			condition: `ne "" $.spec.customDomain`,
+			wantWhen:  `params.customDomain != ""`,
+			wantParam: "customDomain",
+		},
+		// Parenthesized
+		{
+			name:      "param eq reversed parenthesized",
+			condition: `(eq "prod" $.spec.tier)`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param ne reversed parenthesized",
+			condition: `(ne "dev" $.spec.tier)`,
+			wantWhen:  `params.tier != "dev"`,
+			wantParam: "tier",
+		},
+		// Env comparisons reversed
+		{
+			name:      "env eq reversed bare",
+			condition: `eq "prod" $env.stage`,
+			wantWhen:  `env.stage == "prod"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env eq reversed hasKey",
+			condition: `and (hasKey $env "stage") (eq "prod" $env.stage)`,
+			wantWhen:  `env.stage == "prod"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env eq reversed index default",
+			condition: `eq "prod" (default "" (index $env "stage"))`,
+			wantWhen:  `env.stage == "prod"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env ne reversed bare",
+			condition: `ne "dev" $env.stage`,
+			wantWhen:  `env.stage != "dev"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env ne reversed hasKey",
+			condition: `or (not (hasKey $env "stage")) (ne "dev" $env.stage)`,
+			wantWhen:  `env.stage != "dev"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env ne reversed index default",
+			condition: `ne "dev" (default "" (index $env "stage"))`,
+			wantWhen:  `env.stage != "dev"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env eq empty reversed bare",
+			condition: `eq "" $env.stage`,
+			wantWhen:  `env.stage == ""`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env ne empty reversed bare",
+			condition: `ne "" $env.stage`,
+			wantWhen:  `env.stage != ""`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env eq empty reversed index default",
+			condition: `eq "" (default "" (index $env "stage"))`,
+			wantWhen:  `env.stage == ""`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env ne empty reversed index default",
+			condition: `ne "" (default "" (index $env "stage"))`,
+			wantWhen:  `env.stage != ""`,
+			wantEnv:   "stage",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- if %s }}
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: test-cm
+          data:
+            key: value
+          {{- end }}
+`, tc.condition)
+
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 1 {
+				t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+			}
+			res := bp.Spec.Resources[0]
+			if res.When != tc.wantWhen {
+				t.Errorf("res.When = %q, want %q", res.When, tc.wantWhen)
+			}
+			if tc.wantParam != "" {
+				if _, ok := bp.Spec.XRD.Parameters[tc.wantParam]; !ok {
+					t.Errorf("parameter %q not declared in XRD parameters: %+v", tc.wantParam, bp.Spec.XRD.Parameters)
+				}
+			}
+			if tc.wantEnv != "" {
+				if _, ok := bp.Spec.Environment[tc.wantEnv]; !ok {
+					t.Errorf("environment key %q not declared in bp.Spec.Environment: %+v", tc.wantEnv, bp.Spec.Environment)
+				}
+			}
+		})
+	}
+}
+
+func TestAdoptGoTemplate_ReversedWhenGuard_RoundTrip(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: reversed-when-roundtrip
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XReversedApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- if eq "prod" $.spec.tier }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: prod-cm
+              annotations:
+                crossplane.io/composition-resource-name: prod-cm
+            data:
+              env: "prod"
+            {{- end }}
+            {{- if ne "basic" $.observed.composite.resource.spec.tier }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: nonbasic-cm
+              annotations:
+                crossplane.io/composition-resource-name: nonbasic-cm
+            data:
+              env: "nonbasic"
+            {{- end }}
+            {{- if eq "prod" $env.stage }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: env-prod-cm
+              annotations:
+                crossplane.io/composition-resource-name: env-prod-cm
+            data:
+              env: "prod-stage"
+            {{- end }}
+`
+
+	adoptedBP, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Initial Adopt failed: %v", err)
+	}
+
+	nativeCRDs, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+
+	outputs, err := emit.Generate(adoptedBP, nativeCRDs, "")
+	if err != nil {
+		t.Fatalf("emit.Generate failed: %v", err)
+	}
+
+	var compYAML []byte
+	for _, o := range outputs {
+		if strings.Contains(o.Path, "compositions") {
+			compYAML = o.Body
+			break
+		}
+	}
+	if len(compYAML) == 0 {
+		t.Fatal("emit.Generate produced no composition output")
+	}
+
+	reAdoptedBP, _, err := Adopt(compYAML, Options{})
+	if err != nil {
+		t.Fatalf("Re-Adopt failed: %v", err)
+	}
+
+	wantWhens := map[string]string{
+		"prod-cm":     `params.tier == "prod"`,
+		"nonbasic-cm": `params.tier != "basic"`,
+		"env-prod-cm": `env.stage == "prod"`,
+	}
+
+	if len(reAdoptedBP.Spec.Resources) != len(wantWhens) {
+		t.Fatalf("expected %d resources, got %d", len(wantWhens), len(reAdoptedBP.Spec.Resources))
+	}
+
+	for _, r := range reAdoptedBP.Spec.Resources {
+		want, ok := wantWhens[r.Name]
+		if !ok {
+			t.Errorf("unexpected resource %q", r.Name)
+			continue
+		}
+		if r.When != want {
+			t.Errorf("resource %q: When = %q, want %q", r.Name, r.When, want)
+		}
+	}
+}

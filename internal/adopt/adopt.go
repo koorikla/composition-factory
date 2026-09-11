@@ -1117,11 +1117,15 @@ var (
 	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*(?:\(index\s+(?:\$?[.]?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)|(?:\$?[.]?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+))\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reXRResourceRef      = regexp.MustCompile(`\{\{-?\s*\$xr\s*-?\}\}-([a-zA-Z0-9-]+)`)
 	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
-	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+eq\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]*)"\s*-?\}\}`)
-	reWhenIfNe           = regexp.MustCompile(`\{\{-?\s*if\s+ne\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]*)"\s*-?\}\}`)
+	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+\(?eq\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]*)"\)?\s*-?\}\}`)
+	reWhenIfNe           = regexp.MustCompile(`\{\{-?\s*if\s+\(?ne\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]*)"\)?\s*-?\}\}`)
+	reWhenIfEqRev        = regexp.MustCompile(`\{\{-?\s*if\s+\(?eq\s+"([^"]*)"\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)?\s*-?\}\}`)
+	reWhenIfNeRev        = regexp.MustCompile(`\{\{-?\s*if\s+\(?ne\s+"([^"]*)"\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)?\s*-?\}\}`)
 	reWhenIfEnvSimple    = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\$env\.([a-zA-Z0-9_.-]+)|default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\))\s*-?\}\}`)
-	reWhenIfEnvEq        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\(?eq\s+\$env\.([a-zA-Z0-9_.-]+)\s+"?([^"]*?)"?\)?|eq\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\s+"?([^"]*?)"?)\s*-?\}\}`)
-	reWhenIfEnvNe        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:or\s+\(not\s+\(hasKey\s+\$env\s+"[^"]+"\)\)\s+)?\(?ne\s+\$env\.([a-zA-Z0-9_.-]+)\s+"?([^"]*?)"?\)?|ne\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\s+"?([^"]*?)"?)\s*-?\}\}`)
+	reWhenIfEnvEq        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\(?eq\s+\$env\.([a-zA-Z0-9_.-]+)\s+"?([^"]*?)"?\)?|\(?eq\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\s+"?([^"]*?)"?\)?)\s*-?\}\}`)
+	reWhenIfEnvNe        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:or\s+\(not\s+\(hasKey\s+\$env\s+"[^"]+"\)\)\s+)?\(?ne\s+\$env\.([a-zA-Z0-9_.-]+)\s+"?([^"]*?)"?\)?|\(?ne\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\s+"?([^"]*?)"?\)?)\s*-?\}\}`)
+	reWhenIfEnvEqRev     = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:and\s+\(hasKey\s+\$env\s+"[^"]+"\)\s+)?\(?eq\s+"?([^"]*?)"?\s+\$env\.([a-zA-Z0-9_.-]+)\)?|\(?eq\s+"?([^"]*?)"?\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\)?)\s*-?\}\}`)
+	reWhenIfEnvNeRev     = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:or\s+\(not\s+\(hasKey\s+\$env\s+"[^"]+"\)\)\s+)?\(?ne\s+"?([^"]*?)"?\s+\$env\.([a-zA-Z0-9_.-]+)\)?|\(?ne\s+"?([^"]*?)"?\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\)?)\s*-?\}\}`)
 	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
 	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$env\.([a-zA-Z0-9_.-]+)|\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\))\)\s*-?\}\}`)
 	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(index\s+\$?[.]observed\.resources\s+"([^"]+)"\)\.resource\.status\.([a-zA-Z0-9_.-]+)|\$?[.]observed\.resources\.([a-zA-Z0-9_-]+)\.resource\.status\.([a-zA-Z0-9_.-]+))\)\s*-?\}\}`)
@@ -1881,6 +1885,20 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 		}
 		ensureEnvDeclared(bp, key, "string")
 		return fmt.Sprintf("env.%s != %q", key, lit)
+	} else if m := reWhenIfEnvEqRev.FindStringSubmatch(text); len(m) >= 3 {
+		lit, key := m[1], m[2]
+		if key == "" && len(m) >= 5 {
+			lit, key = m[3], m[4]
+		}
+		ensureEnvDeclared(bp, key, "string")
+		return fmt.Sprintf("env.%s == %q", key, lit)
+	} else if m := reWhenIfEnvNeRev.FindStringSubmatch(text); len(m) >= 3 {
+		lit, key := m[1], m[2]
+		if key == "" && len(m) >= 5 {
+			lit, key = m[3], m[4]
+		}
+		ensureEnvDeclared(bp, key, "string")
+		return fmt.Sprintf("env.%s != %q", key, lit)
 	} else if m := reWhenIfEnvSimple.FindStringSubmatch(text); len(m) >= 2 {
 		key := m[1]
 		if key == "" && len(m) >= 3 {
@@ -1894,6 +1912,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 	} else if m := reWhenIfNe.FindStringSubmatch(text); len(m) >= 3 {
 		ensureParamDeclaredTyped(bp, m[1], "string")
 		return fmt.Sprintf("params.%s != %q", m[1], m[2])
+	} else if m := reWhenIfEqRev.FindStringSubmatch(text); len(m) >= 3 {
+		ensureParamDeclaredTyped(bp, m[2], "string")
+		return fmt.Sprintf("params.%s == %q", m[2], m[1])
+	} else if m := reWhenIfNeRev.FindStringSubmatch(text); len(m) >= 3 {
+		ensureParamDeclaredTyped(bp, m[2], "string")
+		return fmt.Sprintf("params.%s != %q", m[2], m[1])
 	} else if m := reWhenIfSimple.FindStringSubmatch(text); len(m) >= 2 {
 		ensureParamDeclaredTyped(bp, m[1], "boolean")
 		return fmt.Sprintf("params.%s", m[1])
