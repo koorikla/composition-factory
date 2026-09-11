@@ -2,6 +2,7 @@ package emit
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -393,6 +394,199 @@ spec:
 	}
 	if !strings.Contains(s, `"namespace": "crossplane-system"`) {
 		t.Errorf("expected namespace child in Python:\n%s", s)
+	}
+}
+
+func TestPythonOptionalEnvelopeMappingOmittedWhenAbsent(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-env-opt
+spec:
+  emit:
+    engine: python
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XQueue
+    plural: xqueues
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+      secretName:
+        type: string
+      secretNamespace:
+        type: string
+      configRefName:
+        type: string
+  resources:
+    - name: work-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      fields:
+        region:
+          value: us-east-1
+      envelope:
+        writeConnectionSecretToRef.name:
+          from: params.secretName
+        writeConnectionSecretToRef.namespace:
+          from: params.secretNamespace
+        publishConnectionDetailsTo.configRef.name:
+          from: params.configRefName
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	_ = os.WriteFile(p, []byte(bpYAML), 0600)
+	b, err := blueprint.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+              writeConnectionSecretToRef:
+                type: object
+                required: [name, namespace]
+                properties: {name: {type: string}, namespace: {type: string}}
+              publishConnectionDetailsTo:
+                type: object
+                properties:
+                  configRef:
+                    type: object
+                    required: [name]
+                    properties: {name: {type: string}}
+`)
+	crds, err := schema.ParseCRDs([][]byte{crdDoc})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := pythonTemplateBody(b, crds)
+	if err != nil {
+		t.Fatalf("pythonTemplateBody: %v", err)
+	}
+
+	// In the generated Python script, the envelope structure must be guarded with "or None"
+	// so empty dictionaries are stripped when all optional child parameters evaluate to None.
+	if !strings.Contains(body, `"writeConnectionSecretToRef": _present({`) {
+		t.Errorf("expected writeConnectionSecretToRef in Python script:\n%s", body)
+	}
+	if !strings.Contains(body, `"publishConnectionDetailsTo": _present({`) {
+		t.Errorf("expected publishConnectionDetailsTo in Python script:\n%s", body)
+	}
+	if !strings.Contains(body, `}) or None,`) {
+		t.Errorf("expected envelope mapping to be guarded with '}) or None,' so empty dicts are omitted:\n%s", body)
+	}
+
+	// Verify runtime behavior: when optional params are absent, writeConnectionSecretToRef
+	// and nested publishConnectionDetailsTo are omitted entirely from spec. When present,
+	// they are included.
+	if pyBin, err := exec.LookPath("python3"); err == nil {
+		pyRunner := `
+import sys, types
+
+m = types.ModuleType("google.protobuf.json_format")
+m.MessageToDict = lambda x: x
+sys.modules["google.protobuf.json_format"] = m
+m2 = types.ModuleType("crossplane.function.proto.v1")
+m2.run_function_pb2 = types.ModuleType("run_function_pb2")
+sys.modules["crossplane.function.proto.v1"] = m2
+sys.modules["crossplane.function.proto.v1.run_function_pb2"] = m2.run_function_pb2
+
+` + body + `
+
+class MockRes:
+    def __init__(self):
+        self.resource = {}
+    def update(self, d):
+        self.resource.update(d)
+
+class MockRsp:
+    def __init__(self):
+        self.desired = types.SimpleNamespace(resources={"work-queue": MockRes()})
+
+# Test case 1: parameters absent (oxr["spec"] is empty)
+req1 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(composite=types.SimpleNamespace(resource={"spec": {}}), resources={}),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={}
+)
+rsp1 = MockRsp()
+compose(req1, rsp1)
+spec1 = rsp1.desired.resources["work-queue"].resource.get("spec", {})
+if "writeConnectionSecretToRef" in spec1:
+    print(f"FAIL: writeConnectionSecretToRef present when params absent: {spec1}")
+    sys.exit(1)
+if "publishConnectionDetailsTo" in spec1:
+    print(f"FAIL: publishConnectionDetailsTo present when params absent: {spec1}")
+    sys.exit(1)
+
+# Test case 2: secretName present
+req2 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(composite=types.SimpleNamespace(resource={"spec": {"secretName": "my-secret"}}), resources={}),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={}
+)
+rsp2 = MockRsp()
+compose(req2, rsp2)
+spec2 = rsp2.desired.resources["work-queue"].resource.get("spec", {})
+if spec2.get("writeConnectionSecretToRef") != {"name": "my-secret"}:
+    print(f"FAIL: writeConnectionSecretToRef not correctly set: {spec2}")
+    sys.exit(2)
+if "publishConnectionDetailsTo" in spec2:
+    print(f"FAIL: publishConnectionDetailsTo present when configRefName absent: {spec2}")
+    sys.exit(2)
+
+# Test case 3: nested configRefName present
+req3 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(composite=types.SimpleNamespace(resource={"spec": {"configRefName": "cfg-1"}}), resources={}),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={}
+)
+rsp3 = MockRsp()
+compose(req3, rsp3)
+spec3 = rsp3.desired.resources["work-queue"].resource.get("spec", {})
+if spec3.get("publishConnectionDetailsTo") != {"configRef": {"name": "cfg-1"}}:
+    print(f"FAIL: publishConnectionDetailsTo not correctly set: {spec3}")
+    sys.exit(3)
+if "writeConnectionSecretToRef" in spec3:
+    print(f"FAIL: writeConnectionSecretToRef present when secretName absent: {spec3}")
+    sys.exit(3)
+
+print("OK")
+`
+		cmd := exec.Command(pyBin, "-c", pyRunner)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("python execution failed: %v\nOutput:\n%s", err, out)
+		}
 	}
 }
 

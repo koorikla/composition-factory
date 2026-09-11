@@ -519,12 +519,17 @@ func pythonFormatLiteral(val string, targetType string) string {
 	return fmt.Sprintf("%q", val)
 }
 
+// writePythonEnvelopeNodes renders envelope fields (like writeConnectionSecretToRef).
+// Optional envelope structures whose child parameters evaluate to None produce an empty
+// dictionary in _present({}); "or None" converts an empty dict to None so the outer
+// _present() omits the mapping entirely, avoiding Crossplane schema admission failures
+// on required child properties (CF-289).
 func writePythonEnvelopeNodes(sb *strings.Builder, indent string, nodes []*envTreeNode) {
 	for _, n := range nodes {
 		if len(n.children) > 0 {
 			sb.WriteString(fmt.Sprintf("%s%q: _present({\n", indent, n.name))
 			writePythonEnvelopeNodes(sb, indent+"    ", n.children)
-			sb.WriteString(fmt.Sprintf("%s}),\n", indent))
+			sb.WriteString(fmt.Sprintf("%s}) or None,\n", indent))
 		} else if n.field != nil {
 			rhs := pythonStructuredRHS(n.field.structured, n.field.rhs)
 			sb.WriteString(fmt.Sprintf("%s%q: %s,\n", indent, n.name, rhs))
