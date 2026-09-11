@@ -684,3 +684,112 @@ func TestSetResource(t *testing.T) {
 		t.Fatal("SetResource with mismatched body name should fail")
 	}
 }
+
+func TestDeepCopyDoesNotAliasEnvironmentPipelineOrEmit(t *testing.T) {
+	orig := &Blueprint{
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "test-bp"},
+		Spec: Spec{
+			Environment: map[string]EnvironmentKey{
+				"region": {Type: "string", Default: "us-east-1"},
+			},
+			EnvironmentConfigs: []EnvironmentConfig{
+				{
+					Name: "env-conf",
+					Data: map[string]string{"tier": "prod"},
+				},
+			},
+			Pipeline: []PipelineStep{
+				{Name: "auto-ready", FunctionRef: "function-auto-ready"},
+			},
+			Emit: &Emit{
+				Engine:         EngineGoTemplating,
+				TemplateSource: TemplateSourceInline,
+			},
+		},
+	}
+
+	want := &Blueprint{
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "test-bp"},
+		Spec: Spec{
+			Environment: map[string]EnvironmentKey{
+				"region": {Type: "string", Default: "us-east-1"},
+			},
+			EnvironmentConfigs: []EnvironmentConfig{
+				{
+					Name: "env-conf",
+					Data: map[string]string{"tier": "prod"},
+				},
+			},
+			Pipeline: []PipelineStep{
+				{Name: "auto-ready", FunctionRef: "function-auto-ready"},
+			},
+			Emit: &Emit{
+				Engine:         EngineGoTemplating,
+				TemplateSource: TemplateSourceInline,
+			},
+		},
+	}
+
+	cp := orig.deepCopy()
+	cp.Spec.Environment["region"] = EnvironmentKey{Type: "integer"}
+	cp.Spec.Environment["newKey"] = EnvironmentKey{Type: "boolean"}
+	cp.Spec.EnvironmentConfigs[0].Name = "mutated-conf"
+	cp.Spec.EnvironmentConfigs[0].Data["tier"] = "dev"
+	cp.Spec.Pipeline[0].Name = "mutated-step"
+	cp.Spec.Emit.Engine = EnginePython
+	cp.Spec.Emit.TemplateSource = TemplateSourceFileSystem
+
+	if diff := cmp.Diff(want, orig); diff != "" {
+		t.Errorf("mutating deepCopy modified original receiver (-want +got):\n%s", diff)
+	}
+}
+
+func TestDeepCopyDoesNotAliasEnvironmentConfigSelectorAndValues(t *testing.T) {
+	orig := &Blueprint{
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "test-bp"},
+		Spec: Spec{
+			EnvironmentConfigs: []EnvironmentConfig{
+				{
+					Name: "env-conf",
+					Selector: &EnvironmentConfigSelector{
+						MatchLabels: map[string]string{"stage": "prod"},
+					},
+					Values: map[string]string{"cluster": "us-east-1"},
+				},
+			},
+		},
+	}
+
+	want := &Blueprint{
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "test-bp"},
+		Spec: Spec{
+			EnvironmentConfigs: []EnvironmentConfig{
+				{
+					Name: "env-conf",
+					Selector: &EnvironmentConfigSelector{
+						MatchLabels: map[string]string{"stage": "prod"},
+					},
+					Values: map[string]string{"cluster": "us-east-1"},
+				},
+			},
+		},
+	}
+
+	cp := orig.deepCopy()
+	cp.Spec.EnvironmentConfigs[0].Selector.MatchLabels["stage"] = "dev"
+	cp.Spec.EnvironmentConfigs[0].Selector.MatchLabels["extra"] = "val"
+	cp.Spec.EnvironmentConfigs[0].Values["cluster"] = "eu-west-1"
+	cp.Spec.EnvironmentConfigs[0].Values["extra"] = "val"
+
+	if diff := cmp.Diff(want, orig); diff != "" {
+		t.Errorf("mutating deepCopy modified original receiver (-want +got):\n%s", diff)
+	}
+}

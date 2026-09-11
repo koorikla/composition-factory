@@ -34,6 +34,53 @@ func (b *Blueprint) deepCopy() *Blueprint {
 		}
 	}
 
+	if b.Spec.Environment != nil {
+		cp.Spec.Environment = make(map[string]EnvironmentKey, len(b.Spec.Environment))
+		for k, v := range b.Spec.Environment {
+			cp.Spec.Environment[k] = v
+		}
+	}
+
+	if b.Spec.EnvironmentConfigs != nil {
+		cp.Spec.EnvironmentConfigs = make([]EnvironmentConfig, len(b.Spec.EnvironmentConfigs))
+		for i, cfg := range b.Spec.EnvironmentConfigs {
+			c := cfg
+			if cfg.Selector != nil {
+				sel := *cfg.Selector
+				if cfg.Selector.MatchLabels != nil {
+					sel.MatchLabels = make(map[string]string, len(cfg.Selector.MatchLabels))
+					for k, v := range cfg.Selector.MatchLabels {
+						sel.MatchLabels[k] = v
+					}
+				}
+				c.Selector = &sel
+			}
+			if cfg.Data != nil {
+				c.Data = make(map[string]string, len(cfg.Data))
+				for k, v := range cfg.Data {
+					c.Data[k] = v
+				}
+			}
+			if cfg.Values != nil {
+				c.Values = make(map[string]string, len(cfg.Values))
+				for k, v := range cfg.Values {
+					c.Values[k] = v
+				}
+			}
+			cp.Spec.EnvironmentConfigs[i] = c
+		}
+	}
+
+	if b.Spec.Pipeline != nil {
+		cp.Spec.Pipeline = make([]PipelineStep, len(b.Spec.Pipeline))
+		copy(cp.Spec.Pipeline, b.Spec.Pipeline)
+	}
+
+	if b.Spec.Emit != nil {
+		emitCopy := *b.Spec.Emit
+		cp.Spec.Emit = &emitCopy
+	}
+
 	cp.Spec.XRD.Parameters = make(map[string]Parameter, len(b.Spec.XRD.Parameters))
 	for name, p := range b.Spec.XRD.Parameters {
 		cp.Spec.XRD.Parameters[name] = copyParameter(p)
