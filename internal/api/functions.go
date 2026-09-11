@@ -65,7 +65,7 @@ func (srv *server) handleAddFunction(w http.ResponseWriter, r *http.Request) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
-	pkg, crds, err := srv.Store.FetchAndSave(r.Context(), srv.Lock, req.Ref, srv.fetch)
+	pkg, crds, err := srv.Store.FetchAndSave(r.Context(), "", req.Ref, srv.fetch)
 	if err != nil {
 		if cache.IsLockError(err) {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
@@ -87,6 +87,15 @@ func (srv *server) handleAddFunction(w http.ResponseWriter, r *http.Request) {
 	}
 	if inputs == 0 && managed > 0 {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("package %q is a provider package, not a function (use 'cf provider add %s')", req.Ref, req.Ref))
+		return
+	}
+
+	if err := srv.Store.PinLock(srv.Lock, req.Ref, pkg.Digest); err != nil {
+		if cache.IsLockError(err) {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

@@ -867,3 +867,33 @@ func TestSanitizeSlugSegment(t *testing.T) {
 		t.Errorf("sanitizeSlugSegment = %q, want %q", got, "a_b_c_d_e_1.2-3")
 	}
 }
+
+func TestPinLock(t *testing.T) {
+	s := New(t.TempDir())
+
+	// Empty lockPath is a no-op
+	if err := s.PinLock("", "example.org/test:v1", "sha256:123"); err != nil {
+		t.Fatalf("PinLock with empty lockPath: %v", err)
+	}
+
+	lockPath := filepath.Join(t.TempDir(), ".cf.lock")
+	if err := s.PinLock(lockPath, "example.org/provider-test:v1", "sha256:abc"); err != nil {
+		t.Fatalf("PinLock provider: %v", err)
+	}
+	if err := s.PinLock(lockPath, "xpkg.crossplane.io/crossplane-contrib/function-test:v1", "sha256:def"); err != nil {
+		t.Fatalf("PinLock function: %v", err)
+	}
+
+	l, err := ReadLock(lockPath)
+	if err != nil {
+		t.Fatalf("ReadLock: %v", err)
+	}
+	p, ok := l.FindProvider("example.org/provider-test:v1")
+	if !ok || p.Digest != "sha256:abc" {
+		t.Errorf("provider entry = %+v, ok = %v", p, ok)
+	}
+	f, ok := l.FindFunction("xpkg.crossplane.io/crossplane-contrib/function-test:v1")
+	if !ok || f.Digest != "sha256:def" {
+		t.Errorf("function entry = %+v, ok = %v", f, ok)
+	}
+}
