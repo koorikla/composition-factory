@@ -872,6 +872,55 @@ function onPanDown(e) {
   gestureBegin(abortDrag);
 }
 
+function fitNodesToView() {
+  const nodes = Array.from(canvasEl ? canvasEl.querySelectorAll(".node") : []);
+  if (!nodes.length || !cwEl) {
+    view.x = 0; view.y = 0; view.k = 1;
+    applyView();
+    return;
+  }
+  const cwRect = cwEl.getBoundingClientRect();
+  const vw = cwRect.width;
+  const vh = cwRect.height;
+  if (vw <= 0 || vh <= 0) {
+    view.x = 0; view.y = 0; view.k = 1;
+    applyView();
+    return;
+  }
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  nodes.forEach(function (el) {
+    const r = el.getBoundingClientRect();
+    const left = (r.left - cwRect.left - view.x) / view.k;
+    const top = (r.top - cwRect.top - view.y) / view.k;
+    const right = (r.right - cwRect.left - view.x) / view.k;
+    const bottom = (r.bottom - cwRect.top - view.y) / view.k;
+    if (left < minX) minX = left;
+    if (top < minY) minY = top;
+    if (right > maxX) maxX = right;
+    if (bottom > maxY) maxY = bottom;
+  });
+
+  const cardsWidth = maxX - minX;
+  const cardsHeight = maxY - minY;
+  const padding = 40;
+  const availW = Math.max(10, vw - padding * 2);
+  const availH = Math.max(10, vh - padding * 2);
+
+  const scaleX = availW / (cardsWidth || 1);
+  const scaleY = availH / (cardsHeight || 1);
+  const minK = Math.min(K_MIN, 0.2);
+  const k = Math.min(1, Math.max(minK, Math.min(scaleX, scaleY)));
+
+  const cx = minX + cardsWidth / 2;
+  const cy = minY + cardsHeight / 2;
+
+  view.k = k;
+  view.x = (vw / 2) - cx * k;
+  view.y = (vh / 2) - cy * k;
+  applyView();
+}
+
 function buildZoomControls() {
   const bar = document.createElement("div");
   bar.id = "zoom-bar";
@@ -886,7 +935,7 @@ function buildZoomControls() {
   const rect = function () { const r = cwEl.getBoundingClientRect(); return { x: r.width / 2, y: r.height / 2 }; };
   bar.querySelector("#zoom-in").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1.2); });
   bar.querySelector("#zoom-out").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1 / 1.2); });
-  bar.querySelector("#zoom-reset").addEventListener("click", function () { view.x = 0; view.y = 0; view.k = 1; applyView(); });
+  bar.querySelector("#zoom-reset").addEventListener("click", fitNodesToView);
   bar.querySelector("#layout-btn").addEventListener("click", function () {
     if (typeof S.clearPositions === "function") {
       S.clearPositions();
@@ -1573,6 +1622,8 @@ function onDragLeave(e) {
 }
 
 function onDrop(e) {
+  const preview = document.getElementById("kind-preview");
+  if (preview) { preview.hidden = true; preview.remove(); }
   cwEl.style.outline = "";
   const pl = parseDropPayload(e.dataTransfer);
   if (!pl) return;

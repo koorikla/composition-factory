@@ -1,6 +1,12 @@
-import { test, expect } from '@playwright/test';
+const { test, expect } = require('@playwright/test');
+const { resetDoc, guardPageErrors } = require('./helpers');
+
+guardPageErrors();
 
 test.describe('CF-057: Generate destination tooltip and overwrite confirmation', () => {
+  test.beforeEach(async ({ request }) => {
+    await resetDoc(request);
+  });
   test('Generate button tooltip names destination directory and warns of overwrite', async ({ page, request }) => {
     // 1. Fetch /api/version to get the expected outDir
     const verRes = await (await request.get('/api/version')).json();
@@ -40,9 +46,9 @@ test.describe('CF-057: Generate destination tooltip and overwrite confirmation',
     await expect(genBtn).toBeVisible();
     await genBtn.click();
 
-    // Verify confirmation prompt was shown with expected message
+    // Verify confirmation prompt was shown with expected message (omits overwrite warning on empty outDir)
     expect(dialogAppeared).toBe(true);
-    const expectedMsg = `Generate will write manifests to disk in '${outDir}', overwriting existing files.\n\nProceed?`;
+    const expectedMsg = `Generate will write manifests to disk in '${outDir}'.\n\nProceed?`;
     expect(dialogMessage).toBe(expectedMsg);
 
     // Because it was dismissed, banner should NOT transition to "Output written to"
@@ -63,7 +69,7 @@ test.describe('CF-057: Generate destination tooltip and overwrite confirmation',
     let dialogAppeared = false;
     let dialogMessage = '';
 
-    page.on('dialog', async (dialog) => {
+    page.once('dialog', async (dialog) => {
       dialogAppeared = true;
       dialogMessage = dialog.message();
       await dialog.accept();
@@ -74,10 +80,21 @@ test.describe('CF-057: Generate destination tooltip and overwrite confirmation',
     await genBtn.click();
 
     expect(dialogAppeared).toBe(true);
-    const expectedMsg = `Generate will write manifests to disk in '${outDir}', overwriting existing files.\n\nProceed?`;
+    const expectedMsg = `Generate will write manifests to disk in '${outDir}'.\n\nProceed?`;
     expect(dialogMessage).toBe(expectedMsg);
 
     // Because it was accepted, banner transitions to "Output written to"
     await expect(banner).toContainText('Output written to');
+
+    // Subsequent generate on now-populated directory warns about overwriting existing files
+    let overwriteWarnSeen = false;
+    page.once('dialog', async (dialog) => {
+      if (dialog.message().includes('overwriting existing files')) {
+        overwriteWarnSeen = true;
+      }
+      await dialog.dismiss();
+    });
+    await genBtn.click();
+    expect(overwriteWarnSeen).toBe(true);
   });
 });

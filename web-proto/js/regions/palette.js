@@ -846,10 +846,13 @@ function syncMemberRows() {
   });
 }
 
-function hideKindPreview() {
+export function hideKindPreview() {
   clearTimeout(previewTimer); previewTimer = null; previewFor = null;
   const el = document.getElementById("kind-preview");
-  if (el) el.hidden = true;
+  if (el) {
+    el.hidden = true;
+    el.remove();
+  }
 }
 
 function showKindPreview(row) {
@@ -1412,6 +1415,7 @@ function bindPaletteEvents() {
 
   /* ---- kind hover preview (slice 28) ---- */
   railEl.addEventListener("mouseover", function (e) {
+    if (isPaletteDragging) return;
     const row = e.target.closest(".kind[data-kind]");
     if (!row) { hideKindPreview(); return; }
     const key = row.getAttribute("data-kind") + "|" + row.getAttribute("data-av");
@@ -1440,8 +1444,12 @@ function bindPaletteEvents() {
   });
 
   railEl.addEventListener("dragend", function () {
+    hideKindPreview();
     setTimeout(function () { isPaletteDragging = false; }, 50);
   });
+
+  document.addEventListener("drop", hideKindPreview);
+  document.addEventListener("dragend", hideKindPreview);
 
   railEl.addEventListener("keydown", function (e) {
     if (e.key === "Enter" || e.key === " ") {

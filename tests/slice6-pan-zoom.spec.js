@@ -33,9 +33,13 @@ test('wheel zooms to the cursor, shift+wheel pans, reset restores', async ({ pag
   expect(Math.abs(t2.x - t.x) + Math.abs(t2.y - t.y)).toBeGreaterThan(0)
   await page.click('#zoom-reset')
   t = await transformOf(page)
-  expect(t.scale).toBeCloseTo(1, 2)
-  expect(t.x).toBeCloseTo(0, 1)
-  expect(t.y).toBeCloseTo(0, 1)
+  // CF-159: zoom-reset fits and centers all cards within visible canvas viewport
+  expect(t.scale).toBeLessThanOrEqual(1)
+  expect(t.scale).toBeGreaterThan(0.7)
+  const wqBox = await page.locator('.node[data-id="work-queue"]').boundingBox()
+  const cwBox = await cw.boundingBox()
+  expect(wqBox.x).toBeGreaterThanOrEqual(cwBox.x - 2)
+  expect(wqBox.x + wqBox.width).toBeLessThanOrEqual(cwBox.x + cwBox.width + 2)
 })
 
 test('zoom buttons work and wires stay glued to their ports', async ({ page }) => {

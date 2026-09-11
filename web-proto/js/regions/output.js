@@ -920,7 +920,13 @@ function initTheme() {
 function generateNow() {
   if (genTimer) { clearTimeout(genTimer); genTimer = null; }
   var dest = outDir || ".";
-  var ok = window.confirm("Generate will write manifests to disk in '" + dest + "', overwriting existing files.\n\nProceed?");
+  var lastGen = store && store.state && store.state.lastGenerate;
+  var existing = lastGen && lastGen.existingFiles;
+  var hasExisting = Array.isArray(existing) && existing.length > 0;
+  var msg = hasExisting
+    ? "Generate will write manifests to disk in '" + dest + "', overwriting existing files.\n\nProceed?"
+    : "Generate will write manifests to disk in '" + dest + "'.\n\nProceed?";
+  var ok = window.confirm(msg);
   if (!ok) return;
   store.generate(true);
 }

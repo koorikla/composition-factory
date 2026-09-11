@@ -145,10 +145,12 @@ func (srv *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	for i, out := range outputs {
 		summaries[i] = generateOutput{Path: out.Path, Bytes: len(out.Body), Body: string(out.Body)}
 	}
+	existing, _ := emit.FindExistingManagedFiles(srv.OutDir)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"outputs": summaries,
-		"written": req.Write,
-		"outDir":  srv.OutDir,
+		"outputs":       summaries,
+		"written":       req.Write,
+		"outDir":        srv.OutDir,
+		"existingFiles": existing,
 	})
 }
 
