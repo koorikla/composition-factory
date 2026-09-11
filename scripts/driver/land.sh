@@ -14,9 +14,10 @@
 #
 # The whole script, including the CI watch and any revert, runs under lock pool
 # `merge` (1 slot): it re-execs itself through lock.sh, which leaves the lock on
-# an inherited descriptor (7-9). One landing at a time, and nobody lands on top
-# of an unwatched push. Every git call disables auto gc and auto maintenance so
-# no detached git process inherits the lock; the gates run with 3-9 closed.
+# an inherited descriptor (the highest free one in 9..3). One landing at a time,
+# and nobody lands on top of an unwatched push. Every git call disables auto gc
+# and auto maintenance so no detached git process inherits the lock; the gates
+# run with descriptors 3-9 closed.
 #
 # Callers decide by the stdout line (exactly one; everything else is stderr):
 #   0  LANDED <sha> <run-url>            CI green; topic branch deleted
@@ -34,7 +35,9 @@
 # When no CI run appears for a pushed sha, the run url reads `none`.
 # lock.sh may also end the run with 2, 73 or 75 and an empty stdout (see its header).
 # The only e2e rerun: when a run's single non-passing job is `e2e` with conclusion
-# failure, it is rerun once (`gh run rerun <id> --failed`) and watched again.
+# failure, it is rerun once (`gh run rerun <id> --failed`) and watched again once
+# `gh run view` no longer shows the failed attempt (at most 30 polls, every
+# CF_CI_POLL_SEC).
 #
 # Environment:
 #   CF_LAND_GATES   shell command run in the rebased worktree. Default:
@@ -48,6 +51,7 @@
 set -u
 
 MAX_POLLS=60
+RERUN_POLLS=30
 
 usage() {
   echo "usage: land.sh <issue>" >&2
@@ -116,9 +120,12 @@ say "issue #$issue: landing $branch as $cf"
 top="$(g rev-parse --show-toplevel)" || die "not inside a git worktree"
 wt="$top/.worktrees/land-$cf"
 
+# remove_worktree: remove the scratch worktree if present, then prune, so a
+# registration whose directory was deleted cannot block the next `worktree add`.
 remove_worktree() {
-  [ -e "$wt" ] || return 0
-  g -C "$top" worktree remove --force "$wt" >&2 2>/dev/null || rm -rf "$wt"
+  if [ -e "$wt" ]; then
+    g -C "$top" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"
+  fi
   g -C "$top" worktree prune >&2
 }
 
@@ -228,6 +235,33 @@ e2e_flake() {
   ' >/dev/null
 }
 
+# await_rerun ID: poll `gh run view` until the run no longer reads as the old
+# attempt (e2e completed with failure). The rerun endpoint is asynchronous, and
+# `gh run watch --exit-status` on a run that still reads completed exits at once
+# with the old conclusion. Queued or running jobs carry an empty or null
+# conclusion and a status other than completed; an empty job list is a new
+# attempt that has no jobs yet. Gives up after RERUN_POLLS and lets the watch
+# decide.
+await_rerun() {
+  local i=0 json
+  while [ "$i" -lt "$RERUN_POLLS" ]; do
+    [ "$i" -eq 0 ] || sleep "$poll"
+    i=$((i + 1))
+    json="$(gh run view "$1" --json jobs)" || continue
+    printf '%s\n' "$json" | jq -e '
+      any(.jobs[]?; .name == "e2e" and (.conclusion // "") == "failure"
+                    and ((.status // "completed") == "completed"))
+    ' >/dev/null
+    case $? in
+      1) return 0 ;;
+      0) ;;
+      *) say "could not read run $1 while waiting for its rerun" ;;
+    esac
+  done
+  say "run $1 still reads as the failed attempt after $RERUN_POLLS polls; watching anyway"
+  return 1
+}
+
 # Step 6: watch, with at most one e2e rerun.
 green=
 if find_run "$sha"; then
@@ -236,7 +270,7 @@ if find_run "$sha"; then
   elif e2e_flake "$run_id"; then
     say "only e2e failed in $run_url; rerunning it once"
     if gh run rerun "$run_id" --failed >&2; then
-      sleep "$poll"
+      await_rerun "$run_id"
       watch_run "$run_id" && green=1
     else
       say "gh run rerun $run_id failed"
