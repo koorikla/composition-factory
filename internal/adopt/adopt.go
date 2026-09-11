@@ -280,9 +280,11 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	}
 
 	// 1. Metadata
-	var srcCommentRE = regexp.MustCompile(`(?m)^# Source:\s*([^\s]+)`)
 	if m := srcCommentRE.FindSubmatch(manifest); len(m) >= 2 && string(m[1]) != "blueprint" {
-		bp.Metadata.Name = string(m[1])
+		candidate := string(m[1])
+		if isValidMetadataName(candidate) {
+			bp.Metadata.Name = candidate
+		}
 	}
 	if meta, ok := compDoc["metadata"].(map[string]any); ok {
 		if bp.Metadata.Name == "" {
@@ -1011,6 +1013,8 @@ var (
 	reChunkName          = regexp.MustCompile(`(?m)^\s*name:\s*["']?([a-zA-Z0-9._-]+)["']?`)
 	rePrintfFormat       = regexp.MustCompile(`printf\s+"([^"]+)"`)
 	reXRNameSuffix       = regexp.MustCompile(`\{\{-?\s*(?:\$xr|\.observed\.composite\.resource\.metadata\.name)\s*-?\}\}-([a-zA-Z0-9_-]+)`)
+	srcCommentRE         = regexp.MustCompile(`(?m)^# Source:\s*([^\s]+)`)
+	dnsSubdomainRE       = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
 	paramNameRE          = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
 	pluralRE             = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 	dnsInvalidRE         = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -1018,6 +1022,20 @@ var (
 		"true": true, "false": true, "null": true,
 	}
 )
+
+func isValidMetadataName(name string) bool {
+	if len(name) == 0 || len(name) > 253 {
+		return false
+	}
+	if !dnsSubdomainRE.MatchString(name) {
+		return false
+	}
+	switch strings.ToLower(name) {
+	case "true", "false", "yes", "no", "on", "off", "null", "y", "n":
+		return false
+	}
+	return true
+}
 
 func matchTemplateInclude(s string) string {
 	m := reTemplateInclude.FindStringSubmatch(strings.TrimSpace(s))

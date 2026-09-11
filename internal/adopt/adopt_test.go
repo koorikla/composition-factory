@@ -4427,5 +4427,46 @@ spec:
 	if bpValid.Metadata.Name != "valid-bp-name" {
 		t.Errorf("expected Metadata.Name to be 'valid-bp-name', got %q", bpValid.Metadata.Name)
 	}
-}
 
+	// Verify keywords and invalid DNS subdomains in # Source: fall back to metadata.name
+	for _, invalidSource := range []string{"true", "yes", "null", "invalid_name", "-starts-with-dash", "blueprint"} {
+		m := fmt.Sprintf("# Source: %s\n%s", invalidSource, manifest[strings.Index(manifest, "apiVersion"):])
+		bpBad, _, err := Adopt([]byte(m), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed for invalid source %q: %v", invalidSource, err)
+		}
+		if bpBad.Metadata.Name != "my-comp" {
+			t.Errorf("expected Metadata.Name for source %q to fall back to 'my-comp', got %q", invalidSource, bpBad.Metadata.Name)
+		}
+		if err := bpBad.Validate(); err != nil {
+			t.Errorf("bpBad.Validate() failed for source %q: %v", invalidSource, err)
+		}
+	}
+
+	// Verbatim reproduction from issue description
+	verbatim := `# Source: mychart/templates/composition.yaml
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: my-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XMyResource
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-auto-ready
+`
+	bpVerbatim, _, err := Adopt([]byte(verbatim), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed for verbatim repro: %v", err)
+	}
+	if bpVerbatim.Metadata.Name != "my-comp" {
+		t.Errorf("expected Metadata.Name for verbatim repro to be 'my-comp', got %q", bpVerbatim.Metadata.Name)
+	}
+	if err := bpVerbatim.Validate(); err != nil {
+		t.Errorf("bpVerbatim.Validate() failed: %v", err)
+	}
+}
