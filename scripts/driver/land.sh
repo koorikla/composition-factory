@@ -130,6 +130,9 @@ remove_worktree() {
 }
 
 g fetch origin >&2 || die "git fetch origin failed"
+# Pin the base: refs/remotes/origin/main is shared by every worktree of the
+# clone, and another session's fetch can move it while the gates run.
+base="$(g rev-parse --verify --quiet "refs/remotes/origin/main^{commit}")" || die "origin/main is missing"
 g rev-parse --verify --quiet "refs/remotes/origin/$branch^{commit}" >/dev/null ||
   die "branch $branch is not on origin"
 
@@ -138,7 +141,7 @@ trap 'remove_worktree' EXIT
 g -C "$top" worktree add --detach "$wt" "origin/$branch" >&2 ||
   die "could not add worktree $wt on origin/$branch"
 
-if ! g -C "$wt" rebase origin/main >&2; then
+if ! g -C "$wt" rebase "$base" >&2; then
   g -C "$wt" rebase --abort >&2
   echo "PARKED rebase-conflict"
   exit 6
@@ -149,7 +152,7 @@ fi
 gates="${CF_LAND_GATES:-}"
 if [ -z "$gates" ]; then
   gates="make lint && make lint-strict"
-  changed="$(g -C "$wt" diff --name-only origin/main HEAD -- '*.go')" ||
+  changed="$(g -C "$wt" diff --name-only "$base" HEAD -- '*.go')" ||
     die "could not list changed Go files"
   seen=$'\n'
   pkgs=""
@@ -175,12 +178,13 @@ if ! (cd "$wt" && /bin/bash -c "$gates") </dev/null >&2 3>&- 4>&- 5>&- 6>&- 7>&-
   exit 6
 fi
 
-# Step 5: one commit on origin/main.
+# Step 5: one commit on the pinned base; a push that is not a fast-forward of
+# origin main is rejected, so a moved main parks instead of being undone.
 subject="$(g -C "$wt" log -1 --format=%s HEAD)" || die "could not read the branch's newest subject"
 suffix="($cf, #$issue)"
 case "$subject" in *"$suffix"*) ;; *) subject="$subject $suffix" ;; esac
 message="$subject"
-commits="$(g -C "$wt" rev-list --reverse origin/main..HEAD)" || die "could not list the branch's commits"
+commits="$(g -C "$wt" rev-list --reverse "$base..HEAD")" || die "could not list the branch's commits"
 [ -n "$commits" ] || die "branch $branch has no commits beyond origin/main"
 for c in $commits; do
   body="$(g -C "$wt" log -1 --format=%b "$c")" || die "could not read commit $c"
@@ -189,7 +193,7 @@ for c in $commits; do
 $body" ;; esac
 done
 
-g -C "$wt" reset --soft origin/main >&2 || die "could not squash onto origin/main"
+g -C "$wt" reset --soft "$base" >&2 || die "could not squash onto origin/main"
 if g -C "$wt" diff --cached --quiet; then
   die "branch $branch has nothing to land against origin/main"
 fi

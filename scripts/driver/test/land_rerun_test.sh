@@ -2,39 +2,7 @@
 # scripts/driver/land.sh — waiting for an e2e rerun to start, and scratch
 # worktrees left registered after their directory was deleted.
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-LAND="$DRIVER_DIR/land.sh"
-
-# land_repo: the same shape as land_test.sh. A bare origin and a working clone;
-# main has one commit; topic branch CF-900-thing has two commits on thing.txt;
-# both are pushed. Issue #42 is handed back with a claim naming that branch.
-# Leaves the shell in the clone.
-land_repo() {
-  new_sandbox
-  export CF_LAND_GATES=true CF_CI_POLL_SEC=0
-  git init -q --bare -b main "$SANDBOX/origin.git"
-  git clone -q "$SANDBOX/origin.git" "$SANDBOX/work" 2>/dev/null
-  cd "$SANDBOX/work" || return 1
-  git config user.email tester@example.com
-  git config user.name tester
-  git checkout -q -b main
-  echo base > thing.txt
-  git add thing.txt
-  git commit -q -m "base"
-  git push -q origin main
-  git checkout -q -b CF-900-thing
-  echo one >> thing.txt
-  git commit -q -am "Teach thing a first trick" -m "First body."
-  echo two >> thing.txt
-  git commit -q -am "Teach thing a second trick" -m "Second body."
-  git push -q origin CF-900-thing
-  git checkout -q main
-  issue_fixture 42 OPEN "handed-back,severity:P2" \
-    "taking — CF-900-thing · driver d06-0300Z · lease until $(iso_at 30) · files: thing.txt" 90
-}
-
-origin_git() { git -C "$SANDBOX/origin.git" "$@"; }
-has_branch() { origin_git show-ref --verify --quiet "refs/heads/$1" && echo yes || echo no; }
-has_worktree() { [ -d "$SANDBOX/work/.worktrees/land-CF-900" ] && echo yes || echo no; }
+. "$(dirname "${BASH_SOURCE[0]}")/land_fixture.sh"
 
 # slow_rerun_gh STALE: a gh ahead of the fake whose rerun starts late, like
 # GitHub's asynchronous rerun endpoint. After `run rerun <id>`, `run view <id>`
