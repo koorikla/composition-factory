@@ -47,7 +47,7 @@ func EnvironmentConfig(b *blueprint.Blueprint, cfg blueprint.EnvironmentConfig) 
 			} else if envKey.Default != "" {
 				d.Line(1, "%s: %s", k, formatEnvDefault(envKey))
 			} else {
-				d.Line(1, "%s: \"\"", k)
+				d.Line(1, "%s: %s", k, formatEnvVal(envKey, ""))
 			}
 		}
 	}
@@ -66,7 +66,16 @@ func formatLabelValue(v string) string {
 
 func formatEnvVal(k blueprint.EnvironmentKey, val string) string {
 	if val == "" {
-		return `""`
+		switch k.Type {
+		case "integer":
+			return "0"
+		case "number":
+			return "0.0"
+		case "boolean":
+			return "false"
+		default:
+			return `""`
+		}
 	}
 	switch k.Type {
 	case "integer", "number", "boolean":
