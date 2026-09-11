@@ -1908,6 +1908,9 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 				report.Record(patchPath,
 					fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
 			}
+		} else if strings.HasPrefix(toPath, "spec.initProvider.") || toPath == "spec.initProvider" {
+			report.Record(patchPath,
+				fmt.Sprintf("unsupported toFieldPath %q in patch (initProvider is not supported in blueprint)", toPath))
 		} else if strings.HasPrefix(toPath, "spec.") {
 			targetField := strings.TrimPrefix(toPath, "spec.")
 			if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
@@ -2227,6 +2230,22 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 	if spec, ok := m["spec"].(map[string]any); ok {
 		if forProvider, ok := spec["forProvider"].(map[string]any); ok {
 			extractFields("", forProvider, res.Fields, placeholders, res.Name, report, nameMapping, bp, isNative)
+			if initProvider, ok := spec["initProvider"].(map[string]any); ok {
+				initKeys := make([]string, 0, len(initProvider))
+				for k := range initProvider {
+					initKeys = append(initKeys, k)
+				}
+				sort.Strings(initKeys)
+				for _, k := range initKeys {
+					if report != nil {
+						report.Record(fmt.Sprintf("resource.%s.initProvider.%s", res.Name, k), "initProvider is not supported in blueprint")
+					}
+				}
+			} else if _, exists := spec["initProvider"]; exists {
+				if report != nil {
+					report.Record(fmt.Sprintf("resource.%s.initProvider", res.Name), "initProvider is not supported in blueprint")
+				}
+			}
 			specKeys := make([]string, 0, len(spec))
 			for k := range spec {
 				specKeys = append(specKeys, k)
