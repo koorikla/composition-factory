@@ -83,6 +83,13 @@ test.describe('CF-235: Stacking and offset for concurrent toasts and import noti
 
     await expect(warnBar).toBeVisible({ timeout: 10000 });
     await expect(importToast).toBeVisible({ timeout: 10000 });
+
+    // In CF-249 unknown wired fields are now pruned during adopt so generate succeeds.
+    // Trigger an error to verify concurrent 3-way notice stacking (CF-235).
+    await page.evaluate(() => {
+      window.store.emit('error', { message: 'schema error: retentionDays' });
+    });
+
     await expect(errorToast).toBeVisible({ timeout: 10000 });
 
     // Verify content of each notice
