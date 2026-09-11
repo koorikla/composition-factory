@@ -2239,6 +2239,7 @@ function onBoxChange(e) {
   }
 
   if (t.hasAttribute("data-wire")) {
+    if (t.dataset.keyNav === "true") return;
     const path = t.getAttribute("data-wire");
     const v = t.value;
     if (v === "__new__") { pendingNewParam = path; render(); return; }
@@ -2260,6 +2261,7 @@ function onBoxChange(e) {
   }
 
   if (t.hasAttribute("data-env-wire")) {
+    if (t.dataset.keyNav === "true") return;
     const path = t.getAttribute("data-env-wire");
     const v = t.value;
     if (v === "__new__") { pendingNewParam = "env:" + path; render(); return; }
@@ -2441,9 +2443,33 @@ export function init(rootEl, deps) {
   box.addEventListener("click", onBoxClick);
   box.addEventListener("change", onBoxChange);
   box.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" && e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT")) {
+    var t = e.target;
+    if (!t) return;
+    if (t.matches && t.matches("select[data-wire], select[data-env-wire]")) {
+      if (e.key === "Enter") {
+        delete t.dataset.keyNav;
+        e.preventDefault();
+        onBoxChange({ target: t });
+        t.blur();
+        return;
+      }
+      if (e.key === "Escape") {
+        delete t.dataset.keyNav;
+        t.blur();
+        return;
+      }
+      if (e.key !== "Tab") {
+        t.dataset.keyNav = "true";
+        // Clear on next macrotask so any subsequent click or programmatic selection commits
+        setTimeout(function () {
+          delete t.dataset.keyNav;
+        }, 50);
+      }
+      return;
+    }
+    if (e.key === "Enter" && (t.tagName === "INPUT" || t.tagName === "SELECT")) {
       e.preventDefault();
-      e.target.blur();
+      t.blur();
     }
   });
   box.addEventListener("input", function (e) {
