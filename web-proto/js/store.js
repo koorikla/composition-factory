@@ -124,7 +124,7 @@ export const store = {
       return null;
     }
     const next = clone(this.state.doc);
-    const returned = mutatorFn(next);
+    const returned = typeof mutatorFn === "function" ? mutatorFn(next) : mutatorFn;
     const candidate = returned === undefined ? next : returned;
     try {
       const prev = clone(this.state.doc);

@@ -156,6 +156,104 @@ function isParamLocked(doc, n) {
   });
 }
 
+function isParamRef(ref, pn) {
+  if (typeof ref !== "string" || !ref || !pn) return false;
+  if (ref === "params." + pn || ref.indexOf("params." + pn + ".") === 0) return true;
+  if (ref === "parameters." + pn || ref.indexOf("parameters." + pn + ".") === 0) return true;
+  return false;
+}
+
+function isRawParamRef(raw, pn) {
+  if (typeof raw !== "string" || !raw || !pn) return false;
+  var escaped = pn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  var re = new RegExp("(?:\\$spec|\\.spec|\\$params|\\.params|params|parameters)\\." + escaped + "(?:$|[^a-zA-Z0-9_])");
+  return re.test(raw);
+}
+
+function isObjectReferencingParam(obj, pn) {
+  if (!obj || typeof obj !== "object") return false;
+  for (var k of Object.keys(obj)) {
+    var v = obj[k];
+    if (typeof v === "string" && (isParamRef(v, pn) || isRawParamRef(v, pn))) return true;
+    if (typeof v === "object" && isObjectReferencingParam(v, pn)) return true;
+  }
+  return false;
+}
+
+function isWhenReferencingParam(whenStr, pn) {
+  if (!whenStr || typeof whenStr !== "string") return false;
+  if (isParamRef(whenStr, pn)) return true;
+  var parsed = parseWhen(whenStr);
+  if (parsed && parsed.param === pn) return true;
+  var m = /^(?:params|parameters)\.([A-Za-z0-9_-]+)/.exec(whenStr);
+  if (m && m[1] === pn) return true;
+  return false;
+}
+
+function cleanParamRefs(draft, pn) {
+  if (!draft || !draft.spec) return;
+  if (draft.spec.xrd && draft.spec.xrd.parameters) {
+    delete draft.spec.xrd.parameters[pn];
+  }
+  var resources = draft.spec.resources || [];
+  resources.forEach(function (r) {
+    if (r.fields) {
+      Object.keys(r.fields).forEach(function (k) {
+        var f = r.fields[k];
+        if (f && (isParamRef(f.from, pn) || isRawParamRef(f.raw, pn))) {
+          delete r.fields[k];
+        }
+      });
+    }
+    if (r.envelope) {
+      Object.keys(r.envelope).forEach(function (k) {
+        var f = r.envelope[k];
+        if (f && (isParamRef(f.from, pn) || isRawParamRef(f.raw, pn))) {
+          delete r.envelope[k];
+        }
+      });
+      if (Object.keys(r.envelope).length === 0) delete r.envelope;
+    }
+    if (r.annotations) {
+      Object.keys(r.annotations).forEach(function (k) {
+        var f = r.annotations[k];
+        if (f && (isParamRef(f.from, pn) || isRawParamRef(f.raw, pn))) {
+          delete r.annotations[k];
+        }
+      });
+      if (Object.keys(r.annotations).length === 0) delete r.annotations;
+    }
+    if (r.connectionSecret) {
+      if (typeof r.connectionSecret === "string") {
+        if (isParamRef(r.connectionSecret, pn) || isRawParamRef(r.connectionSecret, pn)) {
+          delete r.connectionSecret;
+        }
+      } else if (typeof r.connectionSecret === "object") {
+        if (Array.isArray(r.connectionSecret.keys)) {
+          r.connectionSecret.keys = r.connectionSecret.keys.filter(function (item) {
+            if (typeof item === "string") return !isParamRef(item, pn) && !isRawParamRef(item, pn);
+            if (item && typeof item === "object") {
+              if (item.from && (isParamRef(item.from, pn) || isRawParamRef(item.from, pn))) return false;
+              if (item.raw && isRawParamRef(item.raw, pn)) return false;
+              if (isObjectReferencingParam(item, pn)) return false;
+            }
+            return true;
+          });
+          if (r.connectionSecret.keys.length === 0) delete r.connectionSecret;
+        } else if (isObjectReferencingParam(r.connectionSecret, pn)) {
+          delete r.connectionSecret;
+        }
+      }
+    }
+    if (r.when && isWhenReferencingParam(r.when, pn)) {
+      delete r.when;
+    }
+    if (r.forEach && (isParamRef(r.forEach, pn) || isRawParamRef(r.forEach, pn))) {
+      delete r.forEach;
+    }
+  });
+}
+
 function getKindsCached() {
   if (!kindsPromise) {
     kindsPromise = api.getKinds().catch(function (e) {
@@ -2297,12 +2395,18 @@ var boxClickActions = [
       var pn = pd.getAttribute("data-pd");
       if (isParamLocked(doc, pn)) return;
       var fo = fanOut(doc, pn);
-      if (fo > 0 && !confirm('Parameter "' + pn + '" is wired into ' + fo + " field" + (fo === 1 ? "" : "s") + ". Delete it?")) return;
+      if (fo > 0 && !confirm('Parameter "' + pn + '" is wired into ' + fo + " field" + (fo === 1 ? "" : "s") + ". Delete it and unwire all referencing fields?")) return;
       if (paramOrder) {
         var idx = paramOrder.indexOf(pn);
         if (idx !== -1) paramOrder.splice(idx, 1);
       }
-      op(function () { return store.deleteParameter(pn); });
+      if (fo > 0) {
+        var draft = JSON.parse(JSON.stringify(doc));
+        cleanParamRefs(draft, pn);
+        op(function () { return store.replaceDoc(draft); });
+      } else {
+        op(function () { return store.deleteParameter(pn); });
+      }
     }
   },
   {
