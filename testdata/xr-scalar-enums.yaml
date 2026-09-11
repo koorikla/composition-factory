@@ -1,0 +1,14 @@
+apiVersion: platform.sparky.ee/v1alpha1
+kind: XEnumQueue
+metadata:
+  name: demo-enum-queue
+  namespace: default
+spec:
+  providerName: localstack
+  port: 80
+  ratio: 1.5
+  enabled: true
+  tier: standard
+  tuning:
+    maxSize: 1024
+    active: true

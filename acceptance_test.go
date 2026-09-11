@@ -1155,6 +1155,216 @@ func TestAcceptanceTypedObjectParamRenders(t *testing.T) {
 	})
 }
 
+// TestAcceptanceScalarEnumsRender is the scalar-enums gate (CF-212):
+// a blueprint declaring enum options on integer, number, boolean, and string
+// parameters, as well as on typed object members.
+// It verifies:
+//  1. Emitted XRD openAPIV3Schema represents integer, number, and boolean enum
+//     values as bare scalars (unquoted YAML) and string enums as quoted strings.
+//  2. SampleXR synthesizes typed values matching the parameter declared types.
+//  3. crossplane composition render validates and renders the composition and
+//     XRD without schema type errors, correctly wiring values to managed resources.
+func TestAcceptanceScalarEnumsRender(t *testing.T) {
+	if testing.Short() {
+		unavailable(t, "acceptance test needs Docker; skipped under -short")
+	}
+	requireTool(t, "crossplane")
+	requireTool(t, "docker", "info")
+
+	dir := t.TempDir()
+	bin := testBin
+	cacheDir := testCacheDir
+	_ = testLockFile
+
+	// Generate twice into separate directories: determinism check.
+	outDir := filepath.Join(t.TempDir(), "out")
+	for _, o := range []string{outDir, filepath.Join(dir, "out2")} {
+		gen := exec.Command(bin, "gen", "testdata/xqueue-scalar-enums.cf.yaml", "-o", o, "--cache-dir", cacheDir)
+		if out, err := gen.CombinedOutput(); err != nil {
+			t.Fatalf("cf gen into %s: %v\n%s", o, err, out)
+		}
+	}
+	for _, rel := range []string{
+		filepath.Join("compositions", "xenumqueues.platform.sparky.ee.yaml"),
+		filepath.Join("xrds", "xenumqueues.platform.sparky.ee.yaml"),
+		"functions.yaml",
+	} {
+		first, err := os.ReadFile(filepath.Join(outDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		second, err := os.ReadFile(filepath.Join(dir, "out2", rel))
+		if err != nil {
+			t.Fatalf("read second-run %s: %v", rel, err)
+		}
+		if !bytes.Equal(first, second) {
+			t.Errorf("%s: two generate runs over the same blueprint produced different bytes", rel)
+		}
+	}
+
+	xrdPath := filepath.Join(outDir, "xrds", "xenumqueues.platform.sparky.ee.yaml")
+	xrdRaw, err := os.ReadFile(xrdPath)
+	if err != nil {
+		t.Fatalf("read XRD: %v", err)
+	}
+
+	// 1. Structural check: parse openAPIV3Schema via sigs.k8s.io/yaml to verify types.
+	var parsedXRD map[string]any
+	if err := yaml.Unmarshal(xrdRaw, &parsedXRD); err != nil {
+		t.Fatalf("unmarshal XRD: %v", err)
+	}
+	specProps, ok := digAny(parsedXRD, "spec", "versions", 0, "schema", "openAPIV3Schema",
+		"properties", "spec", "properties").(map[string]any)
+	if !ok {
+		t.Fatalf("spec.properties: expected map, got %T", digAny(parsedXRD, "spec", "versions", 0, "schema", "openAPIV3Schema", "properties", "spec", "properties"))
+	}
+
+	// port: integer enum
+	portEnum := digAny(specProps, "port", "enum").([]any)
+	for i, v := range portEnum {
+		if _, ok := v.(float64); !ok {
+			t.Errorf("port enum[%d] is %T (%v), want float64/number", i, v, v)
+		}
+	}
+
+	// ratio: number enum
+	ratioEnum := digAny(specProps, "ratio", "enum").([]any)
+	for i, v := range ratioEnum {
+		if _, ok := v.(float64); !ok {
+			t.Errorf("ratio enum[%d] is %T (%v), want float64/number", i, v, v)
+		}
+	}
+
+	// enabled: boolean enum
+	enabledEnum := digAny(specProps, "enabled", "enum").([]any)
+	for i, v := range enabledEnum {
+		if _, ok := v.(bool); !ok {
+			t.Errorf("enabled enum[%d] is %T (%v), want bool", i, v, v)
+		}
+	}
+
+	// tier: string enum
+	tierEnum := digAny(specProps, "tier", "enum").([]any)
+	for i, v := range tierEnum {
+		if _, ok := v.(string); !ok {
+			t.Errorf("tier enum[%d] is %T (%v), want string", i, v, v)
+		}
+	}
+
+	// tuning members: maxSize (integer) and active (boolean)
+	tuningProps := digAny(specProps, "tuning", "properties").(map[string]any)
+	maxSizeEnum := digAny(tuningProps, "maxSize", "enum").([]any)
+	for i, v := range maxSizeEnum {
+		if _, ok := v.(float64); !ok {
+			t.Errorf("tuning.maxSize enum[%d] is %T (%v), want float64/number", i, v, v)
+		}
+	}
+	activeEnum := digAny(tuningProps, "active", "enum").([]any)
+	for i, v := range activeEnum {
+		if _, ok := v.(bool); !ok {
+			t.Errorf("tuning.active enum[%d] is %T (%v), want bool", i, v, v)
+		}
+	}
+
+	// 2. Exact YAML formatting check: scalars must be unquoted, strings quoted.
+	xrdContent := string(xrdRaw)
+	for _, wantSnippet := range []string{
+		"- 80",
+		"- 443",
+		"- 1.5",
+		"- 2.5",
+		"- true",
+		"- false",
+		"- 1024",
+		"- 2048",
+	} {
+		if !strings.Contains(xrdContent, wantSnippet) {
+			t.Errorf("XRD output missing bare scalar %q\n---\n%s", wantSnippet, xrdContent)
+		}
+	}
+	for _, badSnippet := range []string{
+		"- '80'",
+		"- '443'",
+		"- '1.5'",
+		"- '2.5'",
+		"- 'true'",
+		"- 'false'",
+		"- '1024'",
+		"- '2048'",
+	} {
+		if strings.Contains(xrdContent, badSnippet) {
+			t.Errorf("XRD output contains quoted scalar %q\n---\n%s", badSnippet, xrdContent)
+		}
+	}
+
+	// 3. SampleXR test: load blueprint and synthesize sample XR.
+	bpData, err := os.ReadFile("testdata/xqueue-scalar-enums.cf.yaml")
+	if err != nil {
+		t.Fatalf("read blueprint: %v", err)
+	}
+	bp, err := blueprint.Parse(bpData)
+	if err != nil {
+		t.Fatalf("parse blueprint: %v", err)
+	}
+	sampleBytes, err := emit.SampleXR(bp)
+	if err != nil {
+		t.Fatalf("SampleXR: %v", err)
+	}
+	var sampleXR map[string]any
+	if err := yaml.Unmarshal(sampleBytes, &sampleXR); err != nil {
+		t.Fatalf("unmarshal sample XR: %v", err)
+	}
+	sampleSpec := digAny(sampleXR, "spec").(map[string]any)
+	if v, ok := sampleSpec["port"].(float64); !ok || v != 80 {
+		t.Errorf("sampleXR spec.port = %v (%T), want 80", sampleSpec["port"], sampleSpec["port"])
+	}
+	if v, ok := sampleSpec["ratio"].(float64); !ok || v != 1.5 {
+		t.Errorf("sampleXR spec.ratio = %v (%T), want 1.5", sampleSpec["ratio"], sampleSpec["ratio"])
+	}
+	if v, ok := sampleSpec["enabled"].(bool); !ok || !v {
+		t.Errorf("sampleXR spec.enabled = %v (%T), want true", sampleSpec["enabled"], sampleSpec["enabled"])
+	}
+	if v, ok := sampleSpec["tier"].(string); !ok || v != "standard" {
+		t.Errorf("sampleXR spec.tier = %v (%T), want \"standard\"", sampleSpec["tier"], sampleSpec["tier"])
+	}
+	sampleTuning := digAny(sampleSpec, "tuning").(map[string]any)
+	if v, ok := sampleTuning["maxSize"].(float64); !ok || v != 1024 {
+		t.Errorf("sampleXR spec.tuning.maxSize = %v (%T), want 1024", sampleTuning["maxSize"], sampleTuning["maxSize"])
+	}
+	if v, ok := sampleTuning["active"].(bool); !ok || !v {
+		t.Errorf("sampleXR spec.tuning.active = %v (%T), want true", sampleTuning["active"], sampleTuning["active"])
+	}
+
+	// 4. Render composition with real crossplane CLI and the generated XRD.
+	comp := filepath.Join(outDir, "compositions", "xenumqueues.platform.sparky.ee.yaml")
+	xrd := filepath.Join(outDir, "xrds", "xenumqueues.platform.sparky.ee.yaml")
+	fns := filepath.Join(outDir, "functions.yaml")
+	rendered, err := renderComposition(t, "testdata/xr-scalar-enums.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
+	if err != nil {
+		t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
+	}
+
+	docs := decodeRenderedDocs(t, rendered)
+	queue, ok := docs["Queue"]
+	if !ok {
+		t.Fatalf("no Queue among rendered documents\n---\n%s", rendered)
+	}
+	if got := digAny(queue, "spec", "forProvider", "maxMessageSize"); got != float64(1024) {
+		t.Errorf("Queue maxMessageSize = %v, want 1024", got)
+	}
+	if got := digAny(queue, "spec", "forProvider", "delaySeconds"); got != float64(80) {
+		t.Errorf("Queue delaySeconds = %v, want 80", got)
+	}
+	if got := digAny(queue, "spec", "forProvider", "sqsManagedSseEnabled"); got != true {
+		t.Errorf("Queue sqsManagedSseEnabled = %v, want true", got)
+	}
+	for _, bad := range []string{"<no value>", "<nil>"} {
+		if strings.Contains(string(rendered), bad) {
+			t.Errorf("rendered output contains %q — a missing field reached a live resource shape", bad)
+		}
+	}
+}
+
 // renderComposition runs `crossplane composition render` under the
 // machine-wide render lock (internal/rendertest), retrying exactly once on
 // the CLI's known pinned-container race: generated functions.yaml pins

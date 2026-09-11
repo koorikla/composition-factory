@@ -61,11 +61,11 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 		if len(p.Enum) > 0 {
 			d.Line(8, "enum:")
 			for _, e := range p.Enum {
-				// User-authored value: quote it. Unquoted, values like "yes",
-				// "no", "1.0" or "" are YAML keywords/numbers and would be
-				// silently reinterpreted as bool/number/null on a
-				// type: string field, corrupting the enum.
-				d.Line(8, "- %s", quoteYAML(e))
+				// Strings are quoted so YAML keywords/numbers are not
+				// reinterpreted as bool/number/null on a type: string field.
+				// Non-string types (integer, number, boolean) are emitted bare
+				// so the Kubernetes API server accepts them as the declared type.
+				d.Line(8, "- %s", enumYAML(p.Type, e))
 			}
 		}
 		if p.Type == "object" && len(p.Properties) == 0 {
@@ -145,6 +145,18 @@ func defaultYAML(paramType, value string) string {
 	return value
 }
 
+// enumYAML formats an enum value for the OpenAPI v3 schema.
+// Strings are always YAML-quoted so that values like "yes", "no", "1.0",
+// or "" are not reinterpreted as bool/number/null on a type: string field.
+// Non-string types (integer, number, boolean) are emitted bare so the
+// Kubernetes API server accepts them as the declared schema type.
+func enumYAML(paramType, value string) string {
+	if paramType == "string" {
+		return quoteYAML(value)
+	}
+	return value
+}
+
 // writeObjectMembers renders a typed object's member schema recursively:
 // properties, per-member description/default/enum, a required list per
 // level — and NO additionalProperties, because the members ARE the schema.
@@ -178,7 +190,7 @@ func writeObjectMembers(d *Doc, ind int, p blueprint.Parameter) {
 		if len(mp.Enum) > 0 {
 			d.Line(ind+2, "enum:")
 			for _, e := range mp.Enum {
-				d.Line(ind+2, "- %s", quoteYAML(e))
+				d.Line(ind+2, "- %s", enumYAML(mp.Type, e))
 			}
 		}
 		if mp.Type == "object" && len(mp.Properties) == 0 {

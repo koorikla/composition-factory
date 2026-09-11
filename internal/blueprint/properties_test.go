@@ -472,3 +472,41 @@ func TestFailedEditLeavesPropertiesUnchanged(t *testing.T) {
 		t.Error("tuning.Properties lost maxSize across a failed edit")
 	}
 }
+
+// Parameter unmarshaling accepts scalar values (numbers, booleans) in enum
+// declarations when parsed from YAML/JSON.
+func TestParameterUnmarshalScalarEnums(t *testing.T) {
+	manifest := []byte(`
+type: integer
+default: 80
+enum: [80, 443]
+`)
+	var p Parameter
+	if err := yaml.Unmarshal(manifest, &p); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if p.Default != "80" {
+		t.Errorf("Default = %q, want \"80\"", p.Default)
+	}
+	wantEnum := []string{"80", "443"}
+	if diff := cmp.Diff(wantEnum, p.Enum); diff != "" {
+		t.Errorf("Enum (-want +got):\n%s", diff)
+	}
+
+	boolManifest := []byte(`
+type: boolean
+default: true
+enum: [true, false]
+`)
+	var bp Parameter
+	if err := yaml.Unmarshal(boolManifest, &bp); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if bp.Default != "true" {
+		t.Errorf("Default = %q, want \"true\"", bp.Default)
+	}
+	wantBoolEnum := []string{"true", "false"}
+	if diff := cmp.Diff(wantBoolEnum, bp.Enum); diff != "" {
+		t.Errorf("Enum (-want +got):\n%s", diff)
+	}
+}

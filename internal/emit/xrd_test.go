@@ -326,3 +326,159 @@ func TestNoDefaultEmitsNoDefaultKey(t *testing.T) {
 		t.Errorf("location has a default key (%#v), but Parameter.Default was never set", v)
 	}
 }
+
+// Scalar enum values (integer, number, boolean) must be emitted unquoted
+// in the XRD OpenAPI v3 schema. Quoting them makes them strings, which causes
+// the Kubernetes API server to reject the XRD with a schema type mismatch.
+func TestScalarEnumValuesAreUnquoted(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "enum-test"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "test.example.org",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+				Kind:    "TestXR",
+				Plural:  "testxrs",
+				Parameters: map[string]blueprint.Parameter{
+					"port": {
+						Type: "integer",
+						Enum: []string{"80", "443"},
+					},
+					"ratio": {
+						Type: "number",
+						Enum: []string{"0.5", "1.0"},
+					},
+					"enabled": {
+						Type: "boolean",
+						Enum: []string{"true", "false"},
+					},
+				},
+			},
+		},
+	}
+
+	got, err := XRD(b)
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
+	s := string(got)
+
+	// In raw YAML, scalar enum values must not be quoted.
+	for _, bad := range []string{"- '80'", "- '443'", "- '0.5'", "- '1.0'", "- 'true'", "- 'false'"} {
+		if strings.Contains(s, bad) {
+			t.Errorf("output contains quoted scalar enum %q:\n%s", bad, s)
+		}
+	}
+	for _, want := range []string{"- 80", "- 443", "- 0.5", "- 1.0", "- true", "- false"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("output missing unquoted scalar enum %q:\n%s", want, s)
+		}
+	}
+
+	props := paramProps(t, got)
+
+	// port enum should unmarshal as numbers (float64 in YAML/JSON unmarshaling)
+	portEnum := dig(t, props, "port", "enum").([]any)
+	for i, want := range []float64{80, 443} {
+		if got, ok := portEnum[i].(float64); !ok || got != want {
+			t.Errorf("port.enum[%d] = %#v (%T), want %v", i, portEnum[i], portEnum[i], want)
+		}
+	}
+
+	// ratio enum should unmarshal as numbers
+	ratioEnum := dig(t, props, "ratio", "enum").([]any)
+	for i, want := range []float64{0.5, 1.0} {
+		if got, ok := ratioEnum[i].(float64); !ok || got != want {
+			t.Errorf("ratio.enum[%d] = %#v (%T), want %v", i, ratioEnum[i], ratioEnum[i], want)
+		}
+	}
+
+	// enabled enum should unmarshal as booleans
+	enabledEnum := dig(t, props, "enabled", "enum").([]any)
+	for i, want := range []bool{true, false} {
+		if got, ok := enabledEnum[i].(bool); !ok || got != want {
+			t.Errorf("enabled.enum[%d] = %#v (%T), want %v", i, enabledEnum[i], enabledEnum[i], want)
+		}
+	}
+}
+
+// Object member scalar enums must also be emitted unquoted.
+func TestObjectMemberScalarEnumValuesAreUnquoted(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "enum-obj-test"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "test.example.org",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+				Kind:    "TestXR",
+				Plural:  "testxrs",
+				Parameters: map[string]blueprint.Parameter{
+					"config": {
+						Type: "object",
+						Properties: map[string]blueprint.Parameter{
+							"port": {
+								Type: "integer",
+								Enum: []string{"80", "443"},
+							},
+							"ratio": {
+								Type: "number",
+								Enum: []string{"0.5", "1.0"},
+							},
+							"enabled": {
+								Type: "boolean",
+								Enum: []string{"true", "false"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	got, err := XRD(b)
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
+	s := string(got)
+
+	for _, bad := range []string{"- '80'", "- '443'", "- '0.5'", "- '1.0'", "- 'true'", "- 'false'"} {
+		if strings.Contains(s, bad) {
+			t.Errorf("output contains quoted scalar enum %q:\n%s", bad, s)
+		}
+	}
+	for _, want := range []string{"- 80", "- 443", "- 0.5", "- 1.0", "- true", "- false"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("output missing unquoted scalar enum %q:\n%s", want, s)
+		}
+	}
+
+	props := paramProps(t, got)
+	cfgProps := dig(t, props, "config", "properties").(map[string]any)
+
+	portEnum := dig(t, cfgProps, "port", "enum").([]any)
+	for i, want := range []float64{80, 443} {
+		if got, ok := portEnum[i].(float64); !ok || got != want {
+			t.Errorf("config.port.enum[%d] = %#v (%T), want %v", i, portEnum[i], portEnum[i], want)
+		}
+	}
+
+	ratioEnum := dig(t, cfgProps, "ratio", "enum").([]any)
+	for i, want := range []float64{0.5, 1.0} {
+		if got, ok := ratioEnum[i].(float64); !ok || got != want {
+			t.Errorf("config.ratio.enum[%d] = %#v (%T), want %v", i, ratioEnum[i], ratioEnum[i], want)
+		}
+	}
+
+	enabledEnum := dig(t, cfgProps, "enabled", "enum").([]any)
+	for i, want := range []bool{true, false} {
+		if got, ok := enabledEnum[i].(bool); !ok || got != want {
+			t.Errorf("config.enabled.enum[%d] = %#v (%T), want %v", i, enabledEnum[i], enabledEnum[i], want)
+		}
+	}
+}

@@ -255,12 +255,12 @@ type Parameter struct {
 	Properties  map[string]Parameter `json:"properties,omitempty"`
 }
 
-// UnmarshalJSON permits scalar values (booleans, numbers, strings) for Default.
+// UnmarshalJSON permits scalar values (booleans, numbers, strings) for Default and Enum.
 func (p *Parameter) UnmarshalJSON(data []byte) error {
 	type rawParam struct {
 		Type        string               `json:"type"`
 		Required    bool                 `json:"required"`
-		Enum        []string             `json:"enum"`
+		Enum        []any                `json:"enum"`
 		Default     any                  `json:"default"`
 		Description string               `json:"description"`
 		Properties  map[string]Parameter `json:"properties,omitempty"`
@@ -273,9 +273,28 @@ func (p *Parameter) UnmarshalJSON(data []byte) error {
 	}
 	p.Type = raw.Type
 	p.Required = raw.Required
-	p.Enum = raw.Enum
 	p.Description = raw.Description
 	p.Properties = raw.Properties
+	for _, item := range raw.Enum {
+		switch val := item.(type) {
+		case string:
+			p.Enum = append(p.Enum, val)
+		case bool:
+			if val {
+				p.Enum = append(p.Enum, "true")
+			} else {
+				p.Enum = append(p.Enum, "false")
+			}
+		case float64:
+			if val == float64(int64(val)) {
+				p.Enum = append(p.Enum, strconv.FormatInt(int64(val), 10))
+			} else {
+				p.Enum = append(p.Enum, strconv.FormatFloat(val, 'f', -1, 64))
+			}
+		default:
+			p.Enum = append(p.Enum, fmt.Sprintf("%v", val))
+		}
+	}
 	if raw.Default != nil {
 		switch val := raw.Default.(type) {
 		case string:

@@ -42,28 +42,14 @@ func isForEachParam(b *blueprint.Blueprint, paramName string) bool {
 
 func placeholderValue(p blueprint.Parameter) any {
 	if p.Default != "" {
-		switch p.Type {
-		case "integer":
-			var n int
-			if _, err := fmt.Sscanf(p.Default, "%d", &n); err == nil {
-				return n
-			}
-		case "number":
-			var f float64
-			if _, err := fmt.Sscanf(p.Default, "%f", &f); err == nil {
-				return f
-			}
-		case "boolean":
-			if p.Default == "true" {
-				return true
-			} else if p.Default == "false" {
-				return false
-			}
-		case "string":
-			return p.Default
+		if v := parseParamScalar(p.Default, p.Type); v != nil {
+			return v
 		}
 	}
 	if len(p.Enum) > 0 {
+		if v := parseParamScalar(p.Enum[0], p.Type); v != nil {
+			return v
+		}
 		return p.Enum[0]
 	}
 	switch p.Type {
@@ -86,25 +72,8 @@ func placeholderValue(p blueprint.Parameter) any {
 
 func envPlaceholderValue(k blueprint.EnvironmentKey) any {
 	if k.Default != "" {
-		switch k.Type {
-		case "integer":
-			var n int
-			if _, err := fmt.Sscanf(k.Default, "%d", &n); err == nil {
-				return n
-			}
-		case "number":
-			var f float64
-			if _, err := fmt.Sscanf(k.Default, "%f", &f); err == nil {
-				return f
-			}
-		case "boolean":
-			if k.Default == "true" {
-				return true
-			} else if k.Default == "false" {
-				return false
-			}
-		case "string":
-			return k.Default
+		if v := parseParamScalar(k.Default, k.Type); v != nil {
+			return v
 		}
 	}
 	switch k.Type {
@@ -115,4 +84,28 @@ func envPlaceholderValue(k blueprint.EnvironmentKey) any {
 	default:
 		return "sample"
 	}
+}
+
+func parseParamScalar(val, paramType string) any {
+	switch paramType {
+	case "integer":
+		var n int
+		if _, err := fmt.Sscanf(val, "%d", &n); err == nil {
+			return n
+		}
+	case "number":
+		var f float64
+		if _, err := fmt.Sscanf(val, "%f", &f); err == nil {
+			return f
+		}
+	case "boolean":
+		if val == "true" {
+			return true
+		} else if val == "false" {
+			return false
+		}
+	case "string":
+		return val
+	}
+	return nil
 }

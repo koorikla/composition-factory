@@ -1,0 +1,68 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-scalar-enums
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: platform.sparky.ee
+    kind: XEnumQueue
+    plural: xenumqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+      port:
+        type: integer
+        required: true
+        enum:
+          - "80"
+          - "443"
+        default: "80"
+      ratio:
+        type: number
+        required: true
+        enum:
+          - "1.5"
+          - "2.5"
+        default: "1.5"
+      enabled:
+        type: boolean
+        required: true
+        enum:
+          - "true"
+          - "false"
+        default: "true"
+      tier:
+        type: string
+        required: true
+        enum:
+          - "standard"
+          - "pro"
+        default: "standard"
+      tuning:
+        type: object
+        required: true
+        properties:
+          maxSize:
+            type: integer
+            required: true
+            enum:
+              - "1024"
+              - "2048"
+          active:
+            type: boolean
+            required: true
+            enum:
+              - "true"
+              - "false"
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region:               {value: "eu-north-1"}
+        maxMessageSize:       {from: params.tuning.maxSize}
+        delaySeconds:         {from: params.port}
+        sqsManagedSseEnabled: {from: params.enabled}
