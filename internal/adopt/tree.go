@@ -283,7 +283,6 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	if bp.Spec.XRD.Scope == "" {
 		bp.Spec.XRD.Scope = "Namespaced"
 	}
-	synthesized := map[string]bool{}
 	if bp.Spec.XRD.Scope == "Namespaced" {
 		if _, ok := bp.Spec.XRD.Parameters["providerName"]; !ok {
 			bp.Spec.XRD.Parameters["providerName"] = blueprint.Parameter{
@@ -291,18 +290,11 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 				Required:    true,
 				Description: "Crossplane ProviderConfig name to use for managed resources",
 			}
-			synthesized["providerName"] = true
 		}
 	}
 
 	// 5. Rewrite status references and finalize sources
 	rewriteStatusReferences(bp, nameMapping)
-
-	// No XRD in the tree: the parameters were inferred from their uses in the
-	// Compositions. Settle what they prove and name the rest as lost.
-	if len(xrdDocs) == 0 {
-		applyXRDlessEvidence(bp, compDocs, synthesized, report)
-	}
 	collectSources(bp, defaultProvider)
 
 	if err := bp.Validate(); err != nil {
