@@ -800,6 +800,17 @@ func TestAddProviderFailuresMatchHTTP(t *testing.T) {
 	s.assertToolErrorMatchesHTTP(t,
 		"add_provider", map[string]any{"ref": testProviderRef},
 		http.MethodPost, "/api/providers", `{"ref":"`+testProviderRef+`"}`)
+
+	const fnRef = "ghcr.io/crossplane-contrib/function-auto-ready:v0.5.0"
+	if err := s.options.Store.Save(&xpkg.Package{Ref: fnRef, Digest: "sha256:fn"}, []schema.CRD{{
+		Group: "autoready.fn.crossplane.io", Kind: "AutoReady", Plural: "autoreadies",
+		Function: true,
+	}}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	s.assertToolErrorMatchesHTTP(t,
+		"add_provider", map[string]any{"ref": fnRef},
+		http.MethodPost, "/api/providers", `{"ref":"`+fnRef+`"}`)
 }
 
 // --- generate ---

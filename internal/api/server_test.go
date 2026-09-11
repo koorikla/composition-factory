@@ -741,6 +741,35 @@ func TestCF099BuildIndexErrorsOnMissingCRDsSource(t *testing.T) {
 	}
 }
 
+func TestAddProviderRejectsFunctionPackage(t *testing.T) {
+	h, o := testProviderServer(t, func(ref string) (*xpkg.Package, error) {
+		t.Fatalf("fetch should not be invoked on cache hit for %s", ref)
+		return nil, fmt.Errorf("remote fetch invoked")
+	})
+
+	digest := "sha256:functioncached"
+	crds := []schema.CRD{{
+		Group: "autoready.fn.crossplane.io", Kind: "AutoReady", Plural: "autoreadies",
+		Function: true,
+	}}
+	if err := o.Store.Save(&xpkg.Package{Ref: testFunctionRef, Digest: digest}, crds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	rec := do(t, h, "POST", "/api/providers", `{"ref":"`+testFunctionRef+`"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	want := fmt.Sprintf("package %q is a function package, not a provider (use 'cf function add %s')", testFunctionRef, testFunctionRef)
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if resp["error"] != want {
+		t.Errorf("error = %q, want %q", resp["error"], want)
+	}
+}
+
 const testFunctionRef = "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0"
 
 func TestAddFunctionShortCircuitsOnCacheHit(t *testing.T) {

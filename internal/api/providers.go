@@ -217,13 +217,28 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pkg, _, err := srv.Store.FetchAndSave(r.Context(), srv.Lock, req.Ref, srv.fetch)
+	pkg, crds, err := srv.Store.FetchAndSave(r.Context(), srv.Lock, req.Ref, srv.fetch)
 	if err != nil {
 		if cache.IsLockError(err) {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSONError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	managed := 0
+	inputs := 0
+	for _, crd := range crds {
+		if crd.IsManaged() {
+			managed++
+		}
+		if crd.IsFunctionInput() || crd.Function {
+			inputs++
+		}
+	}
+	if inputs > 0 && managed == 0 {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("package %q is a function package, not a provider (use 'cf function add %s')", req.Ref, req.Ref))
 		return
 	}
 	pkgDigest := pkg.Digest
