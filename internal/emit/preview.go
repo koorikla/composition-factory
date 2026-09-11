@@ -254,13 +254,36 @@ func PreviewExpressionContext(ctx context.Context, b *blueprint.Blueprint, resou
 		return out, err
 	}
 
-	funcs["getResourceCondition"] = func(condType string, res any) map[string]any {
+	funcs["getResourceCondition"] = func(a, b any) map[string]any {
+		var condType string
+		var res any
+		if s, ok := a.(string); ok {
+			condType = s
+			res = b
+		} else if s, ok := b.(string); ok {
+			condType = s
+			res = a
+		} else {
+			return nil
+		}
+
 		if resMap, ok := res.(map[string]any); ok {
+			if inner, ok := resMap["resource"].(map[string]any); ok {
+				resMap = inner
+			}
 			if status, ok := resMap["status"].(map[string]any); ok {
 				if conds, ok := status["conditions"].([]any); ok {
 					for _, c := range conds {
-						if cm, ok := c.(map[string]any); ok && cm["type"] == condType {
-							return cm
+						if cm, ok := c.(map[string]any); ok && (cm["type"] == condType || cm["Type"] == condType) {
+							out := make(map[string]any, len(cm)*2)
+							for k, v := range cm {
+								out[k] = v
+								if len(k) > 0 {
+									titleK := strings.ToUpper(k[:1]) + k[1:]
+									out[titleK] = v
+								}
+							}
+							return out
 						}
 					}
 				}
@@ -271,6 +294,10 @@ func PreviewExpressionContext(ctx context.Context, b *blueprint.Blueprint, resou
 			"status":  "True",
 			"reason":  "Available",
 			"message": "Resource is ready",
+			"Type":    condType,
+			"Status":  "True",
+			"Reason":  "Available",
+			"Message": "Resource is ready",
 		}
 	}
 
@@ -278,30 +305,108 @@ func PreviewExpressionContext(ctx context.Context, b *blueprint.Blueprint, resou
 		return fmt.Sprintf("crossplane.io/composition-resource-name: %s", name)
 	}
 
-	funcs["getComposedResource"] = func(name string, observed any) any {
-		if obsMap, ok := observed.(map[string]any); ok {
-			if resMap, ok := obsMap["resources"].(map[string]any); ok {
-				return resMap[name]
+	funcs["getComposedResource"] = func(a, b any) any {
+		var req any
+		var name string
+		if s, ok := a.(string); ok {
+			name = s
+			req = b
+		} else if s, ok := b.(string); ok {
+			name = s
+			req = a
+		} else {
+			return nil
+		}
+
+		reqMap, ok := req.(map[string]any)
+		if !ok {
+			return nil
+		}
+
+		extract := func(entry any) any {
+			if entryMap, ok := entry.(map[string]any); ok {
+				if res, ok := entryMap["resource"].(map[string]any); ok {
+					return res
+				}
+				return entryMap
+			}
+			return entry
+		}
+
+		if obs, ok := reqMap["observed"].(map[string]any); ok {
+			if resMap, ok := obs["resources"].(map[string]any); ok {
+				if entry, ok := resMap[name]; ok {
+					return extract(entry)
+				}
+				return nil
 			}
 		}
-		return nil
-	}
-
-	funcs["getCompositeResource"] = func(observed any) any {
-		if obsMap, ok := observed.(map[string]any); ok {
-			return obsMap["composite"]
+		if resMap, ok := reqMap["resources"].(map[string]any); ok {
+			if entry, ok := resMap[name]; ok {
+				return extract(entry)
+			}
+			return nil
+		}
+		if entry, ok := reqMap[name]; ok {
+			return extract(entry)
 		}
 		return nil
 	}
 
-	funcs["getExtraResources"] = func(name string, extra any) any {
-		if extraMap, ok := extra.(map[string]any); ok {
-			return extraMap[name]
+	funcs["getCompositeResource"] = func(req any) any {
+		reqMap, ok := req.(map[string]any)
+		if !ok {
+			return nil
+		}
+		if obs, ok := reqMap["observed"].(map[string]any); ok {
+			if comp, ok := obs["composite"].(map[string]any); ok {
+				if res, ok := comp["resource"].(map[string]any); ok {
+					return res
+				}
+				return comp
+			}
+		}
+		if comp, ok := reqMap["composite"].(map[string]any); ok {
+			if res, ok := comp["resource"].(map[string]any); ok {
+				return res
+			}
+			return comp
+		}
+		if res, ok := reqMap["resource"].(map[string]any); ok {
+			return res
 		}
 		return nil
 	}
 
-	funcs["getExtraResourcesFromContext"] = func(name string, ctx any) any {
+	funcs["getExtraResources"] = func(a, b any) any {
+		var req any
+		var name string
+		if s, ok := a.(string); ok {
+			name = s
+			req = b
+		} else if s, ok := b.(string); ok {
+			name = s
+			req = a
+		} else {
+			return nil
+		}
+		if reqMap, ok := req.(map[string]any); ok {
+			if extra, ok := reqMap["extraResources"].(map[string]any); ok {
+				if items, ok := extra[name]; ok {
+					return items
+				}
+			}
+			if extra, ok := reqMap["extra"].(map[string]any); ok {
+				if items, ok := extra[name]; ok {
+					return items
+				}
+			}
+			return reqMap[name]
+		}
+		return nil
+	}
+
+	funcs["getExtraResourcesFromContext"] = func(args ...any) any {
 		return nil
 	}
 

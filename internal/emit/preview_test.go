@@ -259,3 +259,119 @@ func TestPreviewExpression_FromYamlTypes(t *testing.T) {
 		}
 	})
 }
+
+func TestPreviewExpression_CrossplaneHelperSignatures(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{Kind: "XDatabase"},
+			Resources: []blueprint.Resource{
+				{Name: "db-instance", Kind: "Instance"},
+			},
+		},
+	}
+
+	t.Run("getComposedResource standard signature", func(t *testing.T) {
+		res, err := PreviewExpression(bp, "", `{{ (getComposedResource . "db-instance").status.atProvider.id }}`)
+		if err != nil {
+			t.Fatalf("getComposedResource failed: %v", err)
+		}
+		if res != "db-instance-id-12345" {
+			t.Errorf("got %q, want %q", res, "db-instance-id-12345")
+		}
+	})
+
+	t.Run("getComposedResource fallback inverted arguments", func(t *testing.T) {
+		res, err := PreviewExpression(bp, "", `{{ (getComposedResource "db-instance" .).status.atProvider.id }}`)
+		if err != nil {
+			t.Fatalf("getComposedResource failed: %v", err)
+		}
+		if res != "db-instance-id-12345" {
+			t.Errorf("got %q, want %q", res, "db-instance-id-12345")
+		}
+	})
+
+	t.Run("getComposedResource with .observed and .observed.resources", func(t *testing.T) {
+		res1, err := PreviewExpression(bp, "", `{{ (getComposedResource .observed "db-instance").status.atProvider.id }}`)
+		if err != nil {
+			t.Fatalf("getComposedResource with .observed failed: %v", err)
+		}
+		if res1 != "db-instance-id-12345" {
+			t.Errorf("got %q, want %q", res1, "db-instance-id-12345")
+		}
+
+		res2, err := PreviewExpression(bp, "", `{{ (getComposedResource .observed.resources "db-instance").status.atProvider.id }}`)
+		if err != nil {
+			t.Fatalf("getComposedResource with .observed.resources failed: %v", err)
+		}
+		if res2 != "db-instance-id-12345" {
+			t.Errorf("got %q, want %q", res2, "db-instance-id-12345")
+		}
+	})
+
+	t.Run("getCompositeResource standard signature", func(t *testing.T) {
+		res, err := PreviewExpression(bp, "", `{{ (getCompositeResource .).metadata.name }}`)
+		if err != nil {
+			t.Fatalf("getCompositeResource failed: %v", err)
+		}
+		if res != "sample-xdatabase" {
+			t.Errorf("got %q, want %q", res, "sample-xdatabase")
+		}
+	})
+
+	t.Run("getCompositeResource with .observed", func(t *testing.T) {
+		res, err := PreviewExpression(bp, "", `{{ (getCompositeResource .observed).metadata.name }}`)
+		if err != nil {
+			t.Fatalf("getCompositeResource failed: %v", err)
+		}
+		if res != "sample-xdatabase" {
+			t.Errorf("got %q, want %q", res, "sample-xdatabase")
+		}
+	})
+
+	t.Run("getResourceCondition with composed resource and raw observed resource", func(t *testing.T) {
+		// via getComposedResource:
+		res1, err := PreviewExpression(bp, "", `{{ (getResourceCondition "Ready" (getComposedResource . "db-instance")).Status }}`)
+		if err != nil {
+			t.Fatalf("getResourceCondition via getComposedResource failed: %v", err)
+		}
+		if res1 != "True" {
+			t.Errorf("got %q, want %q", res1, "True")
+		}
+
+		// via raw .observed.resources entry (contains inner "resource" key):
+		res2, err := PreviewExpression(bp, "", `{{ (getResourceCondition "Ready" (index .observed.resources "db-instance")).reason }}`)
+		if err != nil {
+			t.Fatalf("getResourceCondition via index .observed.resources failed: %v", err)
+		}
+		if res2 != "Available" {
+			t.Errorf("got %q, want %q", res2, "Available")
+		}
+
+		// inverted arguments:
+		res3, err := PreviewExpression(bp, "", `{{ (getResourceCondition (getComposedResource . "db-instance") "Ready").Reason }}`)
+		if err != nil {
+			t.Fatalf("getResourceCondition inverted failed: %v", err)
+		}
+		if res3 != "Available" {
+			t.Errorf("got %q, want %q", res3, "Available")
+		}
+	})
+
+	t.Run("getExtraResources signatures", func(t *testing.T) {
+		res1, err := PreviewExpression(bp, "", `{{ if (getExtraResources . "extra-thing") }}yes{{ else }}no{{ end }}`)
+		if err != nil {
+			t.Fatalf("getExtraResources failed: %v", err)
+		}
+		if res1 != "no" {
+			t.Errorf("got %q, want %q", res1, "no")
+		}
+
+		res2, err := PreviewExpression(bp, "", `{{ if (getExtraResources "extra-thing" .) }}yes{{ else }}no{{ end }}`)
+		if err != nil {
+			t.Fatalf("getExtraResources inverted failed: %v", err)
+		}
+		if res2 != "no" {
+			t.Errorf("got %q, want %q", res2, "no")
+		}
+	})
+}
