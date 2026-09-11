@@ -862,6 +862,30 @@ func TestGenerateWriteMatchesTheEngineByteForByte(t *testing.T) {
 	}
 }
 
+func TestGenerateWritePrunesOrphanedFiles(t *testing.T) {
+	s := newStack(t)
+
+	// Seed a stale file inside a managed output scope (e.g. xrds/).
+	staleDir := filepath.Join(s.outDir, "xrds")
+	if err := os.MkdirAll(staleDir, 0o755); err != nil {
+		t.Fatalf("mkdir stale dir: %v", err)
+	}
+	staleFile := filepath.Join(staleDir, "stale-xrd.yaml")
+	if err := os.WriteFile(staleFile, []byte("# stale"), 0o644); err != nil {
+		t.Fatalf("write stale file: %v", err)
+	}
+
+	v := s.toolOK(t, "generate", map[string]any{"write": true})
+	if v["written"] != true {
+		t.Fatalf("written = %v, want true", v["written"])
+	}
+
+	// Verify that the stale file has been pruned from disk.
+	if _, err := os.Stat(staleFile); !os.IsNotExist(err) {
+		t.Fatalf("stale file %q was not pruned after generate with write:true", staleFile)
+	}
+}
+
 func TestGenerateBrokenCacheMatchesHTTP(t *testing.T) {
 	s := newStack(t)
 	if err := os.RemoveAll(s.storeRoot); err != nil {

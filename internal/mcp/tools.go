@@ -35,6 +35,8 @@ import (
 	"strconv"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/koorikla/compositionfactory/internal/emit"
 )
 
 // register adds every tool to srv. The set mirrors internal/api's route
@@ -590,6 +592,13 @@ func (s *server) writeOutputs(outputs []generateOutput) error {
 		if err := os.WriteFile(out.Path, []byte(out.Body), 0o644); err != nil {
 			return err
 		}
+	}
+	expected := make(map[string]bool, len(outputs))
+	for _, out := range outputs {
+		expected[filepath.Clean(out.Path)] = true
+	}
+	if _, err := emit.PruneOrphanedFiles(s.ws.out, expected); err != nil {
+		return err
 	}
 	return nil
 }
