@@ -27,7 +27,10 @@
 # `… (CF-NNN, #<issue>)` with no newer `Revert "…"` of it, and the claimed branch's
 # content is exactly that landing (or the branch is gone and the claim is older
 # than the landing), land.sh does not land again: it watches that commit (a run
-# killed after its push, or a lost report).
+# killed after its push, or a lost report). When the newest mention is instead a
+# `Revert "…"` and the claimed branch's content is exactly the reverted landing,
+# it parks the issue (`already-reverted`) rather than land the same change again;
+# a branch with new commits lands normally.
 #
 # Before landing new work it reads main's own CI run and refuses a red main, with
 # two ways out so a red main never blocks its own fix:
@@ -39,12 +42,12 @@
 # Callers decide by the stdout line (exactly one; everything else is stderr):
 #   0  LANDED <sha> <run-url>            CI green; topic branch deleted
 #   5  NOT-HANDED-BACK                   issue lacks `handed-back`; nothing fetched
-#   6  PARKED rebase-conflict | PARKED gates-red | PARKED push-rejected
+#   6  PARKED rebase-conflict | gates-red | push-rejected | already-reverted
 #                                        main untouched
 #   7  REVERTED <failed run-url>         CI red; revert pushed and its CI green;
 #                                        topic branch kept
 #   8  REVERTED-RED <failed run-url>     CI red and the revert's CI red too, or the
-#                                        revert could not be pushed: main is red
+#                                        revert could not be made or pushed: main is red
 #   8  REVERTED-RED push-unknown         the push failed and origin could not be
 #                                        read: main's state is unknown
 #   8  MAIN-RED <run-url>                main's CI is red (after its one rerun, when
@@ -70,7 +73,17 @@
 #                   landing past it is reverted, a revert past it is REVERTED-RED
 #   CF_LAND_GATE_LOCK_TIMEOUT_SEC   CF_LOCK_TIMEOUT_SEC for the gates (default 1800)
 #   plus lock.sh's.
-# land.sh never edits, comments on or closes issues.
+# The issue's state labels are land.sh's to set, under the merge lock, before it
+# exits, so the next land.sh never acts on labels a driver has not updated yet.
+# A failed label edit or comment is a stderr warning; it never changes the result.
+#   LANDED        remove handed-back, in-progress and parked (each only if present);
+#                 the issue stays open: the driver closes it
+#   PARKED <r>    add parked, remove handed-back, comment `parked — <branch> · <r>`
+#   REVERTED <u>  the same, with `reverted <u>`
+#   REVERTED-RED <u>  the same, with `reverted-red <u>` (or `revert-failed <u>`
+#                 when no revert reached main)
+#   MAIN-RED, REVERTED-RED push-unknown, NOT-HANDED-BACK: labels left as they are
+# land.sh never closes issues.
 # Written for /bin/bash 3.2; all JSON is jq.
 set -u
 
@@ -178,6 +191,44 @@ if [ -z "$cf" ] || ! g check-ref-format "refs/heads/$branch"; then
 fi
 suffix="($cf, #$issue)"
 say "issue #$issue: landing $branch as $cf"
+
+# issue_labels: the issue's current label names, one per line (the snapshot from
+# step 1 when gh cannot be read).
+issue_labels() {
+  local json
+  json="$(gh issue view "$issue" --json number,title,state,labels,comments,updatedAt 2>/dev/null)" ||
+    json="$issue_json"
+  printf '%s\n' "$json" | jq -r '.labels[]?.name' 2>/dev/null
+}
+
+# finish CODE LINE [STATE]: print the result LINE, set the issue's labels for
+# STATE (landed, or parked:<reason>; none leaves them), and exit CODE.
+finish() {
+  local have l args=""
+  echo "$2"
+  case "${3:-}" in
+    landed)
+      have="$(issue_labels)"
+      for l in handed-back in-progress parked; do
+        case $'\n'"$have"$'\n' in *$'\n'"$l"$'\n'*) args="$args --remove-label $l" ;; esac
+      done
+      if [ -n "$args" ]; then
+        # shellcheck disable=SC2086 # args holds whole --remove-label pairs
+        gh issue edit "$issue" $args >&2 || say "warning: could not update issue #$issue's labels ($args)"
+      fi
+      ;;
+    parked:*)
+      have="$(issue_labels)"
+      args="--add-label parked"
+      case $'\n'"$have"$'\n' in *$'\n'handed-back$'\n'*) args="$args --remove-label handed-back" ;; esac
+      # shellcheck disable=SC2086 # args holds whole label flag pairs
+      gh issue edit "$issue" $args >&2 || say "warning: could not park issue #$issue ($args)"
+      gh issue comment "$issue" --body "parked — $branch · ${3#parked:}" >&2 ||
+        say "warning: could not comment on issue #$issue"
+      ;;
+  esac
+  exit "$1"
+}
 
 # Step 3: fetch, pin the base, scratch worktree, rebase.
 common="$(g rev-parse --path-format=absolute --git-common-dir)" || die "not inside a git repository"
@@ -320,9 +371,10 @@ e2e_flake() {
 # an attempt number above ATTEMPT; or, only when gh reports no attempt number,
 # no longer the old attempt's jobs (e2e completed with failure). The rerun
 # endpoint is asynchronous, and `gh run watch --exit-status` on a run that still
-# reads completed exits at once with the old conclusion. Queued or running jobs carry an empty or null conclusion and a
-# status other than completed; an empty job list is a new attempt with no jobs
-# yet. Gives up after RERUN_POLLS and lets the watch decide.
+# reads completed exits at once with the old conclusion. Queued or running jobs
+# carry an empty or null conclusion and a status other than completed; an empty
+# job list is a new attempt with no jobs yet. Gives up after RERUN_POLLS and lets
+# the watch decide.
 await_rerun() {
   local i=0 json state before="$2"
   case "$before" in *[!0-9]*) before="" ;; esac
@@ -347,14 +399,18 @@ await_rerun() {
 }
 
 # Resume: this issue's newest landing within HISTORY first-parent commits of
-# base, unless a revert of it is newer.
+# base, unless a revert of it is newer; then `reverted` is that landing.
 history="$(g -C "$top" log --first-parent -n "$HISTORY" --format='%H %s' "$base")" ||
   die "could not read main's history"
 landed=""
+reverted=""
+revert_seen=
 while read -r h s; do
+  case "$s" in *"$suffix"*) ;; *) continue ;; esac
   case "$s" in
-    *"$suffix"*)
-      case "$s" in 'Revert "'*) ;; *) landed="$h" ;; esac
+    'Revert "'*) revert_seen=1 ;;
+    *)
+      if [ -n "$revert_seen" ]; then reverted="$h"; else landed="$h"; fi
       break
       ;;
   esac
@@ -384,6 +440,17 @@ if [ -n "$landed" ]; then
   sha="$landed"
 else
   [ -n "$branch_sha" ] || die "branch $branch is not on origin"
+
+  # A branch whose content is exactly a landing main has reverted would only be
+  # reverted again.
+  if [ -n "$reverted" ]; then
+    merged="$(g -C "$top" merge-tree --write-tree "$reverted^" "$branch_sha" 2>/dev/null)"
+    if [ "${merged%%$'\n'*}" = "$(g -C "$top" rev-parse "$reverted^{tree}")" ]; then
+      say "main reverted $reverted, and $branch carries exactly that change"
+      finish 6 "PARKED already-reverted" parked:already-reverted
+    fi
+    say "main reverted $reverted; $branch carries new work since"
+  fi
 
   # Main must not already be red. No run, or no status fields: proceed. A P0
   # lands anyway; an e2e-only failure or a cancelled run gets one rerun first.
@@ -441,8 +508,7 @@ else
         fi
       fi
       say "main's CI run $main_url is red ($conclusion); not landing on a red main"
-      echo "MAIN-RED $main_url"
-      exit 8
+      finish 8 "MAIN-RED $main_url"
     done
   fi
 
@@ -451,8 +517,7 @@ else
 
   if ! g -C "$wt" rebase "$base" >&2; then
     g -C "$wt" rebase --abort >&2
-    echo "PARKED rebase-conflict"
-    exit 6
+    finish 6 "PARKED rebase-conflict" parked:rebase-conflict
   fi
 
   # Step 4: gates, with the lock descriptors closed so a straggler a test leaves
@@ -483,8 +548,7 @@ else
   say "gates: $gates"
   if ! (cd "$wt" && CF_LOCK_TIMEOUT_SEC="$gate_lock_timeout" && export CF_LOCK_TIMEOUT_SEC &&
     /bin/bash -c "$gates") </dev/null >&2 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; then
-    echo "PARKED gates-red"
-    exit 6
+    finish 6 "PARKED gates-red" parked:gates-red
   fi
 
   # Step 5: one commit on the pinned base; a push that is not a fast-forward of
@@ -520,14 +584,10 @@ $body" ;; esac
   push_main "$sha"
   case $? in
     0) ;;
-    1)
-      echo "PARKED push-rejected"
-      exit 6
-      ;;
+    1) finish 6 "PARKED push-rejected" parked:push-rejected ;;
     *)
       say "the push of $sha failed and origin could not be read; main's state is unknown"
-      echo "REVERTED-RED push-unknown"
-      exit 8
+      finish 8 "REVERTED-RED push-unknown"
       ;;
   esac
   say "pushed $sha to main"
@@ -563,8 +623,7 @@ if [ -n "$green" ]; then
       say "warning: could not delete origin/$branch (moved since $branch_sha, or unreachable)"
   fi
   remove_worktree
-  echo "LANDED $sha $run_url"
-  exit 0
+  finish 0 "LANDED $sha $run_url" landed
 fi
 
 # Step 8: red. Revert and watch the revert (no rerun).
@@ -573,19 +632,16 @@ say "CI red for $sha ($failed_url); reverting"
 before_revert="$(g -C "$wt" rev-parse --verify --quiet HEAD)"
 if ! g -C "$wt" revert --no-edit "$sha" >&2; then
   say "could not revert $sha; main is red"
-  echo "REVERTED-RED $failed_url"
-  exit 8
+  finish 8 "REVERTED-RED $failed_url" "parked:revert-failed $failed_url"
 fi
 revert_sha="$(g -C "$wt" rev-parse --verify --quiet HEAD)"
 if [ -z "$revert_sha" ] || [ "$revert_sha" = "$before_revert" ]; then
   say "git revert of $sha made no commit; main is red"
-  echo "REVERTED-RED $failed_url"
-  exit 8
+  finish 8 "REVERTED-RED $failed_url" "parked:revert-failed $failed_url"
 fi
 if ! push_main "$revert_sha"; then
   say "could not push the revert of $sha; main is red"
-  echo "REVERTED-RED $failed_url"
-  exit 8
+  finish 8 "REVERTED-RED $failed_url" "parked:revert-failed $failed_url"
 fi
 say "pushed revert $revert_sha to main"
 if find_run "$revert_sha"; then
@@ -593,11 +649,9 @@ if find_run "$revert_sha"; then
   rc=$?
   if [ "$rc" -eq 0 ]; then
     remove_worktree
-    echo "REVERTED $failed_url"
-    exit 7
+    finish 7 "REVERTED $failed_url" "parked:reverted $failed_url"
   fi
   [ "$rc" -ne 124 ] || say "the revert's CI run $run_url passed the ${watch_timeout}s watch deadline"
 fi
 say "the revert's CI ($run_url) is not green; main is red"
-echo "REVERTED-RED $failed_url"
-exit 8
+finish 8 "REVERTED-RED $failed_url" "parked:reverted-red $failed_url"

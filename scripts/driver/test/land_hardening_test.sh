@@ -55,8 +55,8 @@ test_landing_again_after_it_landed_resumes_the_same_sha() {
   local first rc1 landed out rc
   first="$("$LAND" 42 2>/dev/null)"; rc1=$?
   landed="$(origin_git rev-parse main)"
-  # land.sh never edits issues: #42 still reads handed-back, as it would when a
-  # driver's report of the first run was lost.
+  # The issue is handed back again, as when a driver acted on a stale report.
+  relabel_handed_back 42 || return 1
   out="$("$LAND" 42 2>/dev/null)"; rc=$?
   assert_eq 0 "$rc1" "first landing" &&
     assert_eq 0 "$rc" "landing an issue that already landed" &&
@@ -156,7 +156,9 @@ test_red_main_is_not_landed_on() {
     assert_eq "$BASE_SHA" "$(origin_git rev-parse main)" "nothing is pushed onto a red main" &&
     assert_eq yes "$(has_branch CF-900-thing)" "the topic branch is kept" &&
     assert_eq no "$(has_worktree)" "no scratch worktree is left" &&
-    assert_eq 0 "$(grep -c 'run rerun' "$FAKE_GH_DIR/calls.log")" "a failure outside e2e is not rerun"
+    assert_eq 0 "$(grep -c 'run rerun' "$FAKE_GH_DIR/calls.log")" "a failure outside e2e is not rerun" &&
+    assert_eq "handed-back severity:P2" "$(labels_of 42)" "MAIN-RED leaves the issue's labels as they are" &&
+    assert_eq 0 "$(grep -c '^issue \(edit\|comment\)' "$FAKE_GH_DIR/calls.log")" "MAIN-RED neither edits nor comments"
 }
 
 test_pending_main_is_waited_for() {
@@ -444,6 +446,7 @@ test_new_claim_after_landing_with_missing_branch_is_not_resumed() {
   after="$(jq -nr --argjson t "$(($(origin_git log -1 --format=%ct main) + 60))" '$t | strftime("%Y-%m-%dT%H:%M:%SZ")')"
   jq --arg b "taking — CF-900-again · driver d08-0600Z · lease until $(iso_at 30) · files: thing.txt" --arg at "$after" \
     '.comments += [{body: $b, createdAt: $at}]' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  relabel_handed_back 42 || return 1
   out="$("$LAND" 42 2>/dev/null)"; rc=$?
   assert_eq 0 "$rc1" "first landing" &&
     assert_eq 70 "$rc" "a claim newer than the landing is new work whose branch is missing" &&
