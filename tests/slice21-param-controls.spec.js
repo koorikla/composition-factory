@@ -21,12 +21,16 @@ test('an unused parameter can be removed from the SHARED rail', async ({ page, r
   expect(doc.spec.xrd.parameters.scratch).toBeUndefined()
 })
 
-test('removing a wired parameter shows the referencers verbatim and keeps it', async ({ page, request }) => {
+test('cancelling unwire dialog for a wired parameter keeps it', async ({ page, request }) => {
   await page.goto('/')
   await page.click('#rtabs button[data-r="shared"]')
-  page.on('dialog', d => d.accept())
+  let dialogMessage = ''
+  page.on('dialog', d => {
+    dialogMessage = d.message()
+    d.dismiss()
+  })
   await page.click('.card:has-text("$region") [data-param-del]')
-  await expect(page.locator('#region-palette [role="alert"]').first()).toContainText(/work-queue|dead-letter/)
+  expect(dialogMessage).toContain('Delete it and unwire all referencing fields?')
   const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
   expect(doc.spec.xrd.parameters.region).toBeTruthy()
 })
