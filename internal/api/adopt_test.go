@@ -43,7 +43,7 @@ spec:
 	reqBody, _ := json.Marshal(map[string]any{
 		"manifest": manifest,
 		"persist":  true,
-		"provider": "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
+		"provider": testProviderRef,
 	})
 
 	rec := httptest.NewRecorder()
@@ -64,6 +64,12 @@ spec:
 	}
 	if res.Blueprint.Metadata.Name != "test-adopted" {
 		t.Errorf("blueprint name = %q, want test-adopted", res.Blueprint.Metadata.Name)
+	}
+	if len(res.Blueprint.Spec.Resources) != 1 {
+		t.Fatalf("resources count = %d, want 1", len(res.Blueprint.Spec.Resources))
+	}
+	if res.Blueprint.Spec.Resources[0].Provider != testProviderRef {
+		t.Errorf("resource provider = %q, want %q", res.Blueprint.Spec.Resources[0].Provider, testProviderRef)
 	}
 	if bpPath == "" {
 		t.Fatal("empty bpPath")
@@ -205,7 +211,7 @@ spec:
 			reqBody, _ := json.Marshal(map[string]any{
 				"manifest": manifest,
 				"persist":  true,
-				"provider": "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
+				"provider": testProviderRef,
 			})
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest("POST", "/api/blueprint/adopt", bytes.NewReader(reqBody))

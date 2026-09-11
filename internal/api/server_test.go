@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -292,7 +293,8 @@ func testServerParts(t *testing.T) (h http.Handler, blueprintPath string, store 
 func testServerOptions(t *testing.T) Options {
 	t.Helper()
 	store := cache.New(t.TempDir())
-	if err := store.Save(&xpkg.Package{Ref: testProviderRef, Digest: "sha256:test"}, testGenerateFixtureCRDs(t)); err != nil {
+	crds := testGenerateFixtureCRDs(t)
+	if err := store.Save(&xpkg.Package{Ref: testProviderRef, Digest: "sha256:test"}, crds); err != nil {
 		t.Fatalf("seed provider cache: %v", err)
 	}
 	return Options{
@@ -302,6 +304,9 @@ func testServerOptions(t *testing.T) Options {
 		OutDir:    t.TempDir(),
 		Lock:      filepath.Join(t.TempDir(), ".cf.lock"),
 		Providers: []string{testProviderRef},
+		fetch: func(ref string) (*xpkg.Package, error) {
+			return nil, fmt.Errorf("unexpected network fetch in test for %s", ref)
+		},
 	}
 }
 

@@ -3,7 +3,6 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 )
@@ -13,12 +12,8 @@ import (
 // it and returns the full doc as JSON — the GUI's "import dsl.yaml" button.
 func TestImportBlueprintYAML(t *testing.T) {
 	srv, _, _, _ := testServerParts(t)
-	yaml, err := os.ReadFile("../../testdata/xqueue.cf.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/blueprint/import", strings.NewReader(string(yaml)))
+	req := httptest.NewRequest("POST", "/api/blueprint/import", strings.NewReader(testBlueprintYAML))
 	req.Header.Set("Content-Type", "application/yaml")
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

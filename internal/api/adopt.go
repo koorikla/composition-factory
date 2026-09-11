@@ -46,9 +46,13 @@ func (srv *server) handleAdoptBlueprint(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	bp, report, err := adopt.Adopt([]byte(req.Manifest), adopt.Options{
+	opts := adopt.Options{
 		DefaultProviderRef: req.Provider,
-	})
+	}
+	if srv.Store != nil {
+		opts.CacheDir = srv.Store.Root
+	}
+	bp, report, err := adopt.Adopt([]byte(req.Manifest), opts)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "adopt failed: "+err.Error())
 		return
