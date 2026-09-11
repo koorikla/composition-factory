@@ -3,7 +3,7 @@
 [![CI](https://github.com/koorikla/compositionfactory/actions/workflows/ci.yml/badge.svg)](https://github.com/koorikla/compositionfactory/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/koorikla/compositionfactory?include_prereleases)](https://github.com/koorikla/compositionfactory/releases)
 [![License](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![Container](https://img.shields.io/badge/ghcr.io-compositionfactory-blue?logo=docker)](https://github.com/koorikla/compositionfactory/pkgs/container/compositionfactory)
+[![Container](https://img.shields.io/badge/ghcr.io-compositionfactory-blue?logo=docker)](https://github.com/koorikla/composition-factory/packages)
 
 **Schema-aware generator and visual canvas for Crossplane v2 Compositions and CompositeResourceDefinitions (XRDs).**
 
