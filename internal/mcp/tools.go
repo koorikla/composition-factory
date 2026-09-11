@@ -622,12 +622,20 @@ type generateOutput struct {
 // the bridge instead would have the HTTP handler write before this gate
 // could look at a single path.
 //
+// When write:true is requested, the dry run sets draft:false so the HTTP
+// handler performs strict CheckRequiredFields validation rather than
+// allowing unconfigured resources through draft preview mode.
+//
 // The write loop is the same MkdirAll+WriteFile sequence cmd/cf/gen.go's
 // run and internal/api's handleGenerate use, applied to the exact bodies
 // the dry run returned — so a generation written by an MCP call leaves the
 // identical tree a CLI run or a canvas write would have.
 func (s *server) generate(_ context.Context, _ *sdk.CallToolRequest, in generateInput) (*sdk.CallToolResult, any, error) {
-	status, body, _, err := s.call(http.MethodPost, "/api/generate", []byte(`{"write":false}`))
+	reqBody := `{"write":false}`
+	if in.Write {
+		reqBody = `{"write":false,"draft":false}`
+	}
+	status, body, _, err := s.call(http.MethodPost, "/api/generate", []byte(reqBody))
 	if err != nil {
 		return nil, nil, err
 	}

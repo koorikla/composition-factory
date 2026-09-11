@@ -1015,6 +1015,41 @@ func TestGenerateWritePrunesOrphanedFiles(t *testing.T) {
 	}
 }
 
+func TestGenerateWriteRejectsUnconfiguredResourceMissingRequiredFields(t *testing.T) {
+	s := newStack(t)
+
+	// Replace main-queue's fields with empty fields map: fields: {}
+	body, err := os.ReadFile(s.blueprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified := strings.Replace(string(body), "fields:\n        maxMessageSize: {from: params.maxMessageSize}\n        region: {value: \"eu-west-1\"}", "fields: {}", 1)
+	if err := os.WriteFile(s.blueprint, []byte(modified), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Preview mode (write: false) stays green for unconfigured resource
+	preview := s.toolOK(t, "generate", map[string]any{"write": false})
+	if preview["written"] != false {
+		t.Errorf("written = %v on preview, want false", preview["written"])
+	}
+
+	// Calling generate with write: true must fail and reject unconfigured resource missing required fields,
+	// matching POST /api/generate {"write": true} verbatim.
+	s.assertToolErrorMatchesHTTP(t,
+		"generate", map[string]any{"write": true},
+		http.MethodPost, "/api/generate", `{"write":true}`)
+
+	// Verify zero files written to output directory
+	entries, err := os.ReadDir(s.outDir)
+	if err != nil {
+		t.Fatalf("read outDir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 files written to outDir on validation failure, found %d", len(entries))
+	}
+}
+
 func TestGenerateBrokenCacheMatchesHTTP(t *testing.T) {
 	s := newStack(t)
 	if err := os.RemoveAll(s.storeRoot); err != nil {

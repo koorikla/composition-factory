@@ -27,7 +27,8 @@ import (
 
 // generateRequest is the POST /api/generate body.
 type generateRequest struct {
-	Write bool `json:"write"`
+	Write bool  `json:"write"`
+	Draft *bool `json:"draft,omitempty"`
 }
 
 // generateOutput is one rendered file, summarized for the JSON response:
@@ -47,18 +48,22 @@ type generateOutput struct {
 	Body  string `json:"body"`
 }
 
-// handleGenerate serves POST /api/generate: {"write":bool} ->
+// handleGenerate serves POST /api/generate: {"write":bool,"draft":bool} ->
 // {"outputs":[{"path":...,"bytes":N,"body":"..."}],"written":bool}.
 //
 // write:false reports what emit.Generate would produce without touching
-// disk — a dry-run preview for the canvas, body included so the canvas can
-// render the output pane straight from the preview. write:true additionally
-// writes every output through the exact same os.MkdirAll+os.WriteFile
-// sequence cmd/cf/gen.go's run uses for a non-check `cf gen` and prunes
-// orphaned files in managed scopes, so a generation triggered from the
-// canvas leaves the output tree in the identical state a CLI run would have;
-// its response carries the same bodies as write:false, since a write does
-// not change what was rendered.
+// disk — by default a dry-run preview for the canvas (allowing unconfigured
+// resources via WithDraftPreview so authoring remains green), body included
+// so the canvas can render the output pane straight from the preview. If
+// draft is explicitly false ({"write":false,"draft":false}), full production
+// CheckRequiredFields validation runs without writing to disk.
+// write:true additionally writes every output through the exact same
+// os.MkdirAll+os.WriteFile sequence cmd/cf/gen.go's run uses for a non-check
+// `cf gen` and prunes orphaned files in managed scopes, so a generation
+// triggered from the canvas leaves the output tree in the identical state
+// a CLI run would have; its response carries the same bodies as write:false,
+// since a write does not change what was rendered. Writes never allow draft
+// mode.
 //
 // Every failure here — a blueprint that no longer validates, a provider not
 // yet in the cache, a field that does not exist on its resolved CRD — is
@@ -101,8 +106,16 @@ func (srv *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isDraft := !req.Write
+	if req.Draft != nil {
+		isDraft = *req.Draft
+	}
+	if req.Write {
+		isDraft = false
+	}
+
 	var genOpts []emit.GenerateOption
-	if !req.Write {
+	if isDraft {
 		genOpts = append(genOpts, emit.WithDraftPreview())
 	}
 	outputs, err := emit.Generate(b, crds, srv.OutDir, genOpts...)

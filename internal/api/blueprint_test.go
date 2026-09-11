@@ -682,6 +682,15 @@ func TestGenerateWriteRejectsEmptyResourceMissingRequiredField(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "region") {
 		t.Errorf("expected error mentioning required field \"region\", got: %s", rec.Body)
 	}
+
+	// Dry-run path with draft:false must also refuse a resource missing a CRD-required field
+	dryStrictRec := do(t, h, "POST", "/api/generate", `{"write":false,"draft":false}`)
+	if dryStrictRec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for write:false,draft:false with empty resource missing required field: %s", dryStrictRec.Code, dryStrictRec.Body)
+	}
+	if !strings.Contains(dryStrictRec.Body.String(), "region") {
+		t.Errorf("expected error mentioning required field \"region\", got: %s", dryStrictRec.Body)
+	}
 }
 
 // --- Additional coverage beyond the brief's verbatim tests ---
