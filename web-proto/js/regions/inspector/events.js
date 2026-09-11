@@ -7,9 +7,9 @@ import { fanOut } from "../../wires.js";
 import { state } from "./state.js";
 import { insertSnippetIntoTextarea, triggerExpressionPreview } from "./preview.js";
 import {
-  paramsOf, isParamLocked, cleanParamRefs, cloneProps, memberParent,
-  memberContainer, commitMembers, paramFrom, parseInputYAML, serializeInputYAML,
-  setPathVal, inferFnMeta
+  paramsOf, isParamLocked, cleanParamRefs, cleanMemberRefs, renameMemberRefs,
+  cloneProps, memberParent, memberContainer, commitMembers, paramFrom, parseInputYAML,
+  serializeInputYAML, setPathVal, inferFnMeta
 } from "./xrd.js";
 
 export async function commitValue(path, kind, text) {
@@ -287,11 +287,23 @@ export var boxClickActions = [
     needsDoc: true,
     run: function (mdel, doc) {
       var mdelKey = mdel.getAttribute("data-mdel").split("|");
-      var mdelProps = cloneProps((paramsOf(doc)[mdelKey[0]] || {}).properties);
-      var mdelLoc = memberParent(mdelProps, mdelKey[1]);
+      var paramName = mdelKey[0];
+      var memberPath = mdelKey[1];
+      var fo = fanOut(doc, paramName + "." + memberPath);
+      if (fo > 0) {
+        if (!confirm('Member "' + paramName + '.' + memberPath + '" is wired into ' + fo + " field" + (fo === 1 ? "" : "s") + ". Delete it and unwire all referencing fields?")) {
+          return;
+        }
+        var draft = JSON.parse(JSON.stringify(doc));
+        cleanMemberRefs(draft, paramName, memberPath);
+        state.op(function () { return state.store.replaceDoc(draft); });
+        return;
+      }
+      var mdelProps = cloneProps((paramsOf(doc)[paramName] || {}).properties);
+      var mdelLoc = memberParent(mdelProps, memberPath);
       if (!mdelLoc) return;
       delete mdelLoc.parent[mdelLoc.key];
-      state.op(function () { return commitMembers(mdelKey[0], mdelProps); })
+      state.op(function () { return commitMembers(paramName, mdelProps); })
         .then(function (r) { if (r === null) state.render(); });
     }
   },
@@ -860,26 +872,51 @@ export function onBoxChange(e) {
     return;
   }
 
-  var mAttr = null;
-  ["data-mname", "data-mtype", "data-mreq", "data-mdef"].some(function (a) {
-    if (t.hasAttribute(a)) { mAttr = a; return true; }
-    return false;
-  });
-  if (mAttr) {
-    var mKey = t.getAttribute(mAttr).split("|");
+  if (t.hasAttribute("data-mname")) {
+    var mKey = t.getAttribute("data-mname").split("|");
     var mParam = mKey[0], mPath = mKey[1];
     var mProps = cloneProps((paramsOf(doc)[mParam] || {}).properties);
     var mLoc = memberParent(mProps, mPath);
     if (!mLoc) return;
+    var mNew = t.value.trim();
+    if (!mNew || mNew === mLoc.key) { state.render(); return; }
+    if (mLoc.parent[mNew]) { state.render(); return; }
+
+    var segs = mPath.split(".");
+    segs[segs.length - 1] = mNew;
+    var newPath = segs.join(".");
+    var oldPath = mPath;
+
+    t.setAttribute("data-mname", mParam + "|" + newPath);
+
+    var fo = fanOut(doc, mParam + "." + oldPath);
+    if (fo > 0) {
+      var draft = JSON.parse(JSON.stringify(doc));
+      renameMemberRefs(draft, mParam, oldPath, newPath);
+      state.op(function () { return state.store.replaceDoc(draft); })
+        .then(function (r) { if (r === null) state.render(); });
+    } else {
+      mLoc.parent[mNew] = mLoc.parent[mLoc.key];
+      delete mLoc.parent[mLoc.key];
+      state.op(function () { return commitMembers(mParam, mProps); })
+        .then(function (r) { if (r === null) state.render(); });
+    }
+    return;
+  }
+
+  var mAttr = null;
+  ["data-mtype", "data-mreq", "data-mdef"].some(function (a) {
+    if (t.hasAttribute(a)) { mAttr = a; return true; }
+    return false;
+  });
+  if (mAttr) {
+    mKey = t.getAttribute(mAttr).split("|");
+    mParam = mKey[0];
+    mPath = mKey[1];
+    mProps = cloneProps((paramsOf(doc)[mParam] || {}).properties);
+    mLoc = memberParent(mProps, mPath);
+    if (!mLoc) return;
     var memberHandler = {
-      "data-mname": function () {
-        var mNew = t.value.trim();
-        if (!mNew || mNew === mLoc.key) { state.render(); return false; }
-        if (mLoc.parent[mNew]) { state.render(); return false; }
-        mLoc.parent[mNew] = mLoc.parent[mLoc.key];
-        delete mLoc.parent[mLoc.key];
-        return true;
-      },
       "data-mtype": function () {
         mLoc.parent[mLoc.key].type = t.value;
         if (t.value !== "object") delete mLoc.parent[mLoc.key].properties;

@@ -129,6 +129,178 @@ export function cleanParamRefs(draft, pn) {
   });
 }
 
+export function cleanMemberRefs(draft, paramName, memberPath) {
+  if (!draft || !draft.spec || !paramName || !memberPath) return;
+  if (draft.spec.xrd && draft.spec.xrd.parameters && draft.spec.xrd.parameters[paramName]) {
+    var p = draft.spec.xrd.parameters[paramName];
+    if (p.properties) {
+      var loc = memberParent(p.properties, memberPath);
+      if (loc && loc.parent) {
+        delete loc.parent[loc.key];
+        if (Object.keys(p.properties).length === 0) {
+          delete p.properties;
+        }
+      }
+    }
+  }
+  var fullParam = paramName + "." + memberPath;
+  var resources = draft.spec.resources || [];
+  resources.forEach(function (r) {
+    if (r.fields) {
+      Object.keys(r.fields).forEach(function (k) {
+        var f = r.fields[k];
+        if (f && (isParamRef(f.from, fullParam) || isRawParamRef(f.raw, fullParam))) {
+          delete r.fields[k];
+        }
+      });
+    }
+    if (r.envelope) {
+      Object.keys(r.envelope).forEach(function (k) {
+        var f = r.envelope[k];
+        if (f && (isParamRef(f.from, fullParam) || isRawParamRef(f.raw, fullParam))) {
+          delete r.envelope[k];
+        }
+      });
+      if (Object.keys(r.envelope).length === 0) delete r.envelope;
+    }
+    if (r.annotations) {
+      Object.keys(r.annotations).forEach(function (k) {
+        var f = r.annotations[k];
+        if (f && (isParamRef(f.from, fullParam) || isRawParamRef(f.raw, fullParam))) {
+          delete r.annotations[k];
+        }
+      });
+      if (Object.keys(r.annotations).length === 0) delete r.annotations;
+    }
+    if (r.connectionSecret) {
+      if (typeof r.connectionSecret === "string") {
+        if (isParamRef(r.connectionSecret, fullParam) || isRawParamRef(r.connectionSecret, fullParam)) {
+          delete r.connectionSecret;
+        }
+      } else if (typeof r.connectionSecret === "object") {
+        if (Array.isArray(r.connectionSecret.keys)) {
+          r.connectionSecret.keys = r.connectionSecret.keys.filter(function (item) {
+            if (typeof item === "string") return !isParamRef(item, fullParam) && !isRawParamRef(item, fullParam);
+            if (item && typeof item === "object") {
+              if (item.from && (isParamRef(item.from, fullParam) || isRawParamRef(item.from, fullParam))) return false;
+              if (item.raw && isRawParamRef(item.raw, fullParam)) return false;
+              if (isObjectReferencingParam(item, fullParam)) return false;
+            }
+            return true;
+          });
+          if (r.connectionSecret.keys.length === 0) delete r.connectionSecret;
+        } else if (isObjectReferencingParam(r.connectionSecret, fullParam)) {
+          delete r.connectionSecret;
+        }
+      }
+    }
+    if (r.when && isWhenReferencingParam(r.when, fullParam)) {
+      delete r.when;
+    }
+    if (r.forEach && (isParamRef(r.forEach, fullParam) || isRawParamRef(r.forEach, fullParam))) {
+      delete r.forEach;
+    }
+  });
+}
+
+export function rewriteRawParam(raw, from, to) {
+  if (!raw || typeof raw !== "string" || !from || !to || from === to) return raw;
+  var escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  var re = new RegExp("((?:\\$spec|\\.spec|\\$params|\\.params|params|parameters)\\.)" + escaped + "($|[^a-zA-Z0-9_])", "g");
+  return raw.replace(re, "$1" + to + "$2");
+}
+
+export function renameMemberRefs(draft, paramName, oldMemberPath, newMemberPath) {
+  if (!draft || !draft.spec || !paramName || !oldMemberPath || !newMemberPath || oldMemberPath === newMemberPath) return;
+  if (draft.spec.xrd && draft.spec.xrd.parameters && draft.spec.xrd.parameters[paramName]) {
+    var p = draft.spec.xrd.parameters[paramName];
+    if (p && p.properties) {
+      var oldLoc = memberParent(p.properties, oldMemberPath);
+      if (oldLoc && oldLoc.parent && oldLoc.parent[oldLoc.key]) {
+        var newKey = newMemberPath.split(".").pop();
+        if (oldLoc.key !== newKey) {
+          oldLoc.parent[newKey] = oldLoc.parent[oldLoc.key];
+          delete oldLoc.parent[oldLoc.key];
+        }
+      }
+    }
+  }
+  var fromParam = paramName + "." + oldMemberPath;
+  var toParam = paramName + "." + newMemberPath;
+  var oldRef1 = "params." + fromParam;
+  var newRef1 = "params." + toParam;
+  var oldRef2 = "parameters." + fromParam;
+  var newRef2 = "parameters." + toParam;
+
+  function rewriteRef(from) {
+    if (typeof from !== "string") return from;
+    if (from === oldRef1) return newRef1;
+    if (from.indexOf(oldRef1 + ".") === 0) return newRef1 + from.slice(oldRef1.length);
+    if (from === oldRef2) return newRef2;
+    if (from.indexOf(oldRef2 + ".") === 0) return newRef2 + from.slice(oldRef2.length);
+    return from;
+  }
+
+  var resources = draft.spec.resources || [];
+  resources.forEach(function (r) {
+    if (r.fields) {
+      Object.keys(r.fields).forEach(function (k) {
+        var f = r.fields[k];
+        if (!f) return;
+        if (f.from) f.from = rewriteRef(f.from);
+        if (f.raw) f.raw = rewriteRawParam(f.raw, fromParam, toParam);
+      });
+    }
+    if (r.envelope) {
+      Object.keys(r.envelope).forEach(function (k) {
+        var f = r.envelope[k];
+        if (!f) return;
+        if (f.from) f.from = rewriteRef(f.from);
+        if (f.raw) f.raw = rewriteRawParam(f.raw, fromParam, toParam);
+      });
+    }
+    if (r.annotations) {
+      Object.keys(r.annotations).forEach(function (k) {
+        var f = r.annotations[k];
+        if (!f) return;
+        if (f.from) f.from = rewriteRef(f.from);
+        if (f.raw) f.raw = rewriteRawParam(f.raw, fromParam, toParam);
+      });
+    }
+    if (r.connectionSecret) {
+      if (typeof r.connectionSecret === "string") {
+        r.connectionSecret = rewriteRef(r.connectionSecret);
+      } else if (typeof r.connectionSecret === "object" && Array.isArray(r.connectionSecret.keys)) {
+        r.connectionSecret.keys.forEach(function (item, idx) {
+          if (typeof item === "string") {
+            r.connectionSecret.keys[idx] = rewriteRef(item);
+          } else if (item && typeof item === "object") {
+            if (item.from) item.from = rewriteRef(item.from);
+            if (item.raw) item.raw = rewriteRawParam(item.raw, fromParam, toParam);
+          }
+        });
+      }
+    }
+    if (r.when && typeof r.when === "string") {
+      if (r.when === oldRef1 || r.when.indexOf(oldRef1 + " ") === 0 || r.when.indexOf(oldRef1 + ".") === 0) {
+        r.when = newRef1 + r.when.slice(oldRef1.length);
+      } else if (r.when === oldRef2 || r.when.indexOf(oldRef2 + " ") === 0 || r.when.indexOf(oldRef2 + ".") === 0) {
+        r.when = newRef2 + r.when.slice(oldRef2.length);
+      }
+    }
+    if (r.forEach && typeof r.forEach === "string") {
+      r.forEach = rewriteRef(r.forEach);
+    }
+  });
+  if (draft.spec && draft.spec.templates) {
+    Object.keys(draft.spec.templates).forEach(function (tName) {
+      if (typeof draft.spec.templates[tName] === "string") {
+        draft.spec.templates[tName] = rewriteRawParam(draft.spec.templates[tName], fromParam, toParam);
+      }
+    });
+  }
+}
+
 var catFnsPromise = null;
 export async function getCatalogueFunctions() {
   if (!catFnsPromise) {
