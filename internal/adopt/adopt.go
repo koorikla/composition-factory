@@ -1001,6 +1001,7 @@ var (
 	reWhenIfEnvNe        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:or\s+\(not\s+\(hasKey\s+\$env\s+"[^"]+"\)\)\s+)?\(?ne\s+\$env\.([a-zA-Z0-9_.-]+)\s+"?([^"]+?)"?\)?|ne\s+\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\)\s+"?([^"]+?)"?)\s*-?\}\}`)
 	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$spec|\.spec|\.observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
 	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$env\.([a-zA-Z0-9_.-]+)|\(default\s+(?:"[^"]*"|\S+)\s+\(index\s+\$env\s+"([a-zA-Z0-9_.-]+)"\)\))\)\s*-?\}\}`)
+	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(index\s+\$?[.]observed\.resources\s+"([^"]+)"\)\.resource\.status\.([a-zA-Z0-9_.-]+)|\$?[.]observed\.resources\.([a-zA-Z0-9_-]+)\.resource\.status\.([a-zA-Z0-9_.-]+))\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
 	reDocSeparator       = regexp.MustCompile(`(?m)^\s*---\s*$`)
 	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+(?:\(printf\s+"([^"]+)"|"([^"]+)")`)
@@ -1624,6 +1625,14 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 			}
 			nextForEach = fmt.Sprintf("env.%s", key)
 			ensureEnvDeclared(bp, key, "integer")
+		} else if m := reForEachStatusLoop.FindStringSubmatch(chunk); len(m) >= 3 {
+			resName := m[1]
+			statusPath := m[2]
+			if resName == "" && len(m) >= 5 {
+				resName = m[3]
+				statusPath = m[4]
+			}
+			nextForEach = fmt.Sprintf("resources.%s.status.%s", resName, statusPath)
 		} else if m := reForEachLoop.FindStringSubmatch(chunk); len(m) >= 2 {
 			nextForEach = fmt.Sprintf("params.%s", m[1])
 			ensureParamDeclaredTyped(bp, m[1], "integer")
