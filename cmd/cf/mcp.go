@@ -51,7 +51,11 @@ func (c *MCPCmd) Run() error {
 // run does the actual work; split from Run for the same reason ServeCmd's
 // is, so a test can drive shutdown by cancelling a context it controls.
 func (c *MCPCmd) run(ctx context.Context) error {
-	// Both workspace paths are resolved to absolute form up front: the write
+	return c.runWithTransport(ctx, cfmcp.NewStdioTransport())
+}
+
+func (c *MCPCmd) runWithTransport(ctx context.Context, transport sdk.Transport) error {
+	// Canonicalize paths up front before building options. The confinement
 	// gate compares absolute, cleaned paths (see internal/mcp/workspace.go),
 	// and an MCP host launches this process with a working directory the
 	// user never sees — a relative --out left relative would make the
@@ -77,5 +81,5 @@ func (c *MCPCmd) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return srv.Run(ctx, &sdk.StdioTransport{})
+	return srv.Run(ctx, transport)
 }
