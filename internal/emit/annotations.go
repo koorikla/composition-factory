@@ -174,38 +174,29 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 				}
 				continue
 			}
-			decl, ok := b.Spec.XRD.Parameters[ref.Param]
-			if !ok {
-				return nil, fmt.Errorf("resource %q annotation %q: unknown parameter %q", r.Name, k, ref.Param)
+			segs, chain, err := blueprint.ParamChain(b.Spec.XRD,
+				fmt.Sprintf("resource %q annotation %q", r.Name, k), ref.Param)
+			if err != nil {
+				return nil, err
 			}
-			rhs := fmt.Sprintf("{{ $spec.%s | quote }}", ref.Param)
-			if decl.Required {
-				plan = append(plan, forProviderField{
-					path: k,
-					rhs:  rhs,
-					structured: structuredRHS{
-						kind:       rhsParam,
-						param:      ref.Param,
-						paramSegs:  []string{ref.Param},
-						rawExpr:    "$spec." + ref.Param,
-						targetType: "string",
-						sourceType: decl.Type,
-					},
-				})
-				continue
-			}
-			guard := fmt.Sprintf("hasKey $spec %q", ref.Param)
+			wireDecl := chain[len(chain)-1]
+			refName := strings.Join(segs, ".")
+			deref := "$spec." + refName
+			rhs := fmt.Sprintf("{{ %s | quote }}", deref)
+			guard := chainGuard(segs, chain)
 			plan = append(plan, forProviderField{
 				path:  k,
 				rhs:   rhs,
 				guard: guard,
 				structured: structuredRHS{
-					kind:      rhsParam,
-					param:     ref.Param,
-					paramSegs: []string{ref.Param},
-					optional:  true,
-					guard:     guard,
-					rawExpr:   "$spec." + ref.Param,
+					kind:       rhsParam,
+					param:      refName,
+					paramSegs:  segs,
+					optional:   guard != "",
+					guard:      guard,
+					rawExpr:    deref,
+					targetType: "string",
+					sourceType: wireDecl.Type,
 				},
 			})
 		}

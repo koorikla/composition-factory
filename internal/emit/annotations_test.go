@@ -377,3 +377,118 @@ func TestEmptyAnnotationsMapEmitsIdenticallyToAbsent(t *testing.T) {
 		t.Error("an empty annotations map changed the emitted bytes")
 	}
 }
+
+func TestNestedParameterAnnotationEmission(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.XRD.Parameters["meta"] = blueprint.Parameter{
+		Type:     "object",
+		Required: false,
+		Properties: map[string]blueprint.Parameter{
+			"owner": {Type: "string", Required: false},
+			"tier":  {Type: "string", Required: true},
+		},
+	}
+	b.Spec.XRD.Parameters["cluster"] = blueprint.Parameter{
+		Type:     "object",
+		Required: true,
+		Properties: map[string]blueprint.Parameter{
+			"name": {Type: "string", Required: true},
+			"desc": {Type: "string", Required: false},
+		},
+	}
+	b.Spec.Resources[0].Annotations = map[string]blueprint.Field{
+		"example.com/owner":        {From: "params.meta.owner"},
+		"example.com/tier":         {From: "params.meta.tier"},
+		"example.com/cluster-name": {From: "params.cluster.name"},
+		"example.com/cluster-desc": {From: "params.cluster.desc"},
+	}
+
+	got, err := Composition(b, testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(got)
+
+	// cluster.name is all-required -> bare expression, no guard
+	if !strings.Contains(s, `'example.com/cluster-name': {{ $spec.cluster.name | quote }}`) {
+		t.Errorf("missing bare cluster-name annotation in:\n%s", s)
+	}
+
+	// cluster.desc: cluster is required, desc is optional -> hasKey $spec.cluster "desc"
+	if !strings.Contains(s, `{{- if hasKey $spec.cluster "desc" }}`) ||
+		!strings.Contains(s, `'example.com/cluster-desc': {{ $spec.cluster.desc | quote }}`) {
+		t.Errorf("missing guarded cluster-desc annotation in:\n%s", s)
+	}
+
+	// meta.owner: meta is optional, owner is optional -> and (hasKey $spec "meta") (hasKey $spec.meta "owner")
+	if !strings.Contains(s, `{{- if and (hasKey $spec "meta") (hasKey $spec.meta "owner") }}`) ||
+		!strings.Contains(s, `'example.com/owner': {{ $spec.meta.owner | quote }}`) {
+		t.Errorf("missing guarded meta.owner annotation in:\n%s", s)
+	}
+
+	// meta.tier: meta is optional, tier is required -> and (hasKey $spec "meta") (hasKey $spec.meta "tier")
+	if !strings.Contains(s, `{{- if and (hasKey $spec "meta") (hasKey $spec.meta "tier") }}`) ||
+		!strings.Contains(s, `'example.com/tier': {{ $spec.meta.tier | quote }}`) {
+		t.Errorf("missing guarded meta.tier annotation in:\n%s", s)
+	}
+
+	tmplBody := extractTemplate(t, got)
+
+	t.Run("render present", func(t *testing.T) {
+		rendered, err := renderTemplate(t, tmplBody, map[string]any{
+			"providerName": "localstack",
+			"location":     "EU",
+			"cluster": map[string]any{
+				"name": "prod-cluster",
+				"desc": "production environment",
+			},
+			"meta": map[string]any{
+				"owner": "team-infra",
+				"tier":  "gold",
+			},
+		})
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		anns := docAnnotations(t, rendered, "Queue")
+		if anns["example.com/cluster-name"] != "prod-cluster" {
+			t.Errorf("cluster-name = %v, want prod-cluster", anns["example.com/cluster-name"])
+		}
+		if anns["example.com/cluster-desc"] != "production environment" {
+			t.Errorf("cluster-desc = %v, want production environment", anns["example.com/cluster-desc"])
+		}
+		if anns["example.com/owner"] != "team-infra" {
+			t.Errorf("owner = %v, want team-infra", anns["example.com/owner"])
+		}
+		if anns["example.com/tier"] != "gold" {
+			t.Errorf("tier = %v, want gold", anns["example.com/tier"])
+		}
+	})
+
+	t.Run("render optional absent", func(t *testing.T) {
+		rendered, err := renderTemplate(t, tmplBody, map[string]any{
+			"providerName": "localstack",
+			"location":     "EU",
+			"cluster": map[string]any{
+				"name": "prod-cluster",
+			},
+		})
+		if err != nil {
+			t.Fatalf("render must succeed with optional nested params absent, got: %v", err)
+		}
+		anns := docAnnotations(t, rendered, "Queue")
+		if anns["example.com/cluster-name"] != "prod-cluster" {
+			t.Errorf("cluster-name = %v, want prod-cluster", anns["example.com/cluster-name"])
+		}
+		for _, key := range []string{"example.com/cluster-desc", "example.com/owner", "example.com/tier"} {
+			if _, present := anns[key]; present {
+				t.Errorf("%s must be omitted when param is absent, got %v", key, anns[key])
+			}
+		}
+		for _, bad := range []string{"<no value>", "<nil>"} {
+			if strings.Contains(rendered, bad) {
+				t.Errorf("rendered output contains %q", bad)
+			}
+		}
+	})
+}

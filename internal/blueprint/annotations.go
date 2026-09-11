@@ -189,10 +189,9 @@ func (b *Blueprint) validateResourceAnnotations(r Resource) error {
 				}
 				continue
 			}
-			decl, exists := x.Parameters[ref.Param]
-			if !exists {
-				return fmt.Errorf("resource %q %s: references unknown parameter %q",
-					r.Name, label, ref.Param)
+			decl, err := resolveParamRef(x, fmt.Sprintf("resource %q %s", r.Name, label), ref.Param)
+			if err != nil {
+				return err
 			}
 			// Same rule as a field's from, same failure mode — with the extra
 			// twist that an annotation value must be a STRING, so even the

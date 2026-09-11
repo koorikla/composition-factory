@@ -331,3 +331,57 @@ func TestDeleteResourceRefusesWhenAnnotationWiresFromIt(t *testing.T) {
 		t.Fatalf("DeleteResource = %v, want the still-wired refusal naming sa", err)
 	}
 }
+
+func TestValidateAcceptsNestedParameterAnnotations(t *testing.T) {
+	b := annotated(func(b *Blueprint) {
+		b.Spec.XRD.Parameters["meta"] = Parameter{
+			Type: "object",
+			Properties: map[string]Parameter{
+				"owner": {Type: "string"},
+			},
+		}
+		b.Spec.Resources[1].Annotations["example.com/owner"] = Field{From: "params.meta.owner"}
+	})
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate rejected valid nested parameter annotation: %v", err)
+	}
+}
+
+func TestValidateRejectsNestedParameterAnnotationErrors(t *testing.T) {
+	t.Run("unknown member", func(t *testing.T) {
+		b := annotated(func(b *Blueprint) {
+			b.Spec.XRD.Parameters["meta"] = Parameter{
+				Type: "object",
+				Properties: map[string]Parameter{
+					"owner": {Type: "string"},
+				},
+			}
+			b.Spec.Resources[1].Annotations["example.com/owner"] = Field{From: "params.meta.missing"}
+		})
+		err := b.Validate()
+		if err == nil || !strings.Contains(err.Error(), `references unknown member "missing" of params.meta`) {
+			t.Fatalf("Validate = %v, want unknown member error", err)
+		}
+	})
+
+	t.Run("non-scalar composite member", func(t *testing.T) {
+		b := annotated(func(b *Blueprint) {
+			b.Spec.XRD.Parameters["meta"] = Parameter{
+				Type: "object",
+				Properties: map[string]Parameter{
+					"sub": {
+						Type: "object",
+						Properties: map[string]Parameter{
+							"name": {Type: "string"},
+						},
+					},
+				},
+			}
+			b.Spec.Resources[1].Annotations["example.com/sub"] = Field{From: "params.meta.sub"}
+		})
+		err := b.Validate()
+		if err == nil || !strings.Contains(err.Error(), `parameter "meta.sub" has type "object", and an annotation wire can only carry a scalar`) {
+			t.Fatalf("Validate = %v, want scalar requirement error", err)
+		}
+	})
+}
