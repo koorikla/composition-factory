@@ -416,7 +416,39 @@ function render() {
 function diagnoseError(errMsg) {
   if (!errMsg) return { isEnv: false, tip: "" };
   var str = String(errMsg).toLowerCase();
-  if (str.indexOf("docker") !== -1 || str.indexOf("daemon") !== -1 || str.indexOf("docker.sock") !== -1) {
+  if (str.indexOf("pipeline returned fatal") !== -1 || str.indexOf("crossplane internal render in docker") !== -1) {
+    return { isEnv: false, tip: "" };
+  }
+  var isDockerUnavail =
+    str.indexOf("cannot connect to the docker daemon") !== -1 ||
+    str.indexOf("is the docker daemon running") !== -1 ||
+    str.indexOf("docker daemon") !== -1 ||
+    str.indexOf("daemon not accessible") !== -1 ||
+    str.indexOf("daemon is not running") !== -1 ||
+    str.indexOf("cannot connect to daemon") !== -1 ||
+    str.indexOf("docker.sock") !== -1 ||
+    str.indexOf("error during connect") !== -1 ||
+    str.indexOf("runtime-docker-network") !== -1 ||
+    str.indexOf("is not connected to docker network") !== -1 ||
+    str.indexOf("is marked for removal") !== -1 ||
+    str.indexOf("marked for removal") !== -1 ||
+    str.indexOf("is already in progress") !== -1 ||
+    (str.indexOf("docker") !== -1 && (
+      str.indexOf("command not found") !== -1 ||
+      str.indexOf("executable file not found") !== -1 ||
+      str.indexOf("not found") !== -1 ||
+      str.indexOf("not accessible") !== -1 ||
+      str.indexOf("stopped") !== -1 ||
+      str.indexOf("unavailable") !== -1
+    )) ||
+    (str.indexOf("dockerd") !== -1 && (
+      str.indexOf("stopped") !== -1 ||
+      str.indexOf("not running") !== -1 ||
+      str.indexOf("not accessible") !== -1 ||
+      str.indexOf("not found") !== -1 ||
+      str.indexOf("unavailable") !== -1
+    ));
+  if (isDockerUnavail) {
     if (isContainerEnv) {
       return {
         isEnv: true,
