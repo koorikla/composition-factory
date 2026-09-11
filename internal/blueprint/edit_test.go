@@ -256,6 +256,39 @@ func TestRenameParameterRewritesReferences(t *testing.T) {
 	}
 }
 
+func TestRenameParameter_NestedAnnotation(t *testing.T) {
+	b := editable()
+	b.Spec.XRD.Parameters["tags"] = Parameter{
+		Type: "object",
+		Properties: map[string]Parameter{
+			"env": {Type: "string"},
+		},
+	}
+	b.Spec.Resources[0].Annotations = map[string]Field{
+		"deploy.environment": {From: "params.tags.env"},
+	}
+	if err := b.RenameParameter("tags", "labels"); err != nil {
+		t.Fatalf("RenameParameter: %v", err)
+	}
+	if _, still := b.Spec.XRD.Parameters["tags"]; still {
+		t.Error("old parameter name still present")
+	}
+	if _, ok := b.Spec.XRD.Parameters["labels"]; !ok {
+		t.Fatal("new parameter name absent")
+	}
+	res := b.ResourceNamed("main-queue")
+	if res == nil {
+		t.Fatal("main-queue missing")
+	}
+	got := res.Annotations["deploy.environment"].From
+	if got != "params.labels.env" {
+		t.Errorf("annotation from = %q, want params.labels.env", got)
+	}
+	if err := b.Validate(); err != nil {
+		t.Errorf("blueprint invalid after rename: %v", err)
+	}
+}
+
 func TestRenameParameterRejectsCollisionAndChangesNothing(t *testing.T) {
 	b := editable()
 	want := b.Spec.Resources[0].Fields["maxMessageSize"].From
