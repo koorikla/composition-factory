@@ -320,7 +320,8 @@ function drawKinds() {
           ' data-kind="' + esc(k.kind) + '"' +
           ' data-av="' + esc(k.apiVersion) + '"' +
           ' data-provider="' + esc(k.provider || "") + '"' +
-          ' data-fam="' + esc(fam) + '">' +
+          ' data-fam="' + esc(fam) + '"' +
+          ' data-fields="' + (k.fields || 0) + '">' +
           '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
           '<span class="nm" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(fullTitle) + '">' + esc(k.kind) + '</span>' +
           kClusterTag +
@@ -719,11 +720,15 @@ function showKindPreview(row) {
   };
   if (previewCache[key]) { paint(previewCache[key]); return; }
   paint(null);
+  let total = row.hasAttribute("data-fields") ? Number(row.getAttribute("data-fields")) : NaN;
+  if (isNaN(total)) {
+    const kRec = kinds.find(function (k) { return k.kind === kind && k.apiVersion === av; });
+    total = kRec && typeof kRec.fields === "number" ? kRec.fields : NaN;
+  }
   api.getKindFields(av, kind, { requiredOnly: true }).then(function (req) {
-    return api.getKindFields(av, kind).then(function (all) {
-      previewCache[key] = { total: all.total, required: req.fields || [] };
-      paint(previewCache[key]);
-    });
+    const resolvedTotal = !isNaN(total) ? Math.max(total, (req.fields || []).length) : (req.total || (req.fields || []).length || 0);
+    previewCache[key] = { total: resolvedTotal, required: req.fields || [] };
+    paint(previewCache[key]);
   }).catch(function () {
     if (previewFor === key) {
       const prov = row.getAttribute("data-provider");
