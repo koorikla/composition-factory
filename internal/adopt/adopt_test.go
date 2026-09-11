@@ -4470,3 +4470,129 @@ spec:
 		t.Errorf("bpVerbatim.Validate() failed: %v", err)
 	}
 }
+
+func TestAdopt_DotNotationMapPatch(t *testing.T) {
+	crdYAML := `
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: queues.sqs.aws.upbound.io
+spec:
+  group: sqs.aws.upbound.io
+  scope: Namespaced
+  names:
+    kind: Queue
+    plural: queues
+    categories: [managed]
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          properties:
+            spec:
+              properties:
+                forProvider:
+                  required: [region]
+                  properties:
+                    region: {type: string}
+                    tags:
+                      type: object
+                      additionalProperties:
+                        type: string
+`
+	crds, err := schema.ParseCRDs([][]byte{[]byte(crdYAML)})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	providerRef := "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
+	cacheDir := t.TempDir()
+	store := cache.New(cacheDir)
+	if err := store.SaveCRDs(providerRef, "sha256:test", crds); err != nil {
+		t.Fatalf("SaveCRDs: %v", err)
+	}
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-dot-map-patch
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  resources:
+    - name: q
+      base:
+        apiVersion: sqs.aws.upbound.io/v1beta1
+        kind: Queue
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.env
+          toFieldPath: spec.forProvider.tags.env
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		Store:    store,
+		CacheDir: cacheDir,
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	// 1. bp.Spec.Resources["q"].Fields["tags[env]"] is populated with From: "params.env".
+	var q *blueprint.Resource
+	for i := range bp.Spec.Resources {
+		if bp.Spec.Resources[i].Name == "q" {
+			q = &bp.Spec.Resources[i]
+			break
+		}
+	}
+	if q == nil {
+		t.Fatalf("expected resource q in bp.Spec.Resources")
+	}
+	f, ok := q.Fields["tags[env]"]
+	if !ok {
+		t.Errorf("expected q.Fields[\"tags[env]\"], got fields: %+v", q.Fields)
+	} else if f.From != "params.env" {
+		t.Errorf("expected q.Fields[\"tags[env]\"].From == \"params.env\", got %q", f.From)
+	}
+
+	// 2. bp.Spec.XRD.Parameters["env"] is preserved.
+	if bp.Spec.XRD.Parameters == nil {
+		t.Fatalf("expected bp.Spec.XRD.Parameters to be populated")
+	}
+	if _, ok := bp.Spec.XRD.Parameters["env"]; !ok {
+		t.Errorf("expected parameter 'env' to be preserved in bp.Spec.XRD.Parameters, got: %+v", bp.Spec.XRD.Parameters)
+	}
+
+	// 3. No schema drop warning is issued for tags.env or tags[env].
+	for _, d := range report.Drops {
+		if strings.Contains(d.Path, "tags") || strings.Contains(d.Reason, "tags") {
+			t.Errorf("unexpected drop recorded for tags: %+v", d)
+		}
+	}
+
+	// 4. Round-trip through emit.Generate
+	outputs, err := emit.Generate(bp, crds, "")
+	if err != nil {
+		t.Fatalf("emit.Generate failed: %v", err)
+	}
+	var compYAML []byte
+	for _, o := range outputs {
+		if strings.Contains(o.Path, "compositions") {
+			compYAML = o.Body
+			break
+		}
+	}
+	if len(compYAML) == 0 {
+		t.Fatalf("no composition generated")
+	}
+	if !strings.Contains(string(compYAML), "tags") {
+		t.Errorf("expected Composition output to contain tags, got:\n%s", string(compYAML))
+	}
+}
