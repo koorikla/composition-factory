@@ -768,3 +768,43 @@ spec:
 		t.Errorf("expected error to mention duplicate config name \"default\", got: %v", err)
 	}
 }
+
+func TestCF243GenRejectsMultiDocumentBlueprint(t *testing.T) {
+	t.Run("valid second YAML document", func(t *testing.T) {
+		dir, _, cacheDir := seed(t)
+		bp := genBlueprint + "\n---\nkind: ExtraDocument\n"
+		bpPath := filepath.Join(dir, "bp.yaml")
+		if err := os.WriteFile(bpPath, []byte(bp), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		code, err := (&GenCmd{Blueprint: bpPath, Out: filepath.Join(dir, "out"), CacheDir: cacheDir}).run(&buf)
+		if code != 1 {
+			t.Fatalf("run exit code = %d, want 1", code)
+		}
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "blueprint must contain exactly one YAML document") {
+			t.Errorf("expected error to mention 'blueprint must contain exactly one YAML document', got: %v", err)
+		}
+	})
+
+	t.Run("invalid trailing YAML document", func(t *testing.T) {
+		dir, _, cacheDir := seed(t)
+		bp := genBlueprint + "\n---\n{{{ not yaml\n"
+		bpPath := filepath.Join(dir, "bp.yaml")
+		if err := os.WriteFile(bpPath, []byte(bp), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		code, err := (&GenCmd{Blueprint: bpPath, Out: filepath.Join(dir, "out"), CacheDir: cacheDir}).run(&buf)
+		if code != 1 {
+			t.Fatalf("run exit code = %d, want 1", code)
+		}
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+}

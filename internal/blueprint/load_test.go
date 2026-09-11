@@ -2082,3 +2082,62 @@ func TestValidateParameterEnumConformance(t *testing.T) {
 		}
 	})
 }
+
+func TestRejectMultiDocumentBlueprint(t *testing.T) {
+	t.Run("valid second YAML document", func(t *testing.T) {
+		multiDoc := valid + "\n---\nkind: ExtraDocument\nname: unexpected\n"
+		_, err := Parse([]byte(multiDoc))
+		if err == nil {
+			t.Fatal("Parse() succeeded on multi-document YAML, want error")
+		}
+		if !strings.Contains(err.Error(), "blueprint must contain exactly one YAML document") {
+			t.Errorf("err = %v, want error containing %q", err, "blueprint must contain exactly one YAML document")
+		}
+
+		_, err = Load(write(t, multiDoc))
+		if err == nil {
+			t.Fatal("Load() succeeded on multi-document YAML, want error")
+		}
+		if !strings.Contains(err.Error(), "blueprint must contain exactly one YAML document") {
+			t.Errorf("err = %v, want error containing %q", err, "blueprint must contain exactly one YAML document")
+		}
+	})
+
+	t.Run("invalid trailing YAML document", func(t *testing.T) {
+		invalidTrailing := valid + "\n---\n{{{ not yaml\n"
+		_, err := Parse([]byte(invalidTrailing))
+		if err == nil {
+			t.Fatal("Parse() succeeded on invalid trailing YAML document, want error")
+		}
+		if strings.TrimSpace(err.Error()) == "" {
+			t.Fatal("expected non-empty error message")
+		}
+
+		_, err = Load(write(t, invalidTrailing))
+		if err == nil {
+			t.Fatal("Load() succeeded on invalid trailing YAML document, want error")
+		}
+	})
+
+	t.Run("single document with leading separator and trailing comments is accepted", func(t *testing.T) {
+		doc := "---\n" + valid + "\n# trailing comment\n...\n"
+		b, err := Parse([]byte(doc))
+		if err != nil {
+			t.Fatalf("Parse() failed: %v", err)
+		}
+		if b == nil || b.Spec.XRD.Kind != "XQueue" {
+			t.Fatalf("unexpected blueprint: %+v", b)
+		}
+	})
+
+	t.Run("trailing document separator without content is rejected", func(t *testing.T) {
+		doc := valid + "\n---\n"
+		_, err := Parse([]byte(doc))
+		if err == nil {
+			t.Fatal("Parse() succeeded on trailing document separator, want error")
+		}
+		if !strings.Contains(err.Error(), "blueprint must contain exactly one YAML document") {
+			t.Errorf("err = %v, want error containing %q", err, "blueprint must contain exactly one YAML document")
+		}
+	})
+}
