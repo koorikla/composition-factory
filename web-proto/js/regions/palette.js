@@ -25,7 +25,7 @@ import { famOf, uniqueResourceName, COLORS } from "../utils.js";
 const HINT_KINDS =
   'Drag a kind onto the canvas. Schemas load per-kind — <span class="mono">4.5 KB</span> median.';
 const HINT_SHARED =
-  'Wires are explicit in the doc — <span class="mono">from: params.X</span> on a resource field. Badge = fan-out.';
+  'Wires are explicit in the doc — <span class="mono">from: params.X</span> on a resource field. Keys are dragged from the EnvironmentConfig card. Badge = fan-out.';
 const HINT_SRC =
   'Pinned by digest in <span class="mono">.cf.lock</span> or discovered live from your cluster.';
 
@@ -56,6 +56,10 @@ let paramFormOpen = false;
 let paramErr = null;
 let paramType = "string";    // add-form type; controls which inputs render
 let paramMembers = [];       // typed-object member rows in the add form
+
+let envFormOpen = false;
+let envErr = null;
+let envType = "string";      // environment add-form type
 
 let providers = null;        // server-side cached providers, null = not loaded
 let providerSeq = 0;
@@ -347,6 +351,44 @@ function memberSummary(props, depth) {
   }).join("");
 }
 
+function findEnvWires(doc, key) {
+  const wires = [];
+  const ref = "env." + key;
+  const resources = doc && doc.spec && doc.spec.resources || [];
+  resources.forEach(function (r) {
+    const checkDict = function (dict, prefix) {
+      if (!dict) return;
+      Object.keys(dict).forEach(function (p) {
+        const f = dict[p];
+        if (f && f.from === ref) {
+          wires.push(r.name + "." + (prefix ? prefix + "." : "") + p);
+        }
+      });
+    };
+    checkDict(r.fields, "");
+    checkDict(r.envelope, "envelope");
+    if (r.annotations) {
+      Object.keys(r.annotations).forEach(function (k) {
+        const f = r.annotations[k];
+        if (f && f.from === ref) {
+          wires.push(r.name + ".annotations." + k);
+        }
+      });
+    }
+    if (r.when && (r.when === ref || r.when.startsWith(ref + " ") || r.when.startsWith(ref + "==") || r.when.startsWith(ref + "!="))) {
+      wires.push(r.name + ".when");
+    }
+    if (r.forEach && r.forEach === ref) {
+      wires.push(r.name + ".forEach");
+    }
+  });
+  return wires;
+}
+
+function envFanOut(doc, key) {
+  return findEnvWires(doc, key).length;
+}
+
 function drawShared() {
   const doc = store.state.doc;
   if (!doc) return '<div class="empty">No document loaded.</div>';
@@ -397,6 +439,51 @@ function drawShared() {
       '<button class="btn sm" id="param-add-cancel">Cancel</button></div></div>';
   }
   if (paramErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(paramErr) + "</div>";
+
+  const env = doc.spec && doc.spec.environment || {};
+  const envKeys = Object.keys(env).sort();
+  h += '<div class="grp"><span class="lbl">Environment</span><span class="n">' + envKeys.length + "</span></div>";
+  if (!envKeys.length) {
+    h += '<div class="empty">No environment declared.</div>';
+  } else {
+    h += '<div class="card" data-config="default">' +
+      '<div class="card-h">' +
+      '<span class="nm" style="color:var(--shared)">default</span>' +
+      '<span class="sp"></span>' +
+      '<span class="dg" style="font-size:9.5px;color:var(--faint)">EnvironmentConfig</span>' +
+      '</div>' +
+      '<div class="card-b" style="padding:0">';
+    envKeys.forEach(function (k, idx) {
+      const ek = env[k] || {};
+      const border = idx < envKeys.length - 1 ? "border-bottom:1px solid var(--rule);" : "";
+      let lines = "type " + (ek.type || "string");
+      if (ek.default !== undefined && ek.default !== "") lines += ", default " + ek.default;
+      if (ek.description) lines += "\n" + ek.description;
+      h += '<div class="env-row" data-env-row="' + esc(k) + '" style="padding:7px 9px;' + border + '">' +
+        '<div style="display:flex;align-items:center;gap:6px">' +
+        '<span class="nm" style="color:var(--shared);font-weight:600">$env.' + esc(k) + "</span>" +
+        '<span class="sp"></span><span class="bind">' + envFanOut(doc, k) + " bound</span>" +
+        '<button class="del" data-env-del="' + esc(k) + '" title="Delete environment key">\u00d7</button></div>' +
+        '<div style="padding-top:3px;font-family:var(--mono);font-size:10px;color:var(--muted);white-space:pre-wrap">' + esc(lines) + "</div></div>";
+    });
+    h += '</div></div>';
+  }
+  if (!envFormOpen) {
+    h += '<div style="padding:8px 10px"><button class="btn sm" id="env-add-btn">+ Add environment key</button></div>';
+  } else {
+    h += '<div class="card" id="env-add-form" style="padding:8px 10px;display:flex;flex-direction:column;gap:6px">' +
+      '<input id="env-add-name" class="search" placeholder="keyName" aria-label="Environment key name">' +
+      '<div style="display:flex;gap:6px;align-items:center">' +
+      '<select id="env-add-type" class="search" style="flex:1" aria-label="Type">' +
+      ["string","integer","number","boolean"].map(function (t) {
+        return '<option value="' + t + '"' + (t === envType ? " selected" : "") + ">" + t + "</option>";
+      }).join("") + "</select></div>" +
+      '<input id="env-add-default" class="search" placeholder="default (optional)" aria-label="Default value">' +
+      '<div style="display:flex;gap:6px">' +
+      '<button class="btn sm pri" id="env-add-submit">Add</button>' +
+      '<button class="btn sm" id="env-add-cancel">Cancel</button></div></div>';
+  }
+  if (envErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(envErr) + "</div>";
   return h;
 }
 
@@ -629,7 +716,7 @@ function drawRail() {
   else { h = drawSources(); hint = HINT_SRC; }
   // A re-render (e.g. the providers list arriving) must not eat what the
   // user is typing into the add-provider field.
-  var keepIds = ["src-add-ref", "cat-search", "fn-search", "param-add-name", "param-add-type", "param-add-req"];
+  var keepIds = ["src-add-ref", "cat-search", "fn-search", "param-add-name", "param-add-type", "param-add-req", "env-add-name", "env-add-type", "env-add-default"];
   var kept = {};
   keepIds.forEach(function (id) {
     var el = railEl.querySelector("#" + id);
@@ -835,6 +922,7 @@ function bindPaletteEvents() {
       return;
     }
     if (e.target.id === "param-add-type") { syncMemberRows(); paramType = e.target.value; drawRail(); return; }
+    if (e.target.id === "env-add-type") { envType = e.target.value; drawRail(); return; }
     if (e.target.closest("[data-member-name],[data-member-type],[data-member-default]")) { syncMemberRows(); return; }
     const pickAll = e.target.closest("input[data-pick-all]");
     if (pickAll) {
@@ -1046,6 +1134,27 @@ function bindPaletteEvents() {
       store.deleteParameter(n);   // failure surfaces via the error topic below
       return;
     }
+    const edel = e.target.closest("[data-env-del]");
+    if (edel) {
+      const k = edel.getAttribute("data-env-del");
+      if (!window.confirm("Delete environment key $env." + k + "?")) return;
+      envErr = null;
+      const wires = findEnvWires(store.state.doc, k);
+      if (wires.length > 0) {
+        envErr = 'delete environment key "' + k + '": still referenced by wire ' + wires.join(", ");
+        drawRail();
+        return;
+      }
+      store.replaceDoc(function (d) {
+        if (d.spec && d.spec.environment) {
+          delete d.spec.environment[k];
+          if (Object.keys(d.spec.environment).length === 0) {
+            delete d.spec.environment;
+          }
+        }
+      });
+      return;
+    }
     if (e.target.closest("#param-add-member")) {
       syncMemberRows();
       paramMembers.push({ name: "", type: "string", default: "" });
@@ -1087,6 +1196,33 @@ function bindPaletteEvents() {
         // the store resolves null on failure and emits the verbatim error;
         // the error subscription below paints it — keep the form open.
         if (res) { paramFormOpen = false; paramErr = null; drawRail(); }
+      });
+      return;
+    }
+    if (e.target.closest("#env-add-btn")) {
+      envFormOpen = true; envErr = null; envType = "string"; drawRail(); return;
+    }
+    if (e.target.closest("#env-add-cancel")) {
+      envFormOpen = false; envErr = null; drawRail(); return;
+    }
+    if (e.target.closest("#env-add-submit")) {
+      const name = (railEl.querySelector("#env-add-name") || {}).value || "";
+      const type = (railEl.querySelector("#env-add-type") || {}).value || "string";
+      const dv = (railEl.querySelector("#env-add-default") || {}).value || "";
+      if (!name.trim()) return;
+      const keyObj = { type: type };
+      if (dv.trim()) keyObj.default = dv.trim();
+      envErr = null;
+      store.replaceDoc(function (d) {
+        d.spec = d.spec || {};
+        d.spec.environment = d.spec.environment || {};
+        d.spec.environment[name.trim()] = keyObj;
+      }).then(function (res) {
+        if (res) {
+          envFormOpen = false;
+          envErr = null;
+          drawRail();
+        }
       });
       return;
     }
@@ -1201,6 +1337,10 @@ function bindPaletteStoreSubscriptions() {
   store.subscribe("error", function (e) {
     if (e && (e.source === "addParameter" || e.source === "deleteParameter")) {
       paramErr = e.message;
+      drawRail();
+    }
+    if (e && e.source === "replaceDoc") {
+      envErr = e.message;
       drawRail();
     }
   });
