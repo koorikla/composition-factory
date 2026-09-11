@@ -32,12 +32,15 @@
 # it parks the issue (`already-reverted`) rather than land the same change again;
 # a branch with new commits lands normally.
 #
-# Before landing new work it reads main's own CI run and refuses a red main, with
-# two ways out so a red main never blocks its own fix:
+# Before landing new work it reads main's own CI run and refuses a red main
+# (any conclusion but success, neutral or skipped), with two ways out so a red
+# main never blocks its own fix:
 # - an issue labelled `severity:P0` lands anyway; its own CI decides;
-# - a main run that failed only in e2e is rerun once (`gh run rerun <id> --failed`),
-#   a cancelled one is rerun in full once (`gh run rerun <id>`), and the landing
-#   goes ahead if that rerun is green.
+# - main's run is rerun, by GitHub's own record rather than per land.sh call,
+#   when its attempt is 1 (or unknown), or when a later attempt was last updated
+#   more than CF_LAND_MAIN_RERUN_AFTER_SEC ago: `gh run rerun <id> --failed`, or
+#   `gh run rerun <id>` for a cancelled run. The landing goes ahead if that rerun
+#   is green; otherwise MAIN-RED. At most one rerun of main per call.
 #
 # Callers decide by the stdout line (exactly one; everything else is stderr):
 #   0  LANDED <sha> <run-url>            CI green; topic branch deleted
@@ -50,8 +53,8 @@
 #                                        revert could not be made or pushed: main is red
 #   8  REVERTED-RED push-unknown         the push failed and origin could not be
 #                                        read: main's state is unknown
-#   8  MAIN-RED <run-url>                main's CI is red (after its one rerun, when
-#                                        allowed) and the issue is not severity:P0;
+#   8  MAIN-RED <run-url>                main's CI is red (after a rerun, when due)
+#                                        and the issue is not severity:P0;
 #                                        nothing pushed
 #  64  usage error, a bad environment value, or no member's claim naming a
 #      CF-<digits> branch (stderr only, empty stdout)
@@ -72,6 +75,9 @@
 #   CF_LAND_WATCH_TIMEOUT_SEC       deadline per watched run (default 2700); a
 #                   landing past it is reverted, a revert past it is REVERTED-RED
 #   CF_LAND_GATE_LOCK_TIMEOUT_SEC   CF_LOCK_TIMEOUT_SEC for the gates (default 1800)
+#   CF_LAND_MAIN_RERUN_AFTER_SEC    how long a red main run on attempt 2 or later
+#                   must sit before land.sh reruns it again (default 3600)
+#   CF_NOW          clock for that age, epoch seconds (default now)
 #   plus lock.sh's.
 # The issue's state labels are land.sh's to set, under the merge lock, before it
 # exits, so the next land.sh never acts on labels a driver has not updated yet.
@@ -115,6 +121,10 @@ watch_timeout=$((10#$watch_timeout))
 [ "$watch_timeout" -ge 1 ] || bad_env "CF_LAND_WATCH_TIMEOUT_SEC must be at least 1"
 gate_lock_timeout="${CF_LAND_GATE_LOCK_TIMEOUT_SEC:-1800}"
 case "$gate_lock_timeout" in '' | *[!0-9]*) bad_env "CF_LAND_GATE_LOCK_TIMEOUT_SEC must be whole seconds" ;; esac
+main_rerun_after="${CF_LAND_MAIN_RERUN_AFTER_SEC:-3600}"
+case "$main_rerun_after" in '' | *[!0-9]*) bad_env "CF_LAND_MAIN_RERUN_AFTER_SEC must be whole seconds" ;; esac
+main_rerun_after=$((10#$main_rerun_after))
+case "${CF_NOW:-0}" in *[!0-9]*) bad_env "CF_NOW must be epoch seconds" ;; esac
 
 # Serialize: the pid survives both execs, so a marker inherited from some
 # other process never matches and cannot skip the lock.
@@ -453,7 +463,8 @@ else
   fi
 
   # Main must not already be red. No run, or no status fields: proceed. A P0
-  # lands anyway; an e2e-only failure or a cancelled run gets one rerun first.
+  # lands anyway; otherwise a red run is rerun when GitHub's record says it is
+  # due (attempt 1 or unknown, or idle past CF_LAND_MAIN_RERUN_AFTER_SEC).
   json="$(gh run list --workflow ci --branch main --commit "$base" --json databaseId,url)" || json='[]'
   row="$(printf '%s\n' "$json" | jq -r '[.[] | "\(.databaseId)\t\(.url)"] | first // empty' 2>/dev/null)"
   if [ -n "$row" ]; then
@@ -462,12 +473,20 @@ else
     i=0
     main_reran=
     while :; do
-      if ! state="$(run_state "$main_id")"; then
+      # Fields are never empty ("-" stands for none): read would merge adjacent tabs.
+      if ! json="$(gh run view "$main_id" --json attempt,status,conclusion,jobs,updatedAt)" ||
+        ! state="$(printf '%s\n' "$json" | jq -r '
+          def f: if . == null or . == "" then "-" else tostring end;
+          "\(.status | f)\t\(.conclusion | f)\t\(.attempt | f)\t\((try (.updatedAt | fromdateiso8601) catch null) | f)"
+        ')"; then
         say "warning: could not read main's CI run $main_url; landing without its verdict"
         break
       fi
-      status="${state%%$'\t'*}"
-      conclusion="${state#*$'\t'}"
+      IFS=$'\t' read -r status conclusion attempt updated <<<"$state"
+      [ "$status" != - ] || status=""
+      [ "$conclusion" != - ] || conclusion=""
+      case "$attempt" in *[!0-9]*) attempt="" ;; esac
+      case "$updated" in *[!0-9]*) updated="" ;; esac
       if [ -n "$status" ] && [ "$status" != completed ]; then
         i=$((i + 1))
         if [ "$i" -ge "$MAIN_POLLS" ]; then
@@ -483,20 +502,25 @@ else
         break
       fi
       if [ -z "$main_reran" ]; then
-        main_reran=1
-        e2e_flake "$main_id"
-        flaky=$?
-        rerun_args=""
-        if [ "$conclusion" = cancelled ]; then
-          rerun_args="$main_id"
-        elif [ "$flaky" -eq 0 ]; then
-          rerun_args="$main_id --failed"
+        due=
+        now="${CF_NOW:-$(date +%s)}"
+        if [ -z "$attempt" ] || [ "$attempt" -le 1 ]; then
+          due=1
+        elif [ -n "$updated" ] && [ $((now - updated)) -gt "$main_rerun_after" ]; then
+          due=1
+        elif [ -n "$updated" ]; then
+          say "main's run $main_url is on attempt $attempt, updated $((now - updated))s ago; not rerunning it before ${main_rerun_after}s"
+        else
+          say "main's run $main_url is on attempt $attempt with no update time; not rerunning it"
         fi
-        if [ -n "$rerun_args" ]; then
-          say "main's CI run $main_url concluded $conclusion; rerunning it once (gh run rerun $rerun_args)"
+        if [ -n "$due" ]; then
+          main_reran=1
+          rerun_args="$main_id --failed"
+          [ "$conclusion" != cancelled ] || rerun_args="$main_id"
+          say "main's CI run $main_url concluded $conclusion (attempt ${attempt:-unknown}); rerunning it (gh run rerun $rerun_args)"
           # shellcheck disable=SC2086 # rerun_args is "<id>" or "<id> --failed"
           if gh run rerun $rerun_args >&2; then
-            await_rerun "$main_id" "$flake_attempt"
+            await_rerun "$main_id" "$attempt"
             if watch_run "$main_id"; then
               say "main's rerun of $main_url is green"
               break
