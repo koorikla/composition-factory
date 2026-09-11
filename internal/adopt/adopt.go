@@ -1014,8 +1014,7 @@ var (
 	pluralRE             = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 	dnsInvalidRE         = regexp.MustCompile(`[^a-z0-9-]+`)
 	yamlKeywords         = map[string]bool{
-		"true": true, "false": true, "yes": true, "no": true,
-		"on": true, "off": true, "null": true, "y": true, "n": true,
+		"true": true, "false": true, "null": true,
 	}
 )
 
