@@ -1605,3 +1605,134 @@ spec:
 		t.Errorf("re-emitted composition differs:\n--- Orig ---\n%s\n--- Re-emitted ---\n%s", string(compYAML), string(reComp))
 	}
 }
+
+func TestAdoptSliceEnvelopeFields(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xpostgresinstances.database.sparky.ee
+spec:
+  compositeTypeRef:
+    apiVersion: database.sparky.ee/v1alpha1
+    kind: XPostgresInstance
+  mode: Pipeline
+  pipeline:
+    - step: render-resources
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            ---
+            apiVersion: rds.aws.m.upbound.io/v1beta1
+            kind: Instance
+            metadata:
+              annotations:
+                {{ setResourceNameAnnotation "db-instance" }}
+            spec:
+              forProvider:
+                dbName: {{ $spec.dbName | quote }}
+                region: {{ $spec.region | quote }}
+              managementPolicies: ['Observe', 'Create', 'Update', 'Delete', 'LateInitialize']
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: {{ $spec.providerName }}
+              writeConnectionSecretToRef:
+                name: {{ $spec.dbName | quote }}
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if drops := dropsBeyondXRDless(report); len(drops) > 0 {
+		t.Errorf("unexpected drops in loss report: %+v", drops)
+	}
+
+	res := bp.ResourceNamed("db-instance")
+	if res == nil {
+		t.Fatalf("resource db-instance not found in adopted blueprint")
+	}
+
+	for k := range res.Envelope {
+		if strings.Contains(k, "[") || strings.Contains(k, "]") {
+			t.Errorf("envelope key %q contains indexing brackets", k)
+		}
+	}
+
+	fld, ok := res.Envelope["managementPolicies"]
+	if !ok {
+		t.Fatalf("managementPolicies missing from adopted envelope: %+v", res.Envelope)
+	}
+	wantVal := "Observe, Create, Update, Delete, LateInitialize"
+	if fld.Value != wantVal {
+		t.Errorf("managementPolicies.Value = %q, want %q", fld.Value, wantVal)
+	}
+
+	// Also test wildcard slice envelope: managementPolicies: ['*']
+	manifestWildcard := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xpostgresinstances.database.sparky.ee
+spec:
+  compositeTypeRef:
+    apiVersion: database.sparky.ee/v1alpha1
+    kind: XPostgresInstance
+  mode: Pipeline
+  pipeline:
+    - step: render-resources
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            ---
+            apiVersion: rds.aws.m.upbound.io/v1beta1
+            kind: Instance
+            metadata:
+              annotations:
+                {{ setResourceNameAnnotation "db-wildcard" }}
+            spec:
+              forProvider:
+                dbName: {{ $spec.dbName | quote }}
+              managementPolicies:
+                - '*'
+`
+	bpWildcard, _, err := Adopt([]byte(manifestWildcard), Options{
+		DefaultProviderRef: "ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt with wildcard managementPolicies failed: %v", err)
+	}
+	resWildcard := bpWildcard.ResourceNamed("db-wildcard")
+	if resWildcard == nil {
+		t.Fatalf("resource db-wildcard not found")
+	}
+	for k := range resWildcard.Envelope {
+		if strings.Contains(k, "[") || strings.Contains(k, "]") {
+			t.Errorf("envelope key %q contains indexing brackets", k)
+		}
+	}
+	fldWildcard, ok := resWildcard.Envelope["managementPolicies"]
+	if !ok {
+		t.Fatalf("managementPolicies missing from adopted envelope: %+v", resWildcard.Envelope)
+	}
+	if fldWildcard.Value != "*" {
+		t.Errorf("wildcard managementPolicies.Value = %q, want '*'", fldWildcard.Value)
+	}
+}

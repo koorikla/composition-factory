@@ -1607,7 +1607,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 						}
 					}
 				}
-				extractFields("", map[string]any{k: v}, res.Envelope, placeholders, res.Name, report, nameMapping, bp)
+				extractEnvelopeFields("", map[string]any{k: v}, res.Envelope, placeholders, res.Name, report, nameMapping, bp)
 			}
 		} else {
 			extractFields("spec", spec, res.Fields, placeholders, res.Name, report, nameMapping, bp)
@@ -1615,6 +1615,116 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 	}
 
 	return res
+}
+
+func extractEnvelopeFields(prefix string, obj map[string]any, out map[string]blueprint.Field, placeholders []string, resName string, report *LossReport, nameMapping map[string]string, bp *blueprint.Blueprint) {
+	for k, v := range obj {
+		path := k
+		if prefix != "" {
+			path = prefix + "." + k
+		}
+		switch val := v.(type) {
+		case map[string]any:
+			extractEnvelopeFields(path, val, out, placeholders, resName, report, nameMapping, bp)
+		case []any, []string:
+			var sliceItems []any
+			if sList, ok := val.([]string); ok {
+				sliceItems = make([]any, len(sList))
+				for i, s := range sList {
+					sliceItems[i] = s
+				}
+			} else {
+				sliceItems = val.([]any)
+			}
+
+			if len(sliceItems) == 0 {
+				out[path] = blueprint.Field{Raw: "[]"}
+				continue
+			}
+
+			canUseValue := true
+			items := make([]string, 0, len(sliceItems))
+			for _, elem := range sliceItems {
+				switch e := elem.(type) {
+				case map[string]any, []any, []string:
+					canUseValue = false
+				case nil:
+					canUseValue = false
+				default:
+					rawElem := unmaskString(fmt.Sprint(e), placeholders)
+					if strings.Contains(rawElem, ",") || strings.Contains(rawElem, "{{") || checkScalarClean(rawElem) != nil || strings.TrimSpace(rawElem) == "" {
+						canUseValue = false
+						break
+					}
+					items = append(items, strings.TrimSpace(rawElem))
+				}
+				if !canUseValue {
+					break
+				}
+			}
+			if canUseValue {
+				out[path] = blueprint.Field{Value: strings.Join(items, ", ")}
+			} else {
+				jsonBytes, err := json.Marshal(sliceItems)
+				if err != nil {
+					if report != nil {
+						report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path), "failed to serialize slice envelope")
+					}
+					continue
+				}
+				rawStr := unmaskString(string(jsonBytes), placeholders)
+				if err := checkScalarClean(rawStr); err != nil {
+					if report != nil {
+						report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path),
+							"multi-line scalar contains newlines, which is not supported in blueprint values")
+					}
+					continue
+				}
+				out[path] = blueprint.Field{Raw: rawStr}
+			}
+		case string:
+			rawStr := unmaskString(val, placeholders)
+			if err := checkScalarClean(rawStr); err != nil {
+				if report != nil {
+					report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path),
+						"multi-line scalar contains newlines, which is not supported in blueprint values")
+				}
+				continue
+			}
+			if m := reParamVar.FindStringSubmatch(rawStr); len(m) >= 2 {
+				if isValidParamIdentifier(m[1]) {
+					out[path] = blueprint.Field{From: "params." + m[1]}
+				} else if report != nil {
+					report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path), "invalid parameter reference")
+				}
+			} else if key := matchEnvVar(rawStr); key != "" {
+				if isValidParamIdentifier(key) {
+					out[path] = blueprint.Field{From: "env." + key}
+					if bp != nil {
+						ensureEnvDeclared(bp, key, "string")
+					}
+				} else if report != nil {
+					report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path), "invalid environment reference")
+				}
+			} else if strings.Contains(rawStr, "{{") {
+				out[path] = blueprint.Field{Raw: rawStr}
+			} else {
+				out[path] = blueprint.Field{Value: rawStr}
+			}
+		case nil:
+			continue
+		default:
+			rawStr := unmaskString(fmt.Sprint(val), placeholders)
+			if err := checkScalarClean(rawStr); err != nil {
+				if report != nil {
+					report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path),
+						"contains newlines or control characters")
+				}
+				continue
+			}
+			out[path] = blueprint.Field{Value: rawStr}
+		}
+	}
 }
 
 func isMapFieldPrefix(prefix, nextKey string) bool {
