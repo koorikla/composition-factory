@@ -48,7 +48,6 @@ type resilientConn struct {
 	incoming  chan msgOrErr
 	closed    chan struct{}
 	closeOnce sync.Once
-	closeErr  error
 }
 
 type msgOrErr struct {
