@@ -3555,3 +3555,60 @@ spec:
 		t.Fatalf("emit.Generate on adopted blueprint failed: %v", err)
 	}
 }
+
+func TestAdoptNamedTemplateParameterDiscovered(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- define "trust-policy" }}
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"{{ .spec.oidcProviderArn }}"},"Action":"sts:AssumeRoleWithWebIdentity"}]}
+            {{- end }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: main-cm
+            data:
+              policy: |
+                {{ include "trust-policy" . }}
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-iam:v1.14.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if _, ok := bp.Spec.XRD.Parameters["oidcProviderArn"]; !ok {
+		t.Fatalf("expected parameter oidcProviderArn to be discovered from named template, got parameters: %+v", bp.Spec.XRD.Parameters)
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+	nativeCRDs, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+	if _, err := emit.Generate(bp, nativeCRDs, ""); err != nil {
+		t.Fatalf("emit.Generate() failed: %v", err)
+	}
+}
