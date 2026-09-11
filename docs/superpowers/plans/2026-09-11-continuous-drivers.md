@@ -6,6 +6,10 @@
 **Goal:** Let many Antigravity drivers run around the clock without colliding, by moving all
 shared state into GitHub issues and serializing the three racy operations behind kernel locks.
 
+**Nobody answers questions.** Neither the agent executing this plan nor any driver or
+subagent it produces may wait on Kaur. Wherever a decision is needed, the text says which
+conservative choice to make and where to record it.
+
 **Architecture:** Three bash scripts — `lock.sh` (lockf descriptor-form slot pools),
 `claim.sh` (lease + file-overlap claims on issues) and `land.sh` (squash, push, watch CI,
 revert on red) — each a single process holding its lock for its whole critical section. The
@@ -38,8 +42,9 @@ lists every difference and Task 9 folds them back into the spec.
 - **Stable:** 5/5 full runs green with all 12 cores pinned by `yes`. Lock tests wait for
   holder markers, never for fixed sleeps.
 
-Do not edit a test to make it pass. If a test looks wrong, stop and report — that is a
-finding about this plan.
+Do not edit a test to make it pass. If a test looks wrong, leave it red, finish every
+other task, and file an issue per `.claude/skills/backlog-authoring/SKILL.md` naming the
+test and what is wrong with it — that is a finding about this plan, not a question.
 
 **Work in a worktree** (`docs/task-execution-contract.md` §1):
 
@@ -95,27 +100,36 @@ Scripts parse JSON with `jq`; never `gh … --jq`. Argument order matters where 
 4. **`claim.sh`** adds exit 2 `REFUSED closed|wontfix|handed-back` and `--dry-run`
    (all reads and checks, no writes, output `CLAIMED (dry run)`).
 5. **`land.sh`** adds exit 6 `PARKED push-rejected` and exit 8 `REVERTED-RED <run-url>`
-   (the revert's own CI run failed — `main` is red and needs a human).
+   (the revert's own CI run failed — `main` is red). The driver files `severity:P0`, which
+   the preflight rule makes every driver's only landing work until `main` is green.
 6. **Resuming a `parked` issue is not a takeover**; `takeover of <driver>` appears only
    when the claimed issue carried `in-progress` with an expired lease (`legacy` when that
    lease came from an old-style comment or a bare label).
+7. **The global cap lives in the pinned Driver log issue's body** (`cap: <n>`), not in the
+   routine, and drivers tune it themselves by the rule in Task 8 — no merge, no question.
+   `GATE_SLOTS` stays in the `Makefile`: it is measured, not tuned per shift.
+8. **Drivers work only from worktrees, too.** At 08:29–08:31 on 2026-09-11 a driver checked
+   out `CF-175-…` in the shared checkout, and a commit made there by another session landed
+   on `main` inside CF-175. The contract's §1 binds drivers as well as subagents.
 
 ---
 
 ## Task 1: Measure gate capacity
 
-No code. The slot count and global cap come from these numbers (spec §6).
+No code, and no pausing anything: drivers run around the clock, so wait for a quiet window
+instead of asking for one. The slot count and cap come from these numbers (spec §6).
 
-**Files:** none yet — results go into `docs/routines/issue-driver.md` §0 in Task 8.
+**Files:** none yet — results go into the `Makefile` (Task 4) and the Driver log issue
+(Task 10).
 
-**Step 1: Get an idle machine.** Ask Kaur to pause the Antigravity scheduled tasks for ~40
-minutes. Confirm nothing heavy runs:
+**Step 1: Wait for a quiet window.** Poll every 5 minutes, for up to 3 hours, until two
+consecutive polls show no heavy process:
 
 ```sh
 pgrep -fl 'go test|playwright|crossplane' || echo idle
 ```
 
-Expected: `idle`. Do not measure on a busy machine — the numbers would bake contention in.
+Record the time and `uptime` when the window opens.
 
 **Step 2: Time each heavy gate alone**, from the worktree:
 
@@ -126,18 +140,24 @@ Expected: `idle`. Do not measure on a busy machine — the numbers would bake co
 grep -E 'real|maximum resident' /tmp/gate-*.txt
 ```
 
-Record wall-clock and peak RSS per gate. Note `/usr/bin/time -l` reports the peak RSS of the
-largest single process, not the tree; also watch Activity Monitor's memory pressure.
+While each runs, poll `pgrep -fl 'go test|playwright|crossplane'` from a second shell every
+30 s and keep only lines whose working directory is not your worktree
+(`lsof -a -d cwd -p <pid>`). A gate whose run overlapped someone else's heavy process is
+discarded and re-measured at the next quiet window. Record wall-clock and peak RSS per
+gate; `/usr/bin/time -l` reports the largest single process, not the tree.
 
-**Step 3: Find the slot count.** For N = 2, 3, 4: run N copies of `make test-e2e` and
-`make test-race` interleaved (e.g. `test-e2e` in N worktrees at once — each hashes its own
-port) and record: memory pressure stays green, e2e passes three runs in a row. `GATE_SLOTS`
-= the largest N that holds.
+**Step 3: Find the slot count.** For N = 2, 3, 4, run `make test-e2e` in N worktrees at
+once (each hashes its own port) alongside `make test-race`, and record memory pressure
+(`memory_pressure | tail -1`) and whether e2e passes three times in a row. `GATE_SLOTS` =
+the largest N that holds.
 
-**Step 4: Compute the global cap.** `cap = floor(GATE_SLOTS × 90 ÷ (2.5 × mean heavy-gate
-minutes))`. Write down the inputs and the result.
+**Step 4: Compute the starting cap.** `cap = floor(GATE_SLOTS × 90 ÷ (2.5 × mean
+heavy-gate minutes))`. Write down the inputs and the result for your handover.
 
-**Step 5: Resume the schedule** and write the numbers into your handover. No commit.
+**Fallback — no quiet window in 3 hours:** use `GATE_SLOTS=2` and `cap: 8`, mark both
+**provisional** where they are recorded, and continue with Task 2. On a contended machine
+low numbers are the safe direction, and drivers raise the cap by the Task 8 rule once the
+shift reports show slack.
 
 ---
 
@@ -998,12 +1018,26 @@ ran in Tasks 3–6.
 **Step 1: `docs/routines/issue-driver.md`.** Rewrite to spec §5 plus the amendments above.
 It must contain:
 
+- A first line under the title: **No step in this routine waits for a human.** When a
+  decision is needed, make the conservative choice, record it in the Driver log, continue.
 - §0 **Shift and capacity.** A shift is one scheduled run of at most 5 h; checkpoints
-  T0+3:00 last dispatch, T0+4:30 last `land.sh`, T0+4:45 post report and exit. The global
-  cap and `GATE_SLOTS` with the Task 1 measurements that produced them. The quota back-off
-  rule. No "5-hour quota is a hard wall" — drivers run on Gemini.
-- §1 **Preflight** as today, plus: `gh issue list --label handed-back`, and the Driver log
-  issue for any posted quota reset time.
+  T0+3:00 last dispatch, T0+4:30 last `land.sh`, T0+4:45 post report and exit. `GATE_SLOTS`
+  with the Task 1 measurements that produced it. The quota back-off rule. No "5-hour quota
+  is a hard wall" — drivers run on Gemini.
+- §0 **The cap is read, and tuned, from the Driver log issue body** (`cap: <n>`). At shift
+  start, read the last four shift comments. If two or more report a max gate wait over
+  15 min, lower the cap by 2 (never below 4). If all four report a max gate wait under
+  2 min and live subagents at the cap, raise it by 2 (never above 1.5× the Task 1 value).
+  Edit the body's `cap:` line and add one line `cap <old>→<new> by <driver-id>: <reason>`
+  under it. At most one change per shift.
+- §1 **Worktrees only.** Drivers never check out, commit, rebase or merge in the shared
+  checkout — every driver operation happens in `.worktrees/`, and landing happens only
+  inside `land.sh`'s own worktree. The old preflight line "the shared checkout must be
+  clean; if not, stop and report" goes: its state is not the driver's business.
+- §1 **Preflight** as today (minus the shared-checkout check), plus:
+  `gh issue list --label handed-back`, and the Driver log issue for its `cap:` and any
+  posted quota reset time. A red `main` makes the open `severity:P0` for it the first and
+  only work, as today.
 - §2 **The loop**, every ~5 min: land → resume parked → take over expired → dispatch, with
   live subagents counted as open `in-progress` issues with a live lease.
 - §3 **Claiming** only via `scripts/driver/claim.sh`, with every result and what to do:
@@ -1028,6 +1062,9 @@ It must contain:
   with `parked` and the exact state. No other issue edits.
 - §4: heavy gates may print `lock.sh: waiting for gate` — that is the machine being shared,
   not a hang; never bypass it.
+- §3: "Stop and report" becomes: stop implementing, push what exists, and **park** with the
+  finding as the handover comment. A brief that contradicts the code is parked the same way.
+  Nothing in the contract waits for an answer.
 
 **Step 3: `AGENTS.md`.**
 - §4: **One-Driver Rule** becomes **One Merge at a Time** — many drivers may run; only
@@ -1041,7 +1078,7 @@ It must contain:
 outputs, and grep for leftovers:
 
 ```sh
-grep -nE "6 subagents|at most \*\*6\*\*|One-Driver|hard wall|Do not push" AGENTS.md docs/routines/issue-driver.md docs/task-execution-contract.md
+grep -niE "6 subagents|at most \*\*6\*\*|One-Driver|hard wall|Do not push|stop and report|ask kaur|confirm with" AGENTS.md docs/routines/issue-driver.md docs/task-execution-contract.md
 ```
 
 Expected: no output.
@@ -1059,7 +1096,8 @@ git commit -m "docs: continuous drivers — claim, land and gate through scripts
 
 **Files:** Modify: `docs/superpowers/specs/2026-09-11-continuous-drivers-design.md`
 
-Apply §"Spec amendments" 1–6 at their places in spec §1, §3 and §4. No new decisions.
+Apply §"Spec amendments" 1–8 at their places in spec §1, §3, §4, §5 and §7, and add
+**No step waits for a human** to the spec's Decision section. No new decisions.
 
 ```sh
 git add docs/superpowers/specs/2026-09-11-continuous-drivers-design.md
@@ -1070,26 +1108,30 @@ git commit -m "docs(spec): continuous drivers — amendments found while writing
 
 ## Task 10: GitHub setup and rollout
 
-**Outward-facing: confirm with Kaur before each command.**
+Kaur has authorized this setup in advance; do not ask. **Run Step 1 before Task 8**, so the
+routine can name the Driver log issue by number.
 
-**Step 1: Labels and the log issue.**
+**Step 1: Labels and the log issue.** Skip any that already exist.
 
 ```sh
 gh label create handed-back --color 0E8A16 --description "Subagent finished; branch pushed, report on the issue, awaiting land.sh"
 gh label create parked      --color FBCA04 --description "Branch pushed but not landable yet; the issue says why; claimable"
-gh issue create --title "Driver log" --body "One comment per driver shift. See docs/routines/issue-driver.md §6."
+gh issue create --title "Driver log" --body "cap: <cap from Task 1>
+
+One comment per driver shift. Drivers read and tune cap: per docs/routines/issue-driver.md §0."
 gh issue pin <number>
 ```
 
 **Step 2: Land this branch — the last merge done the old way.** The merge lock does not
-exist on `main` until this lands, so choose a quiet moment: no driver mid-merge
-(`gh run list --branch main --limit 3` shows nothing in progress), rebase on `origin/main`,
-`make lint && make lint-strict && make test-race && make test-driver`, push `main`, and
-`gh run watch <id> --exit-status`.
+exist on `main` until this lands. Wait until `gh run list --branch main --limit 3 --json
+status` shows nothing `in_progress` and `origin/main` has not moved for 5 minutes. Then, in
+the worktree: rebase on `origin/main`; `make lint && make lint-strict && make test-race &&
+make test-driver`; push `main`; `gh run watch <id> --exit-status`. If `origin/main` moved
+during the gates, rebase and repeat. Red CI → revert, push, watch it go green, fix on the
+branch, repeat.
 
-**Step 3: Tell Kaur the two manual steps:** add a 23:00 scheduled task, and nothing else —
-the existing tasks' prompts already point at `docs/routines/issue-driver.md`, so each new
-shift picks up the new rules.
-
-**Step 4: Watch the first two shifts' Driver log comments** for `REVERTED`, `OVERLAP` churn
-and gate wait; lower `GATE_SLOTS` or the cap if either climbs.
+**Step 3: Baseline the log.** The scheduled tasks' prompts already point at
+`docs/routines/issue-driver.md`, so each shift that starts after the landing picks the rules
+up. Post the first Driver log comment yourself: the landing sha, `cap`, `GATE_SLOTS`, the
+Task 1 measurements (or `provisional`), and that shifts started before the landing sha still
+run the old rules until they end.
