@@ -52,14 +52,14 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 
 		indent := "    "
 		if r.When != "" {
-			condPython := translateWhenToPython(r.When)
+			condPython := translateWhenToPython(r.When, b.Spec.Environment)
 			sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, condPython))
 			indent = "        "
 		}
 
 		resKeyExpr := fmt.Sprintf("%q", r.Name)
 		if r.ForEach != "" {
-			loopExpr := translateForEachToPython(r.ForEach)
+			loopExpr := translateForEachToPython(r.ForEach, b.Spec.Environment)
 			sb.WriteString(fmt.Sprintf("%sfor _i in %s:\n", indent, loopExpr))
 			indent = indent + "    "
 			resKeyExpr = fmt.Sprintf("f\"%s-{_i}\"", r.Name)
@@ -264,6 +264,10 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 		return fmt.Sprintf("f\"{xr_name}-%s\"", s.resource)
 	case rhsEnv:
 		expr := fmt.Sprintf("env.get(%q)", s.param)
+		if s.hasEnvDef {
+			defVal := pythonFormatLiteral(s.envDefault, s.sourceType)
+			expr = fmt.Sprintf("env.get(%q, %s)", s.param, defVal)
+		}
 		if s.targetType == "string" && s.sourceType != "" && s.sourceType != "string" {
 			return fmt.Sprintf("_str(%s)", expr)
 		}
@@ -340,7 +344,7 @@ func translateObservedAccessToPython(expr string) string {
 	return expr
 }
 
-func translateWhenToPython(when string) string {
+func translateWhenToPython(when string, env ...map[string]blueprint.EnvironmentKey) string {
 	when = strings.TrimSpace(when)
 	source, name, op, literal, err := blueprint.ParseWhen(when)
 	if err == nil {
@@ -348,13 +352,30 @@ func translateWhenToPython(when string) string {
 		if source == "env" {
 			targetDict = "env"
 		}
+		var envDecl blueprint.EnvironmentKey
+		var hasEnvDefault bool
+		if source == "env" && len(env) > 0 && env[0] != nil {
+			if d, ok := env[0][name]; ok && d.Default != "" {
+				envDecl = d
+				hasEnvDefault = true
+			}
+		}
+
+		var getExpr string
+		if hasEnvDefault {
+			defVal := pythonFormatLiteral(envDecl.Default, envDecl.Type)
+			getExpr = fmt.Sprintf("env.get(%q, %s)", name, defVal)
+		} else {
+			getExpr = fmt.Sprintf("%s.get(%q)", targetDict, name)
+		}
+
 		switch op {
 		case "":
-			return fmt.Sprintf("bool(%s.get(%q))", targetDict, name)
+			return fmt.Sprintf("bool(%s)", getExpr)
 		case "==":
-			return fmt.Sprintf("%s.get(%q) == %s", targetDict, name, pythonFormatLiteral(literal, "string"))
+			return fmt.Sprintf("%s == %s", getExpr, pythonFormatLiteral(literal, "string"))
 		case "!=":
-			return fmt.Sprintf("%s.get(%q) != %s", targetDict, name, pythonFormatLiteral(literal, "string"))
+			return fmt.Sprintf("%s != %s", getExpr, pythonFormatLiteral(literal, "string"))
 		}
 	}
 	for _, op := range []string{"==", "!="} {
@@ -364,11 +385,13 @@ func translateWhenToPython(when string) string {
 				prefix := strings.TrimSuffix(when, suffix)
 				targetDict := "spec"
 				var name string
+				var isEnv bool
 				if strings.HasPrefix(prefix, "params.") {
 					name = strings.TrimPrefix(prefix, "params.")
 				} else if envKey, ok := blueprint.EnvRef(prefix); ok {
 					targetDict = "env"
 					name = envKey
+					isEnv = true
 				}
 				if name != "" {
 					isNot := ""
@@ -379,7 +402,17 @@ func translateWhenToPython(when string) string {
 					if bVal == "false" {
 						pyBool = "False"
 					}
-					return fmt.Sprintf("bool(%s.get(%q)) is%s %s", targetDict, name, isNot, pyBool)
+					var getExpr string
+					if isEnv && len(env) > 0 && env[0] != nil {
+						if d, ok := env[0][name]; ok && d.Default != "" {
+							defVal := pythonFormatLiteral(d.Default, d.Type)
+							getExpr = fmt.Sprintf("env.get(%q, %s)", name, defVal)
+						}
+					}
+					if getExpr == "" {
+						getExpr = fmt.Sprintf("%s.get(%q)", targetDict, name)
+					}
+					return fmt.Sprintf("bool(%s) is%s %s", getExpr, isNot, pyBool)
 				}
 			}
 		}
@@ -388,15 +421,34 @@ func translateWhenToPython(when string) string {
 		p := strings.TrimPrefix(when, "!params.")
 		return fmt.Sprintf("not bool(spec.get(%q))", p)
 	}
+	if envKey, ok := blueprint.EnvRef(strings.TrimPrefix(when, "!")); ok && strings.HasPrefix(when, "!") {
+		var getExpr string
+		if len(env) > 0 && env[0] != nil {
+			if d, ok := env[0][envKey]; ok && d.Default != "" {
+				defVal := pythonFormatLiteral(d.Default, d.Type)
+				getExpr = fmt.Sprintf("env.get(%q, %s)", envKey, defVal)
+			}
+		}
+		if getExpr == "" {
+			getExpr = fmt.Sprintf("env.get(%q)", envKey)
+		}
+		return fmt.Sprintf("not bool(%s)", getExpr)
+	}
 	return when
 }
 
-func translateForEachToPython(forEach string) string {
+func translateForEachToPython(forEach string, env ...map[string]blueprint.EnvironmentKey) string {
 	if strings.HasPrefix(forEach, "params.") {
 		param := strings.TrimPrefix(forEach, "params.")
 		return fmt.Sprintf("range(int(spec.get(%q, 0)))", param)
 	}
 	if key, ok := blueprint.EnvRef(forEach); ok {
+		if len(env) > 0 && env[0] != nil {
+			if d, ok := env[0][key]; ok && d.Default != "" {
+				defVal := pythonFormatLiteral(d.Default, d.Type)
+				return fmt.Sprintf("range(int(env.get(%q, %s)))", key, defVal)
+			}
+		}
 		return fmt.Sprintf("range(int(env.get(%q, 0)))", key)
 	}
 	if strings.HasPrefix(forEach, "resources.") {

@@ -750,3 +750,70 @@ func TestEmitPythonNativeMetadataLabels(t *testing.T) {
 		t.Errorf("Python missing metadata.labels:\n%s", s)
 	}
 }
+
+func TestPythonEnvironmentDefaults(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "xapp"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EnginePython},
+			Sources: []blueprint.Source{
+				{Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v2"},
+			},
+			XRD: blueprint.XRD{
+				Group:   "platform.example.org",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+			Environment: map[string]blueprint.EnvironmentKey{
+				"region":    {Type: "string", Default: "us-east-1"},
+				"retention": {Type: "integer", Default: "345600"},
+				"count":     {Type: "integer", Default: "3"},
+				"enabled":   {Type: "boolean", Default: "true"},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "queue",
+					Kind:     "Queue",
+					Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v2",
+					When:     "env.enabled",
+					ForEach:  "env.count",
+					Fields: map[string]blueprint.Field{
+						"region":                  {From: "env.region"},
+						"messageRetentionSeconds": {From: "env.retention"},
+					},
+					Envelope: map[string]blueprint.Field{
+						"providerConfigRef.name": {From: "env.region"},
+					},
+				},
+			},
+		},
+	}
+
+	body, err := pythonTemplateBody(bp, testCRDs(t))
+	if err != nil {
+		t.Fatalf("pythonTemplateBody failed: %v", err)
+	}
+
+	if !strings.Contains(body, `"region": env.get("region", "us-east-1")`) {
+		t.Errorf("expected env.get(\"region\", \"us-east-1\") in python body, got:\n%s", body)
+	}
+	if !strings.Contains(body, `"messageRetentionSeconds": env.get("retention", 345600)`) {
+		t.Errorf("expected env.get(\"retention\", 345600) in python body, got:\n%s", body)
+	}
+	if !strings.Contains(body, `"name": env.get("region", "us-east-1")`) {
+		t.Errorf("expected envelope providerConfigRef name with default in python body, got:\n%s", body)
+	}
+	if !strings.Contains(body, `range(int(env.get("count", 3)))`) {
+		t.Errorf("expected range(int(env.get(\"count\", 3))) in python body, got:\n%s", body)
+	}
+	if !strings.Contains(body, `bool(env.get("enabled", True))`) {
+		t.Errorf("expected bool(env.get(\"enabled\", True)) in python body, got:\n%s", body)
+	}
+}

@@ -222,6 +222,9 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 						paramSegs:  []string{envKey},
 						rawExpr:    expr,
 						targetType: n.Type,
+						sourceType: envDecl.Type,
+						envDefault: envDecl.Default,
+						hasEnvDef:  true,
 						optional:   false,
 						guard:      "",
 					}
@@ -240,6 +243,7 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 						paramSegs:  []string{envKey},
 						rawExpr:    deref,
 						targetType: n.Type,
+						sourceType: envDecl.Type,
 						optional:   true,
 						guard:      g,
 					}

@@ -167,8 +167,8 @@ func TestEnvironmentEmission_Python(t *testing.T) {
 	if !strings.Contains(body, `for _i in range(int(env.get("count", 0))):`) {
 		t.Errorf("expected range on env.get(count) in python body, got:\n%s", body)
 	}
-	if !strings.Contains(body, `"region": env.get("region")`) {
-		t.Errorf("expected env.get(region) for field region in python body, got:\n%s", body)
+	if !strings.Contains(body, `"region": env.get("region", "us-east-1")`) {
+		t.Errorf("expected env.get(region, \"us-east-1\") for field region in python body, got:\n%s", body)
 	}
 }
 

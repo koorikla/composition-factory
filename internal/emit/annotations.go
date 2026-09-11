@@ -151,6 +151,8 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 							rawExpr:    expr,
 							targetType: "string",
 							sourceType: envDecl.Type,
+							envDefault: envDecl.Default,
+							hasEnvDef:  true,
 						},
 					})
 				} else {

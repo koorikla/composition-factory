@@ -38,6 +38,8 @@ type structuredRHS struct {
 	rawExpr    string   // Go-template dereference expression without {{ }}
 	targetType string   // "string", "integer", "number", "boolean", "array", "map"
 	sourceType string   // Source type of param/status/env leaf: "string", "integer", "number", "boolean"
+	envDefault string   // Declared default for rhsEnv if any
+	hasEnvDef  bool     // Whether an environment default was declared
 }
 
 func isByteTarget(node *schema.Node, r blueprint.Resource, p string, isMap bool) bool {
@@ -259,6 +261,8 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 			}
 
 			if envDecl.Default != "" {
+				s.hasEnvDef = true
+				s.envDefault = envDecl.Default
 				defVal := formatEnvDefault(envDecl)
 				expr := fmt.Sprintf("default %s (index $env %q)", defVal, ref.Env)
 				s.optional = false
