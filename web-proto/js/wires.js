@@ -157,13 +157,48 @@ export function fanOut(doc, param) {
   return fanOutMap(doc)[param] || 0;
 }
 
-/**
- * Fan-out of one environment key: how many fields it is wired into.
- * @param {Object} doc The full blueprint document.
- * @param {string} key Environment key name (without the "env." prefix).
- * @returns {number}
- */
 export function envFanOut(doc, key) {
   if (!doc) return 0;
-  return fanOutMap(doc)["env." + key] || 0;
+  return findEnvWires(doc, key).length;
 }
+
+/**
+ * Find all wires referencing an environment key.
+ * @param {Object} doc The full blueprint document.
+ * @param {string} key Environment key name (without the "env." prefix).
+ * @returns {string[]} List of wire target paths (e.g. "my-res.field", "my-res.when").
+ */
+export function findEnvWires(doc, key) {
+  const wires = [];
+  const ref = "env." + key;
+  const resources = (doc && doc.spec && doc.spec.resources) || [];
+  resources.forEach(function (r) {
+    const checkDict = function (dict, prefix) {
+      if (!dict) return;
+      Object.keys(dict).forEach(function (p) {
+        const f = dict[p];
+        if (f && f.from === ref) {
+          wires.push(r.name + "." + (prefix ? prefix + "." : "") + p);
+        }
+      });
+    };
+    checkDict(r.fields, "");
+    checkDict(r.envelope, "envelope");
+    if (r.annotations) {
+      Object.keys(r.annotations).forEach(function (k) {
+        const f = r.annotations[k];
+        if (f && f.from === ref) {
+          wires.push(r.name + ".annotations." + k);
+        }
+      });
+    }
+    if (r.when && (r.when === ref || r.when.startsWith(ref + " ") || r.when.startsWith(ref + "==") || r.when.startsWith(ref + "!="))) {
+      wires.push(r.name + ".when");
+    }
+    if (r.forEach && r.forEach === ref) {
+      wires.push(r.name + ".forEach");
+    }
+  });
+  return wires;
+}
+

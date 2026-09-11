@@ -112,3 +112,39 @@ export function mapResourceCoordinates(msg, storeOrDoc) {
     return match;
   });
 }
+
+/**
+ * Delete an environment key from a blueprint doc and remove it from all
+ * environmentConfigs data maps. If no environment keys remain in spec.environment,
+ * cleans up both spec.environment and spec.environmentConfigs so the document
+ * remains valid under backend validation rules.
+ *
+ * @param {Object} d Blueprint document
+ * @param {string} keyName Environment key name
+ */
+export function deleteEnvKeyFromDoc(d, keyName) {
+  if (!d || !d.spec) return;
+  if (d.spec.environment) {
+    delete d.spec.environment[keyName];
+    if (Object.keys(d.spec.environment).length === 0) {
+      delete d.spec.environment;
+    }
+  }
+  if (!d.spec.environment || Object.keys(d.spec.environment).length === 0) {
+    delete d.spec.environment;
+    delete d.spec.environmentConfigs;
+  } else if (Array.isArray(d.spec.environmentConfigs)) {
+    d.spec.environmentConfigs.forEach(function (cfg) {
+      if (cfg && cfg.data && typeof cfg.data === "object") {
+        delete cfg.data[keyName];
+      }
+      if (cfg && cfg.values && typeof cfg.values === "object") {
+        delete cfg.values[keyName];
+      }
+    });
+    if (d.spec.environmentConfigs.length === 0) {
+      delete d.spec.environmentConfigs;
+    }
+  }
+}
+

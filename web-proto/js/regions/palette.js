@@ -19,8 +19,8 @@
 import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
-import { fanOut } from "../wires.js";
-import { famOf, uniqueResourceName, COLORS } from "../utils.js";
+import { fanOut, envFanOut, findEnvWires } from "../wires.js";
+import { famOf, uniqueResourceName, COLORS, deleteEnvKeyFromDoc } from "../utils.js";
 
 const HINT_KINDS =
   'Drag a kind onto the canvas. Schemas load per-kind — <span class="mono">4.5 KB</span> median.';
@@ -448,44 +448,6 @@ function memberSummary(props, depth) {
     if (mp.type === "object") row += memberSummary(mp.properties, depth + 1);
     return row;
   }).join("");
-}
-
-function findEnvWires(doc, key) {
-  const wires = [];
-  const ref = "env." + key;
-  const resources = doc && doc.spec && doc.spec.resources || [];
-  resources.forEach(function (r) {
-    const checkDict = function (dict, prefix) {
-      if (!dict) return;
-      Object.keys(dict).forEach(function (p) {
-        const f = dict[p];
-        if (f && f.from === ref) {
-          wires.push(r.name + "." + (prefix ? prefix + "." : "") + p);
-        }
-      });
-    };
-    checkDict(r.fields, "");
-    checkDict(r.envelope, "envelope");
-    if (r.annotations) {
-      Object.keys(r.annotations).forEach(function (k) {
-        const f = r.annotations[k];
-        if (f && f.from === ref) {
-          wires.push(r.name + ".annotations." + k);
-        }
-      });
-    }
-    if (r.when && (r.when === ref || r.when.startsWith(ref + " ") || r.when.startsWith(ref + "==") || r.when.startsWith(ref + "!="))) {
-      wires.push(r.name + ".when");
-    }
-    if (r.forEach && r.forEach === ref) {
-      wires.push(r.name + ".forEach");
-    }
-  });
-  return wires;
-}
-
-function envFanOut(doc, key) {
-  return findEnvWires(doc, key).length;
 }
 
 function drawShared() {
@@ -1267,12 +1229,7 @@ function bindPaletteEvents() {
         return;
       }
       store.replaceDoc(function (d) {
-        if (d.spec && d.spec.environment) {
-          delete d.spec.environment[k];
-          if (Object.keys(d.spec.environment).length === 0) {
-            delete d.spec.environment;
-          }
-        }
+        deleteEnvKeyFromDoc(d, k);
       });
       return;
     }

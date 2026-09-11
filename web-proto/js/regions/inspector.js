@@ -19,8 +19,8 @@
 import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
-import { fanOut, parseFrom, listWires } from "../wires.js";
-import { mapResourceCoordinates } from "../utils.js";
+import { fanOut, parseFrom, listWires, findEnvWires } from "../wires.js";
+import { mapResourceCoordinates, deleteEnvKeyFromDoc } from "../utils.js";
 
 function isParamRequired(params, pName) {
   if (!params || !pName) return false;
@@ -1588,14 +1588,18 @@ function setEnvKeyField(keyName, field, value) {
 }
 
 function deleteEnvKey(keyName) {
+  var doc = store.state.doc;
+  var wires = findEnvWires(doc, keyName);
+  if (wires.length > 0) {
+    var msg = 'delete environment key "' + keyName + '": still referenced by wire ' + wires.join(", ");
+    warnMsg = msg;
+    store.emit("error", { message: msg });
+    render();
+    return;
+  }
   return op(function () {
     return store.replaceDoc(function (d) {
-      if (d.spec && d.spec.environment) {
-        delete d.spec.environment[keyName];
-        if (Object.keys(d.spec.environment).length === 0) {
-          delete d.spec.environment;
-        }
-      }
+      deleteEnvKeyFromDoc(d, keyName);
     });
   }, "unable to delete environment key");
 }
