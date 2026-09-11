@@ -653,7 +653,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
   var wired = m === "w" && dm === "w" && !uiMode[f.path] && entry;
   var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
   var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
-    '<div class="fld-h"><span class="n">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
+    '<div class="fld-h"><span class="n" title="' + esc(f.path) + '">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
     (isReq ? '<span class="rq">req</span>' : "") +
     modeButtons(f.path, m, false) +
     '</div>' + formatDescHtml(f.description, f.path);
@@ -694,7 +694,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap) {
 
         h += '<div class="map-entry-card" style="padding:6px 8px;background:var(--surface-2);border-radius:4px;border:1px solid var(--rule)">' +
           '<div class="frow" style="margin-bottom:3px;align-items:center">' +
-          '<span style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ink);flex:1">[' + esc(me.key) + ']</span>' +
+          '<span style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ink);flex:1;min-width:0;overflow-wrap:anywhere;word-break:break-word" title="[' + esc(me.key) + ']">[' + esc(me.key) + ']</span>' +
           modeButtons(me.fullPath, meM, false) +
           '<button class="del" data-del-map-entry="' + esc(me.fullPath) + '" title="Delete key" style="margin-left:4px">&#215;</button>' +
           '</div>';
@@ -773,7 +773,7 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap) {
   var isXr = entry && !entry.from && entry.raw === "{{ $xr }}";
 
   var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + (isAuto ? " auto-defaulted" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
-    '<div class="fld-h"><span class="n">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
+    '<div class="fld-h"><span class="n" title="' + esc(f.path) + '">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
     (showReq ? '<span class="rq">req</span>' : (isAuto ? '<span class="pill" style="font-size:9.5px;background:var(--wire-ref-soft);color:var(--wire-ref);padding:1px 4px;margin-left:2px" title="Filled automatically from providerName">auto</span>' : "")) +
     modeButtons(f.path, m, true) +
     '</div>' + formatDescHtml(f.description, f.path);
@@ -1100,7 +1100,7 @@ async function renderResource(res) {
     var branchRows = (filter === "req" || filter === "all")
       ? branches.map(function (b) {
           return '<div class="fld"><div class="fld-h">' +
-            '<span class="n">' + esc(b.path) + '</span>' +
+            '<span class="n" title="' + esc(b.path) + '">' + esc(b.path) + '</span>' +
             '<span class="t">' + esc(b.type || "object") + '</span>' +
             '<span class="rq">req</span></div>' +
             '<div class="fld-d">required object \u2014 set its member fields (expand via All / search)</div></div>';
