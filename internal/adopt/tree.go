@@ -122,6 +122,63 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	if len(compDocs) == 0 {
 		return nil, nil, fmt.Errorf("no Composition document found in tree %s", dirPath)
 	}
+
+	var compNames []string
+	seenNames := make(map[string]bool)
+	for _, cd := range compDocs {
+		name := ""
+		if meta, ok := cd["metadata"].(map[string]any); ok {
+			name, _ = meta["name"].(string)
+		}
+		if name == "" {
+			name = "<unnamed>"
+		}
+		if !seenNames[name] {
+			seenNames[name] = true
+			compNames = append(compNames, name)
+		}
+	}
+	sort.Strings(compNames)
+
+	var compDoc map[string]any
+	targetComp := opts.TargetComposition
+	if targetComp != "" {
+		selectedIdx := -1
+		for i, cd := range compDocs {
+			name := ""
+			if meta, ok := cd["metadata"].(map[string]any); ok {
+				name, _ = meta["name"].(string)
+			}
+			if name == targetComp {
+				selectedIdx = i
+				compDoc = cd
+				break
+			}
+		}
+		if selectedIdx == -1 {
+			return nil, nil, fmt.Errorf("composition %q not found in tree %s (available: %s)", targetComp, dirPath, strings.Join(compNames, ", "))
+		}
+		for i, cd := range compDocs {
+			if i == selectedIdx {
+				continue
+			}
+			name := ""
+			if meta, ok := cd["metadata"].(map[string]any); ok {
+				name, _ = meta["name"].(string)
+			}
+			target := "manifest.Composition"
+			if name != "" && name != "<unnamed>" {
+				target = fmt.Sprintf("manifest.Composition/%s", name)
+			}
+			report.Record(target, "unselected composition omitted from blueprint adoption")
+		}
+	} else {
+		if len(compDocs) > 1 {
+			return nil, nil, fmt.Errorf("ambiguous multi-composition input: found %d Compositions in tree %s (%s); specify a target composition to adopt", len(compDocs), dirPath, strings.Join(compNames, ", "))
+		}
+		compDoc = compDocs[0]
+	}
+
 	bp := &blueprint.Blueprint{
 		APIVersion: blueprint.APIVersion,
 		Kind:       blueprint.Kind,
@@ -213,44 +270,30 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 		}
 	}
 
-	// 2. Process XRD definitions
-	for _, xrdDoc := range xrdDocs {
-		parseXRDDoc(xrdDoc, bp, report)
-	}
-
-	// 3. Process Compositions
-	defaultProvider := opts.DefaultProviderRef
-	if defaultProvider == "" && len(bp.Spec.Sources) > 0 && bp.Spec.Sources[0].Provider != "" {
-		defaultProvider = bp.Spec.Sources[0].Provider
-	}
-
-	nameMapping := make(map[string]string)
-	for _, compDoc := range compDocs {
-		if meta, ok := compDoc["metadata"].(map[string]any); ok {
-			if bp.Metadata.Name == "" {
-				if name, ok := meta["name"].(string); ok && name != "" {
-					bp.Metadata.Name = name
+	// 2. Process metadata and compositeTypeRef from the chosen Composition
+	if meta, ok := compDoc["metadata"].(map[string]any); ok {
+		if bp.Metadata.Name == "" {
+			if name, ok := meta["name"].(string); ok && name != "" {
+				bp.Metadata.Name = name
+			}
+		}
+		if anns, ok := meta["annotations"].(map[string]any); ok {
+			if envConfigsRaw, ok := anns[blueprint.EnvironmentConfigsAnnotation].(string); ok && envConfigsRaw != "" {
+				var envConfigs []blueprint.EnvironmentConfig
+				if err := json.Unmarshal([]byte(envConfigsRaw), &envConfigs); err == nil && len(envConfigs) > 0 {
+					bp.Spec.EnvironmentConfigs = envConfigs
 				}
 			}
-			if anns, ok := meta["annotations"].(map[string]any); ok {
-				if envConfigsRaw, ok := anns[blueprint.EnvironmentConfigsAnnotation].(string); ok && envConfigsRaw != "" {
-					var envConfigs []blueprint.EnvironmentConfig
-					if err := json.Unmarshal([]byte(envConfigsRaw), &envConfigs); err == nil && len(envConfigs) > 0 {
-						bp.Spec.EnvironmentConfigs = envConfigs
-					}
-				}
-				if envKeysRaw, ok := anns[blueprint.EnvironmentKeysAnnotation].(string); ok && envKeysRaw != "" {
-					var envKeys map[string]blueprint.EnvironmentKey
-					if err := json.Unmarshal([]byte(envKeysRaw), &envKeys); err == nil && len(envKeys) > 0 {
-						bp.Spec.Environment = envKeys
-					}
+			if envKeysRaw, ok := anns[blueprint.EnvironmentKeysAnnotation].(string); ok && envKeysRaw != "" {
+				var envKeys map[string]blueprint.EnvironmentKey
+				if err := json.Unmarshal([]byte(envKeysRaw), &envKeys); err == nil && len(envKeys) > 0 {
+					bp.Spec.Environment = envKeys
 				}
 			}
 		}
-		spec, ok := compDoc["spec"].(map[string]any)
-		if !ok {
-			continue
-		}
+	}
+	spec, _ := compDoc["spec"].(map[string]any)
+	if spec != nil {
 		checkCompositionSpecFields(spec, report)
 		if ctr, ok := spec["compositeTypeRef"].(map[string]any); ok {
 			if k, ok := ctr["kind"].(string); ok && bp.Spec.XRD.Kind == "" {
@@ -273,6 +316,39 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 				bp.Spec.XRD.Plural = p
 			}
 		}
+	}
+
+	// 3. Process XRD definitions matching compositeTypeRef
+	var matchedXRD map[string]any
+	if len(xrdDocs) == 1 {
+		matchedXRD = xrdDocs[0]
+	} else if len(xrdDocs) > 1 {
+		for _, xd := range xrdDocs {
+			if xSpec, ok := xd["spec"].(map[string]any); ok {
+				if names, ok := xSpec["names"].(map[string]any); ok {
+					if k, _ := names["kind"].(string); k != "" && k == bp.Spec.XRD.Kind {
+						matchedXRD = xd
+						break
+					}
+				}
+			}
+		}
+		if matchedXRD == nil {
+			matchedXRD = xrdDocs[0]
+		}
+	}
+	if matchedXRD != nil {
+		parseXRDDoc(matchedXRD, bp, report)
+	}
+
+	// 4. Process Composition resources/pipeline
+	defaultProvider := opts.DefaultProviderRef
+	if defaultProvider == "" && len(bp.Spec.Sources) > 0 && bp.Spec.Sources[0].Provider != "" {
+		defaultProvider = bp.Spec.Sources[0].Provider
+	}
+
+	nameMapping := make(map[string]string)
+	if spec != nil {
 		if pipeline, ok := spec["pipeline"].([]any); ok && len(pipeline) > 0 {
 			if err := parsePipelineComposition(pipeline, bp, opts, report, nameMapping, len(xrdDocs) > 0); err != nil {
 				return nil, nil, err
@@ -293,7 +369,7 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 		bp.Spec.EnvironmentConfigs = nil
 	}
 
-	// 4. Set defaults for any missing XRD fields
+	// 5. Set defaults for any missing XRD fields
 	if bp.Metadata.Name == "" {
 		bp.Metadata.Name = "adopted-composition"
 	}
@@ -322,7 +398,7 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 		}
 	}
 
-	// 5. Rewrite status references and finalize sources
+	// 6. Rewrite status references and finalize sources
 	rewriteStatusReferences(bp, nameMapping)
 
 	collectSources(bp, defaultProvider)
@@ -336,7 +412,7 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	// No XRD in the tree: the parameters were inferred from their uses in the
 	// Compositions. Settle what they prove and name the rest as lost.
 	if len(xrdDocs) == 0 {
-		applyXRDlessEvidence(bp, compDocs, synthesized, report, opts.BaseBlueprint, opts.Store)
+		applyXRDlessEvidence(bp, []map[string]any{compDoc}, synthesized, report, opts.BaseBlueprint, opts.Store)
 	}
 
 	if err := bp.Validate(); err != nil {

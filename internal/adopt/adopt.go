@@ -33,6 +33,17 @@ type Options struct {
 	FunctionPackages map[string]string
 	// BaseBlueprint is the optional pre-existing blueprint being replaced or updated.
 	BaseBlueprint *blueprint.Blueprint
+	// TargetComposition specifies which Composition to adopt when multiple are present.
+	TargetComposition string
+	// CompositionName is an alias for TargetComposition.
+	CompositionName string
+}
+
+func (o Options) targetComposition() string {
+	if o.CompositionName != "" {
+		return o.CompositionName
+	}
+	return o.TargetComposition
 }
 
 // LossReport records any dropped fields, unsupported patches, or schema discrepancies.
@@ -202,17 +213,17 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		opts.Store = cache.New(opts.CacheDir)
 	}
 
-	var compDoc map[string]any
-	var xrdDoc map[string]any
+	var compDocs []map[string]any
+	var xrdDocs []map[string]any
 	var envConfigDocs []map[string]any
 
 	for _, d := range docs {
 		kind, _ := d["kind"].(string)
 		switch kind {
 		case "Composition":
-			compDoc = d
+			compDocs = append(compDocs, d)
 		case "CompositeResourceDefinition":
-			xrdDoc = d
+			xrdDocs = append(xrdDocs, d)
 		case "EnvironmentConfig":
 			envConfigDocs = append(envConfigDocs, d)
 		case "Function":
@@ -275,13 +286,69 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		}
 	}
 
-	if compDoc == nil {
-		if xrdDoc != nil && opts.BaseBlueprint != nil {
-			if _, ok := xrdDoc["spec"].(map[string]any); ok {
-				return adoptXRDComplement(xrdDoc, opts, report)
+	if len(compDocs) == 0 {
+		if len(xrdDocs) > 0 && opts.BaseBlueprint != nil {
+			if _, ok := xrdDocs[0]["spec"].(map[string]any); ok {
+				return adoptXRDComplement(xrdDocs[0], opts, report)
 			}
 		}
 		return nil, nil, fmt.Errorf("no Composition document found in manifest")
+	}
+
+	var compNames []string
+	seenNames := make(map[string]bool)
+	for _, cd := range compDocs {
+		name := ""
+		if meta, ok := cd["metadata"].(map[string]any); ok {
+			name, _ = meta["name"].(string)
+		}
+		if name == "" {
+			name = "<unnamed>"
+		}
+		if !seenNames[name] {
+			seenNames[name] = true
+			compNames = append(compNames, name)
+		}
+	}
+	sort.Strings(compNames)
+
+	var compDoc map[string]any
+	targetComp := opts.targetComposition()
+	if targetComp != "" {
+		selectedIdx := -1
+		for i, cd := range compDocs {
+			name := ""
+			if meta, ok := cd["metadata"].(map[string]any); ok {
+				name, _ = meta["name"].(string)
+			}
+			if name == targetComp {
+				selectedIdx = i
+				compDoc = cd
+				break
+			}
+		}
+		if selectedIdx == -1 {
+			return nil, nil, fmt.Errorf("composition %q not found in manifest (available: %s)", targetComp, strings.Join(compNames, ", "))
+		}
+		for i, cd := range compDocs {
+			if i == selectedIdx {
+				continue
+			}
+			name := ""
+			if meta, ok := cd["metadata"].(map[string]any); ok {
+				name, _ = meta["name"].(string)
+			}
+			target := "manifest.Composition"
+			if name != "" && name != "<unnamed>" {
+				target = fmt.Sprintf("manifest.Composition/%s", name)
+			}
+			report.Record(target, "unselected composition omitted from blueprint adoption")
+		}
+	} else {
+		if len(compDocs) > 1 {
+			return nil, nil, fmt.Errorf("ambiguous multi-composition input: found %d Compositions in manifest (%s); specify a target composition to adopt", len(compDocs), strings.Join(compNames, ", "))
+		}
+		compDoc = compDocs[0]
 	}
 
 	bp := &blueprint.Blueprint{
@@ -304,8 +371,8 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		}
 	}
 	if meta, ok := compDoc["metadata"].(map[string]any); ok {
-		if bp.Metadata.Name == "" {
-			if name, ok := meta["name"].(string); ok {
+		if name, ok := meta["name"].(string); ok && name != "" {
+			if targetComp != "" || bp.Metadata.Name == "" {
 				bp.Metadata.Name = name
 			}
 		}
@@ -355,6 +422,24 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	}
 
 	// 3. If XRD document is present, parse parameters & metadata
+	var xrdDoc map[string]any
+	if len(xrdDocs) == 1 {
+		xrdDoc = xrdDocs[0]
+	} else if len(xrdDocs) > 1 {
+		for _, xd := range xrdDocs {
+			if xSpec, ok := xd["spec"].(map[string]any); ok {
+				if names, ok := xSpec["names"].(map[string]any); ok {
+					if k, _ := names["kind"].(string); k != "" && k == bp.Spec.XRD.Kind {
+						xrdDoc = xd
+						break
+					}
+				}
+			}
+		}
+		if xrdDoc == nil && len(xrdDocs) > 0 {
+			xrdDoc = xrdDocs[0]
+		}
+	}
 	if xrdDoc != nil {
 		parseXRDDoc(xrdDoc, bp, report)
 	}

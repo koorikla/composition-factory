@@ -1430,3 +1430,361 @@ spec:
 		t.Errorf("expected report to record skipped unparseable YAML")
 	}
 }
+
+func TestCF257_AdoptTreeMultiCompositionAmbiguousError(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	compA := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: comp-a
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResourceA
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: res-a
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                forProvider:
+                  region: us-east-1
+`
+	compB := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: comp-b
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResourceB
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: res-b
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                forProvider:
+                  region: us-west-2
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "comp-a.yaml"), []byte(compA), 0644); err != nil {
+		t.Fatalf("write comp-a.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "comp-b.yaml"), []byte(compB), 0644); err != nil {
+		t.Fatalf("write comp-b.yaml: %v", err)
+	}
+
+	bp, _, err := AdoptTree(tmpDir, Options{})
+	if err == nil {
+		t.Fatalf("expected error when adopting tree with multiple compositions, got nil (bp resources count: %d)", len(bp.Spec.Resources))
+	}
+	if !strings.Contains(err.Error(), "comp-a") || !strings.Contains(err.Error(), "comp-b") {
+		t.Errorf("expected error to identify 'comp-a' and 'comp-b', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ambiguous") && !strings.Contains(err.Error(), "multi-composition") {
+		t.Errorf("expected error to report ambiguous multi-composition input, got: %v", err)
+	}
+}
+
+func TestCF257_AdoptTreeMultiCompositionSelectedTarget(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	compA := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: comp-a
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResourceA
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: res-a
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                forProvider:
+                  region: us-east-1
+`
+	compB := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: comp-b
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResourceB
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: res-b
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                forProvider:
+                  region: us-west-2
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "comp-a.yaml"), []byte(compA), 0644); err != nil {
+		t.Fatalf("write comp-a.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "comp-b.yaml"), []byte(compB), 0644); err != nil {
+		t.Fatalf("write comp-b.yaml: %v", err)
+	}
+
+	// 1. Adopt with TargetComposition: "comp-a"
+	bp, report, err := AdoptTree(tmpDir, Options{TargetComposition: "comp-a"})
+	if err != nil {
+		t.Fatalf("AdoptTree failed with TargetComposition: %v", err)
+	}
+	if bp.Metadata.Name != "comp-a" {
+		t.Errorf("expected bp name 'comp-a', got %q", bp.Metadata.Name)
+	}
+	if len(bp.Spec.Resources) != 1 || bp.Spec.Resources[0].Name != "res-a" {
+		t.Errorf("expected 1 resource 'res-a', got %+v", bp.Spec.Resources)
+	}
+	if report == nil || !report.HasTrueLoss() {
+		t.Errorf("expected report to record true loss for omitted comp-b")
+	}
+	foundDropB := false
+	for _, d := range report.Drops {
+		if d.Path == "manifest.Composition/comp-b" {
+			foundDropB = true
+			if !strings.Contains(d.Reason, "omitted") {
+				t.Errorf("expected drop reason to mention omitted, got %q", d.Reason)
+			}
+			break
+		}
+	}
+	if !foundDropB {
+		t.Errorf("expected drop entry for manifest.Composition/comp-b, got drops: %+v", report.Drops)
+	}
+
+	// 2. Adopt with TargetComposition: "comp-b" (alias)
+	bpB, reportB, err := AdoptTree(tmpDir, Options{TargetComposition: "comp-b"})
+	if err != nil {
+		t.Fatalf("AdoptTree failed with TargetComposition: %v", err)
+	}
+	if bpB.Metadata.Name != "comp-b" {
+		t.Errorf("expected bp name 'comp-b', got %q", bpB.Metadata.Name)
+	}
+	if len(bpB.Spec.Resources) != 1 || bpB.Spec.Resources[0].Name != "res-b" {
+		t.Errorf("expected 1 resource 'res-b', got %+v", bpB.Spec.Resources)
+	}
+	if reportB == nil || !reportB.HasTrueLoss() {
+		t.Errorf("expected report to record true loss for omitted comp-a")
+	}
+	foundDropA := false
+	for _, d := range reportB.Drops {
+		if d.Path == "manifest.Composition/comp-a" {
+			foundDropA = true
+			break
+		}
+	}
+	if !foundDropA {
+		t.Errorf("expected drop entry for manifest.Composition/comp-a, got drops: %+v", reportB.Drops)
+	}
+
+	outYAML, err := FormatAdoptedYAML(bpB, reportB)
+	if err != nil {
+		t.Fatalf("FormatAdoptedYAML failed: %v", err)
+	}
+	if !strings.Contains(string(outYAML), "# adopt: dropped manifest.Composition/comp-a") {
+		t.Errorf("expected output YAML to contain comment '# adopt: dropped manifest.Composition/comp-a', got:\n%s", string(outYAML))
+	}
+
+	// 3. Adopt with non-existent target composition
+	_, _, err = AdoptTree(tmpDir, Options{TargetComposition: "comp-c"})
+	if err == nil {
+		t.Fatalf("expected error for non-existent composition comp-c, got nil")
+	}
+	if !strings.Contains(err.Error(), "comp-c") {
+		t.Errorf("expected error to mention 'comp-c', got: %v", err)
+	}
+}
+
+func TestCF257_AdoptTreeMultiCompositionWithMultiXRD(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	xrdA := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xresourceas.example.org
+spec:
+  group: example.org
+  names:
+    kind: XResourceA
+    plural: xresourceas
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                paramA:
+                  type: string
+`
+	xrdB := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xresourcebs.example.org
+spec:
+  group: example.org
+  names:
+    kind: XResourceB
+    plural: xresourcebs
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                paramB:
+                  type: string
+`
+	compA := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: comp-a
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResourceA
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: res-a
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                forProvider:
+                  region: us-east-1
+`
+	compB := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: comp-b
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResourceB
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: res-b
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: Bucket
+              spec:
+                forProvider:
+                  region: us-west-2
+`
+	if err := os.MkdirAll(filepath.Join(tmpDir, "apis", "a"), 0755); err != nil {
+		t.Fatalf("mkdir apis/a: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "apis", "b"), 0755); err != nil {
+		t.Fatalf("mkdir apis/b: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "apis", "a", "definition.yaml"), []byte(xrdA), 0644); err != nil {
+		t.Fatalf("write xrdA: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "apis", "b", "definition.yaml"), []byte(xrdB), 0644); err != nil {
+		t.Fatalf("write xrdB: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "comp-a.yaml"), []byte(compA), 0644); err != nil {
+		t.Fatalf("write comp-a.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "comp-b.yaml"), []byte(compB), 0644); err != nil {
+		t.Fatalf("write comp-b.yaml: %v", err)
+	}
+
+	bpA, _, err := AdoptTree(tmpDir, Options{TargetComposition: "comp-a"})
+	if err != nil {
+		t.Fatalf("AdoptTree for comp-a failed: %v", err)
+	}
+	if bpA.Spec.XRD.Kind != "XResourceA" {
+		t.Errorf("expected XRD kind 'XResourceA', got %q", bpA.Spec.XRD.Kind)
+	}
+	if _, ok := bpA.Spec.XRD.Parameters["paramA"]; !ok {
+		t.Errorf("expected XRD parameters to include paramA")
+	}
+	if _, ok := bpA.Spec.XRD.Parameters["paramB"]; ok {
+		t.Errorf("XRD parameters unexpectedly included paramB from unselected XRD")
+	}
+
+	bpB, _, err := AdoptTree(tmpDir, Options{TargetComposition: "comp-b"})
+	if err != nil {
+		t.Fatalf("AdoptTree for comp-b failed: %v", err)
+	}
+	if bpB.Spec.XRD.Kind != "XResourceB" {
+		t.Errorf("expected XRD kind 'XResourceB', got %q", bpB.Spec.XRD.Kind)
+	}
+	if _, ok := bpB.Spec.XRD.Parameters["paramB"]; !ok {
+		t.Errorf("expected XRD parameters to include paramB")
+	}
+	if _, ok := bpB.Spec.XRD.Parameters["paramA"]; ok {
+		t.Errorf("XRD parameters unexpectedly included paramA from unselected XRD")
+	}
+}
