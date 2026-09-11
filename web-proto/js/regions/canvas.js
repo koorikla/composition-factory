@@ -1238,6 +1238,11 @@ function onKeyDown(e) {
     return;
   }
 
+  if (e.key === "Escape" && S.state.selectedResource) {
+    S.select(null);
+    return;
+  }
+
   const sel = S.state.selectedResource;
   if (!sel || sel === XR_ID || sel === ENV_ID) return;
   const d = doc();
