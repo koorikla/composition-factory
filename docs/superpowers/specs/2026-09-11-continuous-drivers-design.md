@@ -95,10 +95,17 @@ Subagents have network access and `gh` authenticated as `koorikla`.
 
 - Lock files: `$(git rev-parse --git-common-dir)/cf-locks/<pool>.<n>`, shared by every
   worktree of the clone.
-- Acquisition: try `lockf -s -t 0` on slots `1..slots`; when none is free, sleep 10 s and
-  retry, printing `waiting for <pool>` once. The command runs as the lock holder's child;
-  the kernel releases the lock when that process exits, including on `kill -9`. There is
-  no stale-lock state and no expiry logic.
+- Acquisition uses the **descriptor form**: open the slot file on fd 9, `lockf -s -t 0 9`,
+  and on success `exec` the command, which inherits the locked descriptor. When no slot is
+  free, sleep 10 s and retry, printing `waiting for <pool>` once.
+- The lock is held for as long as **any** process holding that descriptor lives — the
+  command and every descendant — and the kernel drops it when the last one exits,
+  including on `kill -9`. There is no stale-lock state and no expiry logic.
+- **Not the command form** (`lockf file cmd`). Measured on macOS 2026-09-11: killing the
+  `lockf` parent with `-9` releases the lock while its child keeps running, so a landing
+  could continue pushing `main` with the merge lock free. The descriptor form keeps the
+  lock with the orphan instead. The cost is liveness: a leaked daemon that inherited fd 9
+  holds its slot until it dies; `lsof <slot file>` names it.
 - On exit, prints `<pool> wait <seconds>s` to stderr so reports can record contention.
 - Where `lockf` is absent (Linux CI) or `CF_GATE_SLOTS=off`, it runs the command directly.
 
@@ -121,7 +128,8 @@ Each operation that must not race is therefore a single script run under its loc
 
 Under `claim`: read the issue's labels and comments; refuse if it is `closed`, `wontfix`,
 or `in-progress` with an unexpired lease; collect file sets from every unexpired claim on
-every open `in-progress` issue; refuse on intersection; otherwise add `in-progress`,
+every **open** `in-progress` issue (closed issues still carrying the label are ignored —
+#58 was observed closed with `in-progress` still set); refuse on intersection; otherwise add `in-progress`,
 remove `parked` if present, post the claim comment. Exit 0 `CLAIMED`, 3 `TAKEN`,
 4 `OVERLAP <issue>`.
 
@@ -145,7 +153,8 @@ Under `merge`:
    `REVERTED <run-url>`. The topic branch is kept for the next attempt.
 7. Green → delete the remote topic branch, exit 0 `LANDED <sha> <run-url>`.
 
-The driver, outside the lock, then closes the issue (exit 0), labels it `parked` with a
+The driver, outside the lock, then closes the issue and removes every state label
+(`in-progress`, `handed-back`, `parked`) (exit 0), labels it `parked` with a
 comment (6), or labels it `parked` with the CI link (7), and removes the topic
 worktree.
 
