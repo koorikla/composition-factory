@@ -30,12 +30,19 @@ edits files between your tool calls.
 git fetch && git log --oneline HEAD..origin/main    # local state goes stale in minutes
 git status --short                                  # someone else's live WIP
 git diff --stat                                     # what they are already fixing
+gh pr list --search "author:app/dependabot"          # open Dependabot updates / MR-s
 ```
 
 **A defect already being fixed in the dirty tree is not a finding.** Check the diff
 before you write the line, not after. Then search closed issues (`gh issue list --state all --search "<keyword>"`),
 `docs/backlog-archive.md` (pre-migration history) and `docs/non-findings.md` - re-raising
 a settled item costs a reviewer the whole round trip to work out it is settled.
+
+**Check open Dependabot MR-s/PRs.** When auditing dependencies or triage, check open
+Dependabot updates with `gh pr checks <n>`. A dependency bump that breaks gates (`test`,
+`lint`, `build`) due to a real upstream breaking change is filed as an issue citing the failure
+mechanism, reproduction, and PR; passing bumps are noted for driver merge rather than filed
+as issues.
 
 ## 2. The evidence bar
 

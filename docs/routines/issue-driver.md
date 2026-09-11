@@ -21,7 +21,7 @@ Everything below is planned around a 5 h session quota. Record `T0` at start
 | T0 + 4:00 | last moment to start a merge; after this only CI watching, closing, cleanup |
 | T0 + 4:30 | write the run report (step 6) even if CI is still running; note what is unfinished |
 
-Concurrency: at most **3 subagents at once**. More than that trips API rate limits and
+Concurrency: at most **6 subagents at once**. More than that trips API rate limits and
 turns one failed run into three. Sequential work that fits the budget beats parallel work
 that overruns it.
 
