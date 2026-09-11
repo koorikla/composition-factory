@@ -81,6 +81,9 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 			}
 			if metaName != nil {
 				rhs := kclStructuredRHS(metaName.structured, metaName.rhs)
+				if r.ForEach != "" {
+					rhs = kclLoopedRHS(rhs)
+				}
 				if metaName.structured.kind == rhsStatus {
 					raw := kclRawStatusAccess(metaName.structured)
 					sb.WriteString(fmt.Sprintf("%sif %s != None:\n", metaInner, raw))
@@ -281,6 +284,18 @@ func quoteKCLKey(k string) string {
 
 func kclRawStatusAccess(s structuredRHS) string {
 	return fmt.Sprintf("ocds?[%q]?.Resource?.status?.%s", s.resource, strings.ReplaceAll(s.statusPath, ".", "?."))
+}
+
+// kclLoopedRHS appends the loop index _i to a metadata.name RHS expression in KCL (CF-301).
+func kclLoopedRHS(rhs string) string {
+	rhs = strings.TrimSpace(rhs)
+	if strings.HasPrefix(rhs, `"`) && strings.HasSuffix(rhs, `"`) && len(rhs) >= 2 {
+		return rhs[:len(rhs)-1] + `-${_i}"`
+	}
+	if strings.HasPrefix(rhs, `'`) && strings.HasSuffix(rhs, `'`) && len(rhs) >= 2 {
+		return rhs[:len(rhs)-1] + `-${_i}'`
+	}
+	return fmt.Sprintf(`"${%s}-${_i}"`, rhs)
 }
 
 func kclStructuredRHS(s structuredRHS, fallbackRHS string) string {

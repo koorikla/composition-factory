@@ -83,6 +83,9 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 			}
 			if metaName != nil {
 				rhs := pythonStructuredRHS(metaName.structured, metaName.rhs)
+				if r.ForEach != "" {
+					rhs = pythonLoopedRHS(rhs)
+				}
 				sb.WriteString(fmt.Sprintf("%s\"name\": %s,\n", metaInner, rhs))
 			} else {
 				if r.ForEach != "" {
@@ -207,6 +210,28 @@ func writePythonElement(sb *strings.Builder, indent string, elem *nativeNode) {
 	sb.WriteString(fmt.Sprintf("%s_present({\n", indent))
 	writePythonNodes(sb, indent+"    ", elem.children)
 	sb.WriteString(fmt.Sprintf("%s}),\n", indent))
+}
+
+// pythonLoopedRHS appends the loop index _i to a metadata.name RHS expression in Python (CF-301).
+func pythonLoopedRHS(rhs string) string {
+	rhs = strings.TrimSpace(rhs)
+	if strings.HasPrefix(rhs, `f"`) && strings.HasSuffix(rhs, `"`) && len(rhs) >= 3 {
+		return rhs[:len(rhs)-1] + `-{_i}"`
+	}
+	if strings.HasPrefix(rhs, `f'`) && strings.HasSuffix(rhs, `'`) && len(rhs) >= 3 {
+		return rhs[:len(rhs)-1] + `-{_i}'`
+	}
+	if strings.HasPrefix(rhs, `"`) && strings.HasSuffix(rhs, `"`) && len(rhs) >= 2 {
+		inner := rhs[1 : len(rhs)-1]
+		return fmt.Sprintf(`f"%s-{_i}"`, inner)
+	}
+	if strings.HasPrefix(rhs, `'`) && strings.HasSuffix(rhs, `'`) && len(rhs) >= 2 {
+		inner := rhs[1 : len(rhs)-1]
+		return fmt.Sprintf(`f'%s-{_i}'`, inner)
+	}
+	// Expression: use single quotes inside the f-string interpolation
+	expr := strings.ReplaceAll(rhs, `"`, `'`)
+	return fmt.Sprintf(`f"{%s}-{_i}"`, expr)
 }
 
 func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
