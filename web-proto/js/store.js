@@ -56,6 +56,7 @@ export const store = {
     doc: null,
     selectedResource: null,
     positions: {},
+    persistedKeys: new Set(),
     undoStack: [],
     redoStack: [],
     lastGenerate: null,
@@ -94,6 +95,7 @@ export const store = {
     try {
       const doc = await api.getBlueprint();
       this.state.doc = doc;
+      this._restorePositions(doc);
       this.emit("doc", doc);
       return doc;
     } catch (e) {
@@ -189,13 +191,19 @@ export const store = {
   },
 
   /**
-   * Record a node's client-side canvas position. Positions are never
-   * persisted and emit NO topic — the canvas region owns rendering them.
+   * Record a node's client-side canvas position. User-dragged positions
+   * are persisted to localStorage under `cf-positions:<doc.metadata.name>`.
    * @param {string} name Resource name (or "xrd").
    * @param {{x:number, y:number}} pos
+   * @param {boolean} [persist=true] Whether to persist to localStorage.
    */
-  setPosition(name, pos) {
+  setPosition(name, pos, persist) {
     this.state.positions[name] = { x: pos.x, y: pos.y };
+    if (persist !== false) {
+      if (!this.state.persistedKeys) this.state.persistedKeys = new Set();
+      this.state.persistedKeys.add(name);
+      this._savePositions();
+    }
   },
 
   /**
@@ -205,6 +213,79 @@ export const store = {
    */
   getPosition(name) {
     return this.state.positions[name] || null;
+  },
+
+  deletePosition(name) {
+    delete this.state.positions[name];
+    if (this.state.persistedKeys) this.state.persistedKeys.delete(name);
+    this._savePositions();
+  },
+
+  renamePosition(from, to) {
+    if (this.state.positions[from]) {
+      this.state.positions[to] = this.state.positions[from];
+      delete this.state.positions[from];
+    }
+    if (this.state.persistedKeys && this.state.persistedKeys.has(from)) {
+      this.state.persistedKeys.delete(from);
+      this.state.persistedKeys.add(to);
+      this._savePositions();
+    }
+  },
+
+  clearPositions() {
+    this.state.positions = {};
+    if (this.state.persistedKeys) this.state.persistedKeys.clear();
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.removeItem(this._storageKey());
+    } catch (_) {}
+  },
+
+  _storageKey(docObj) {
+    const d = docObj || this.state.doc;
+    const name = (d && d.metadata && d.metadata.name) || "default";
+    return "cf-positions:" + name;
+  },
+
+  _savePositions() {
+    if (typeof localStorage === "undefined") return;
+    try {
+      const key = this._storageKey();
+      const toSave = {};
+      if (this.state.persistedKeys) {
+        for (const k of this.state.persistedKeys) {
+          if (this.state.positions[k]) {
+            toSave[k] = this.state.positions[k];
+          }
+        }
+      }
+      localStorage.setItem(key, JSON.stringify(toSave));
+    } catch (_) {}
+  },
+
+  _restorePositions(docObj) {
+    this.state.positions = {};
+    if (!this.state.persistedKeys) {
+      this.state.persistedKeys = new Set();
+    } else {
+      this.state.persistedKeys.clear();
+    }
+    if (typeof localStorage === "undefined") return;
+    try {
+      const raw = localStorage.getItem(this._storageKey(docObj));
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved && typeof saved === "object") {
+          for (const k of Object.keys(saved)) {
+            if (saved[k] && typeof saved[k].x === "number" && typeof saved[k].y === "number") {
+              this.state.positions[k] = { x: saved[k].x, y: saved[k].y };
+              this.state.persistedKeys.add(k);
+            }
+          }
+        }
+      }
+    } catch (_) {}
   },
 
   /**
@@ -291,6 +372,7 @@ export const store = {
         self.state.lastAdoptReport = null;
         self._recordHistory(prev);
         self.state.doc = doc;
+        self._restorePositions(doc);
         self.emit("doc", doc);
         return doc;
       } catch (e) {
@@ -353,7 +435,11 @@ export const store = {
       const prev = clone(this.state.doc);
       const doc = await requestFn();
       this._recordHistory(prev);
+      const nameChanged = !this.state.doc || (doc && doc.metadata && this.state.doc.metadata && doc.metadata.name !== this.state.doc.metadata.name);
       this.state.doc = doc;
+      if (nameChanged || source === "importBlueprint" || source === "adoptComposition") {
+        this._restorePositions(doc);
+      }
       this.emit("doc", doc);
       return doc;
     } catch (e) {

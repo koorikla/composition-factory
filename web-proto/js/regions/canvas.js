@@ -24,6 +24,7 @@ import {
   XR_ID,
   ENV_ID,
   computeDependencyLayout,
+  dependencyLayers,
 } from "./canvas/layout.js";
 import {
   initDragToWire,
@@ -431,16 +432,89 @@ function resourceCardHTML(d, r, sel) {
 const autoPlaced = new Set(); // cards the layout owns until the user drags them
 let lastLayoutSig = "";       // measured-size signature; re-lay only on change
 
+function getVisibleCanvasBounds() {
+  const cw = cwEl ? cwEl.getBoundingClientRect() : { left: 0, right: window.innerWidth, width: window.innerWidth, height: window.innerHeight };
+  const insp = document.getElementById("region-inspector");
+  let maxScreenX = cw.width;
+  if (insp) {
+    const inspRect = insp.getBoundingClientRect();
+    if (inspRect.width > 0 && inspRect.height > 0) {
+      if (inspRect.left > cw.left && inspRect.left <= cw.right) {
+        maxScreenX = Math.min(maxScreenX, inspRect.left - cw.left);
+      }
+    }
+  }
+  const maxCanvasX = toCanvas(maxScreenX, 0).x;
+  return {
+    screenMaxX: maxScreenX,
+    canvasMaxX: maxCanvasX,
+  };
+}
+
 function applyDependencyLayout(onlyUnplaced) {
   const d = doc();
   if (!d) return;
+
+  const bounds = getVisibleCanvasBounds();
+  const layers = dependencyLayers(d);
+  const byLayer = {};
+  (d.spec.resources || []).forEach(function (r) {
+    (byLayer[layers[r.name]] = byLayer[layers[r.name]] || []).push(r.name);
+  });
+
+  const layerKeys = Object.keys(byLayer).map(Number).sort(function (a, b) { return a - b; });
+  const hasEnv = !!(d.spec && ((d.spec.environment && Object.keys(d.spec.environment).length > 0) || (Array.isArray(d.spec.environmentConfigs) && d.spec.environmentConfigs.length > 0)));
+  const xrEl = canvasEl ? canvasEl.querySelector('.node[data-id="' + CSS.escape(XR_ID) + '"]') : null;
+  let sourceW = xrEl ? xrEl.offsetWidth : 220;
+  if (hasEnv) {
+    const envEl = canvasEl ? canvasEl.querySelector('.node[data-id="' + CSS.escape(ENV_ID) + '"]') : null;
+    sourceW = Math.max(sourceW, envEl ? envEl.offsetWidth : 220);
+  }
+
+  const colWidths = [sourceW];
+  layerKeys.forEach(function (L) {
+    let maxW = 0;
+    byLayer[L].forEach(function (name) {
+      const el = canvasEl ? canvasEl.querySelector('.node[data-id="' + CSS.escape(name) + '"]') : null;
+      maxW = Math.max(maxW, el ? el.offsetWidth : 220);
+    });
+    colWidths.push(maxW || 220);
+  });
+
+  const numCols = colWidths.length;
+  let X0 = 40;
+  let GX = 60;
+
+  if (numCols > 1) {
+    const sumColWidths = colWidths.reduce(function (a, b) { return a + b; }, 0);
+    const gaps = numCols - 1;
+    let availableForSpacing = bounds.canvasMaxX - 24 - sumColWidths;
+
+    const minNeededSpacing = 16 + gaps * 16;
+    const totalMinCanvas = sumColWidths + minNeededSpacing + 24;
+
+    if (totalMinCanvas > bounds.screenMaxX && (view.k === 1 && view.x === 0 || !onlyUnplaced)) {
+      const targetK = Math.max(K_MIN, Math.min(1, bounds.screenMaxX / totalMinCanvas));
+      if (targetK < view.k) {
+        view.k = targetK;
+        applyView(true);
+        availableForSpacing = ((bounds.screenMaxX - 24) / view.k) - sumColWidths;
+      }
+    }
+
+    if (availableForSpacing < 40 + gaps * 60) {
+      X0 = Math.max(16, Math.min(40, Math.floor(availableForSpacing * 0.2)));
+      GX = Math.max(16, Math.min(60, Math.floor((availableForSpacing - X0) / gaps)));
+    }
+  }
+
   computeDependencyLayout(d, {
     onlyUnplaced: onlyUnplaced,
     autoPlaced: autoPlaced,
     getPosition: function (id) { return S.getPosition(id); },
-    setPosition: function (id, pos) { S.setPosition(id, pos); },
+    setPosition: function (id, pos) { S.setPosition(id, pos, false); },
     getSize: function (id) {
-      const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(id) + '"]');
+      const el = canvasEl ? canvasEl.querySelector('.node[data-id="' + CSS.escape(id) + '"]') : null;
       return {
         width: el ? el.offsetWidth : 220,
         height: el ? el.offsetHeight : 160,
@@ -448,6 +522,8 @@ function applyDependencyLayout(onlyUnplaced) {
     },
     XR_ID: XR_ID,
     ENV_ID: ENV_ID,
+    X0: X0,
+    GX: GX,
   });
 }
 
@@ -812,6 +888,11 @@ function buildZoomControls() {
   bar.querySelector("#zoom-out").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1 / 1.2); });
   bar.querySelector("#zoom-reset").addEventListener("click", function () { view.x = 0; view.y = 0; view.k = 1; applyView(); });
   bar.querySelector("#layout-btn").addEventListener("click", function () {
+    if (typeof S.clearPositions === "function") {
+      S.clearPositions();
+    }
+    autoPlaced.clear();
+    lastLayoutSig = "";
     applyDependencyLayout(false);
     canvasEl.querySelectorAll(".node").forEach(function (el) {
       const p = S.getPosition(el.getAttribute("data-id"));
@@ -897,7 +978,13 @@ function openCtxMenu(x, y, resName) {
           S.renameResource(resName, to).then(function (ok) {
             if (!ok) return;
             const p = S.getPosition(resName);
-            if (p) S.setPosition(to, p);
+            if (p) {
+              if (typeof S.renamePosition === "function") {
+                S.renamePosition(resName, to);
+              } else {
+                S.setPosition(to, p);
+              }
+            }
             S.select(to);
           });
         },
@@ -991,7 +1078,14 @@ function duplicateResource(src) {
   }).then(function (ok) {
     if (!ok) return;
     const p = S.getPosition(src.name);
-    if (p) S.setPosition(copyName, { x: p.x + 28, y: p.y + 28 });
+    if (p) {
+      const bounds = getVisibleCanvasBounds();
+      const cardW = 220;
+      const maxX = Math.max(4, bounds.canvasMaxX - cardW - 16);
+      const nx = Math.max(4, Math.min(maxX, p.x + 28));
+      autoPlaced.delete(copyName);
+      S.setPosition(copyName, { x: nx, y: p.y + 28 }, true);
+    }
     S.select(copyName);
   });
 }
@@ -1401,16 +1495,22 @@ function onPointerDown(e) {
   let lx = start.x, ly = start.y;
 
   function onUp() {
-    S.setPosition(name, { x: lx, y: ly }); // client-side only, recorded on release
-    if (Math.abs(lx - start.x) > 3 || Math.abs(ly - start.y) > 3) {
+    const isDrag = Math.abs(lx - start.x) > 3 || Math.abs(ly - start.y) > 3;
+    if (isDrag) {
       autoPlaced.delete(name);             // a real drag: the user owns it now
+      S.setPosition(name, { x: lx, y: ly }, true);
+    } else {
+      S.setPosition(name, { x: lx, y: ly }, !autoPlaced.has(name));
     }
     drawWires();
     gestureEnd();
   }
   function mv(ev) {
     if (!ev.buttons) { onUp(); return; } // release happened while unfocused
-    lx = Math.max(4, start.x + (ev.clientX - sx) / view.k);
+    const bounds = getVisibleCanvasBounds();
+    const cardW = el.offsetWidth || 220;
+    const maxX = Math.max(4, bounds.canvasMaxX - cardW - 16);
+    lx = Math.max(4, Math.min(maxX, start.x + (ev.clientX - sx) / view.k));
     ly = Math.max(4, start.y + (ev.clientY - sy) / view.k);
     el.style.left = lx + "px";
     el.style.top = ly + "px";
@@ -1482,10 +1582,14 @@ function onDrop(e) {
   if (!entry || !d) return;
   const rect = cwEl.getBoundingClientRect();
   const pt = toCanvas(e.clientX - rect.left, e.clientY - rect.top);
-  const x = Math.max(4, pt.x - 90);
+  const bounds = getVisibleCanvasBounds();
+  const cardW = 220;
+  const maxX = Math.max(4, bounds.canvasMaxX - cardW - 16);
+  const x = Math.max(4, Math.min(maxX, pt.x - 90));
   const y = Math.max(4, pt.y - 16);
   const name = uniqueResourceName(d, entry.kind);
-  S.setPosition(name, { x: x, y: y });
+  autoPlaced.delete(name);
+  S.setPosition(name, { x: x, y: y }, true);
   S.select(name);
   S.replaceDoc(function (next) {
     // sources is the dependency manifest the server loads providers from at
