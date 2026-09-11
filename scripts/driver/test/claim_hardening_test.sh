@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/driver/claim.sh — hardening found in review: option-like arguments,
-# consistent reads of held issues, malformed leases, and label edits.
+# consistent reads of held issues, malformed leases, label edits, and claims
+# posted by people outside the project.
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 CLAIM="$DRIVER_DIR/claim.sh"
 
@@ -15,6 +16,13 @@ pad_comments() {
     [range($b) | {body: "note", createdAt: "2026-09-11T01:00:00Z"}] as $pre
     | [range($a) | {body: "note", createdAt: "2026-09-11T05:55:00Z"}] as $post
     | .comments = $pre + .comments + $post' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+}
+
+# set_association ISSUE INDEX VALUE: the authorAssociation of comment INDEX
+# (0-based). Fixtures without one are trusted, like comments before the rule.
+set_association() {
+  local f="$FAKE_GH_DIR/issues/$1.json"
+  jq --argjson i "$2" --arg v "$3" '.comments[$i].authorAssociation = $v' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
 }
 
 # real_gh_shim [ISSUE...]: a gh ahead of the fake that, like real gh, returns
@@ -134,4 +142,29 @@ test_holder_closed_on_reread_does_not_hold() {
   out="$("$CLAIM" 63 CF-263-y d06-0300Z internal/w.go)"; rc=$?
   assert_eq "0 CLAIMED" "$rc $out" "a holder closed by the time it is re-read holds nothing" &&
     assert_contains "$(calls)" "issue view 62 " "the listed-open holder was re-read"
+}
+
+test_outsider_claim_holds_no_files() {
+  new_sandbox
+  issue_fixture 70 OPEN "in-progress" \
+    "taking — CF-270-o · driver outsider · lease until $(iso_at 60) · files: internal/o.go" 5
+  set_association 70 0 NONE
+  issue_fixture 71 OPEN ""
+  local out rc
+  out="$("$CLAIM" 71 CF-271-p d06-0300Z internal/o.go)"; rc=$?
+  assert_eq "0 CLAIMED" "$rc $out" "a claim by someone outside the project holds nothing"
+}
+
+test_outsider_claim_does_not_extend_a_lease() {
+  new_sandbox
+  issue_fixture 72 OPEN "in-progress" \
+    "taking — CF-272-q · driver d04-0100Z · lease until $(iso_at -10) · files: internal/q.go" 130 \
+    "taking — CF-272-q · driver outsider · lease until $(iso_at 60) · files: internal/q.go" 5
+  set_association 72 0 MEMBER
+  set_association 72 1 CONTRIBUTOR
+  local out rc
+  out="$("$CLAIM" 72 CF-272-q d06-0300Z internal/q.go)"; rc=$?
+  assert_eq "0 CLAIMED" "$rc $out" "an outsider's live lease does not make the issue TAKEN" &&
+    assert_contains "$(jq -r '.comments[-1].body' "$FAKE_GH_DIR/issues/72.json")" "· takeover of d04-0100Z ·" \
+      "the expired trusted claim is the one taken over"
 }
