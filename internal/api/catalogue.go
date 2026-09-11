@@ -9,6 +9,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -66,11 +67,17 @@ func handleCatalogue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rawType := r.URL.Query().Get("type")
+	typ := strings.ToLower(rawType)
+	if typ != "" && typ != "function" && typ != "provider" {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("invalid type: %q (must be \"function\" or \"provider\")", rawType))
+		return
+	}
+
 	q := strings.ToLower(r.URL.Query().Get("q"))
 	if q == "" {
 		q = strings.ToLower(r.URL.Query().Get("search"))
 	}
-	typ := strings.ToLower(r.URL.Query().Get("type")) // "function", "provider", or ""
 	if q == "" && typ == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("ETag", unfilteredCatalogueETag)
