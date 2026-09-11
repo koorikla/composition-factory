@@ -62,6 +62,21 @@ function isOptParamWire(fromVal, params) {
   return !isParamRequired(params, parsed.param);
 }
 
+function formatWireBinding(fromExpr, targetRes, targetPath) {
+  if (!fromExpr || typeof fromExpr !== "string") return "";
+  var parsed = parseFrom(fromExpr);
+  if (parsed) {
+    if (parsed.kind === "status") {
+      return parsed.resource + ".status." + parsed.statusPath + " \u2192 " + targetRes + "." + targetPath;
+    } else if (parsed.kind === "env") {
+      return "env." + parsed.key + " \u2192 " + targetRes + "." + targetPath;
+    } else if (parsed.kind === "param") {
+      return "$" + parsed.param + " \u2192 " + targetRes + "." + targetPath;
+    }
+  }
+  return fromExpr + " \u2192 " + targetRes + "." + targetPath;
+}
+
 
 var store = defaultStore;
 var api = defaultApi;
@@ -413,9 +428,12 @@ function fieldRow(res, f, params, otherResources, otherStatusMap, env) {
       if (dm === "w" && !uiMode[f.path] && entry) {
         const wireCol = isStatusWire ? "var(--wire-status)" : (isEnvWire ? "var(--shared)" : "var(--wire-xrd)");
         const bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : (isEnvWire ? ' style="background:var(--shared-soft)"' : "");
-        h += '<div class="bound' + (isEnvWire ? ' shared' : '') + '"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-          '<span class="src' + (isEnvWire ? ' sh' : '') + '" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
-          '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
+        const fullBinding = formatWireBinding(entry.from, res.name, f.path);
+        h += '<div class="bound' + (isEnvWire ? ' shared' : '') + '"' + bgStyle + (fullBinding ? ' title="' + esc(fullBinding) + '" data-wire-binding="' + esc(fullBinding) + '" tabindex="0" role="button"' : '') + '><span style="color:' + wireCol + '">&#8592;</span>' +
+          '<span class="src' + (isEnvWire ? ' sh' : '') + '" style="color:' + wireCol + '"' + (fullBinding ? ' title="' + esc(fullBinding) + '"' : '') + '>' + esc(entry.from || "") + "</span>" +
+          '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span>' +
+          (fullBinding ? '<div class="bound-binding-detail" style="color:' + wireCol + '">' + esc(fullBinding) + '</div>' : '') +
+          '</div>';
         if (isReq && isOptParamWire(entry.from, params)) {
           h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
         }
@@ -454,9 +472,12 @@ function fieldRow(res, f, params, otherResources, otherStatusMap, env) {
           if (meWired) {
             var wireCol = isMeStatus ? "var(--wire-status)" : (isMeEnv ? "var(--shared)" : "var(--wire-xrd)");
             var bgStyle = isMeStatus ? ' style="background:var(--wire-status-soft)"' : (isMeEnv ? ' style="background:var(--shared-soft)"' : "");
-            h += '<div class="bound' + (isMeEnv ? ' shared' : '') + '"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-              '<span class="src' + (isMeEnv ? ' sh' : '') + '" style="color:' + wireCol + '">' + esc(meEntry.from || "") + "</span>" +
-              '<span class="x" role="button" tabindex="0" data-unwire="' + esc(me.fullPath) + '" title="Remove wire">&#215;</span></div>';
+            var meFullBinding = formatWireBinding(meEntry.from, res.name, me.fullPath);
+            h += '<div class="bound' + (isMeEnv ? ' shared' : '') + '"' + bgStyle + (meFullBinding ? ' title="' + esc(meFullBinding) + '" data-wire-binding="' + esc(meFullBinding) + '" tabindex="0" role="button"' : '') + '><span style="color:' + wireCol + '">&#8592;</span>' +
+              '<span class="src' + (isMeEnv ? ' sh' : '') + '" style="color:' + wireCol + '"' + (meFullBinding ? ' title="' + esc(meFullBinding) + '"' : '') + '>' + esc(meEntry.from || "") + "</span>" +
+              '<span class="x" role="button" tabindex="0" data-unwire="' + esc(me.fullPath) + '" title="Remove wire">&#215;</span>' +
+              (meFullBinding ? '<div class="bound-binding-detail" style="color:' + wireCol + '">' + esc(meFullBinding) + '</div>' : '') +
+              '</div>';
           } else {
             h += wireSelectHtml(me.fullPath, "string", params, otherResources, otherStatusMap, false, false, meEntry && meEntry.from, env);
           }
@@ -483,9 +504,12 @@ function fieldRow(res, f, params, otherResources, otherStatusMap, env) {
       if (dm === "w" && !uiMode[f.path] && entry) {
         const wireCol = isStatusWire ? "var(--wire-status)" : (isEnvWire ? "var(--shared)" : "var(--wire-xrd)");
         const bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : (isEnvWire ? ' style="background:var(--shared-soft)"' : "");
-        h += '<div class="bound' + (isEnvWire ? ' shared' : '') + '"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-          '<span class="src' + (isEnvWire ? ' sh' : '') + '" style="color:' + wireCol + '">' + esc(entry.from || "") + "</span>" +
-          '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
+        const fullBinding = formatWireBinding(entry.from, res.name, f.path);
+        h += '<div class="bound' + (isEnvWire ? ' shared' : '') + '"' + bgStyle + (fullBinding ? ' title="' + esc(fullBinding) + '" data-wire-binding="' + esc(fullBinding) + '" tabindex="0" role="button"' : '') + '><span style="color:' + wireCol + '">&#8592;</span>' +
+          '<span class="src' + (isEnvWire ? ' sh' : '') + '" style="color:' + wireCol + '"' + (fullBinding ? ' title="' + esc(fullBinding) + '"' : '') + '>' + esc(entry.from || "") + "</span>" +
+          '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span>' +
+          (fullBinding ? '<div class="bound-binding-detail" style="color:' + wireCol + '">' + esc(fullBinding) + '</div>' : '') +
+          '</div>';
         if (isReq && isOptParamWire(entry.from, params)) {
           h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
         }
@@ -535,9 +559,12 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap, env) {
       var wireCol = isStatusWire ? "var(--wire-status)" : (isEnvWire ? "var(--shared)" : "var(--wire-xrd)");
       var bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : (isEnvWire ? ' style="background:var(--shared-soft)"' : "");
       var wireLabel = isXr ? "XR name ($xr)" : (entry.from || "");
-      h += '<div class="bound' + (isEnvWire ? ' shared' : '') + '"' + bgStyle + '><span style="color:' + wireCol + '">&#8592;</span>' +
-        '<span class="src' + (isEnvWire ? ' sh' : '') + '" style="color:' + wireCol + '">' + esc(wireLabel) + "</span>" +
-        '<span class="x" role="button" tabindex="0" data-env-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span></div>';
+      var envFullBinding = isXr ? ("$xr \u2192 " + res.name + ".envelope." + f.path) : formatWireBinding(entry.from, res.name, "envelope." + f.path);
+      h += '<div class="bound' + (isEnvWire ? ' shared' : '') + '"' + bgStyle + (envFullBinding ? ' title="' + esc(envFullBinding) + '" data-wire-binding="' + esc(envFullBinding) + '" tabindex="0" role="button"' : '') + '><span style="color:' + wireCol + '">&#8592;</span>' +
+        '<span class="src' + (isEnvWire ? ' sh' : '') + '" style="color:' + wireCol + '"' + (envFullBinding ? ' title="' + esc(envFullBinding) + '"' : '') + '>' + esc(wireLabel) + "</span>" +
+        '<span class="x" role="button" tabindex="0" data-env-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span>' +
+        (envFullBinding ? '<div class="bound-binding-detail" style="color:' + wireCol + '">' + esc(envFullBinding) + '</div>' : '') +
+        '</div>';
       if (showReq && !isXr && isOptParamWire(entry.from, params)) {
         h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
       }
@@ -786,7 +813,7 @@ async function renderResource(res) {
   var intParams = Object.keys(allParams).filter(function (n) { return allParams[n].type === "integer"; });
   h += '<div class="fld"><div class="frow" style="margin-bottom:0">' +
     '<span class="lbl" style="flex:0 0 auto">for each</span>' +
-    '<select class="tsel" data-foreach="' + esc(res.name) + '" style="flex:1" ' +
+    '<select class="tsel" data-foreach="' + esc(res.name) + '" style="flex:1;min-width:0" ' +
     'title="Repeat this resource N times \u2014 N comes from an integer parameter">' +
     '<option value=""' + (!res.forEach ? " selected" : "") + ">\u2014 no loop \u2014</option>" +
     intParams.map(function (n) {
@@ -816,7 +843,7 @@ async function renderResource(res) {
   });
   h += '<div class="fld"><div class="frow" style="margin-bottom:0">' +
     '<span class="lbl" style="flex:0 0 auto">when</span>' +
-    '<select class="tsel" data-when-param="' + esc(res.name) + '" style="flex:1" ' +
+    '<select class="tsel" data-when-param="' + esc(res.name) + '" style="flex:1;min-width:0" ' +
     'title="Compose this resource only when the condition holds">' +
     '<option value=""' + (!w.param ? " selected" : "") + ">\u2014 always \u2014</option>" +
     condParams.map(function (n) {
@@ -829,11 +856,11 @@ async function renderResource(res) {
         return '<option value="' + o + '"' + (w.op === o ? " selected" : "") + ">" + o + "</option>";
       }).join("") + "</select>";
     h += vals.length
-      ? '<select class="tsel" data-when-val="' + esc(res.name) + '" style="flex:1">' +
+      ? '<select class="tsel" data-when-val="' + esc(res.name) + '" style="flex:1;min-width:0">' +
         vals.map(function (v) {
           return '<option value="' + esc(v) + '"' + (w.val === v ? " selected" : "") + ">" + esc(v) + "</option>";
         }).join("") + "</select>"
-      : '<input class="tin" data-when-val="' + esc(res.name) + '" style="flex:1" value="' + esc(w.val || "") + '" placeholder="value">';
+      : '<input class="tin" data-when-val="' + esc(res.name) + '" style="flex:1;min-width:0" value="' + esc(w.val || "") + '" placeholder="value">';
   }
   h += "</div></div>";
 
@@ -895,10 +922,14 @@ async function renderResource(res) {
       annKeys.map(function (k) {
         var f = anns[k];
         var val = f.from ? "\u2190 " + f.from : (f.raw ? "raw" : f.value);
-        return '<div class="frow" style="margin-bottom:2px">' +
+        var fullBinding = f.from ? formatWireBinding(f.from, res.name, "annotations." + k) : "";
+        var rowTitle = fullBinding || (k + (f.from ? " \u2190 " + f.from : ""));
+        return '<div class="frow ann-row' + (fullBinding ? ' has-wire' : '') + '" style="margin-bottom:2px" title="' + esc(rowTitle) + '" data-wire-binding="' + esc(fullBinding) + '" tabindex="0" role="button">' +
           '<span class="ann-key" title="' + esc(k) + '">' + esc(k) + '</span>' +
-          '<span class="ann-val dg" title="' + esc(val) + '">' + esc(val) + '</span>' +
-          '<button class="del" data-ann-del="' + esc(k) + '" title="Remove annotation">\u00d7</button></div>';
+          '<span class="ann-val dg" title="' + esc(rowTitle) + '">' + esc(val) + '</span>' +
+          '<button class="del" data-ann-del="' + esc(k) + '" title="Remove annotation">\u00d7</button>' +
+          (fullBinding ? '<div class="ann-binding-detail" title="' + esc(fullBinding) + '">' + esc(fullBinding) + '</div>' : '') +
+          '</div>';
       }).join("") +
       '<div class="frow" style="margin-top:4px;margin-bottom:0">' +
       '<input class="tin" data-ann-key placeholder="prefix/name" value="' + esc(annDraftKey || "") + '" style="flex:1;min-width:0">' +
@@ -911,9 +942,9 @@ async function renderResource(res) {
         '<div style="font-size:11px;font-weight:600;color:var(--wire-status);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Status Outputs</div>' +
         '<div style="font-size:11px;color:var(--faint);margin-bottom:6px">Other resources can wire from this object\'s status:</div>' +
         detail.status.slice(0, 10).map(function (sf) {
-          return '<div style="display:flex;align-items:center;justify-content:space-between;padding:2px 0;font-size:11px">' +
-            '<code style="color:var(--wire-status);font-family:var(--mono)">status.' + esc(sf.path) + '</code>' +
-            '<span style="color:var(--faint)">' + esc(sf.type) + '</span>' +
+          return '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;padding:2px 0;font-size:11px;min-width:0">' +
+            '<code style="color:var(--wire-status);font-family:var(--mono);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="status.' + esc(sf.path) + '">status.' + esc(sf.path) + '</code>' +
+            '<span style="color:var(--faint);flex-shrink:0">' + esc(sf.type) + '</span>' +
             '</div>';
         }).join("") +
         '</div>';
@@ -1446,6 +1477,15 @@ export function init(rootEl, deps) {
   fseg = root.querySelector("#fseg");
 
   bindInspectorEvents(box, fseg);
+
+  if (box) {
+    box.addEventListener("click", function (e) {
+      var target = e.target.closest(".ann-row, .bound");
+      if (target && !e.target.closest("button, .del, .x, input, select, textarea")) {
+        target.classList.toggle("expanded");
+      }
+    });
+  }
 
   var lastSourcesSig = "";
   store.subscribe("doc", function () {
