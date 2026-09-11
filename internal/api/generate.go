@@ -100,7 +100,11 @@ func (srv *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	outputs, err := emit.Generate(b, crds, srv.OutDir)
+	var genOpts []emit.GenerateOption
+	if !req.Write {
+		genOpts = append(genOpts, emit.WithDraftPreview())
+	}
+	outputs, err := emit.Generate(b, crds, srv.OutDir, genOpts...)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return

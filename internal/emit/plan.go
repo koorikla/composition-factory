@@ -131,12 +131,20 @@ func refuseGoTemplateOnlyFeatures(b *blueprint.Blueprint) error {
 // CheckRequiredFields validates that every resource in b has all CRD-required fields specified.
 // Native K8s resources are skipped as their schemas include fields populated by admission controllers.
 func CheckRequiredFields(b *blueprint.Blueprint, crds []schema.CRD) error {
+	return checkRequiredFields(b, crds, false)
+}
+
+// CheckRequiredFieldsDraft validates that every configured resource in b has all CRD-required fields specified.
+// Unconfigured resources (fields: {}) are skipped so canvas draft workflow and preview generation
+// remain green until fields are authored.
+func CheckRequiredFieldsDraft(b *blueprint.Blueprint, crds []schema.CRD) error {
+	return checkRequiredFields(b, crds, true)
+}
+
+func checkRequiredFields(b *blueprint.Blueprint, crds []schema.CRD, allowUnconfigured bool) error {
 	wantNamespaced := b.Spec.XRD.Scope == "Namespaced"
 	for _, r := range b.Spec.Resources {
-		// Freshly dropped resources on the visual canvas have no fields configured yet (fields: {}).
-		// Skip required field validation for unconfigured resources so canvas draft workflow and
-		// preview generation remain green until fields are authored.
-		if len(r.Fields) == 0 {
+		if allowUnconfigured && len(r.Fields) == 0 {
 			continue
 		}
 		crd, err := resolveKind(crds, r, wantNamespaced)
@@ -149,15 +157,15 @@ func CheckRequiredFields(b *blueprint.Blueprint, crds []schema.CRD) error {
 		}
 		rc := r
 		rc.Fields = fields
-		if err := checkRequiredFields(rc, crd); err != nil {
+		if err := checkResourceRequiredFields(rc, crd, allowUnconfigured); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func checkRequiredFields(r blueprint.Resource, crd schema.CRD) error {
-	if crd.Native || len(r.Fields) == 0 {
+func checkResourceRequiredFields(r blueprint.Resource, crd schema.CRD, allowUnconfigured bool) error {
+	if crd.Native || (allowUnconfigured && len(r.Fields) == 0) {
 		return nil
 	}
 	nodes, err := crd.FieldTree()

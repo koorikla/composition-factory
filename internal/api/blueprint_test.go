@@ -656,6 +656,34 @@ func TestGenerateSurfacesValidationErrorsAsIs(t *testing.T) {
 	}
 }
 
+func TestGenerateWriteRejectsEmptyResourceMissingRequiredField(t *testing.T) {
+	h, path := testHandlerWithPath(t)
+	// Replace main-queue's fields with empty fields map: fields: {}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified := strings.Replace(string(body), "fields:\n        maxMessageSize: {from: params.maxMessageSize}\n        region: {value: \"eu-west-1\"}", "fields: {}", 1)
+	if err := os.WriteFile(path, []byte(modified), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Preview path (write: false) may stay green for unconfigured resource
+	previewRec := do(t, h, "POST", "/api/generate", `{"write":false}`)
+	if previewRec.Code != http.StatusOK {
+		t.Errorf("preview mode status = %d, want 200: %s", previewRec.Code, previewRec.Body)
+	}
+
+	// Write path (write: true) must refuse a resource missing a CRD-required field regardless of whether fields is empty
+	rec := do(t, h, "POST", "/api/generate", `{"write":true}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for write:true with empty resource missing required field: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "region") {
+		t.Errorf("expected error mentioning required field \"region\", got: %s", rec.Body)
+	}
+}
+
 // --- Additional coverage beyond the brief's verbatim tests ---
 //
 // Not from the brief's Step 1 listing. The brief's prose (distinct from its

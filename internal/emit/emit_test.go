@@ -119,3 +119,17 @@ func TestGenerateRejectsMissingRequiredField(t *testing.T) {
 		t.Fatalf("expected error mentioning missing required field \"region\", got: %v", err)
 	}
 }
+
+func TestGenerateRejectsEmptyResourceMissingRequiredField(t *testing.T) {
+	b := testBlueprint()
+	// An empty resource (fields: {}) missing CRD-required fields (e.g. region on Queue)
+	// must be refused during generation.
+	b.Spec.Resources[0].Fields = map[string]blueprint.Field{}
+	_, err := Generate(b, testCRDs(t), "out")
+	if err == nil {
+		t.Fatal("expected error when required field is missing on empty resource, got nil")
+	}
+	if !strings.Contains(err.Error(), `missing required field "region"`) {
+		t.Fatalf("expected error mentioning missing required field \"region\", got: %v", err)
+	}
+}

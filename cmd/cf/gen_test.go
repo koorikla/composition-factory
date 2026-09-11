@@ -504,6 +504,54 @@ func TestCheckRequiredFieldsOnRealCRD(t *testing.T) {
 	}
 }
 
+func TestCF189EmptyResourceMissingRequiredField(t *testing.T) {
+	// Repro from CF-189: one Bucket with fields: {} missing CRD-required field "region"
+	const bpYAML = `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: empty-bucket-app
+spec:
+  xrd:
+    group: platform.example.org
+    kind: XApp
+    plural: xapps
+    scope: Namespaced
+    version: v1alpha1
+    parameters:
+      providerName:
+        type: string
+        required: true
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0
+  resources:
+    - name: bucket
+      kind: Bucket
+      fields: {}
+`
+	dir := t.TempDir()
+	bpPath := filepath.Join(dir, "a-empty-bucket.cf.yaml")
+	if err := os.WriteFile(bpPath, []byte(bpYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	cmd := &GenCmd{
+		Blueprint: bpPath,
+		Out:       filepath.Join(dir, "oa"),
+		CacheDir:  cache.DefaultRoot(),
+	}
+	code, err := cmd.run(&buf)
+	if err != nil && strings.Contains(err.Error(), "is not in the cache") {
+		t.Skipf("skipping: s3 provider not in cache: %v", err)
+	}
+	if code == 0 && err == nil {
+		t.Fatalf("expected error stating that required field \"region\" on resource \"bucket\" is missing, got exit 0")
+	}
+	if err == nil || !strings.Contains(err.Error(), "region") || !strings.Contains(strings.ToLower(err.Error()), "bucket") {
+		t.Fatalf("expected error mentioning required field \"region\" and resource \"bucket\", got: %v", err)
+	}
+}
+
 func TestCF180GenValidateDockerUnavailable(t *testing.T) {
 	dir, bp, cacheDir := seed(t)
 	out := filepath.Join(dir, "out")

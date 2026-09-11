@@ -14,6 +14,21 @@ type Output struct {
 	Body []byte
 }
 
+// GenerateOption configures the generation process.
+type GenerateOption func(*generateConfig)
+
+type generateConfig struct {
+	allowUnconfigured bool
+}
+
+// WithDraftPreview configures Generate to allow unconfigured resources (fields: {})
+// so canvas draft workflow and preview generation remain green until fields are authored.
+func WithDraftPreview() GenerateOption {
+	return func(c *generateConfig) {
+		c.allowUnconfigured = true
+	}
+}
+
 // Generate renders every artifact for b into outDir. This is the ONLY entry
 // point: the CLI, the HTTP server and the MCP server all call it, so a
 // UI-authored artifact is always reproducible from the CLI.
@@ -29,12 +44,22 @@ type Output struct {
 // server prunes), while the XRD emitted a null `scope:`. Both artifacts
 // parse. Validating here makes "the one entry point" mean the one place the
 // rules are enforced too, not just the one place the files are assembled.
-func Generate(b *blueprint.Blueprint, crds []schema.CRD, outDir string) ([]Output, error) {
+func Generate(b *blueprint.Blueprint, crds []schema.CRD, outDir string, opts ...GenerateOption) ([]Output, error) {
+	var cfg generateConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	if err := b.Validate(); err != nil {
 		return nil, err
 	}
-	if err := CheckRequiredFields(b, crds); err != nil {
-		return nil, err
+	if cfg.allowUnconfigured {
+		if err := CheckRequiredFieldsDraft(b, crds); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := CheckRequiredFields(b, crds); err != nil {
+			return nil, err
+		}
 	}
 	name := b.Spec.XRD.Plural + "." + b.Spec.XRD.Group + ".yaml"
 
