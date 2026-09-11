@@ -22,6 +22,9 @@ Each issue had its acceptance tests run and verified failing before the fix, qua
 | **CF-156** (#41) | On a fresh blank scaffold providerName is editable and deletable with no confirm | Merged & Closed | `fad917d` | [34557800234](https://github.com/koorikla/composition-factory/actions/runs/34557800234) | `tests/cf156-providername-scaffold-locked.spec.js` |
 | **CF-119** (#7) | Importing the Composition that Generate just wrote turns inferred auto-ready into a custom step | Merged & Closed | `19949a7` | [34558281856](https://github.com/koorikla/composition-factory/actions/runs/34558281856) | `internal/adopt.TestCF119ImportGeneratedCompositionRoundTrip`, `tests/cf119-import-generated-composition.spec.js` |
 | **CF-157** (#42) | Kinds search dead-ends with 'No kinds match search query.' when the answer is 'add a provider in SOURCES' | Merged & Closed | `3804221` | [34558614428](https://github.com/koorikla/composition-factory/actions/runs/34558614428) | `tests/cf157-kinds-search-empty-state-sources-hint.spec.js` |
+| **CF-165** (#50) | Canvas wire rendering queries getBoundingClientRect per wire endpoint, triggering layout thrashing | Merged & Closed | `57cb2ca` | [34559183560](https://github.com/koorikla/composition-factory/actions/runs/34559183560) | `tests/cf165-canvas-wire-rect-cache.spec.js` |
+| **CF-161** (#46) | Store.List() deserializes full CRD trees across all cached providers just to read the provider ref | Merged & Closed | `1cefeb7` | [34559458488](https://github.com/koorikla/composition-factory/actions/runs/34559458488) | `internal/cache.TestStoreListDoesNotUnmarshalCRDs` |
+| **CF-166** (#51) | blueprint.SplitDocs allocates thousands of byte slices via bytes.Split on large YAML streams | Merged & Closed | `388512b` | [34559719397](https://github.com/koorikla/composition-factory/actions/runs/34559719397) | `internal/blueprint.TestSplitDocs`, `internal/blueprint.TestSplitDocs_StreamAllocations` |
 
 *Note: Issues CF-149 (#34), CF-152 (#37), CF-092 (#4), and CF-141 (#26) were closed in runs earlier in the day.*
 
@@ -43,6 +46,14 @@ Each issue had its acceptance tests run and verified failing before the fix, qua
 - **CF-156** (`web-proto/js/regions/inspector.js`, `tests/cf156-providername-scaffold-locked.spec.js`): Locked `providerName` parameter from first paint on fresh scaffolds (`resources.length === 0`), while preserving unlocking when all composed resources are native Kubernetes kinds. CI run 34557800234 green.
 - **CF-119** (`internal/adopt/adopt.go`, `internal/adopt/adopt_test.go`, `web-proto/js/regions/inspector.js`, `tests/cf119-import-generated-composition.spec.js`): Dropped default inferred `function-auto-ready` step from being adopted into `bp.Spec.Pipeline` as a custom step. Removed hardcoded `AutoReady` CRD mapping in `inferFnMeta` to prevent 404 network errors and console warnings when viewing adopted compositions. CI run 34558281856 green.
 - **CF-157** (`web-proto/js/regions/palette.js`, `tests/cf157-kinds-search-empty-state-sources-hint.spec.js`): Enhanced KINDS search empty state to direct user to SOURCES with an interactive button, and asynchronously query the catalogue to display matching provider packages with one-click Add buttons directly within the empty search panel. CI run 34558614428 green.
+- **CF-165** (`web-proto/js/regions/canvas.js`, `tests/cf165-canvas-wire-rect-cache.spec.js`): Cached canvas container `getBoundingClientRect()` once in `drawWires()` and forwarded to `portPos`, eliminating layout thrashing and forced synchronous reflows on wire redraws. CI run 34559183560 green.
+- **CF-161** (`internal/cache/store.go`, `internal/cache/store_test.go`): Stream-scanned `crds.json` tokens in `Store.List()` to read only top-level `"ref"` without deserializing full CRD schema trees (12x faster, 80x less allocations). CI run 34559458488 green.
+- **CF-166** (`internal/blueprint/split.go`, `internal/blueprint/split_test.go`): Replaced `bytes.Split` line allocation in `SplitDocs` with column-0 YAML separator offset index scanning (1.8x faster, 2.2x less allocations on large multi-document manifests). CI run 34559719397 green.
+
+### Wave 3 (Dispatched)
+- **CF-170** (`internal/emit/configuration.go`): Deduplicate package declarations in `spec.dependsOn` so provider and function packages are emitted at most once.
+- **CF-164** (`web-proto/js/regions/palette.js`): Reuse client-side kind field counts in `showKindPreview` to avoid redundant second network fetch downloading full schema trees.
+- **CF-163** (`internal/api/`): Point unit tests to pre-seeded fixture providers so all short tests execute completely offline without OCI network roundtrips.
 
 ---
 
