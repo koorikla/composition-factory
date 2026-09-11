@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -119,5 +121,106 @@ spec:
 	}
 	if !strings.Contains(rec.Body.String(), "status") {
 		t.Fatalf("expected error naming unknown field, got: %s", rec.Body)
+	}
+}
+
+// POST /api/blueprint/import rejects a request body exceeding the 4 MiB limit
+// with HTTP 413 and does not modify or persist the truncated document (CF-204).
+func TestImportBlueprintRejectsBodyExceedingLimit(t *testing.T) {
+	srv, blueprintPath, _, _ := testServerParts(t)
+
+	origDiskBytes, err := os.ReadFile(blueprintPath)
+	if err != nil {
+		t.Fatalf("read original blueprint: %v", err)
+	}
+
+	var b strings.Builder
+	b.WriteString(`apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test-bp
+spec:
+  xrd:
+    group: platform.example.org
+    kind: XTest
+    plural: xtests
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        description: `)
+	b.WriteString(strings.Repeat("a", 5<<20))
+	b.WriteString("END-MARKER\n")
+	b.WriteString("  resources: []\n")
+	bigYAML := b.String()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/blueprint/import", strings.NewReader(bigYAML))
+	req.Header.Set("Content-Type", "application/yaml")
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status %d, want 413: %.200s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "4 MiB") {
+		t.Errorf("expected error message to mention '4 MiB', got: %s", rec.Body)
+	}
+
+	persistedBytes, err := os.ReadFile(blueprintPath)
+	if err != nil {
+		t.Fatalf("read blueprint after import attempt: %v", err)
+	}
+	if !bytes.Equal(persistedBytes, origDiskBytes) {
+		t.Errorf("blueprint on disk was modified on rejected import: got %d bytes, want %d bytes", len(persistedBytes), len(origDiskBytes))
+	}
+}
+
+// A document within the 4 MiB limit (e.g. 3 MiB) imports intact.
+func TestImportBlueprintWithinLimit(t *testing.T) {
+	srv, blueprintPath, _, _ := testServerParts(t)
+
+	var b strings.Builder
+	b.WriteString(`apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test-bp
+spec:
+  xrd:
+    group: platform.example.org
+    kind: XTest
+    plural: xtests
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        description: `)
+	b.WriteString(strings.Repeat("a", 3<<20))
+	b.WriteString("END-MARKER\n")
+	b.WriteString("  resources: []\n")
+	yaml3MiB := b.String()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/blueprint/import", strings.NewReader(yaml3MiB))
+	req.Header.Set("Content-Type", "application/yaml")
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "END-MARKER") {
+		t.Fatalf("response missing END-MARKER")
+	}
+
+	persistedBytes, err := os.ReadFile(blueprintPath)
+	if err != nil {
+		t.Fatalf("read blueprint after import: %v", err)
+	}
+	if !bytes.Contains(persistedBytes, []byte("END-MARKER")) {
+		t.Fatalf("persisted blueprint missing END-MARKER")
+	}
+	if !bytes.Contains(persistedBytes, []byte("resources: []")) {
+		t.Fatalf("persisted blueprint missing resources: []")
 	}
 }

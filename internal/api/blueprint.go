@@ -189,6 +189,10 @@ func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, &b)
 }
 
+// maxImportBodyBytes is the maximum allowed request body size for
+// POST /api/blueprint/import (4 MiB).
+const maxImportBodyBytes = 4 << 20
+
 // handleImportBlueprint is POST /api/blueprint/import: the body is raw
 // blueprint YAML — the on-disk DSL format — run through the same
 // strict-decode + Validate gate a file gets (blueprint.Parse), persisted,
@@ -196,8 +200,15 @@ func (srv *server) handlePutBlueprint(w http.ResponseWriter, r *http.Request) {
 // here; the response shape is identical to PUT's, so no new contract
 // fixture is needed.
 func (srv *server) handleImportBlueprint(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBodyBytes)
+	defer r.Body.Close()
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("blueprint import body exceeds 4 MiB limit (max %d bytes)", maxImportBodyBytes))
+			return
+		}
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
