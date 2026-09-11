@@ -79,16 +79,20 @@ lease_min="${CF_LEASE_MIN:-120}"
 case "$now" in '' | *[!0-9]*) echo "claim.sh: CF_NOW must be epoch seconds" >&2; exit 64 ;; esac
 case "$lease_min" in '' | *[!0-9]*) echo "claim.sh: CF_LEASE_MIN must be whole minutes" >&2; exit 64 ;; esac
 
-# lease: from the issue's newest `taking —` comment. A missing or unparseable
-# `lease until` is a legacy lease from the comment time; no such comment, a
-# legacy lease from updatedAt. Yields {driver, expiry (epoch), until (iso),
-# files, live}.
+# lease: from the issue's newest `taking —` comment by a project member. The
+# repo is public, so a comment whose authorAssociation is present and not
+# OWNER, MEMBER or COLLABORATOR is ignored (as in land.sh); one without the
+# field is trusted. A missing or unparseable `lease until` is a legacy lease
+# from the comment time; no such comment, a legacy lease from updatedAt.
+# Yields {driver, expiry (epoch), until (iso), files, live}.
 # shellcheck disable=SC2016 # $now, $min, $c ... are jq variables
 JQ_LEASE='
 def labelled($l): any(.labels[]?; .name == $l);
+def trusted: .authorAssociation as $a
+  | $a == null or $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR";
 def legacy($at; $min): {driver: "legacy", expiry: (($at | fromdateiso8601) + $min * 60), files: []};
 def lease($now; $min):
-  ([.comments[]? | select((.body // "") | startswith("taking —"))] | last) as $c
+  ([.comments[]? | select((.body // "") | startswith("taking —")) | select(trusted)] | last) as $c
   | if $c == null then legacy(.updatedAt; $min)
     else
       ($c.body | split("\n")[0] | sub("\r$"; "")) as $line
