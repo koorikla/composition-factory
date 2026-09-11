@@ -6,6 +6,10 @@ BLUEPRINT ?= testdata/xqueue.cf.yaml
 OUT       ?= out
 STATICCHECK := v0.8.1
 
+# Heavy gates share this many machine-wide slots (scripts/driver/lock.sh). Measured 2026-09-11: 4 concurrent e2e suites flaked most, 3 and 2 were indistinguishable while other gates ran unpooled; memory never bound (>=32% free).
+GATE_SLOTS ?= 3
+GATE := ./scripts/driver/lock.sh gate $(GATE_SLOTS) --
+
 build:
 	go build -buildvcs=false -ldflags "-X main.version=$(VERSION)" -o $(BIN) ./cmd/cf
 
@@ -14,16 +18,16 @@ test:
 	go test $$(go list ./... | grep -v /node_modules/) -short -count=1
 
 test-race:
-	go test $$(go list ./... | grep -v /node_modules/) -short -race -count=1
+	$(GATE) go test $$(go list ./... | grep -v /node_modules/) -short -race -count=1
 
 # Lane B: needs a Docker daemon and the crossplane CLI on PATH.
 test-docker:
-	go test $$(go list ./... | grep -v /node_modules/) -run Acceptance -v -count=1
+	$(GATE) go test $$(go list ./... | grep -v /node_modules/) -run Acceptance -v -count=1
 
 # Playwright behavior suite over web-proto/. Boots its own isolated engine
 # on a workspace-derived port with a scratch blueprint (see playwright.config.js).
 test-e2e:
-	npx playwright test
+	$(GATE) npx playwright test
 
 # Driver coordination scripts (scripts/driver). Lock tests need lockf, so they skip on Linux.
 test-driver:
