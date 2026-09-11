@@ -124,7 +124,8 @@ function showToast(html, onLinkClick) {
   toastTimer = setTimeout(function () { if (t.parentNode) t.remove(); }, 6000);
 }
 
-function switchTab(r) {
+export function switchTab(r) {
+  if (r === "sources") r = "src";
   rail = r;
   if (tabsEl) {
     [].forEach.call(tabsEl.children, function (c) {

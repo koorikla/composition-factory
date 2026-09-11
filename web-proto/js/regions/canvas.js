@@ -19,6 +19,7 @@ import { esc } from "../dom.js";
 import { startDrag } from "../drag.js";
 import { listWires, fanOut, parseFrom } from "../wires.js";
 import { famOf, uniqueResourceName, COLORS } from "../utils.js";
+import { switchTab } from "./palette.js";
 
 const XR_ID = "xrd"; // store.selectedResource / positions key for the composite node
 
@@ -420,6 +421,16 @@ function gestureEnd() {
   if (pendingRender) { pendingRender = false; render(); }
 }
 
+function triggerTabSwitch(target) {
+  if (target === "sources") target = "src";
+  const btn = document.querySelector('#rtabs button[data-r="' + target + '"]');
+  if (btn) {
+    btn.click();
+  } else {
+    switchTab(target);
+  }
+}
+
 function render() {
   // Never rebuild the DOM under an active pointer gesture: replacing the
   // dragged element kills the drag mid-flight ("random mouse clutches").
@@ -439,11 +450,29 @@ function render() {
       emptyEl = document.createElement("div");
       emptyEl.className = "canvas-empty-state";
       emptyEl.id = "canvas-empty-state";
-      emptyEl.innerHTML = '<div class="canvas-empty-title">1. Drag kinds from KINDS  2. Add cloud providers in SOURCES</div>' +
+      emptyEl.innerHTML = '<div class="canvas-empty-title">' +
+          '1. Drag kinds from <span role="button" tabindex="0" class="canvas-empty-tab-link" data-tab-switch="kinds" data-r="kinds">KINDS</span>  ' +
+          '2. Add cloud providers in <span role="button" tabindex="0" class="canvas-empty-tab-link" data-tab-switch="sources" data-r="src">SOURCES</span>' +
+        '</div>' +
         '<div class="canvas-empty-steps">' +
-          '<div class="canvas-empty-step"><span class="step-num">1</span> Drag kinds onto canvas from <strong>KINDS</strong> (16 native Kubernetes kinds ready without providers)</div>' +
-          '<div class="canvas-empty-step"><span class="step-num">2</span> Add cloud providers in <strong>SOURCES</strong> for AWS, Azure, GCP</div>' +
+          '<div class="canvas-empty-step"><span class="step-num">1</span> Drag kinds onto canvas from <span role="button" tabindex="0" class="canvas-empty-tab-link" data-tab-switch="kinds" data-r="kinds"><strong>KINDS</strong></span> (16 native Kubernetes kinds ready without providers)</div>' +
+          '<div class="canvas-empty-step"><span class="step-num">2</span> Add cloud providers in <span role="button" tabindex="0" class="canvas-empty-tab-link" data-tab-switch="sources" data-r="src"><strong>SOURCES</strong></span> for AWS, Azure, GCP</div>' +
         '</div>';
+      emptyEl.addEventListener("click", function (e) {
+        const tabSwitch = e.target.closest("[data-tab-switch]");
+        if (tabSwitch) {
+          e.stopPropagation();
+          triggerTabSwitch(tabSwitch.getAttribute("data-tab-switch"));
+        }
+      });
+      emptyEl.addEventListener("keydown", function (e) {
+        const tabSwitchKey = e.target.closest("[data-tab-switch]");
+        if (tabSwitchKey && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          e.stopPropagation();
+          triggerTabSwitch(tabSwitchKey.getAttribute("data-tab-switch"));
+        }
+      });
       canvasEl.appendChild(emptyEl);
     }
   } else if (emptyEl) {
@@ -895,6 +924,12 @@ function removeResource(name) {
 
 function onKeyDown(e) {
   const t = e.target;
+  const tabSwitchKey = t && t.closest && t.closest("[data-tab-switch]");
+  if (tabSwitchKey && (e.key === "Enter" || e.key === " ")) {
+    e.preventDefault();
+    triggerTabSwitch(tabSwitchKey.getAttribute("data-tab-switch"));
+    return;
+  }
   if (t && t.id === "xr-add-input") {
     if (e.key === "Enter") {
       const val = (t.value || "").trim();
@@ -1001,6 +1036,11 @@ function onCwClick(e) {
 }
 
 function onCanvasClick(e) {
+  const tabSwitch = e.target.closest("[data-tab-switch]");
+  if (tabSwitch) {
+    triggerTabSwitch(tabSwitch.getAttribute("data-tab-switch"));
+    return;
+  }
   const act = e.target.closest("[data-act]");
   if (act) {
     const rn = act.getAttribute("data-res");
