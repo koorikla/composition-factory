@@ -2808,3 +2808,196 @@ spec:
 		}
 	}
 }
+
+func TestAdoptIntegerLiteralPreservesWholeNumberFormat(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+                messageRetentionSeconds: 1209600
+                oneMillion: 1000000
+                largeThreshold: 3000000
+                negativeVal: -1209600
+                zeroVal: 0
+                delaySeconds: 900
+                maxMessageSize: 262144
+                retryIntervals:
+                  - 1209600
+                  - 1000000
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+
+	expectedFields := map[string]string{
+		"region":                  "us-east-1",
+		"messageRetentionSeconds": "1209600",
+		"oneMillion":              "1000000",
+		"largeThreshold":          "3000000",
+		"negativeVal":             "-1209600",
+		"zeroVal":                 "0",
+		"delaySeconds":            "900",
+		"maxMessageSize":          "262144",
+		"retryIntervals[0]":       "1209600",
+		"retryIntervals[1]":       "1000000",
+	}
+
+	for k, want := range expectedFields {
+		f, ok := res.Fields[k]
+		if !ok {
+			t.Errorf("field %q missing from adopted resource", k)
+			continue
+		}
+		if f.Value != want {
+			t.Errorf("field %q value = %q, want %q", k, f.Value, want)
+		}
+	}
+}
+
+func TestAdoptIntegerLiteralRoundTripEmission(t *testing.T) {
+	crdDoc := `
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: queues.sqs.aws.upbound.io
+spec:
+  group: sqs.aws.upbound.io
+  names:
+    kind: Queue
+    plural: queues
+    categories: [managed]
+  scope: Namespaced
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              properties:
+                forProvider:
+                  type: object
+                  properties:
+                    region: {type: string}
+                    messageRetentionSeconds: {type: integer}
+                    delaySeconds: {type: integer}
+`
+	crds, err := schema.ParseCRDs(blueprint.SplitDocs([]byte(crdDoc)))
+	if err != nil {
+		t.Fatalf("parse CRD: %v", err)
+	}
+
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata: blueprint.Metadata{
+			Name: "queues.aws.example.org",
+		},
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{
+				{Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0"},
+			},
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "XQueue",
+				Plural:  "xqueues",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "main-queue",
+					Kind:     "Queue",
+					Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
+					Fields: map[string]blueprint.Field{
+						"region":                  {Value: "us-east-1"},
+						"messageRetentionSeconds": {Value: "1209600"},
+						"delaySeconds":            {Value: "900"},
+					},
+				},
+			},
+		},
+	}
+
+	outputs, err := emit.Generate(b, crds, "")
+	if err != nil {
+		t.Fatalf("emit.Generate: %v", err)
+	}
+	var compYAML []byte
+	for _, o := range outputs {
+		if strings.Contains(o.Path, "compositions") {
+			compYAML = o.Body
+			break
+		}
+	}
+	if len(compYAML) == 0 {
+		t.Fatalf("no composition generated")
+	}
+
+	adoptedBP, _, err := Adopt(compYAML, Options{
+		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	reOutputs, err := emit.Generate(adoptedBP, crds, "")
+	if err != nil {
+		t.Fatalf("emit.Generate on adopted blueprint: %v", err)
+	}
+	var reComp []byte
+	for _, o := range reOutputs {
+		if strings.Contains(o.Path, "compositions") {
+			reComp = o.Body
+			break
+		}
+	}
+	if len(reComp) == 0 {
+		t.Fatalf("no re-composition generated")
+	}
+
+	if strings.Contains(string(reComp), "1.2096e+06") {
+		t.Errorf("regenerated composition contains scientific notation 1.2096e+06:\n%s", string(reComp))
+	}
+	if !strings.Contains(string(reComp), "messageRetentionSeconds: 1209600") {
+		t.Errorf("regenerated composition missing 'messageRetentionSeconds: 1209600':\n%s", string(reComp))
+	}
+}

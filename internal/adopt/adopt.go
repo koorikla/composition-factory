@@ -691,7 +691,7 @@ func parseEnvironmentConfigDocs(envConfigDocs []map[string]any, bp *blueprint.Bl
 						strVal = ""
 					default:
 						inferredType = "string"
-						strVal = fmt.Sprintf("%v", val)
+						strVal = formatScalarValue(val)
 					}
 
 					ensureEnvDeclared(bp, k, inferredType)
@@ -719,7 +719,7 @@ func parseEnvironmentConfigDocs(envConfigDocs []map[string]any, bp *blueprint.Bl
 					sort.Strings(labelKeys)
 					matchLabels := make(map[string]string, len(labels))
 					for _, lk := range labelKeys {
-						matchLabels[lk] = fmt.Sprintf("%v", labels[lk])
+						matchLabels[lk] = formatScalarValue(labels[lk])
 					}
 					sel = &blueprint.EnvironmentConfigSelector{MatchLabels: matchLabels}
 				}
@@ -736,7 +736,7 @@ func parseEnvironmentConfigDocs(envConfigDocs []map[string]any, bp *blueprint.Bl
 				sort.Strings(labelKeys)
 				matchLabels := make(map[string]string, len(labels))
 				for _, lk := range labelKeys {
-					matchLabels[lk] = fmt.Sprintf("%v", labels[lk])
+					matchLabels[lk] = formatScalarValue(labels[lk])
 				}
 				targetCfg.Selector = &blueprint.EnvironmentConfigSelector{MatchLabels: matchLabels}
 			}
@@ -952,7 +952,7 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 	var pEnum []string
 	if enumRaw, ok := pObj["enum"].([]any); ok {
 		for _, e := range enumRaw {
-			s := fmt.Sprint(e)
+			s := formatScalarValue(e)
 			if checkScalarClean(s) == nil {
 				pEnum = append(pEnum, s)
 			}
@@ -967,26 +967,7 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 
 	var defStr string
 	if defVal, ok := pObj["default"]; ok {
-		switch v := defVal.(type) {
-		case bool:
-			if v {
-				defStr = "true"
-			} else {
-				defStr = "false"
-			}
-		case int:
-			defStr = strconv.Itoa(v)
-		case int64:
-			defStr = strconv.FormatInt(v, 10)
-		case float64:
-			if v == float64(int64(v)) {
-				defStr = strconv.FormatInt(int64(v), 10)
-			} else {
-				defStr = strconv.FormatFloat(v, 'f', -1, 64)
-			}
-		default:
-			defStr = fmt.Sprint(defVal)
-		}
+		defStr = formatScalarValue(defVal)
 		if err := checkScalarClean(defStr); err != nil {
 			report.Record(path+".default", "contains control characters")
 			defStr = ""
@@ -1187,7 +1168,7 @@ func extractResourceName(m map[string]any, kind string, placeholders []string) s
 			}
 			for k, v := range anns {
 				unmaskedK := unmaskString(fmt.Sprint(k), placeholders)
-				unmaskedV := unmaskString(fmt.Sprint(v), placeholders)
+				unmaskedV := unmaskString(formatScalarValue(v), placeholders)
 				if m := reSetResourceNameAnn.FindStringSubmatch(unmaskedK); len(m) >= 2 {
 					candidate := m[1]
 					if candidate == "" && len(m) >= 3 {
@@ -1997,7 +1978,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 			for _, k := range annKeys {
 				v := anns[k]
 				rawK := unmaskString(fmt.Sprint(k), placeholders)
-				rawStr := unmaskString(fmt.Sprint(v), placeholders)
+				rawStr := unmaskString(formatScalarValue(v), placeholders)
 				if k == "crossplane.io/composition-resource-name" || strings.Contains(rawK, "setResourceNameAnnotation") || strings.Contains(rawStr, "setResourceNameAnnotation") {
 					continue
 				}
@@ -2055,6 +2036,8 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 						srcRes = normalizeDNSLabel(srcRes)
 					}
 					res.Annotations[rawK] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
+				} else if strings.Contains(rawStr, "{{") {
+					res.Annotations[rawK] = blueprint.Field{Raw: rawStr}
 				} else {
 					res.Annotations[rawK] = blueprint.Field{Value: rawStr}
 				}
@@ -2068,7 +2051,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 				continue
 			}
 			if k == "name" {
-				rawName := unmaskString(fmt.Sprint(v), placeholders)
+				rawName := unmaskString(formatScalarValue(v), placeholders)
 				if isDefaultMetadataName(rawName, res.Name, normName) {
 					continue
 				}
@@ -2125,7 +2108,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 		if mapVal, ok := v.(map[string]any); ok {
 			extractFields(k, mapVal, res.Fields, placeholders, res.Name, report, nameMapping, bp)
 		} else {
-			rawStr := unmaskString(fmt.Sprint(v), placeholders)
+			rawStr := unmaskString(formatScalarValue(v), placeholders)
 			if err := checkScalarClean(rawStr); err != nil {
 				report.Record(fmt.Sprintf("resource.%s.fields.%s", res.Name, k), "contains newlines or control characters")
 				continue
@@ -2223,7 +2206,7 @@ func extractEnvelopeFields(prefix string, obj map[string]any, out map[string]blu
 				case nil:
 					canUseValue = false
 				default:
-					rawElem := unmaskString(fmt.Sprint(e), placeholders)
+					rawElem := unmaskString(formatScalarValue(e), placeholders)
 					if strings.Contains(rawElem, ",") || strings.Contains(rawElem, "{{") || checkScalarClean(rawElem) != nil || strings.TrimSpace(rawElem) == "" {
 						canUseValue = false
 						break
@@ -2286,7 +2269,7 @@ func extractEnvelopeFields(prefix string, obj map[string]any, out map[string]blu
 		case nil:
 			continue
 		default:
-			rawStr := unmaskString(fmt.Sprint(val), placeholders)
+			rawStr := unmaskString(formatScalarValue(val), placeholders)
 			if err := checkScalarClean(rawStr); err != nil {
 				if report != nil {
 					report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path),
@@ -2450,7 +2433,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 						out[elemPath] = blueprint.Field{Value: rawStr}
 					}
 				default:
-					rawStr := unmaskString(fmt.Sprint(elemVal), placeholders)
+					rawStr := unmaskString(formatScalarValue(elemVal), placeholders)
 					if err := checkScalarClean(rawStr); err != nil {
 						report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath),
 							"contains newlines or control characters")
@@ -2460,7 +2443,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 				}
 			}
 		default:
-			rawStr := unmaskString(fmt.Sprint(val), placeholders)
+			rawStr := unmaskString(formatScalarValue(val), placeholders)
 			if err := checkScalarClean(rawStr); err != nil {
 				report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path),
 					"contains newlines or control characters")
@@ -2468,6 +2451,56 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 			}
 			out[path] = blueprint.Field{Value: rawStr}
 		}
+	}
+}
+
+// formatScalarValue stringifies a scalar value while preserving whole numbers
+// in standard decimal notation rather than scientific notation (e.g. 1209600 -> "1209600").
+func formatScalarValue(val any) string {
+	switch v := val.(type) {
+	case string:
+		return v
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case int16:
+		return strconv.FormatInt(int64(v), 10)
+	case int8:
+		return strconv.FormatInt(int64(v), 10)
+	case uint:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint64:
+		return strconv.FormatUint(v, 10)
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint16:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint8:
+		return strconv.FormatUint(uint64(v), 10)
+	case float64:
+		if v >= -1<<53 && v <= 1<<53 && v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case float32:
+		if float64(v) == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
+	case json.Number:
+		return v.String()
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(val)
 	}
 }
 
