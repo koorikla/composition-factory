@@ -292,10 +292,16 @@ export function getProviders() {
 
 /**
  * Add a provider by OCI ref; the server pulls, caches and reindexes.
+ * With `replaces`, the new ref takes the place of that declared source in
+ * spec.sources (and on every resource pinned to it) — the repair for a
+ * source that failed to load (CF-152).
  * @param {string} ref
+ * @param {string} [replaces] A declared source ref the new one replaces.
  */
-export function addProvider(ref) {
-  return request("POST", "/api/providers", { ref: ref });
+export function addProvider(ref, replaces) {
+  const body = { ref: ref };
+  if (replaces) body.replaces = replaces;
+  return request("POST", "/api/providers", body);
 }
 
 /**

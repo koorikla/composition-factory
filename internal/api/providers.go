@@ -26,10 +26,18 @@ import (
 // "provider" half of POST's. Kinds is a count, not the kinds themselves; the
 // canvas fetches those from /api/kinds, which stays the one source for kind
 // listings.
+//
+// Error is set only on a source the blueprint declares that the server could
+// not load (CF-152): the fetch failed and the ref never entered srv.Providers,
+// so it has no digest and no kinds, but it is still part of the document and
+// still the reason generate answers 400. Listing it — with the reason — is
+// what lets the canvas offer the remove/replace that repairs the document;
+// before, the only way out was hand-editing the YAML.
 type providerEntry struct {
 	Ref    string `json:"ref"`
 	Digest string `json:"digest"`
 	Kinds  int    `json:"kinds"`
+	Error  string `json:"error,omitempty"`
 }
 
 // handleListProviders serves GET /api/providers:
@@ -46,11 +54,20 @@ type providerEntry struct {
 // had every reason to believe was cached. Under the same lock the DELETE
 // swaps under, the list always describes a provider set whose cache entries
 // all still exist.
-func (srv *server) handleListProviders(w http.ResponseWriter, _ *http.Request) {
+func (srv *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
-	entries, err := srv.providerEntriesLocked()
+	b, ok := srv.loadBlueprint(w)
+	if !ok {
+		return
+	}
+	// A declared source the server has not tried yet is neither held nor
+	// known to have failed; attempt it (memoized, so a failed ref is not
+	// re-fetched on every list) so the list can name the reason.
+	_ = srv.ensureBlueprintSourcesLoadedLocked(r.Context(), b)
+
+	entries, err := srv.providerEntriesLocked(b)
 	if err != nil {
 		// The server's own cache no longer holds a provider it was
 		// started with (or added) — its fixed environment is broken, not
@@ -65,16 +82,36 @@ func (srv *server) handleListProviders(w http.ResponseWriter, _ *http.Request) {
 // providerEntriesLocked builds the {"providers":[...]} entry list for the
 // server's current provider set — the one envelope both GET /api/providers
 // and DELETE /api/providers/{ref} serve, built in one place so the two can
-// never disagree on its shape. srv.mu must be held by the caller.
-func (srv *server) providerEntriesLocked() ([]providerEntry, error) {
+// never disagree on its shape — followed by every source b declares that the
+// server does not hold, each carrying the fetch failure as its Error (see
+// providerEntry). srv.mu must be held by the caller.
+func (srv *server) providerEntriesLocked(b *blueprint.Blueprint) ([]providerEntry, error) {
 	counts := kindCountsByProvider(srv.Index)
 	entries := make([]providerEntry, 0, len(srv.Providers))
+	held := make(map[string]bool, len(srv.Providers))
 	for _, ref := range srv.Providers {
 		digest, err := srv.Store.LoadDigest(ref)
 		if err != nil {
 			return nil, err
 		}
+		held[ref] = true
 		entries = append(entries, providerEntry{Ref: ref, Digest: digest, Kinds: counts[ref]})
+	}
+	if b == nil {
+		return entries, nil
+	}
+	seen := make(map[string]bool)
+	for _, s := range b.Spec.Sources {
+		ref := s.Provider
+		if ref == "" || ref == blueprint.NativeProvider || held[ref] || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		reason := "source is declared but not loaded"
+		if err := srv.failedSources[ref]; err != nil {
+			reason = err.Error()
+		}
+		entries = append(entries, providerEntry{Ref: ref, Error: reason})
 	}
 	return entries, nil
 }
@@ -87,9 +124,14 @@ func kindCountsByProvider(idx *index.Index) map[string]int {
 	return idx.CountsByProvider()
 }
 
-// addProviderRequest is the POST /api/providers body.
+// addProviderRequest is the POST /api/providers body. Replaces names a
+// declared source the new ref takes the place of (CF-152): its spec.sources
+// entry becomes Ref, every resource pinned to it re-points to Ref, and if
+// the server held it, it is evicted the way DELETE evicts. It is how a
+// source that failed to load is repaired without hand-editing the document.
 type addProviderRequest struct {
-	Ref string `json:"ref"`
+	Ref      string `json:"ref"`
+	Replaces string `json:"replaces,omitempty"`
 }
 
 // handleAddProvider serves POST /api/providers: {"ref":"ghcr.io/..."} ->
@@ -158,8 +200,19 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Only return 409 Conflict if already in srv.Providers AND already declared in spec.sources.
-	if isProvider && hasSource {
+	replaces := req.Replaces
+	if replaces == req.Ref {
+		replaces = ""
+	}
+	if replaces != "" && !declaresProvider(b, replaces) {
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("source not declared: %q", replaces))
+		return
+	}
+
+	// Only return 409 Conflict if already in srv.Providers AND already declared
+	// in spec.sources — and nothing is being replaced: swapping a declared
+	// source for one the server already serves is still a real change.
+	if isProvider && hasSource && replaces == "" {
 		writeJSONError(w, http.StatusConflict, fmt.Sprintf("provider %q is already cached", req.Ref))
 		return
 	}
@@ -204,21 +257,48 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		}
 		pkgDigest = pkg.Digest
 	}
+	origProviders := append([]string(nil), srv.Providers...)
 	if !isProvider {
 		srv.Providers = append(srv.Providers, req.Ref)
 	}
 
-	if !hasSource {
+	if !hasSource && replaces == "" {
 		b.Spec.Sources = append(b.Spec.Sources, blueprint.Source{Provider: req.Ref})
+	}
+	if replaces != "" {
+		replaceProvider(b, replaces, req.Ref)
+		delete(srv.failedSources, replaces)
+		remaining := make([]string, 0, len(srv.Providers))
+		for _, p := range srv.Providers {
+			if p != replaces {
+				remaining = append(remaining, p)
+			}
+		}
+		srv.Providers = remaining
+	}
+
+	if !hasSource || replaces != "" {
 		if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
+			srv.Providers = origProviders
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
 
 	if err := srv.rebuildIndexLocked(b); err != nil {
+		srv.Providers = origProviders
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// The replaced ref, if the server held it, is evicted the way DELETE
+	// evicts — cache entry and lock pin — after the swap has landed. One
+	// that never loaded left nothing on disk to evict.
+	if replaces != "" && contains(origProviders, replaces) {
+		if err := srv.evictProviderLocked(replaces); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	added := []index.Kind{}
@@ -254,9 +334,11 @@ func pathProviderRef(r *http.Request) (string, error) {
 // the server currently serves — evict its cached schemas and its lockfile
 // pin, and rebuild the index over the remaining providers — answering 200
 // with the remaining providers list, the same {"providers":[...]} envelope
-// GET serves. 404 is a ref the server does not hold; 409 is a ref the
-// blueprint still references — from spec.sources or any resource's provider —
-// with the message naming every referencer, the same refuse-and-name
+// GET serves. A ref the server does not hold but the blueprint declares is
+// a source that failed to load (CF-152): it is removed from spec.sources and
+// answered 200 the same way, since that document edit is the whole repair.
+// 404 is a ref neither held nor declared; 409 is a ref a resource still
+// pins, with the message naming every referencer, the same refuse-and-name
 // discipline DeleteParameter applies to a still-referenced parameter
 // (internal/blueprint/edit.go): the user fixes every reference in one
 // round-trip instead of discovering a broken blueprint at the next generate.
@@ -284,18 +366,6 @@ func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) 
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
-	held := false
-	for _, p := range srv.Providers {
-		if p == ref {
-			held = true
-			break
-		}
-	}
-	if !held {
-		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("provider not found: %q", ref))
-		return
-	}
-
 	// The referencer check reads the blueprint from disk, like every handler
 	// that consults it — the file is the source of truth, and a copy held
 	// since some earlier request could miss a source or resource added since.
@@ -303,23 +373,39 @@ func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+
+	held := contains(srv.Providers, ref)
+	if !held && !declaresProvider(b, ref) {
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("provider not found: %q", ref))
+		return
+	}
 	if msg := providerReferencers(b, ref); msg != "" {
 		writeJSONError(w, http.StatusConflict, msg)
 		return
 	}
 
-	// Remove from spec.sources if present
-	newSources := make([]blueprint.Source, 0, len(b.Spec.Sources))
-	changedSources := false
-	for _, s := range b.Spec.Sources {
-		if s.Provider == ref {
-			changedSources = true
-			continue
+	if !held {
+		// A declared source the server never loaded (CF-152): there is no
+		// cache entry, pin or index share to evict — removing it is purely
+		// a document edit, plus forgetting the fetch failure it left behind.
+		b.Spec.Sources = withoutProvider(b.Spec.Sources, ref)
+		if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
-		newSources = append(newSources, s)
+		delete(srv.failedSources, ref)
+		entries, err := srv.providerEntriesLocked(b)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"providers": entries})
+		return
 	}
-	if changedSources {
-		b.Spec.Sources = newSources
+
+	// Remove from spec.sources if present
+	if declaresProvider(b, ref) {
+		b.Spec.Sources = withoutProvider(b.Spec.Sources, ref)
 		if err := writeBlueprintFile(srv.Blueprint, b); err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -340,23 +426,12 @@ func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := srv.Store.Delete(ref); err != nil {
+	if err := srv.evictProviderLocked(ref); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	l, err := cache.ReadLock(srv.Lock)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if l.Remove(ref) { // a ref never pinned (or pinned elsewhere) is fine; don't rewrite for a no-op
-		if err := l.Write(srv.Lock); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
 	}
 
-	entries, err := srv.providerEntriesLocked()
+	entries, err := srv.providerEntriesLocked(b)
 	if err != nil {
 		// The delete itself has landed; this is the server's environment
 		// failing to describe the survivors, same classification as GET's.
@@ -394,4 +469,80 @@ func providerReferencers(b *blueprint.Blueprint, ref string) string {
 	}
 	parts = append(parts, "resources "+strings.Join(resources, ", "))
 	return fmt.Sprintf("delete provider %q: still referenced by %s", ref, strings.Join(parts, " and by "))
+}
+
+// evictProviderLocked removes ref's cached schemas and its lockfile pin —
+// the on-disk half of a delete, after the in-memory swap has landed. A ref
+// never pinned (or pinned elsewhere) is fine; the lock is not rewritten for
+// a no-op. srv.mu must be held by the caller.
+func (srv *server) evictProviderLocked(ref string) error {
+	if err := srv.Store.Delete(ref); err != nil {
+		return err
+	}
+	l, err := cache.ReadLock(srv.Lock)
+	if err != nil {
+		return err
+	}
+	if l.Remove(ref) {
+		if err := l.Write(srv.Lock); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// withoutProvider returns sources minus every entry naming ref.
+func withoutProvider(sources []blueprint.Source, ref string) []blueprint.Source {
+	out := make([]blueprint.Source, 0, len(sources))
+	for _, s := range sources {
+		if s.Provider != ref {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func contains(refs []string, ref string) bool {
+	for _, r := range refs {
+		if r == ref {
+			return true
+		}
+	}
+	return false
+}
+
+// declaresProvider reports whether b.Spec.Sources names ref.
+func declaresProvider(b *blueprint.Blueprint, ref string) bool {
+	for _, s := range b.Spec.Sources {
+		if s.Provider == ref {
+			return true
+		}
+	}
+	return false
+}
+
+// replaceProvider swaps old for new in b: the spec.sources entry naming old
+// becomes new, in place (dropped instead when new is already declared, so
+// the document never lists a source twice), and every resource pinned to
+// old re-points to new — the pins are what make a lone sources edit fail
+// validation ("provider is not declared in spec.sources").
+func replaceProvider(b *blueprint.Blueprint, old, new string) {
+	already := declaresProvider(b, new)
+	out := make([]blueprint.Source, 0, len(b.Spec.Sources))
+	for _, s := range b.Spec.Sources {
+		if s.Provider != old {
+			out = append(out, s)
+			continue
+		}
+		if !already {
+			out = append(out, blueprint.Source{Provider: new})
+			already = true
+		}
+	}
+	b.Spec.Sources = out
+	for i := range b.Spec.Resources {
+		if b.Spec.Resources[i].Provider == old {
+			b.Spec.Resources[i].Provider = new
+		}
+	}
 }

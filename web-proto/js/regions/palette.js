@@ -7,7 +7,10 @@
  *             dataTransfer JSON payload {kind, apiVersion, provider}.
  *   SHARED  — XRD parameters from doc.spec.xrd.parameters, rendered with the
  *             prototype's Vars card look; badge = fan-out count (wires.js).
- *   SOURCES — doc.spec.sources refs as src-rows; add flow disabled for now.
+ *   SOURCES — the server's provider list as src-rows. A declared source the
+ *             server could not load is listed too, in a failed state with the
+ *             fetch reason and a remove/replace action (CF-152): either edits
+ *             spec.sources server-side, then the doc reloads and regenerates.
  *
  * Exported init(rootEl, {store, api}) is the single entry point — main.js
  * calls it once with the region root and the shared store/api.
@@ -58,6 +61,7 @@ let paramMembers = [];       // typed-object member rows in the add form
 let providers = null;        // server-side cached providers, null = not loaded
 let providerSeq = 0;
 let providersErr = null;     // verbatim server error from the last add/list
+let replaceRef = null;       // failed source the add field is replacing (CF-152), or null
 let catRows = null;          // catalogue search results, null = untouched
 let catTimer = null;
 let fnRows = null;           // functions catalogue search results, null = untouched
@@ -407,7 +411,7 @@ function drawSources() {
 
   // Providers tab
   let sources = providers !== null
-    ? providers.map(function (p) { return { provider: p.ref, digest: p.digest, kinds: p.kinds }; })
+    ? providers.map(function (p) { return { provider: p.ref, digest: p.digest, kinds: p.kinds, error: p.error || "" }; })
     : (doc.spec && doc.spec.sources || []).slice();
   const nativeCount = kinds.filter(function (k) { return k.provider === "k8s"; }).length;
   if (nativeCount) sources = sources.concat([{ provider: "k8s", digest: "", kinds: nativeCount, native: true }]);
@@ -418,6 +422,21 @@ function drawSources() {
   if (!sources.length) h += '<div class="empty">No sources declared.</div>';
   sources.forEach(function (s) {
     const ref = s && s.provider || "";
+    if (s.error) {
+      // A declared source that failed to load: no digest, no kinds, nothing
+      // to expand — the row carries the reason and the two ways out.
+      h += '<div class="src-row" data-ref="' + esc(ref) + '" data-state="failed" style="cursor:default;align-items:flex-start;flex-wrap:wrap" ' +
+        'title="This source is declared in the blueprint but could not be loaded">' +
+        '<span class="sw" style="width:5px;height:22px;border-radius:1.5px;background:var(--err)"></span>' +
+        '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(ref.split("/").pop()) + "</span>" +
+        '<span class="dg" style="display:block;word-break:break-all">' + esc(ref) + '</span>' +
+        '<span class="dg src-fail-reason" role="alert" style="display:block;color:var(--err);white-space:normal;word-break:break-word;margin-top:2px">' + esc(s.error) + '</span></span>' +
+        '<span class="pill" style="background:transparent;color:var(--err);border:1px solid var(--err);flex:0 0 auto;margin-top:3px">failed</span>' +
+        '<button class="btn sm" data-replace-ref="' + esc(ref) + '" style="flex:0 0 auto" title="Replace this source with another ref (e.g. a version that exists)">Replace</button>' +
+        '<button class="del src-row-remove" data-remove-ref="' + esc(ref) + '" title="Remove this source from the blueprint">&#215;</button>' +
+        '</div>';
+      return;
+    }
     const fam = /aws/.test(ref) ? "aws" : "k8s";
     const meta = (s.digest ? s.digest.slice(0, 19) : "") + (s.kinds ? " \u00b7 " + s.kinds + " kinds" : "");
     h += '<div class="src-row" data-ref="' + esc(ref) + '" style="cursor:pointer" title="Click for details" aria-expanded="' + (expandedProvider === ref) + '">' +
@@ -449,9 +468,14 @@ function drawSources() {
         kindsHtml + "</div>";
     }
   });
+  if (replaceRef) {
+    h += '<div id="src-replace-note" class="dg" style="padding:6px 10px 0;display:flex;gap:6px;align-items:center;white-space:normal">' +
+      '<span style="min-width:0;flex:1;word-break:break-all">Replacing <b>' + esc(replaceRef) + '</b> \u2014 enter the new ref and press Replace.</span>' +
+      '<button class="btn sm" id="src-replace-cancel" title="Keep the failed source as it is">Cancel</button></div>';
+  }
   h += '<div style="padding:8px 10px;display:flex;gap:6px">' +
-    '<input id="src-add-ref" class="search" style="flex:1;min-width:0" placeholder="ghcr.io/\u2026/provider-x:vN" aria-label="Provider ref">' +
-    '<button class="btn sm" id="src-add-btn">Add</button></div>';
+    '<input id="src-add-ref" class="search" style="flex:1;min-width:0" placeholder="ghcr.io/\u2026/provider-x:vN" aria-label="' + (replaceRef ? "Replacement provider ref" : "Provider ref") + '">' +
+    '<button class="btn sm" id="src-add-btn">' + (replaceRef ? "Replace" : "Add") + '</button></div>';
   // add/remove failures surface here, verbatim (the refactor that added
   // the functions rail dropped this render and the add handler with it —
   // both are load-bearing: without them the Add button is silently dead)
@@ -465,6 +489,7 @@ function drawSources() {
   } else {
     catRows.slice(0, 20).forEach(function (c) {
       var isInstalled = (sources || []).some(function (s) {
+        if (s.error) return false;            // a failed source serves nothing
         var sp = (s.provider || "").split(":")[0];
         var cr = (c.ref || "").split(":")[0];
         return s.provider === c.ref || (cr && sp && sp === cr);
@@ -856,6 +881,25 @@ function bindPaletteEvents() {
       if (ref) removeProviderWithConfirm(ref);
       return;
     }
+    const replaceBtn = e.target.closest("button[data-replace-ref]");
+    if (replaceBtn) {
+      e.stopPropagation();
+      // Put the failed ref in the add field to be edited (most repairs are a
+      // tag change) and arm the add flow to swap it server-side.
+      replaceRef = replaceBtn.getAttribute("data-replace-ref");
+      providersErr = null;
+      drawRail();
+      const fld = railEl.querySelector("#src-add-ref");
+      if (fld) { fld.value = replaceRef; fld.focus(); fld.select(); }
+      return;
+    }
+    if (e.target.closest("#src-replace-cancel")) {
+      replaceRef = null;
+      drawRail();
+      const fld = railEl.querySelector("#src-add-ref");
+      if (fld) fld.value = "";
+      return;
+    }
     const guideExBtn = e.target.closest("button[data-guide-example]");
     if (guideExBtn) {
       const exId = guideExBtn.getAttribute("data-guide-example");
@@ -884,7 +928,10 @@ function bindPaletteEvents() {
       addBtn.innerHTML = '<span class="spinner"></span> Adding\u2026';
       if (addInput) addInput.disabled = true;
       providersErr = null;
-      api.addProvider(addRef).then(function () {
+      const replacing = replaceRef;
+      api.addProvider(addRef, replacing || undefined).then(function () {
+        if (replacing && replaceRef === replacing) replaceRef = null;
+        if (addInput) addInput.value = "";
         loadProviders();
         loadKinds();             // new kinds must appear in the KINDS tab
         return store.loadDoc();
@@ -928,6 +975,7 @@ function bindPaletteEvents() {
     }
     if (e.target.closest(".src-detail")) return; // the change listener owns it
     const srcRow = e.target.closest(".src-row[data-ref]");
+    if (srcRow && srcRow.getAttribute("data-state") === "failed") return; // nothing to expand
     if (srcRow) {
       const ref = srcRow.getAttribute("data-ref");
       if (expandedProvider === ref) { expandedProvider = null; providerKinds = null; drawRail(); return; }
@@ -1118,6 +1166,7 @@ function bindPaletteStoreSubscriptions() {
       providers = null;
       expandedProvider = null;
       providerKinds = null;
+      replaceRef = null;       // the source being replaced may be gone
       loadKinds();
       loadProviders();
     }
