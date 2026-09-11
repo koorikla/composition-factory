@@ -332,15 +332,7 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 	writeAnnotations(d, ti, annPlan)
 
 	if crd.Native {
-		var otherMeta []forProviderField
-		for _, fld := range metaPlan {
-			if fld.path == "metadata.name" || fld.path == "metadata.annotations" || strings.HasPrefix(fld.path, "metadata.annotations.") {
-				continue
-			}
-			fldCopy := fld
-			fldCopy.path = strings.TrimPrefix(fld.path, "metadata.")
-			otherMeta = append(otherMeta, fldCopy)
-		}
+		otherMeta := otherNativeMetadata(metaPlan)
 		if len(otherMeta) > 0 {
 			if err := writeNativeFields(d, ti+1, r.Name, otherMeta); err != nil {
 				return err

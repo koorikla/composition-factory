@@ -876,3 +876,136 @@ func TestNativeMetadataNameExplicitOverride(t *testing.T) {
 		t.Errorf("Python missing custom metadata.name:\n%s", string(compPy))
 	}
 }
+
+func TestNativeMetadataLabelsParityAcrossEngines(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "repro-labels"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "example.org", Kind: "XApp", Plural: "xapps",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"appName": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "sa", Kind: "ServiceAccount", Provider: blueprint.NativeProvider,
+					Annotations: map[string]blueprint.Field{
+						"example.org/team": {Value: "infra"},
+					},
+					Fields: map[string]blueprint.Field{
+						"metadata.labels[app]": {From: "params.appName"},
+						"metadata.labels[env]": {Value: "production"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	// 1. Go-template
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineGoTemplating}
+	compGo, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(go): %v", err)
+	}
+	goStr := string(compGo)
+	if !strings.Contains(goStr, "'example.org/team': 'infra'") ||
+		!strings.Contains(goStr, "labels:\n") ||
+		!strings.Contains(goStr, "app: {{ $spec.appName | quote }}") ||
+		!strings.Contains(goStr, "env: 'production'") {
+		t.Errorf("Go-template missing metadata.labels or annotations:\n%s", goStr)
+	}
+
+	// 2. KCL
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+	compKCL, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(kcl): %v", err)
+	}
+	kclStr := string(compKCL)
+	if !strings.Contains(kclStr, `"example.org/team" = "infra"`) ||
+		!strings.Contains(kclStr, "labels = {") ||
+		!strings.Contains(kclStr, "app = _spec?.appName") ||
+		!strings.Contains(kclStr, `env = "production"`) {
+		t.Errorf("KCL missing metadata.labels or annotations:\n%s", kclStr)
+	}
+
+	// 3. Python
+	b.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	compPy, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(python): %v", err)
+	}
+	pyStr := string(compPy)
+	if !strings.Contains(pyStr, `"example.org/team": "infra"`) ||
+		!strings.Contains(pyStr, `"labels": _present({`) ||
+		!strings.Contains(pyStr, `"app": spec.get("appName")`) ||
+		!strings.Contains(pyStr, `"env": "production"`) {
+		t.Errorf("Python missing metadata.labels or annotations:\n%s", pyStr)
+	}
+
+	// 4. Looped native resource with labels
+	bLooped := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "repro-labels-looped"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "example.org", Kind: "XApp", Plural: "xapps",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"appName": {Type: "string", Required: true},
+					"count":   {Type: "integer", Default: "2"},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "sa", Kind: "ServiceAccount", Provider: blueprint.NativeProvider,
+					ForEach: "params.count",
+					Fields: map[string]blueprint.Field{
+						"metadata.labels[app]": {From: "params.appName"},
+					},
+				},
+			},
+		},
+	}
+	if err := bLooped.Validate(); err != nil {
+		t.Fatalf("Validate(looped): %v", err)
+	}
+
+	// Looped Go-template
+	bLooped.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineGoTemplating}
+	compGoLooped, err := Composition(bLooped, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(go looped): %v", err)
+	}
+	if !strings.Contains(string(compGoLooped), `app: {{ $spec.appName | quote }}`) {
+		t.Errorf("Go-template looped missing labels:\n%s", string(compGoLooped))
+	}
+
+	// Looped KCL
+	bLooped.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+	compKCLLooped, err := Composition(bLooped, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(kcl looped): %v", err)
+	}
+	if !strings.Contains(string(compKCLLooped), `app = _spec?.appName`) {
+		t.Errorf("KCL looped missing labels:\n%s", string(compKCLLooped))
+	}
+
+	// Looped Python
+	bLooped.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	compPyLooped, err := Composition(bLooped, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition(python looped): %v", err)
+	}
+	if !strings.Contains(string(compPyLooped), `"app": spec.get("appName")`) {
+		t.Errorf("Python looped missing labels:\n%s", string(compPyLooped))
+	}
+}

@@ -114,6 +114,16 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 			}
 		}
 		sb.WriteString(fmt.Sprintf("%s}\n", metaInner))
+		if crd.Native {
+			otherMeta := otherNativeMetadata(pres.MetaPlan)
+			if len(otherMeta) > 0 {
+				root, err := buildNativeTree(r.Name, otherMeta)
+				if err != nil {
+					return "", err
+				}
+				writeKCLNodes(&sb, metaInner, root.children)
+			}
+		}
 		sb.WriteString(fmt.Sprintf("%s}\n", inner))
 
 		// Spec

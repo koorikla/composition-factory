@@ -175,6 +175,22 @@ func writeNativeFields(d *Doc, indent int, resourceName string, plan []forProvid
 	return nil
 }
 
+// otherNativeMetadata extracts all non-name, non-annotation planned fields from
+// a native resource's MetaPlan and strips the leading "metadata." prefix so they can
+// be structured as a native YAML/KCL/Python tree under the metadata block.
+func otherNativeMetadata(metaPlan []forProviderField) []forProviderField {
+	var otherMeta []forProviderField
+	for _, fld := range metaPlan {
+		if fld.path == "metadata.name" || fld.path == "name" || fld.path == "metadata.annotations" || strings.HasPrefix(fld.path, "metadata.annotations.") {
+			continue
+		}
+		fldCopy := fld
+		fldCopy.path = strings.TrimPrefix(fld.path, "metadata.")
+		otherMeta = append(otherMeta, fldCopy)
+	}
+	return otherMeta
+}
+
 // cutArrayIndex splits a path segment's trailing [N] element index. A
 // non-numeric bracket suffix (map keys never reach here; ParseFieldPath
 // strips those first) or no suffix returns the segment untouched.

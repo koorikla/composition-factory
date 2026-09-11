@@ -642,3 +642,44 @@ spec:
 		t.Errorf("Python output missing nested tags map:\n%s", s)
 	}
 }
+
+func TestEmitPythonNativeMetadataLabels(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "native-labels-python"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EnginePython},
+			XRD: blueprint.XRD{
+				Group: "example.org", Kind: "XApp", Plural: "xapps",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"appName": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "sa", Kind: "ServiceAccount", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.labels[app]":  {From: "params.appName"},
+						"metadata.labels[tier]": {Value: "backend"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	compBytes, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(compBytes)
+	if !strings.Contains(s, `"labels": _present({`) ||
+		!strings.Contains(s, `"app": spec.get("appName")`) ||
+		!strings.Contains(s, `"tier": "backend"`) {
+		t.Errorf("Python missing metadata.labels:\n%s", s)
+	}
+}
