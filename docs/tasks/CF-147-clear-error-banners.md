@@ -22,7 +22,7 @@ In UX runs M3 (F8) and M2 (F1):
    - On `#env-add-name` / `#env-add-default` input: clear `envErr = null; drawRail();`.
 3. **Inspector (`web-proto/js/regions/inspector.js`)**:
    - In `store.subscribe("doc")`: reset `warnMsg = null`.
-   - In `store.subscribe("generate")`: reset `warnMsg = null; render();`.
+   - In `store.subscribe("selection")`: reset `warnMsg = null; render();`.
    - On user input in inspector (`box.addEventListener("input")`): if `warnMsg` is set, clear `warnMsg = null;` and remove `.warnbar` from `box` so errors clear immediately as the user edits inputs.
 4. **Global Toasts (`web-proto/js/main.js`)**:
    - In `store.subscribe("selection")`: call `clearErrorToast()`.

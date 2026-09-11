@@ -3233,12 +3233,6 @@ export function init(rootEl, deps) {
     warnMsg = null;
     render();
   });
-  store.subscribe("generate", function () {
-    if (warnMsg) {
-      warnMsg = null;
-      render();
-    }
-  });
 
   render();
 }

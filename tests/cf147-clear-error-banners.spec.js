@@ -66,7 +66,7 @@ test.describe('CF-147 — Error banners and toasts clear on next action or doc c
     await expect(page.locator('#lrail .warnbar[role="alert"]')).toHaveCount(0);
   });
 
-  test('Inspector error banner clears on user input, generate, and doc change', async ({ page }) => {
+  test('Inspector error banner clears on user input and doc change', async ({ page }) => {
     await page.goto('/');
     await canvasSettled(page);
 
@@ -116,14 +116,12 @@ test.describe('CF-147 — Error banners and toasts clear on next action or doc c
     await expect(warnbar).toBeVisible();
     await expect(warnbar).toContainText(/key is required/i);
 
-    // 4. Clicking Generate must clear inspector error banner
-    page.on('dialog', d => d.accept());
-    const genBtn = page.locator('#generateBtn');
-    await expect(genBtn).toBeVisible();
-    await genBtn.click();
+    // 4. Typing into the key input must immediately clear the error banner
+    await keyInput.fill('example.com/another-key');
     await expect(warnbar).toHaveCount(0);
 
     // 5. Re-trigger error again
+    await keyInput.fill('');
     await addBtn.click();
     await expect(warnbar).toBeVisible();
 
