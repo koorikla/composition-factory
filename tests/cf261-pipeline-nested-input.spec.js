@@ -102,7 +102,7 @@ test.describe('CF-261 Pipeline Step Nested Input Preservation', () => {
     await expect.poll(async () => {
       const bDoc = await (await request.get(ENGINE + '/api/blueprint')).json();
       return bDoc.spec.pipeline?.[0]?.input || '';
-    }).toContain('extraField');
+    }).toContain('filter: false');
 
     const finalDoc = await (await request.get(ENGINE + '/api/blueprint')).json();
     const finalInput = finalDoc.spec.pipeline[0].input;
