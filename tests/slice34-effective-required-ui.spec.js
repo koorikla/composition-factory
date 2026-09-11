@@ -2,25 +2,13 @@
 // Required view shows selector+template (branches), not 250 conditional
 // leaves; managed kinds are unchanged (chain == raw there).
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors, dropKind } = require('./helpers')
 guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request)
 })
 
-async function dropKind(page, kind, av, x, y) {
-  await page.evaluate(({ kind, av, x, y }) => {
-    const row = document.querySelector('.kind[data-kind="' + kind + '"][data-av="' + av + '"]')
-    const cw = document.getElementById('cw')
-    const r = cw.getBoundingClientRect()
-    const dt = new DataTransfer()
-    row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }))
-    const ev = { clientX: r.left + x, clientY: r.top + y }
-    cw.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, ...ev }))
-    cw.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, ...ev }))
-  }, { kind, av, x, y })
-}
 
 test('a dropped Deployment card shows its true must-set fields, not a flood', async ({ page }) => {
   await page.goto('/')

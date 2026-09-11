@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const { resetDoc, guardPageErrors } = require('./helpers');
+const { resetDoc, guardPageErrors, dropKind } = require('./helpers');
 
 test.describe('CF-141 — Inspector badges nested optional leaves correctly', () => {
   guardPageErrors();
@@ -8,18 +8,6 @@ test.describe('CF-141 — Inspector badges nested optional leaves correctly', ()
     await resetDoc(request);
   });
 
-  async function dropKind(page, kind, av, x, y) {
-    await page.evaluate(({ kind, av, x, y }) => {
-      const row = document.querySelector('.kind[data-kind="' + kind + '"][data-av="' + av + '"]');
-      const cw = document.getElementById('cw');
-      const r = cw.getBoundingClientRect();
-      const dt = new DataTransfer();
-      row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
-      const ev = { clientX: r.left + x, clientY: r.top + y };
-      cw.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, ...ev }));
-      cw.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, ...ev }));
-    }, { kind, av, x, y });
-  }
 
   test('nested leaf in an optional object is not badged REQ in All filter or counted in required when parent is unset', async ({ page }) => {
     await page.goto('/');

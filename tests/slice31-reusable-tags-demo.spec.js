@@ -2,7 +2,7 @@
 // template applied by convention to every resource that doesn't set tags,
 // with dead-letter's explicit raw tags overriding it.
 const { test, expect } = require('@playwright/test')
-const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
+const { resetDoc, ENGINE, guardPageErrors, dropKind } = require('./helpers')
 guardPageErrors()
 
 test.beforeEach(async ({ request }) => {
@@ -19,17 +19,8 @@ test('the composition carries the convention define and both tag behaviors', asy
 
 test('a freshly dropped resource inherits the reusable tags too', async ({ page }) => {
   await page.goto('/')
-  await page.evaluate(() => {
-    // a Queue has a top-level tags leaf, so the convention applies to it
-    const row = document.querySelector('#lrail .kind[data-kind="Queue"][data-av*=".m."]')
-    const cw = document.getElementById('cw')
-    const r = cw.getBoundingClientRect()
-    const dt = new DataTransfer()
-    row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }))
-    const at = { clientX: r.left + 180, clientY: r.top + 300 }
-    cw.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, ...at }))
-    cw.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, ...at }))
-  })
+  // a Queue has a top-level tags leaf, so the convention applies to it
+  await dropKind(page, 'Queue', '*=.m.', 180, 300)
   await expect(page.locator('.node[data-id="queue"]')).toBeVisible()
   // the convention reaches the new resource with zero configuration: the
   // define holds the tag literal ONCE; each covered resource emits a CALL

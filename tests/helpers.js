@@ -102,7 +102,8 @@ module.exports.guardPageErrors = guardPageErrors
 
 /** Resolve once the canvas has stopped moving: fonts loaded, node boxes and
  *  wire paths identical across consecutive animation frames. */
-async function canvasSettled(page) {
+async function canvasSettled(page, options) {
+  const timeout = (options && options.timeout) || 10000
   await page.evaluate(async () => {
     delete window.__cfSettle
     if (document.fonts) await document.fonts.ready
@@ -116,7 +117,7 @@ async function canvasSettled(page) {
     const s = window.__cfSettle || (window.__cfSettle = { sig: null, n: 0 })
     if (sig !== s.sig) { s.sig = sig; s.n = 0; return false }
     return ++s.n >= 3
-  }, null, { polling: 'raf' })
+  }, null, { polling: 'raf', timeout })
 }
 
 /** boundingBox() that cannot return null: waits for the element to be visible
@@ -173,6 +174,72 @@ async function clickWire(page, nth, options) {
   await page.mouse.click(x, y, options)
 }
 
+/** Drop a kind from the palette onto the canvas.
+ *  Waits for the kind's row locator to be attached and for the canvas to be ready
+ *  (settled) before dispatching dragstart/dragover/drop events.
+ *  Fails with an error naming the kind if the row never appears in the palette.
+ */
+async function dropKind(page, kind, av, x, y, options) {
+  if (typeof av === 'object' && av !== null) {
+    options = av;
+    av = options.av;
+    x = options.x;
+    y = options.y;
+  } else if (typeof x === 'object' && x !== null) {
+    options = x;
+    x = options.x;
+    y = options.y;
+  }
+  const dropX = typeof x === 'number' ? x : 400;
+  const dropY = typeof y === 'number' ? y : 300;
+  const timeout = (options && options.timeout) || 10000;
+
+  let rowSelector = `.kind[data-kind="${kind}"]`;
+  if (av) {
+    if (av.startsWith('[')) {
+      rowSelector += av;
+    } else if (av.startsWith('*=')) {
+      const val = av.slice(2).replace(/^["']|["']$/g, '');
+      rowSelector += `[data-av*="${val}"]`;
+    } else if (av.includes('/')) {
+      rowSelector += `[data-av="${av}"]`;
+    } else {
+      const val = av.replace(/^["']|["']$/g, '');
+      rowSelector += `[data-av*="${val}"]`;
+    }
+  }
+
+  const rowLocator = page.locator(rowSelector).first();
+
+  const waitRow = (async () => {
+    try {
+      await rowLocator.waitFor({ state: 'attached', timeout });
+    } catch (err) {
+      throw new Error(`palette kind "${kind}" not found in palette (selector ${rowSelector} never attached within ${timeout}ms)`);
+    }
+  })();
+
+  const waitCanvas = (async () => {
+    await page.waitForFunction(() => !window.store || (window.store.state && window.store.state.doc), null, { timeout });
+    await canvasSettled(page, { timeout });
+  })();
+
+  await Promise.all([waitRow, waitCanvas]);
+
+  await rowLocator.evaluate((row, { x, y }) => {
+    const cw = document.getElementById('cw');
+    if (!cw) throw new Error('canvas #cw element not found');
+    const r = cw.getBoundingClientRect();
+    const dt = new DataTransfer();
+    row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const ev = { clientX: r.left + x, clientY: r.top + y };
+    cw.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, ...ev }));
+    cw.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, ...ev }));
+  }, { x: dropX, y: dropY });
+}
+
 module.exports.canvasSettled = canvasSettled
 module.exports.settledBox = settledBox
 module.exports.clickWire = clickWire
+module.exports.dropKind = dropKind
+
