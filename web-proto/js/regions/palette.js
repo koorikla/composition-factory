@@ -365,13 +365,13 @@ function drawKinds() {
       const bg = matchesXRD ? "rgba(34,197,94,0.12)" : "rgba(255,255,255,0.06)";
       const color = matchesXRD ? "var(--ok)" : "var(--faint)";
       const title = matchesXRD ? "Matches composition XRD scope" : "Does not match composition XRD scope";
-      scopeTag = '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:' + bg + ';color:' + color + ';border-radius:3px;margin-left:6px" title="' + title + '">' + esc(tagText) + '</span>';
+      scopeTag = '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:' + bg + ';color:' + color + ';border-radius:3px" title="' + title + '">' + esc(tagText) + '</span>';
     } else if (isCluster) {
       const tagText = matchesXRD ? "cluster-scoped \u00b7 matches XRD" : "cluster-scoped";
       const bg = matchesXRD ? "rgba(34,197,94,0.12)" : "rgba(255,255,255,0.06)";
       const color = matchesXRD ? "var(--ok)" : "var(--faint)";
       const title = matchesXRD ? "Matches composition XRD scope" : "Does not match composition XRD scope";
-      scopeTag = '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:' + bg + ';color:' + color + ';border-radius:3px;margin-left:6px" title="' + title + '">' + esc(tagText) + '</span>';
+      scopeTag = '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:' + bg + ';color:' + color + ';border-radius:3px" title="' + title + '">' + esc(tagText) + '</span>';
     }
 
     const isCollapsible = isMismatch && items.length > 0;
@@ -383,7 +383,9 @@ function drawKinds() {
 
     h += '<div class="grp' + (isCluster ? ' grp-cluster' : '') + '"' +
       (isCollapsible ? ' data-grp-toggle="' + esc(g) + '"' : '') +
-      ' style="' + cursorStyle + '">' + arrow + '<span class="lbl">' + esc(g) + '</span>' + scopeTag + '<span class="n">' + items.length + "</span></div>";
+      ' style="' + cursorStyle + '">' +
+      '<div class="grp-line">' + arrow + '<span class="lbl" title="' + esc(g) + '">' + esc(g) + '</span><span class="n">' + items.length + '</span></div>' +
+      scopeTag + '</div>';
 
     if (!isCollapsed) {
       items.forEach(function (k) {

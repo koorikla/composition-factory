@@ -167,9 +167,12 @@ html,body{height:100%;overflow:hidden}
 .search{width:100%;height:27px;padding:0 9px;border:1px solid var(--rule-2);border-radius:5px;
   background:var(--sunk);color:var(--ink);font-size:12px}
 .search::placeholder{color:var(--faint)}
-.search:focus{outline:none;border-color:var(--wire-xrd);background:var(--surface)}
-.grp{padding:9px 12px 3px;display:flex;align-items:center;gap:6px}
-.grp .n{font-family:var(--mono);font-size:10px;color:var(--faint);margin-left:auto}
+.grp{padding:8px 12px 4px;display:flex;flex-wrap:wrap;align-items:center;gap:3px 6px;min-width:0}
+.grp-line{display:flex;align-items:center;gap:6px;width:100%;min-width:0}
+.grp .grp-toggle{flex:0 0 auto}
+.grp .lbl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
+.grp .n{font-family:var(--mono);font-size:10px;color:var(--faint);margin-left:auto;flex:0 0 auto}
+.grp .pill{white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto;height:auto;min-height:14px;line-height:12px;padding:1px 5px}
 .kind{display:flex;align-items:center;gap:6px;padding:4.5px 8px;cursor:pointer;border-left:2px solid transparent}
 .kind:hover,.kind:focus-visible{background:var(--sunk);border-left-color:var(--wire-xrd)}
 .kind .sw{width:5px;height:14px;border-radius:1.5px;flex:0 0 auto}
