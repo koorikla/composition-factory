@@ -123,6 +123,110 @@ export function listWires(doc) {
 }
 
 /**
+ * Parse a when: condition expression.
+ * @param {string} str
+ * @returns {{param?: string, op?: string, val?: string}}
+ */
+export function parseWhen(str) {
+  if (!str || typeof str !== "string") return {};
+  const m = /^(?:params|parameters|\$params)\.([A-Za-z0-9_.-]+?)(?:\s*(==|!=)\s*"([^"]*)")?$/.exec(str.trim());
+  if (!m) {
+    const fallback = /^(?:params|parameters|\$params)\.([A-Za-z0-9_.-]+)/.exec(str.trim());
+    if (fallback) return { param: fallback[1].replace(/\.+$/, ""), op: "==", val: undefined };
+    return {};
+  }
+  return { param: m[1].replace(/\.+$/, ""), op: m[2] || "==", val: m[3] };
+}
+
+/**
+ * Check whether a reference string references parameter pn.
+ * @param {string} ref
+ * @param {string} pn
+ * @returns {boolean}
+ */
+export function isParamRef(ref, pn) {
+  if (typeof ref !== "string" || !ref || !pn) return false;
+  if (ref === "params." + pn || ref.indexOf("params." + pn + ".") === 0) return true;
+  if (ref === "parameters." + pn || ref.indexOf("parameters." + pn + ".") === 0) return true;
+  if (ref === "$params." + pn || ref.indexOf("$params." + pn + ".") === 0) return true;
+  return false;
+}
+
+/**
+ * Check whether a when: condition references parameter pn.
+ * @param {string} whenStr
+ * @param {string} pn
+ * @returns {boolean}
+ */
+export function isWhenReferencingParam(whenStr, pn) {
+  if (!whenStr || typeof whenStr !== "string") return false;
+  if (isParamRef(whenStr, pn)) return true;
+  const parsed = parseWhen(whenStr);
+  if (parsed && (parsed.param === pn || (parsed.param && parsed.param.indexOf(pn + ".") === 0))) return true;
+  const m = /^(?:params|parameters|\$params)\.([A-Za-z0-9_.-]+)/.exec(whenStr.trim());
+  if (m && (m[1] === pn || m[1].indexOf(pn + ".") === 0)) return true;
+  return false;
+}
+
+/**
+ * Extract parameter reference from a when: guard expression.
+ * @param {string} when
+ * @returns {string|null} Parameter name without "params." prefix, or null.
+ */
+export function extractWhenParam(when) {
+  if (typeof when !== "string") return null;
+  const parsed = parseWhen(when);
+  return parsed.param || null;
+}
+
+/**
+ * Extract parameter reference from a forEach: expression.
+ * @param {string|Object} forEach
+ * @returns {string|null} Parameter name without "params." prefix, or null.
+ */
+export function extractForEachParam(forEach) {
+  let str;
+  if (typeof forEach === "string") {
+    str = forEach;
+  } else if (forEach && typeof forEach === "object" && typeof forEach.over === "string") {
+    str = forEach.over;
+  } else {
+    return null;
+  }
+  const s = str.trim();
+  const m = /^(?:params|parameters|\$params)\.([A-Za-z0-9_.-]+)/.exec(s);
+  if (!m) return null;
+  const p = m[1].replace(/\.+$/, "");
+  if (!p) return null;
+  return isParamRef(s, p) ? p : null;
+}
+
+function extractWhenEnv(when) {
+  if (typeof when !== "string") return null;
+  const s = when.trim();
+  const m = /^(?:\$env|env)\.([A-Za-z0-9_.-]+)/.exec(s);
+  if (!m) return null;
+  const p = m[1].replace(/\.+$/, "");
+  return p || null;
+}
+
+function extractForEachEnv(forEach) {
+  let str;
+  if (typeof forEach === "string") {
+    str = forEach;
+  } else if (forEach && typeof forEach === "object" && typeof forEach.over === "string") {
+    str = forEach.over;
+  } else {
+    return null;
+  }
+  const s = str.trim();
+  const m = /^(?:\$env|env)\.([A-Za-z0-9_.-]+)/.exec(s);
+  if (!m) return null;
+  const p = m[1].replace(/\.+$/, "");
+  return p || null;
+}
+
+/**
  * Compute the fan-out count map for every parameter in the document in a single pass.
  * @param {Object} doc The full blueprint document.
  * @returns {Record<string, number>} Map from param name to count.
@@ -133,20 +237,44 @@ export function fanOutMap(doc) {
     return docFanOutCache.get(doc);
   }
   const map = {};
+  const addParam = function (param) {
+    if (!param) return;
+    map[param] = (map[param] || 0) + 1;
+    const parts = param.split(".");
+    for (let p = 1; p < parts.length; p++) {
+      const prefix = parts.slice(0, p).join(".");
+      map[prefix] = (map[prefix] || 0) + 1;
+    }
+  };
+  const addEnv = function (key) {
+    if (!key) return;
+    map["env." + key] = (map["env." + key] || 0) + 1;
+  };
+
   const wires = listWires(doc);
   for (let i = 0; i < wires.length; i++) {
     const w = wires[i];
     if (w.kind === "param" && w.param) {
-      map[w.param] = (map[w.param] || 0) + 1;
-      const parts = w.param.split(".");
-      for (let p = 1; p < parts.length; p++) {
-        const prefix = parts.slice(0, p).join(".");
-        map[prefix] = (map[prefix] || 0) + 1;
-      }
+      addParam(w.param);
     } else if (w.kind === "env" && w.envKey) {
-      map["env." + w.envKey] = (map["env." + w.envKey] || 0) + 1;
+      addEnv(w.envKey);
     }
   }
+
+  const resources = (doc && doc.spec && doc.spec.resources) || [];
+  for (let i = 0; i < resources.length; i++) {
+    const r = resources[i];
+    if (!r || typeof r !== "object") continue;
+    if (r.when) {
+      addParam(extractWhenParam(r.when));
+      addEnv(extractWhenEnv(r.when));
+    }
+    if (r.forEach) {
+      addParam(extractForEachParam(r.forEach));
+      addEnv(extractForEachEnv(r.forEach));
+    }
+  }
+
   docFanOutCache.set(doc, map);
   return map;
 }
