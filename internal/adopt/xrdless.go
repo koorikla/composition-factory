@@ -220,24 +220,13 @@ func applyXRDlessEvidence(bp *blueprint.Blueprint, compDocs []map[string]any, sy
 		}
 		p := bp.Spec.XRD.Parameters[name]
 		if p.Type == "object" && len(p.Properties) > 0 {
-			members := make([]string, 0, len(p.Properties))
-			for m := range p.Properties {
-				members = append(members, m)
-			}
-			sort.Strings(members)
-			for _, m := range members {
-				mp := p.Properties[m]
-				var baseMember *blueprint.Parameter
-				if baseBP != nil {
-					if bpParent, ok := baseBP.Spec.XRD.Parameters[name]; ok && bpParent.Properties != nil {
-						if bmp, ok := bpParent.Properties[m]; ok {
-							baseMember = &bmp
-						}
-					}
+			var baseProps map[string]blueprint.Parameter
+			if baseBP != nil {
+				if bpParent, ok := baseBP.Spec.XRD.Parameters[name]; ok {
+					baseProps = bpParent.Properties
 				}
-				settle(&mp, ev[name+"."+m], "xrd.parameters."+name+".properties."+m, report, baseMember)
-				p.Properties[m] = mp
 			}
+			settleProperties(p.Properties, baseProps, name, "xrd.parameters."+name, ev, report)
 			report.Record("xrd.parameters."+name, "without the XRD, description could not be recovered (combine XRD and Composition into one file, or import XRD to complement)")
 			bp.Spec.XRD.Parameters[name] = p
 			continue
@@ -250,6 +239,51 @@ func applyXRDlessEvidence(bp *blueprint.Blueprint, compDocs []map[string]any, sy
 		}
 		settle(&p, ev[name], "xrd.parameters."+name, report, baseParam)
 		bp.Spec.XRD.Parameters[name] = p
+	}
+}
+
+// settleProperties recursively settles properties of an object parameter.
+func settleProperties(
+	props map[string]blueprint.Parameter,
+	baseProps map[string]blueprint.Parameter,
+	paramPath string,
+	reportPath string,
+	ev map[string]*paramEvidence,
+	report *LossReport,
+) {
+	members := make([]string, 0, len(props))
+	for m := range props {
+		members = append(members, m)
+	}
+	sort.Strings(members)
+
+	for _, m := range members {
+		mp := props[m]
+		var baseMember *blueprint.Parameter
+		if baseProps != nil {
+			if bmp, ok := baseProps[m]; ok {
+				baseMember = &bmp
+			}
+		}
+
+		childParamPath := m
+		if paramPath != "" {
+			childParamPath = paramPath + "." + m
+		}
+		childReportPath := fmt.Sprintf("%s.properties.%s", reportPath, m)
+
+		if mp.Type == "object" && len(mp.Properties) > 0 {
+			var childBaseProps map[string]blueprint.Parameter
+			if baseMember != nil {
+				childBaseProps = baseMember.Properties
+			}
+			settleProperties(mp.Properties, childBaseProps, childParamPath, childReportPath, ev, report)
+			report.Record(childReportPath, "without the XRD, description could not be recovered (combine XRD and Composition into one file, or import XRD to complement)")
+			props[m] = mp
+		} else {
+			settle(&mp, ev[childParamPath], childReportPath, report, baseMember)
+			props[m] = mp
+		}
 	}
 }
 
@@ -302,8 +336,8 @@ func settle(p *blueprint.Parameter, e *paramEvidence, path string, report *LossR
 			lost = append(lost, "type (rendered unquoted, so it is not a string; written as string until the XRD or the CRD schema says which scalar it is)")
 		}
 	default:
-		if p.Type == "boolean" || p.Type == "integer" {
-			// type was already recovered from template structure (e.g. conditional or loop bound)
+		if p.Type == "boolean" || p.Type == "integer" || p.Type == "object" {
+			// type was already recovered from template structure (e.g. conditional or loop bound) or is an object
 		} else if baseParam != nil && baseParam.Type != "" {
 			p.Type = baseParam.Type
 		} else {

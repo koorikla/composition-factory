@@ -1940,7 +1940,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 		if strings.HasPrefix(toPath, "spec.forProvider.") {
 			targetField := strings.TrimPrefix(toPath, "spec.forProvider.")
 			targetField = normalizeMapFieldPath(targetField)
-			if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
+			if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
 				if res.Fields == nil {
 					res.Fields = make(map[string]blueprint.Field)
 				}
@@ -1958,7 +1958,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 		} else if strings.HasPrefix(toPath, "spec.") {
 			if res.Provider == blueprint.NativeProvider {
 				targetField := normalizeMapFieldPath(toPath)
-				if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
+				if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
 					if res.Fields == nil {
 						res.Fields = make(map[string]blueprint.Field)
 					}
@@ -1973,7 +1973,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			} else {
 				targetField := strings.TrimPrefix(toPath, "spec.")
 				targetField = normalizeMapFieldPath(targetField)
-				if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) && len(strings.Split(paramName, ".")) <= 2 {
+				if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) {
 					if res.Envelope == nil {
 						res.Envelope = make(map[string]blueprint.Field)
 					}
@@ -2050,47 +2050,56 @@ func ensureParamDeclared(bp *blueprint.Blueprint, paramPath string) {
 }
 
 func ensureParamDeclaredTyped(bp *blueprint.Blueprint, paramPath string, typ string) {
+	if bp == nil {
+		return
+	}
+	if bp.Spec.XRD.Parameters == nil {
+		bp.Spec.XRD.Parameters = make(map[string]blueprint.Parameter)
+	}
+	if typ == "" {
+		typ = "string"
+	}
 	parts := strings.Split(paramPath, ".")
-	root := parts[0]
+	if len(parts) == 0 || parts[0] == "" {
+		return
+	}
+
+	insertParamIntoMap(bp.Spec.XRD.Parameters, parts, typ)
+}
+
+func insertParamIntoMap(props map[string]blueprint.Parameter, parts []string, typ string) {
+	head := parts[0]
 	if len(parts) == 1 {
-		if p, exists := bp.Spec.XRD.Parameters[root]; !exists {
-			bp.Spec.XRD.Parameters[root] = blueprint.Parameter{
+		p, exists := props[head]
+		if !exists {
+			props[head] = blueprint.Parameter{
 				Type:     typ,
 				Required: false,
 			}
 		} else if typ != "string" && p.Type == "string" {
 			p.Type = typ
-			bp.Spec.XRD.Parameters[root] = p
+			props[head] = p
 		}
 		return
 	}
 
-	// Nested object member
-	rootParam, exists := bp.Spec.XRD.Parameters[root]
+	// Intermediate object node
+	p, exists := props[head]
 	if !exists {
-		rootParam = blueprint.Parameter{
+		p = blueprint.Parameter{
 			Type:       "object",
 			Properties: make(map[string]blueprint.Parameter),
 		}
-	} else if rootParam.Type != "object" {
-		rootParam.Type = "object"
-		if rootParam.Properties == nil {
-			rootParam.Properties = make(map[string]blueprint.Parameter)
+	} else {
+		if p.Type != "object" {
+			p.Type = "object"
 		}
-	} else if rootParam.Properties == nil {
-		rootParam.Properties = make(map[string]blueprint.Parameter)
-	}
-
-	member := parts[1]
-	if mp, mExists := rootParam.Properties[member]; !mExists {
-		rootParam.Properties[member] = blueprint.Parameter{
-			Type: typ,
+		if p.Properties == nil {
+			p.Properties = make(map[string]blueprint.Parameter)
 		}
-	} else if typ != "string" && mp.Type == "string" {
-		mp.Type = typ
-		rootParam.Properties[member] = mp
 	}
-	bp.Spec.XRD.Parameters[root] = rootParam
+	insertParamIntoMap(p.Properties, parts[1:], typ)
+	props[head] = p
 }
 
 func ensureEnvDeclared(bp *blueprint.Blueprint, envKey, typ string) {
@@ -2936,24 +2945,37 @@ func matchesParamRef(s string, paramName, memberName string) bool {
 	if s == "" {
 		return false
 	}
+	fullPath := paramName
 	if memberName != "" {
-		reMember := regexp.MustCompile(`(?:\$spec|\.spec|params)\.` + regexp.QuoteMeta(paramName) + `\.` + regexp.QuoteMeta(memberName) + `\b`)
-		if reMember.MatchString(s) {
-			return true
-		}
-		// Also check if the whole parent parameter is referenced directly (e.g. $spec.parent not followed by .)
-		reParent := regexp.MustCompile(`(?:\$spec|\.spec|params)\.` + regexp.QuoteMeta(paramName) + `\b`)
-		locs := reParent.FindAllStringIndex(s, -1)
-		for _, loc := range locs {
-			end := loc[1]
-			if end >= len(s) || s[end] != '.' {
-				return true
+		fullPath = paramName + "." + memberName
+	}
+
+	// 1. Direct or descendant reference to fullPath:
+	// e.g. $spec.network.vpc.id or params.network.vpc.id (or $spec.network.vpc if memberName is "vpc")
+	reMember := regexp.MustCompile(`(?:\$spec|\.spec|params)\.` + regexp.QuoteMeta(fullPath) + `\b`)
+	if reMember.MatchString(s) {
+		return true
+	}
+
+	// 2. Direct reference to any ancestor object without trailing dot:
+	// e.g. if fullPath is "network.vpc.id", an unadorned reference to $spec.network or $spec.network.vpc
+	// references the entire object, which transitively references all members.
+	parts := strings.Split(fullPath, ".")
+	if len(parts) > 1 {
+		for i := 1; i < len(parts); i++ {
+			ancestor := strings.Join(parts[:i], ".")
+			reAncestor := regexp.MustCompile(`(?:\$spec|\.spec|params)\.` + regexp.QuoteMeta(ancestor) + `\b`)
+			locs := reAncestor.FindAllStringIndex(s, -1)
+			for _, loc := range locs {
+				end := loc[1]
+				if end >= len(s) || s[end] != '.' {
+					return true
+				}
 			}
 		}
-		return false
 	}
-	reParam := regexp.MustCompile(`(?:\$spec|\.spec|params)\.` + regexp.QuoteMeta(paramName) + `\b`)
-	return reParam.MatchString(s)
+
+	return false
 }
 
 func isParameterReferenced(bp *blueprint.Blueprint, paramName string, memberName string) bool {
@@ -2962,18 +2984,19 @@ func isParameterReferenced(bp *blueprint.Blueprint, paramName string, memberName
 		targetFrom = "params." + paramName + "." + memberName
 	}
 
+	matchesFrom := func(from string) bool {
+		if from == "" || !strings.HasPrefix(from, "params.") {
+			return false
+		}
+		if from == targetFrom || strings.HasPrefix(targetFrom, from+".") || strings.HasPrefix(from, targetFrom+".") {
+			return true
+		}
+		return false
+	}
+
 	checkField := func(f blueprint.Field) bool {
-		if f.From != "" {
-			if memberName != "" {
-				if f.From == "params."+paramName || f.From == targetFrom || strings.HasPrefix(f.From, targetFrom+".") {
-					return true
-				}
-			} else {
-				param, _, ok := blueprint.ParamRef(f.From)
-				if ok && param == paramName {
-					return true
-				}
-			}
+		if matchesFrom(f.From) {
+			return true
 		}
 		if f.Raw != "" && matchesParamRef(f.Raw, paramName, memberName) {
 			return true
@@ -2986,30 +3009,20 @@ func isParameterReferenced(bp *blueprint.Blueprint, paramName string, memberName
 
 	for _, r := range bp.Spec.Resources {
 		if r.ForEach != "" {
-			if memberName != "" {
-				if r.ForEach == "params."+paramName || r.ForEach == targetFrom || matchesParamRef(r.ForEach, paramName, memberName) {
-					return true
-				}
-			} else {
-				param, _, ok := blueprint.ParamRef(r.ForEach)
-				if (ok && param == paramName) || matchesParamRef(r.ForEach, paramName, "") {
-					return true
-				}
+			if matchesFrom(r.ForEach) || matchesParamRef(r.ForEach, paramName, memberName) {
+				return true
 			}
 		}
 		if r.When != "" {
-			if memberName != "" {
-				if matchesParamRef(r.When, paramName, memberName) {
+			source, param, _, _, err := blueprint.ParseWhen(r.When)
+			if err == nil && (source == "params" || source == "") {
+				whenFrom := "params." + param
+				if matchesFrom(whenFrom) {
 					return true
 				}
-			} else {
-				source, name, _, _, err := blueprint.ParseWhen(r.When)
-				if err == nil && (source == "params" || source == "") && name == paramName {
-					return true
-				}
-				if matchesParamRef(r.When, paramName, "") {
-					return true
-				}
+			}
+			if matchesParamRef(r.When, paramName, memberName) {
+				return true
 			}
 		}
 		for _, f := range r.Fields {
@@ -3056,6 +3069,64 @@ func isParameterReferenced(bp *blueprint.Blueprint, paramName string, memberName
 	return false
 }
 
+func pruneParameterProperties(
+	bp *blueprint.Blueprint,
+	paramName string,
+	memberPrefix string,
+	pathPrefix string,
+	p *blueprint.Parameter,
+	baseParam *blueprint.Parameter,
+	report *LossReport,
+) {
+	if len(p.Properties) == 0 {
+		return
+	}
+
+	memberNames := make([]string, 0, len(p.Properties))
+	for m := range p.Properties {
+		memberNames = append(memberNames, m)
+	}
+	sort.Strings(memberNames)
+
+	for _, m := range memberNames {
+		childParam := p.Properties[m]
+		var childBaseParam *blueprint.Parameter
+		if baseParam != nil && baseParam.Properties != nil {
+			if bpProp, ok := baseParam.Properties[m]; ok {
+				childBaseParam = &bpProp
+			}
+		}
+
+		childMemberPath := m
+		if memberPrefix != "" {
+			childMemberPath = memberPrefix + "." + m
+		}
+		childReportPath := fmt.Sprintf("%s.properties.%s", pathPrefix, m)
+
+		// Recurse into nested object properties first (bottom-up / post-order)
+		if childParam.Type == "object" && len(childParam.Properties) > 0 {
+			pruneParameterProperties(bp, paramName, childMemberPath, childReportPath, &childParam, childBaseParam, report)
+			p.Properties[m] = childParam
+		}
+
+		if childBaseParam != nil {
+			continue
+		}
+
+		if childParam.Type == "object" {
+			if len(childParam.Properties) == 0 && !isParameterReferenced(bp, paramName, childMemberPath) {
+				delete(p.Properties, m)
+				report.Record(childReportPath, "parameter member orphaned by pruned unknown field dropped")
+			}
+		} else {
+			if !isParameterReferenced(bp, paramName, childMemberPath) {
+				delete(p.Properties, m)
+				report.Record(childReportPath, "parameter member orphaned by pruned unknown field dropped")
+			}
+		}
+	}
+}
+
 func pruneOrphanedParameters(bp *blueprint.Blueprint, baseBP *blueprint.Blueprint, report *LossReport) {
 	if bp == nil || bp.Spec.XRD.Parameters == nil {
 		return
@@ -3071,32 +3142,20 @@ func pruneOrphanedParameters(bp *blueprint.Blueprint, baseBP *blueprint.Blueprin
 		if name == "providerName" {
 			continue
 		}
+		var baseParam *blueprint.Parameter
 		if baseBP != nil && baseBP.Spec.XRD.Parameters != nil {
-			if _, ok := baseBP.Spec.XRD.Parameters[name]; ok {
-				continue
+			if bpParam, ok := baseBP.Spec.XRD.Parameters[name]; ok {
+				baseParam = &bpParam
 			}
 		}
 
 		p := bp.Spec.XRD.Parameters[name]
 		if p.Type == "object" && len(p.Properties) > 0 {
-			memberNames := make([]string, 0, len(p.Properties))
-			for m := range p.Properties {
-				memberNames = append(memberNames, m)
-			}
-			sort.Strings(memberNames)
+			pruneParameterProperties(bp, name, "", "xrd.parameters."+name, &p, baseParam, report)
 
-			for _, m := range memberNames {
-				if baseBP != nil && baseBP.Spec.XRD.Parameters != nil {
-					if bpParent, ok := baseBP.Spec.XRD.Parameters[name]; ok && bpParent.Properties != nil {
-						if _, ok := bpParent.Properties[m]; ok {
-							continue
-						}
-					}
-				}
-				if !isParameterReferenced(bp, name, m) {
-					delete(p.Properties, m)
-					report.Record(fmt.Sprintf("xrd.parameters.%s.properties.%s", name, m), "parameter member orphaned by pruned unknown field dropped")
-				}
+			if baseParam != nil {
+				bp.Spec.XRD.Parameters[name] = p
+				continue
 			}
 
 			if len(p.Properties) == 0 && !isParameterReferenced(bp, name, "") {
@@ -3105,6 +3164,10 @@ func pruneOrphanedParameters(bp *blueprint.Blueprint, baseBP *blueprint.Blueprin
 			} else {
 				bp.Spec.XRD.Parameters[name] = p
 			}
+			continue
+		}
+
+		if baseParam != nil {
 			continue
 		}
 

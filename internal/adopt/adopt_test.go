@@ -4843,3 +4843,240 @@ spec:
 		t.Errorf("expected emitted composition to contain {{ $spec.replicas }}, got:\n%s", compStr)
 	}
 }
+
+func TestAdoptClassicComposition_NestedObjectParameters(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: classic-nested
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1
+    kind: XNetwork
+  resources:
+    - name: vpc-res
+      base:
+        apiVersion: ec2.aws.upbound.io/v1beta1
+        kind: VPC
+        spec:
+          forProvider:
+            cidrBlock: 10.0.0.0/16
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.network.vpc.id
+          toFieldPath: spec.forProvider.vpcId
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+	if got := r.Fields["vpcId"].From; got != "params.network.vpc.id" {
+		t.Errorf("vpcId From = %q, want %q", got, "params.network.vpc.id")
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+}
+
+func TestAdoptGoTemplate_NestedObjectParameters(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: gotemplate-nested
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: ec2.aws.upbound.io/v1beta1
+            kind: Subnet
+            metadata:
+              name: app-subnet
+            spec:
+              forProvider:
+                vpcId: {{ $spec.network.vpc.id }}
+                cidrBlock: {{ $spec.network.vpc.cidr }}
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if d := dropsBeyondXRDless(report); len(d) > 0 {
+		t.Errorf("expected no loss beyond the XRD-less parameter report, got: %+v", d)
+	}
+
+	networkParam, ok := bp.Spec.XRD.Parameters["network"]
+	if !ok {
+		t.Fatalf("expected network parameter to exist")
+	}
+	if networkParam.Type != "object" {
+		t.Errorf("network parameter type = %q, want object", networkParam.Type)
+	}
+	vpcProp, ok := networkParam.Properties["vpc"]
+	if !ok {
+		t.Fatalf("expected network.Properties[vpc] to exist")
+	}
+	if vpcProp.Type != "object" {
+		t.Errorf("network.vpc type = %q, want object", vpcProp.Type)
+	}
+	idProp, ok := vpcProp.Properties["id"]
+	if !ok {
+		t.Errorf("expected network.vpc.Properties[id] to exist")
+	} else if idProp.Type != "string" {
+		t.Errorf("network.vpc.id type = %q, want string", idProp.Type)
+	}
+	cidrProp, ok := vpcProp.Properties["cidr"]
+	if !ok {
+		t.Errorf("expected network.vpc.Properties[cidr] to exist")
+	} else if cidrProp.Type != "string" {
+		t.Errorf("network.vpc.cidr type = %q, want string", cidrProp.Type)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+	if got := r.Fields["vpcId"].From; got != "params.network.vpc.id" {
+		t.Errorf("vpcId From = %q, want %q", got, "params.network.vpc.id")
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+}
+
+func TestAdoptGoTemplate_NestedObjectParameters_OrphanPruning(t *testing.T) {
+	crdYAML := `
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: queues.sqs.aws.upbound.io
+spec:
+  group: sqs.aws.upbound.io
+  names:
+    kind: Queue
+    categories: [managed]
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+`
+	crds, err := schema.ParseCRDs([][]byte{[]byte(crdYAML)})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	providerRef := "ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
+	cacheDir := t.TempDir()
+	store := cache.New(cacheDir)
+	if err := store.SaveCRDs(providerRef, "sha256:test", crds); err != nil {
+		t.Fatalf("SaveCRDs: %v", err)
+	}
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-nested-param-pruning
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: main-queue
+            spec:
+              forProvider:
+                region: {{ $spec.network.vpc.region }}
+                badField: {{ $spec.network.vpc.badField }}
+                anotherBad: {{ $spec.isolated.deep.unknown }}
+`
+	bp, report, err := Adopt([]byte(manifest), Options{
+		Store:    store,
+		CacheDir: cacheDir,
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	dropsByPath := make(map[string]string)
+	for _, d := range report.Drops {
+		dropsByPath[d.Path] = d.Reason
+	}
+
+	if _, ok := dropsByPath["resource.main-queue.fields.badField"]; !ok {
+		t.Errorf("expected drop for wired unknown field badField, got drops: %+v", report.Drops)
+	}
+	if _, ok := dropsByPath["xrd.parameters.network.properties.vpc.properties.badField"]; !ok {
+		t.Errorf("expected drop for orphaned property network.vpc.badField, got drops: %+v", report.Drops)
+	}
+
+	network, ok := bp.Spec.XRD.Parameters["network"]
+	if !ok {
+		t.Fatalf("expected network parameter to exist")
+	}
+	vpc, ok := network.Properties["vpc"]
+	if !ok {
+		t.Fatalf("expected network.Properties[vpc] to exist")
+	}
+	if _, ok := vpc.Properties["badField"]; ok {
+		t.Errorf("network.vpc.Properties[badField] should be pruned")
+	}
+	if _, ok := vpc.Properties["region"]; !ok {
+		t.Errorf("network.vpc.Properties[region] should be preserved")
+	}
+
+	if _, ok := bp.Spec.XRD.Parameters["isolated"]; ok {
+		t.Errorf("isolated parameter should have been completely pruned, but remains")
+	}
+	if _, ok := dropsByPath["xrd.parameters.isolated"]; !ok {
+		t.Errorf("expected drop for orphaned parameter isolated, got drops: %+v", report.Drops)
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("adopted blueprint failed validation: %v", err)
+	}
+}
