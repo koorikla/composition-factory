@@ -310,23 +310,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	if bp.Spec.XRD.Version == "" {
 		bp.Spec.XRD.Version = "v1alpha1"
 	}
-	if bp.Spec.XRD.Plural == "" {
-		if bp.Spec.XRD.Group != "" && strings.HasSuffix(bp.Metadata.Name, "."+bp.Spec.XRD.Group) {
-			candidate := strings.TrimSuffix(bp.Metadata.Name, "."+bp.Spec.XRD.Group)
-			if pluralRE.MatchString(candidate) && !yamlKeywords[strings.ToLower(candidate)] {
-				bp.Spec.XRD.Plural = candidate
-			}
-		}
-		if bp.Spec.XRD.Plural == "" && strings.Contains(bp.Metadata.Name, ".") {
-			candidate := bp.Metadata.Name[:strings.Index(bp.Metadata.Name, ".")]
-			if pluralRE.MatchString(candidate) && !yamlKeywords[strings.ToLower(candidate)] {
-				bp.Spec.XRD.Plural = candidate
-			}
-		}
-	}
-	if bp.Spec.XRD.Plural == "" {
-		bp.Spec.XRD.Plural = inferPlural(bp.Spec.XRD.Kind)
-	}
+	resolveXRDPlural(bp)
 	if bp.Spec.XRD.Scope == "" {
 		bp.Spec.XRD.Scope = "Namespaced"
 	}
@@ -861,6 +845,28 @@ func extractResourceName(m map[string]any, kind string, placeholders []string) s
 		}
 	}
 	return strings.ToLower(kind)
+}
+
+// resolveXRDPlural determines the XRD plural name from composite metadata name,
+// group suffix, or infers it from the kind.
+func resolveXRDPlural(bp *blueprint.Blueprint) {
+	if bp.Spec.XRD.Plural == "" {
+		if bp.Spec.XRD.Group != "" && strings.HasSuffix(bp.Metadata.Name, "."+bp.Spec.XRD.Group) {
+			candidate := strings.TrimSuffix(bp.Metadata.Name, "."+bp.Spec.XRD.Group)
+			if pluralRE.MatchString(candidate) && !yamlKeywords[strings.ToLower(candidate)] {
+				bp.Spec.XRD.Plural = candidate
+			}
+		}
+		if bp.Spec.XRD.Plural == "" && strings.Contains(bp.Metadata.Name, ".") {
+			candidate := bp.Metadata.Name[:strings.Index(bp.Metadata.Name, ".")]
+			if pluralRE.MatchString(candidate) && !yamlKeywords[strings.ToLower(candidate)] {
+				bp.Spec.XRD.Plural = candidate
+			}
+		}
+	}
+	if bp.Spec.XRD.Plural == "" {
+		bp.Spec.XRD.Plural = inferPlural(bp.Spec.XRD.Kind)
+	}
 }
 
 func inferPlural(kind string) string {

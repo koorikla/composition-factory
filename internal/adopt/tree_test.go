@@ -2,6 +2,7 @@ package adopt
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1002,5 +1003,110 @@ spec:
 	}
 	if !bytes.Equal(origXRD, rtXRD) {
 		t.Errorf("regenerated XRD differs from original emission:\n--- Orig ---\n%s\n--- RT ---\n%s", string(origXRD), string(rtXRD))
+	}
+}
+
+func TestAdoptTreePluralInferenceWithoutXRD(t *testing.T) {
+	tests := []struct {
+		name       string
+		compName   string
+		kind       string
+		group      string
+		ctrPlural  string
+		wantPlural string
+	}{
+		{
+			name:       "deduce plural from composition metadata name and group",
+			compName:   "xpolicies.iam.aws.m.upbound.io",
+			kind:       "XPolicy",
+			group:      "iam.aws.m.upbound.io",
+			wantPlural: "xpolicies",
+		},
+		{
+			name:       "deduce plural from compositeTypeRef plural override",
+			compName:   "custom.platform.example.org",
+			kind:       "CustomKind",
+			group:      "platform.example.org",
+			ctrPlural:  "myplurals",
+			wantPlural: "myplurals",
+		},
+		{
+			name:       "fallback to inferPlural for kinds ending in y with consonant",
+			compName:   "unrelated-name",
+			kind:       "XPolicy",
+			group:      "example.org",
+			wantPlural: "xpolicies",
+		},
+		{
+			name:       "fallback to inferPlural for kinds ending in s",
+			compName:   "unrelated-name",
+			kind:       "XAccess",
+			group:      "example.org",
+			wantPlural: "xaccesses",
+		},
+		{
+			name:       "fallback to inferPlural for kinds ending in x",
+			compName:   "unrelated-name",
+			kind:       "XBox",
+			group:      "example.org",
+			wantPlural: "xboxes",
+		},
+		{
+			name:       "fallback to inferPlural for kinds ending in ch or sh",
+			compName:   "unrelated-name",
+			kind:       "XBranch",
+			group:      "example.org",
+			wantPlural: "xbranches",
+		},
+		{
+			name:       "fallback to inferPlural for standard kind",
+			compName:   "unrelated-name",
+			kind:       "XBucket",
+			group:      "example.org",
+			wantPlural: "xbuckets",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			pluralLine := ""
+			if tt.ctrPlural != "" {
+				pluralLine = fmt.Sprintf("    plural: %s\n", tt.ctrPlural)
+			}
+			manifest := fmt.Sprintf(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: %s
+spec:
+  compositeTypeRef:
+    apiVersion: %s/v1alpha1
+    kind: %s
+%s  pipeline:
+  - step: patch-and-transform
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+      - name: dummy
+        base:
+          apiVersion: v1
+          kind: ConfigMap
+`, tt.compName, tt.group, tt.kind, pluralLine)
+
+			if err := os.WriteFile(filepath.Join(tmpDir, "composition.yaml"), []byte(manifest), 0644); err != nil {
+				t.Fatalf("write composition.yaml: %v", err)
+			}
+
+			bp, _, err := AdoptTree(tmpDir, Options{})
+			if err != nil {
+				t.Fatalf("AdoptTree failed: %v", err)
+			}
+			if bp.Spec.XRD.Plural != tt.wantPlural {
+				t.Errorf("XRD.Plural = %q, want %q", bp.Spec.XRD.Plural, tt.wantPlural)
+			}
+		})
 	}
 }

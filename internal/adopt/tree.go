@@ -252,6 +252,9 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 					bp.Spec.XRD.Version = av
 				}
 			}
+			if p, ok := ctr["plural"].(string); ok && p != "" && bp.Spec.XRD.Plural == "" {
+				bp.Spec.XRD.Plural = p
+			}
 		}
 		if pipeline, ok := spec["pipeline"].([]any); ok && len(pipeline) > 0 {
 			if err := parsePipelineComposition(pipeline, bp, opts, report, nameMapping); err != nil {
@@ -277,9 +280,7 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 	if bp.Spec.XRD.Version == "" {
 		bp.Spec.XRD.Version = "v1alpha1"
 	}
-	if bp.Spec.XRD.Plural == "" {
-		bp.Spec.XRD.Plural = strings.ToLower(bp.Spec.XRD.Kind) + "s"
-	}
+	resolveXRDPlural(bp)
 	if bp.Spec.XRD.Scope == "" {
 		bp.Spec.XRD.Scope = "Namespaced"
 	}
