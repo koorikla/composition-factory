@@ -272,6 +272,15 @@ function resourceCardHTML(d, r, sel) {
     }
     let title = p + (sf ? " \u00b7 " + sf.type + (sf.required ? " \u00b7 required" : "") : "") +
       (sf && sf.description ? "\n" + sf.description : "");
+    if (parsed) {
+      if (parsed.kind === "status") {
+        title = parsed.resource + ".status." + parsed.statusPath + " \u2192 " + r.name + "." + p + (title ? " \u00b7 " + title : "");
+      } else if (parsed.kind === "env") {
+        title = "env." + parsed.key + " \u2192 " + r.name + "." + p + (title ? " \u00b7 " + title : "");
+      } else if (parsed.kind === "param") {
+        title = "$" + parsed.param + " \u2192 " + r.name + "." + p + (title ? " \u00b7 " + title : "");
+      }
+    }
     if (optWarn) {
       title += " \u00b7 \u26a0 optional parameter wired to required field: render will omit if missing";
     }
@@ -303,13 +312,23 @@ function resourceCardHTML(d, r, sel) {
         dot = "var(--shared)";
       }
     }
+    let title = r.name + ".envelope." + p + " (Crossplane envelope)";
+    if (parsed) {
+      if (parsed.kind === "status") {
+        title = parsed.resource + ".status." + parsed.statusPath + " \u2192 " + r.name + ".envelope." + p;
+      } else if (parsed.kind === "env") {
+        title = "env." + parsed.key + " \u2192 " + r.name + ".envelope." + p;
+      } else if (parsed.kind === "param") {
+        title = "$" + parsed.param + " \u2192 " + r.name + ".envelope." + p;
+      }
+    }
     h += portRow(r.name, "envelope." + p, {
       dir: "in",
       dotColor: dot,
       req: false,
       ty: "env",
       label: "env." + shortPath(p),
-      title: r.name + ".envelope." + p + " (Crossplane envelope)",
+      title: title,
     });
   });
 
@@ -322,13 +341,26 @@ function resourceCardHTML(d, r, sel) {
     annKeys.forEach(function (k) {
       const f = anns[k];
       const wired = f && typeof f.from === "string";
+      const parsed = wired ? parseFrom(f.from) : null;
+      let title = k;
+      if (wired) {
+        if (parsed && parsed.kind === "status") {
+          title = parsed.resource + ".status." + parsed.statusPath + " \u2192 " + r.name + ".annotations." + k;
+        } else if (parsed && parsed.kind === "env") {
+          title = "env." + parsed.key + " \u2192 " + r.name + ".annotations." + k;
+        } else if (parsed && parsed.kind === "param") {
+          title = "$" + parsed.param + " \u2192 " + r.name + ".annotations." + k;
+        } else {
+          title = k + " \u2190 " + f.from;
+        }
+      }
       h += portRow(r.name, "annotations." + k, {
         dir: "in",
         dotColor: wired && f.from.indexOf("resources.") === 0 ? "var(--wire-status)" : (wired && f.from.indexOf("env.") === 0 ? "var(--shared)" : "var(--wire-xrd)"),
         req: false,
         ty: wired ? "" : (f && f.raw !== undefined && f.raw !== "" ? "raw" : "value"),
         label: shortPath(k),
-        title: k + (wired ? " \u2190 " + f.from : ""),
+        title: title,
       });
     });
   }
@@ -364,6 +396,13 @@ function resourceCardHTML(d, r, sel) {
     h += '<div class="node-grp" style="color:var(--wire-status);text-align:right">outputs</div>';
     statusRows.forEach(function (p) {
       const isId = p === "atProvider.id" || p === "id";
+      const pWires = outStatusWires.filter(function (w) { return w.srcPath === p; });
+      let title = r.name + ".status." + p + " (status output \u2014 other objects can wire from this)";
+      if (pWires.length > 0) {
+        title = pWires.map(function (w) {
+          return w.srcResource + ".status." + w.srcPath + " \u2192 " + w.resource + "." + w.path;
+        }).join("\n");
+      }
       h += portRow(r.name, "status." + p, {
         dir: "out",
         dotColor: "var(--wire-status)",
@@ -373,7 +412,7 @@ function resourceCardHTML(d, r, sel) {
         // outputs read right-aligned and short: the atProvider prefix is
         // noise at a glance, the full path lives in the title
         label: isId ? "name / id" : shortPath(p.replace(/^atProvider\./, "")),
-        title: r.name + ".status." + p + " (status output \u2014 other objects can wire from this)",
+        title: title,
       });
     });
   }
@@ -623,20 +662,20 @@ function drawWires() {
       b = portPos(w.resource, w.path, cwRect);
       cls = "wire-status";
       col = "var(--wire-status)";
-      title = esc(w.srcResource) + ".status." + esc(w.srcPath) + " \u2192 " + esc(w.resource) + "." + esc(w.path);
+      title = w.srcResource + ".status." + w.srcPath + " \u2192 " + w.resource + "." + w.path;
     } else if (w.kind === "env") {
       a = portPos(ENV_ID, w.envKey, cwRect);
       b = portPos(w.resource, w.path, cwRect);
       cls = "wire-shared";
       col = "var(--shared)";
-      title = "env." + esc(w.envKey) + " \u2192 " + esc(w.resource) + "." + esc(w.path);
+      title = "env." + w.envKey + " \u2192 " + w.resource + "." + w.path;
     } else {
       a = portPos(XR_ID, w.param, cwRect);
       b = portPos(w.resource, w.path, cwRect);
       const shared = fans[w.param] > 1;
       cls = shared ? "wire-shared" : "wire-xrd";
       col = shared ? "var(--shared)" : "var(--wire-xrd)";
-      title = "$" + esc(w.param) + " \u2192 " + esc(w.resource) + "." + esc(w.path);
+      title = "$" + w.param + " \u2192 " + w.resource + "." + w.path;
     }
     if (!a || !b) return;
     const isSel = selectedWire && wireKey(selectedWire) === wireKey(w);
@@ -645,11 +684,11 @@ function drawWires() {
       ' C' + (a.x + dx) + ',' + a.y + ' ' + (b.x - dx) + ',' + b.y +
       ' ' + b.x + ',' + b.y;
     s += '<path class="wire-hit" d="' + dPath +
-      '" stroke="transparent" stroke-width="14" fill="none" pointer-events="stroke" data-wire-idx="' + idx + '">' +
-      '<title>' + title + '</title></path>';
+      '" stroke="transparent" stroke-width="14" fill="none" pointer-events="stroke" data-wire-idx="' + idx + '" title="' + esc(title) + '">' +
+      '<title>' + esc(title) + '</title></path>';
     s += '<path class="wire-path ' + cls + (isSel ? " wire-selected" : "") + '" d="' + dPath +
-      '" stroke="' + col + '" data-wire-idx="' + idx + '" pointer-events="stroke" tabindex="0" role="button" aria-label="' + esc(title) + '">' +
-      '<title>' + title + '</title></path>';
+      '" stroke="' + col + '" data-wire-idx="' + idx + '" pointer-events="stroke" tabindex="0" role="button" aria-label="' + esc(title) + '" title="' + esc(title) + '">' +
+      '<title>' + esc(title) + '</title></path>';
 
     if (isSel) {
       const midX = (a.x + b.x) / 2;
@@ -669,6 +708,33 @@ function drawWires() {
     }
   });
   wiresEl.innerHTML = s + delButtons;
+
+  const existingBadge = cwEl && cwEl.querySelector("#wire-badge");
+  if (selectedWire) {
+    let bText;
+    if (selectedWire.kind === "status") {
+      bText = selectedWire.srcResource + ".status." + selectedWire.srcPath + " \u2192 " + selectedWire.resource + "." + selectedWire.path;
+    } else if (selectedWire.kind === "env") {
+      bText = "env." + selectedWire.envKey + " \u2192 " + selectedWire.resource + "." + selectedWire.path;
+    } else {
+      bText = "$" + selectedWire.param + " \u2192 " + selectedWire.resource + "." + selectedWire.path;
+    }
+    if (!existingBadge && cwEl) {
+      const bEl = document.createElement("div");
+      bEl.id = "wire-badge";
+      bEl.className = "wire-badge wire-hint-bar";
+      bEl.setAttribute("role", "status");
+      cwEl.appendChild(bEl);
+    }
+    const badge = cwEl.querySelector("#wire-badge");
+    if (badge) {
+      badge.textContent = bText;
+      badge.setAttribute("title", bText);
+      badge.setAttribute("aria-label", bText);
+    }
+  } else if (existingBadge) {
+    existingBadge.remove();
+  }
 }
 
 function scheduleWires() {

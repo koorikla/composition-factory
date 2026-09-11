@@ -217,6 +217,11 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .wire-del-btn:hover .wire-del-btn-g{transform:scale(1.2)}
 .wire-del-btn circle{fill:#e11d48;stroke:var(--surface, #fff);stroke-width:1.5;filter:drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4))}
 .wire-del-btn text{fill:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:12px;font-weight:700;text-anchor:middle;dominant-baseline:central;user-select:none;pointer-events:none}
+.wire-badge{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);
+  background:var(--surface);border:1px solid var(--rule-2);box-shadow:var(--shadow-lg, 0 4px 12px rgba(0,0,0,.15));
+  border-radius:6px;padding:5px 12px;font-family:var(--mono);font-size:11px;color:var(--ink);
+  display:flex;align-items:center;gap:6px;z-index:20;pointer-events:auto;max-width:90%;
+  white-space:normal;word-break:break-all}
 
 .node{position:absolute;width:max-content;min-width:198px;max-width:340px;background:var(--surface);border:1px solid var(--rule-2);
   border-radius:7px;box-shadow:var(--shadow);user-select:none}
@@ -276,13 +281,17 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
   background:var(--surface);font-family:var(--mono);font-size:11px}
 .tin:focus{outline:none;border-color:var(--wire-xrd)}
 .tsel{height:24px;padding:0 4px;border:1px solid var(--rule-2);border-radius:4px;
-  background:var(--surface);font-family:var(--mono);font-size:10.5px;color:var(--ink-2)}
+  background:var(--surface);font-family:var(--mono);font-size:10.5px;color:var(--ink-2);min-width:0;max-width:100%}
 .ck{display:inline-flex;align-items:center;gap:3px;font-family:var(--cond);font-size:9.5px;
   font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);cursor:pointer}
 .del{color:var(--faint);font-size:14px;line-height:1;padding:0 3px}
 .del:hover{color:var(--err)}
 .ann-key{font-family:var(--mono);font-size:11px;color:var(--ink-2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .ann-val{font-family:var(--mono);font-size:10.5px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.ann-row{cursor:pointer;position:relative;flex-wrap:wrap;min-width:0;max-width:100%;box-sizing:border-box}
+.ann-row.has-wire:hover, .ann-row.has-wire:focus-within, .ann-row.has-wire.expanded{background:var(--surface-2)}
+.ann-binding-detail{width:100%;font-family:var(--mono);font-size:10px;color:var(--wire-status);word-break:break-all;overflow-wrap:anywhere;box-sizing:border-box;padding:2px 0 1px;display:none}
+.ann-row.has-wire:hover .ann-binding-detail, .ann-row.has-wire.expanded .ann-binding-detail{display:block}
 .fld{padding:8px 12px;border-bottom:1px solid var(--rule)}
 .fld:hover{background:var(--surface-2)}
 .fld.wired{background:var(--wire-xrd-soft)} .fld.wired:hover{background:var(--wire-xrd-soft)}
@@ -331,13 +340,16 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .expr-preview.ok .expr-preview-body{color:var(--ink)}
 .expr-preview.err .expr-preview-body{color:var(--err)}
 .bound{display:flex;align-items:center;gap:5px;padding:4px 7px;border-radius:4px;
-  background:var(--surface);border:1px solid var(--rule-2);font-family:var(--mono);font-size:10.5px}
-.bound .src{color:var(--wire-xrd);font-weight:500}
+  background:var(--surface);border:1px solid var(--rule-2);font-family:var(--mono);font-size:10.5px;
+  flex-wrap:wrap;min-width:0;max-width:100%;cursor:pointer}
+.bound .src{color:var(--wire-xrd);font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .bound .src.sh{color:var(--shared)}
 .bound.shared{background:var(--shared-soft)}
 .bound.shared .src{color:var(--shared)}
 .bound .x{margin-left:auto;color:var(--faint);font-size:13px;line-height:1}
 .bound .x:hover{color:var(--err)}
+.bound .bound-binding-detail{width:100%;font-size:10px;word-break:break-all;overflow-wrap:anywhere;padding:2px 0 1px;display:none}
+.bound:hover .bound-binding-detail, .bound.expanded .bound-binding-detail{display:block}
 .empty{padding:24px 16px;text-align:center;color:var(--faint);font-size:12px;line-height:1.5}
 
 /* drawer */
