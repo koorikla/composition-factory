@@ -3836,3 +3836,194 @@ spec:
 		t.Fatalf("expected drop for template.body, got drops: %+v", report.Drops)
 	}
 }
+
+func TestAdopt_YAMLParamNames(t *testing.T) {
+	t.Run("Pipeline", func(t *testing.T) {
+		manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xservices.example.org
+spec:
+  group: example.org
+  names:
+    kind: XService
+    plural: xservices
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                "on":
+                  type: boolean
+                "off":
+                  type: boolean
+                "yes":
+                  type: boolean
+                "no":
+                  type: boolean
+                "y":
+                  type: string
+                "n":
+                  type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xservices.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XService
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              name: test-bucket
+            spec:
+              forProvider:
+                "on": {{ $spec.on }}
+                "off": {{ $spec.off }}
+                "yes": {{ $spec.yes }}
+                "no": {{ $spec.no }}
+                "y": {{ $spec.y }}
+                "n": {{ $spec.n }}
+`
+		bp, report, err := Adopt([]byte(manifest), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(report.Drops) > 0 {
+			t.Fatalf("expected 0 loss drops, got %d: %+v", len(report.Drops), report.Drops)
+		}
+
+		for _, name := range []string{"on", "off", "yes", "no", "y", "n"} {
+			if _, ok := bp.Spec.XRD.Parameters[name]; !ok {
+				t.Errorf("expected parameter %q in XRD parameters", name)
+			}
+		}
+
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		res := bp.Spec.Resources[0]
+		for _, name := range []string{"on", "off", "yes", "no", "y", "n"} {
+			if f, ok := res.Fields[name]; !ok || f.From != "params."+name {
+				t.Errorf("field %q = %+v, want From: params.%s", name, f, name)
+			}
+		}
+	})
+
+	t.Run("ClassicPatches", func(t *testing.T) {
+		manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xservices.example.org
+spec:
+  group: example.org
+  names:
+    kind: XService
+    plural: xservices
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    "on":
+                      type: boolean
+                    "off":
+                      type: boolean
+                    "yes":
+                      type: boolean
+                    "no":
+                      type: boolean
+                    "y":
+                      type: string
+                    "n":
+                      type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xservices.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XService
+  resources:
+    - name: test-bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider: {}
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.on
+          toFieldPath: spec.forProvider.on
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.off
+          toFieldPath: spec.forProvider.off
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.yes
+          toFieldPath: spec.forProvider.yes
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.no
+          toFieldPath: spec.forProvider.no
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.y
+          toFieldPath: spec.forProvider.y
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.n
+          toFieldPath: spec.forProvider.n
+`
+		bp, report, err := Adopt([]byte(manifest), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(report.Drops) > 0 {
+			t.Fatalf("expected 0 loss drops, got %d: %+v", len(report.Drops), report.Drops)
+		}
+
+		for _, name := range []string{"on", "off", "yes", "no", "y", "n"} {
+			if _, ok := bp.Spec.XRD.Parameters[name]; !ok {
+				t.Errorf("expected parameter %q in XRD parameters", name)
+			}
+		}
+
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		res := bp.Spec.Resources[0]
+		for _, name := range []string{"on", "off", "yes", "no", "y", "n"} {
+			if f, ok := res.Fields[name]; !ok || f.From != "params."+name {
+				t.Errorf("field %q = %+v, want From: params.%s", name, f, name)
+			}
+		}
+	})
+}
