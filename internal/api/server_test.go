@@ -213,6 +213,7 @@ spec:
               forProvider:
                 required: [region]
                 properties:
+                  name: {type: string}
                   region: {type: string}
                   tags: {type: object, additionalProperties: {type: string}}
                   maxMessageSize: {type: integer}
