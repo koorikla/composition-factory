@@ -619,3 +619,67 @@ test_main_rerun_after_is_configurable() {
     assert_contains "$out" "LANDED " "landing output" &&
     assert_eq 1 "$(grep -c 'run rerun' "$FAKE_GH_DIR/calls.log")" "main is rerun once"
 }
+
+# cwd_gh: gh ahead of the fake that, like the real gh left to infer its
+# repository, fails in a working directory that no longer exists. It logs the
+# GH_REPO each call saw.
+cwd_gh() {
+  shim gh <<EOF
+#!/bin/bash
+if ! pwd -P >/dev/null 2>&1; then
+  echo "\$*" >> "$SANDBOX/gh-in-deleted-cwd"
+  exit 1
+fi
+echo "\${GH_REPO-unset}" >> "$SANDBOX/gh-repo"
+exec "$TEST_DIR/fakebin/gh" "\$@"
+EOF
+}
+
+test_caller_worktree_deleted_mid_run_still_lands() {
+  land_repo || return 1
+  sandbox_guard || return 1
+  git worktree add -q --detach "$SANDBOX/work/.worktrees/caller" main || return 1
+  cwd_gh || return 1
+  unset GH_REPO
+  # The gates remove the worktree land.sh was started from.
+  export CF_LAND_GATES="rm -rf '$SANDBOX/work/.worktrees/caller'"
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  local out rc
+  out="$(cd "$SANDBOX/work/.worktrees/caller" && "$LAND" 42 2>/dev/null)"; rc=$?
+  assert_eq 0 "$rc" "land.sh keeps working after its caller's directory is gone" &&
+    assert_contains "$out" "LANDED $(origin_git rev-parse main) " "landing output" &&
+    assert_eq no "$([ -d "$SANDBOX/work/.worktrees/caller" ] && echo yes || echo no)" "the caller's worktree was removed" &&
+    assert_eq "" "$(cat "$SANDBOX/gh-in-deleted-cwd" 2>/dev/null)" "no gh call ran in the deleted directory" &&
+    assert_eq unset "$(sort -u "$SANDBOX/gh-repo")" "a local origin path sets no GH_REPO"
+}
+
+# gh_repo_from URL: land from a clone whose origin is configured as URL, with git
+# rewriting URL to the sandbox's bare repo (so nothing leaves the sandbox), and
+# print the distinct GH_REPO values land.sh's gh calls saw.
+gh_repo_from() {
+  sandbox_guard || return 1
+  git config remote.origin.url "$1" &&
+    git config "url.$SANDBOX/origin.git.insteadOf" "$1" || return 1
+  # get-url applies insteadOf: the guard still sees the sandbox's bare repo.
+  sandbox_guard || return 1
+  cwd_gh || return 1
+  unset GH_REPO
+  printf 'green\n' > "$FAKE_GH_DIR/ci-results"
+  "$LAND" 42 > "$SANDBOX/out" 2>/dev/null || return 1
+  sort -u "$SANDBOX/gh-repo"
+}
+
+test_gh_repo_comes_from_a_github_ssh_origin() {
+  land_repo || return 1
+  local seen
+  seen="$(gh_repo_from "git@github.com:acme/widget.git")" || { fail "landing through a rewritten origin failed"; return 1; }
+  assert_eq "acme/widget" "$seen" "GH_REPO for git@github.com:acme/widget.git" &&
+    assert_contains "$(cat "$SANDBOX/out")" "LANDED " "landing output"
+}
+
+test_gh_repo_keeps_a_non_github_host() {
+  land_repo || return 1
+  local seen
+  seen="$(gh_repo_from "https://git.example.invalid:8443/acme/widget/")" || { fail "landing through a rewritten origin failed"; return 1; }
+  assert_eq "git.example.invalid/acme/widget" "$seen" "GH_REPO for an https origin on another host"
+}

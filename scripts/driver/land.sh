@@ -1,7 +1,10 @@
 #!/bin/bash
 # land.sh <issue>
 #
-# The only way a branch reaches main. Run from inside any worktree of the clone.
+# The only way a branch reaches main. Run from inside any worktree of the clone;
+# it moves to the clone's main worktree at once, so the caller's directory may be
+# removed while it runs, and exports GH_REPO ([HOST/]OWNER/REPO, HOST omitted for
+# github.com) from origin's configured URL so gh never depends on the directory.
 # It lands the branch named by the issue's newest claim comment from a project
 # member (`taking — <branch> · driver …`, or the legacy `taking — <branch> (wave …`):
 # rebase onto origin/main (pinned when fetched) in a scratch worktree at
@@ -155,6 +158,52 @@ g() {
     -c commit.gpgsign=false -c rebase.updateRefs=false -c rebase.autoStash=false "$@"
 }
 
+# repo_slug URL: [HOST/]OWNER/REPO for gh from a git URL (scp-like user@host:path
+# or scheme://[user@]host[:port]/path), HOST left out for github.com; nothing
+# when URL has another shape, such as a local path.
+repo_slug() {
+  local url="$1" rest authority host path
+  case "$url" in
+    *://*)
+      rest="${url#*://}"
+      authority="${rest%%/*}"
+      [ "$authority" != "$rest" ] || return 0
+      host="${authority##*@}"
+      host="${host%%:*}"
+      path="${rest#*/}"
+      ;;
+    [!/]*@*:*)
+      rest="${url#*@}"
+      host="${rest%%:*}"
+      path="${rest#*:}"
+      ;;
+    *) return 0 ;;
+  esac
+  path="${path%/}"
+  path="${path%.git}"
+  case "$host" in '' | *[!A-Za-z0-9.-]*) return 0 ;; esac
+  case "$path" in '' | /* | */ | */*/* | *[!A-Za-z0-9._/-]*) return 0 ;; ?*/?*) ;; *) return 0 ;; esac
+  if [ "$host" = github.com ]; then
+    echo "$path"
+  else
+    echo "$host/$path"
+  fi
+}
+
+# Anchor on the clone's main worktree and work from there: the caller may be a
+# worktree that a driver removes while this runs.
+common="$(g rev-parse --path-format=absolute --git-common-dir)" || die "not inside a git repository"
+case "$common" in
+  */.git) top="${common%/.git}" ;;
+  *) die "the clone at $common has no main worktree to hold .worktrees/" ;;
+esac
+cd "$top" || die "could not enter $top"
+gh_repo="$(repo_slug "$(g config --get remote.origin.url)")"
+if [ -n "$gh_repo" ]; then
+  GH_REPO="$gh_repo"
+  export GH_REPO
+fi
+
 # Step 1: the issue must be handed back, before anything is fetched.
 issue_json="$(gh issue view "$issue" --json number,title,state,labels,comments,updatedAt)" ||
   die "gh issue view $issue failed"
@@ -241,11 +290,6 @@ finish() {
 }
 
 # Step 3: fetch, pin the base, scratch worktree, rebase.
-common="$(g rev-parse --path-format=absolute --git-common-dir)" || die "not inside a git repository"
-case "$common" in
-  */.git) top="${common%/.git}" ;;
-  *) die "the clone at $common has no main worktree to hold .worktrees/" ;;
-esac
 wt="$top/.worktrees/land-$cf"
 
 # remove_worktree: remove the scratch worktree if present, then prune, so a
