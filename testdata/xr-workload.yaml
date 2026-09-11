@@ -1,0 +1,12 @@
+apiVersion: workloads.sparky.ee/v1alpha1
+kind: XWorkload
+metadata:
+  name: demo
+  namespace: default
+spec:
+  providerName: default
+  image: nginx:latest
+  replicas: 3
+  port: 8080
+  logLevel: info
+  enableService: true

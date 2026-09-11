@@ -1483,10 +1483,18 @@ func TestUnavailableFailsWhenAcceptanceIsRequired(t *testing.T) {
 	}
 }
 
-// TestAcceptanceAlternativeEnginesRender renders the same blueprint across
+// TestAcceptanceAlternativeEnginesRender renders blueprints across
 // go-templating, KCL, and Python engines through their real function images,
 // decodes the rendered composed resources into structured documents, and
-// structurally diffs them across engines (CF-081).
+// structurally diffs them across engines (CF-081, CF-115).
+//
+// Blueprints tested:
+//   - xqueue: exercises AWS provider SQS resources and status wires
+//     (resources.main-queue.status.atProvider.url wired into QueuePolicy.forProvider.queueUrl)
+//     via --observed-resources.
+//   - k8s-workload: exercises native K8s resources, integer-to-string parameter
+//     conversion (params.port wired into ConfigMap data[PORT]), resource metadata wires
+//     (resources.sa.metadata.name, resources.config.metadata.name), and conditionals.
 func TestAcceptanceAlternativeEnginesRender(t *testing.T) {
 	if testing.Short() {
 		unavailable(t, "acceptance test needs Docker; skipped under -short")
@@ -1498,94 +1506,138 @@ func TestAcceptanceAlternativeEnginesRender(t *testing.T) {
 	cacheDir := testCacheDir
 
 	engines := []string{"go-templating", "kcl", "python"}
-	renderedByEngine := make(map[string]map[string]map[string]any)
 
-	for _, engine := range engines {
-		t.Run("engine="+engine, func(t *testing.T) {
-			outDir := filepath.Join(t.TempDir(), "out-"+engine)
-			bpPath := filepath.Join(t.TempDir(), "xqueue-"+engine+".cf.yaml")
-
-			raw, err := os.ReadFile("testdata/xqueue.cf.yaml")
-			if err != nil {
-				t.Fatalf("read testdata/xqueue.cf.yaml: %v", err)
-			}
-			content := string(raw) + fmt.Sprintf("\n  emit:\n    engine: %s\n", engine)
-			if err := os.WriteFile(bpPath, []byte(content), 0o644); err != nil {
-				t.Fatalf("write bp: %v", err)
-			}
-
-			gen := exec.Command(bin, "gen", bpPath, "-o", outDir, "--cache-dir", cacheDir)
-			if out, err := gen.CombinedOutput(); err != nil {
-				t.Fatalf("cf gen: %v\n%s", err, out)
-			}
-
-			comp := filepath.Join(outDir, "compositions", "xqueues.platform.sparky.ee.yaml")
-			xrd := filepath.Join(outDir, "xrds", "xqueues.platform.sparky.ee.yaml")
-			fns := filepath.Join(outDir, "functions.yaml")
-			rendered, err := renderComposition(t, "testdata/xr.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
-			if err != nil {
-				t.Fatalf("crossplane composition render (%s): %v\n%s", engine, err, rendered)
-			}
-
-			got := string(rendered)
-			for _, want := range []string{
+	cases := []struct {
+		name       string
+		blueprint  string
+		xr         string
+		observed   string // optional path to observed resources
+		compRel    string
+		xrdRel     string
+		wantOutput []string
+	}{
+		{
+			name:      "xqueue",
+			blueprint: "testdata/xqueue.cf.yaml",
+			xr:        "testdata/xr.yaml",
+			observed:  "testdata/observed-queue.yaml",
+			compRel:   filepath.Join("compositions", "xqueues.platform.sparky.ee.yaml"),
+			xrdRel:    filepath.Join("xrds", "xqueues.platform.sparky.ee.yaml"),
+			wantOutput: []string{
 				"apiVersion: sqs.aws.m.upbound.io/v1beta1",
 				"kind: Queue",
 				"maxMessageSize: 2048",
 				"region: eu-north-1",
-			} {
-				if !strings.Contains(got, want) {
-					t.Errorf("rendered %s output missing %q\n---\n%s", engine, want, got)
-				}
-			}
-
-			docs := decodeComposedResources(t, rendered)
-			renderedByEngine[engine] = docs
-		})
+				"queueUrl: https://sqs.eu-north-1.amazonaws.com/000000000000/demo-main-queue",
+			},
+		},
+		{
+			name:      "k8s-workload",
+			blueprint: "internal/examples/k8s-workload.cf.yaml",
+			xr:        "testdata/xr-workload.yaml",
+			compRel:   filepath.Join("compositions", "xworkloads.workloads.sparky.ee.yaml"),
+			xrdRel:    filepath.Join("xrds", "xworkloads.workloads.sparky.ee.yaml"),
+			wantOutput: []string{
+				"PORT: \"8080\"",
+				"LOG_LEVEL: info",
+				"containerPort: 8080",
+			},
+		},
 	}
 
-	t.Run("diff-engines", func(t *testing.T) {
-		for _, engine := range engines {
-			if len(renderedByEngine[engine]) == 0 {
-				t.Fatalf("engine %q produced 0 composed resources; cannot compare", engine)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			renderedByEngine := make(map[string]map[string]map[string]any)
+
+			for _, engine := range engines {
+				t.Run("engine="+engine, func(t *testing.T) {
+					outDir := filepath.Join(t.TempDir(), "out-"+engine)
+					bpPath := filepath.Join(t.TempDir(), tc.name+"-"+engine+".cf.yaml")
+
+					raw, err := os.ReadFile(tc.blueprint)
+					if err != nil {
+						t.Fatalf("read %s: %v", tc.blueprint, err)
+					}
+					content := string(raw) + fmt.Sprintf("\n  emit:\n    engine: %s\n", engine)
+					if err := os.WriteFile(bpPath, []byte(content), 0o644); err != nil {
+						t.Fatalf("write bp: %v", err)
+					}
+
+					gen := exec.Command(bin, "gen", bpPath, "-o", outDir, "--cache-dir", cacheDir)
+					if out, err := gen.CombinedOutput(); err != nil {
+						t.Fatalf("cf gen: %v\n%s", err, out)
+					}
+
+					comp := filepath.Join(outDir, tc.compRel)
+					xrd := filepath.Join(outDir, tc.xrdRel)
+					fns := filepath.Join(outDir, "functions.yaml")
+
+					renderArgs := []string{tc.xr, comp, fns, "--xrd", xrd, "--timeout", "5m"}
+					if tc.observed != "" {
+						renderArgs = append(renderArgs, "--observed-resources", tc.observed)
+					}
+
+					rendered, err := renderComposition(t, renderArgs...)
+					if err != nil {
+						t.Fatalf("crossplane composition render (%s): %v\n%s", engine, err, rendered)
+					}
+
+					got := string(rendered)
+					for _, want := range tc.wantOutput {
+						if !strings.Contains(got, want) {
+							t.Errorf("rendered %s output missing %q\n---\n%s", engine, want, got)
+						}
+					}
+
+					docs := decodeComposedResources(t, rendered)
+					renderedByEngine[engine] = docs
+				})
 			}
-		}
 
-		gtDocs := renderedByEngine["go-templating"]
-		gtNames := mapKeys(gtDocs)
-
-		for _, other := range []string{"kcl", "python"} {
-			otherDocs := renderedByEngine[other]
-			otherNames := mapKeys(otherDocs)
-
-			// 1. Verify resource names match identically across engines.
-			if diff := cmp.Diff(gtNames, otherNames); diff != "" {
-				t.Errorf("composed resource names mismatch between go-templating and %s (-go-templating +%s):\n%s",
-					other, other, diff)
-				continue
-			}
-
-			// 2. For each composed resource, verify kind, apiVersion, and normalized spec/metadata.
-			for _, name := range gtNames {
-				gtDoc := gtDocs[name]
-				otherDoc := otherDocs[name]
-
-				if gtKind, otherKind := gtDoc["kind"], otherDoc["kind"]; gtKind != otherKind {
-					t.Errorf("resource %q kind mismatch: go-templating=%v, %s=%v", name, gtKind, other, otherKind)
-				}
-				if gtAPI, otherAPI := gtDoc["apiVersion"], otherDoc["apiVersion"]; gtAPI != otherAPI {
-					t.Errorf("resource %q apiVersion mismatch: go-templating=%v, %s=%v", name, gtAPI, other, otherAPI)
+			t.Run("diff-engines", func(t *testing.T) {
+				for _, engine := range engines {
+					if len(renderedByEngine[engine]) == 0 {
+						t.Fatalf("engine %q produced 0 composed resources; cannot compare", engine)
+					}
 				}
 
-				gtNorm := normalizeComposedResource(gtDoc)
-				otherNorm := normalizeComposedResource(otherDoc)
-				if diff := cmp.Diff(gtNorm, otherNorm); diff != "" {
-					t.Errorf("resource %q diff between go-templating and %s (-go-templating +%s):\n%s",
-						name, other, other, diff)
+				gtDocs := renderedByEngine["go-templating"]
+				gtNames := mapKeys(gtDocs)
+
+				for _, other := range []string{"kcl", "python"} {
+					otherDocs := renderedByEngine[other]
+					otherNames := mapKeys(otherDocs)
+
+					// 1. Verify resource names match identically across engines.
+					if diff := cmp.Diff(gtNames, otherNames); diff != "" {
+						t.Errorf("composed resource names mismatch between go-templating and %s (-go-templating +%s):\n%s",
+							other, other, diff)
+						continue
+					}
+
+					// 2. For each composed resource, verify kind, apiVersion, and normalized spec/metadata.
+					for _, name := range gtNames {
+						gtDoc := gtDocs[name]
+						otherDoc := otherDocs[name]
+
+						if gtKind, otherKind := gtDoc["kind"], otherDoc["kind"]; gtKind != otherKind {
+							t.Errorf("resource %q kind mismatch: go-templating=%v, %s=%v", name, gtKind, other, otherKind)
+						}
+						if gtAPI, otherAPI := gtDoc["apiVersion"], otherDoc["apiVersion"]; gtAPI != otherAPI {
+							t.Errorf("resource %q apiVersion mismatch: go-templating=%v, %s=%v", name, gtAPI, other, otherAPI)
+						}
+
+						gtNorm := normalizeComposedResource(gtDoc)
+						otherNorm := normalizeComposedResource(otherDoc)
+						if diff := cmp.Diff(gtNorm, otherNorm); diff != "" {
+							t.Errorf("resource %q diff between go-templating and %s (-go-templating +%s):\n%s",
+								name, other, other, diff)
+						}
+					}
 				}
-			}
-		}
-	})
+			})
+		})
+	}
 }
 
 // normalizeComposedResource returns a normalized copy of a composed resource
