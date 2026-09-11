@@ -281,6 +281,8 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
   font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);cursor:pointer}
 .del{color:var(--faint);font-size:14px;line-height:1;padding:0 3px}
 .del:hover{color:var(--err)}
+.ann-key{font-family:var(--mono);font-size:11px;color:var(--ink-2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.ann-val{font-family:var(--mono);font-size:10.5px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .fld{padding:8px 12px;border-bottom:1px solid var(--rule)}
 .fld:hover{background:var(--surface-2)}
 .fld.wired{background:var(--wire-xrd-soft)} .fld.wired:hover{background:var(--wire-xrd-soft)}

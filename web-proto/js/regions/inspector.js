@@ -1142,8 +1142,9 @@ async function renderResource(res) {
       annKeys.map(function (k) {
         var f = anns[k];
         var val = f.from ? "\u2190 " + f.from : (f.raw ? "raw" : f.value);
-        return '<div class="frow" style="margin-bottom:2px"><span class="lbl" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">' + esc(k) + "</span>" +
-          '<span class="dg" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">' + esc(val) + "</span>" +
+        return '<div class="frow" style="margin-bottom:2px">' +
+          '<span class="ann-key" title="' + esc(k) + '">' + esc(k) + '</span>' +
+          '<span class="ann-val dg" title="' + esc(val) + '">' + esc(val) + '</span>' +
           '<button class="del" data-ann-del="' + esc(k) + '" title="Remove annotation">\u00d7</button></div>';
       }).join("") +
       '<div class="frow" style="margin-top:4px;margin-bottom:0">' +
