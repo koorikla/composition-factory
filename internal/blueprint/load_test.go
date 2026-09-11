@@ -1860,3 +1860,99 @@ func TestValidateAllowsConventionsOnNativeKinds(t *testing.T) {
 		t.Fatalf("Validate unexpectedly rejected convention on native kind: %v", err)
 	}
 }
+
+func TestCF193MalformedSourceEntryRefusal(t *testing.T) {
+	badYAML := `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  sources:
+    - ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0
+`
+	_, err := Parse([]byte(badYAML))
+	if err == nil {
+		t.Fatal("expected error for bare string source entry, got nil")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "blueprint.Source") {
+		t.Errorf("error exposed internal Go type name blueprint.Source: %v", msg)
+	}
+	if !strings.Contains(msg, "spec.sources[0]") {
+		t.Errorf("expected error to name DSL field path 'spec.sources[0]', got: %v", msg)
+	}
+	if !strings.Contains(msg, "string") {
+		t.Errorf("expected error to describe what was found (string), got: %v", msg)
+	}
+	if !strings.Contains(msg, "mapping") {
+		t.Errorf("expected error to describe expected shape (mapping), got: %v", msg)
+	}
+}
+
+func TestCF193MalformedSourceEntryRefusal_Variants(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantIn  []string
+		wantOut []string
+	}{
+		{
+			name: "number scalar in sources list",
+			yaml: `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  sources:
+    - 123
+`,
+			wantIn:  []string{"spec.sources[0]", "mapping", "number"},
+			wantOut: []string{"blueprint.Source"},
+		},
+		{
+			name: "boolean scalar in sources list",
+			yaml: `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  sources:
+    - true
+`,
+			wantIn:  []string{"spec.sources[0]", "mapping", "bool"},
+			wantOut: []string{"blueprint.Source"},
+		},
+		{
+			name: "bare string for sources list",
+			yaml: `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  sources: ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0
+`,
+			wantIn:  []string{"spec.sources", "list", "string"},
+			wantOut: []string{"blueprint.Source", "[]blueprint.Source"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(tc.yaml))
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			msg := err.Error()
+			for _, in := range tc.wantIn {
+				if !strings.Contains(msg, in) {
+					t.Errorf("expected error to contain %q, got: %v", in, msg)
+				}
+			}
+			for _, out := range tc.wantOut {
+				if strings.Contains(msg, out) {
+					t.Errorf("error unexpectedly contained %q: %v", out, msg)
+				}
+			}
+		})
+	}
+}

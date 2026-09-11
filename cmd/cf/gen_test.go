@@ -692,3 +692,39 @@ spec:
 		t.Errorf("expected %s to be pruned after removing environment, stat err: %v", target, err)
 	}
 }
+
+func TestCF193GenRejectsMalformedSourceEntry(t *testing.T) {
+	dir := t.TempDir()
+	bp := `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata: {name: xqueue}
+spec:
+  sources:
+    - ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0
+`
+	bpPath := filepath.Join(dir, "bp.yaml")
+	if err := os.WriteFile(bpPath, []byte(bp), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	code, err := (&GenCmd{Blueprint: bpPath, Out: filepath.Join(dir, "out"), CacheDir: filepath.Join(dir, "cache")}).run(&buf)
+	if code != 1 {
+		t.Fatalf("run exit code = %d, want 1", code)
+	}
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "blueprint.Source") {
+		t.Errorf("error exposed internal Go type name blueprint.Source: %v", msg)
+	}
+	if !strings.Contains(msg, "spec.sources[0]") {
+		t.Errorf("expected error to name DSL field path 'spec.sources[0]', got: %v", msg)
+	}
+	if !strings.Contains(msg, "string") {
+		t.Errorf("expected error to describe what was found (string), got: %v", msg)
+	}
+	if !strings.Contains(msg, "mapping") {
+		t.Errorf("expected error to describe expected shape (mapping), got: %v", msg)
+	}
+}

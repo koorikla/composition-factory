@@ -3,8 +3,10 @@ package blueprint
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -360,12 +362,74 @@ func Parse(body []byte) (*Blueprint, error) {
 	dec := json.NewDecoder(bytes.NewReader(jsonBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&b); err != nil {
-		return nil, fmt.Errorf("parse blueprint: %w", err)
+		return nil, fmt.Errorf("parse blueprint: %w", formatDecodeError(err))
 	}
 	if err := b.Validate(); err != nil {
 		return nil, err
 	}
 	return &b, nil
+}
+
+var arrayIndexRE = regexp.MustCompile(`\.([0-9]+)`)
+
+// formatDecodeError converts raw JSON unmarshaling errors into user-facing DSL terms,
+// replacing internal Go type names (e.g. blueprint.Source) and internal struct dot paths
+// (e.g. spec.sources.0) with DSL field paths (spec.sources[0]) and expected shapes.
+func formatDecodeError(err error) error {
+	var ute *json.UnmarshalTypeError
+	if !errors.As(err, &ute) {
+		return err
+	}
+
+	field := ute.Field
+	field = strings.TrimPrefix(field, "Blueprint.")
+	field = strings.TrimPrefix(field, "blueprint.")
+	field = arrayIndexRE.ReplaceAllString(field, "[$1]")
+
+	valDesc := ute.Value
+	if valDesc == "bool" {
+		valDesc = "boolean"
+	} else if valDesc == "array" {
+		valDesc = "list"
+	} else if valDesc == "object" {
+		valDesc = "mapping"
+	}
+
+	expected := expectedShape(field, ute.Type)
+	if field != "" {
+		return fmt.Errorf("%s: expected %s, got %s", field, expected, valDesc)
+	}
+	return fmt.Errorf("expected %s, got %s", expected, valDesc)
+}
+
+func expectedShape(field string, targetType reflect.Type) string {
+	if (targetType != nil && (targetType.String() == "blueprint.Source" || targetType.Name() == "Source")) ||
+		(strings.HasPrefix(field, "spec.sources[") && !strings.Contains(strings.TrimPrefix(field, "spec.sources["), ".")) {
+		return "mapping with provider (a package ref) or crds (a CRD manifest file)"
+	}
+	if field == "spec.sources" {
+		return "list of mappings"
+	}
+	if field == "spec.resources" {
+		return "list of resources"
+	}
+	if targetType != nil {
+		switch targetType.Kind() {
+		case reflect.Slice, reflect.Array:
+			return "list"
+		case reflect.Struct, reflect.Map:
+			return "mapping"
+		case reflect.String:
+			return "string"
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return "integer"
+		case reflect.Float32, reflect.Float64:
+			return "number"
+		case reflect.Bool:
+			return "boolean"
+		}
+	}
+	return "mapping"
 }
 
 // BlueprintAnnotation is where cf package embeds the blueprint source in a
