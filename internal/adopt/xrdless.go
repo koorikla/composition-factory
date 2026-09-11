@@ -238,7 +238,7 @@ func applyXRDlessEvidence(bp *blueprint.Blueprint, compDocs []map[string]any, sy
 				settle(&mp, ev[name+"."+m], "xrd.parameters."+name+".properties."+m, report, baseMember)
 				p.Properties[m] = mp
 			}
-			report.Record("xrd.parameters."+name, "without the XRD, description could not be recovered")
+			report.Record("xrd.parameters."+name, "without the XRD, description could not be recovered (combine XRD and Composition into one file, or import XRD to complement)")
 			bp.Spec.XRD.Parameters[name] = p
 			continue
 		}
@@ -313,7 +313,7 @@ func settle(p *blueprint.Parameter, e *paramEvidence, path string, report *LossR
 	}
 
 	lost = append(lost, "default", "enum", "description")
-	report.Record(path, "without the XRD, "+joinLost(lost)+" could not be recovered")
+	report.Record(path, "without the XRD, "+joinLost(lost)+" could not be recovered (combine XRD and Composition into one file, or import XRD to complement)")
 }
 
 func walkNodes(nodes []*schema.Node, prefix string, out map[string]*schema.Node) {

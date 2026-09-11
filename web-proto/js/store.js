@@ -272,7 +272,7 @@ export const store = {
   async adoptComposition(yamlText, provider) {
     const self = this;
     return this._paramOp("adoptComposition", async function () {
-      const res = await api.adoptComposition(yamlText, provider);
+      const res = await api.adoptComposition(yamlText, provider, self.state.doc);
       self.state.lastAdoptReport = (res && res.lossReport) || null;
       return res.blueprint;
     });

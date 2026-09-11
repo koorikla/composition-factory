@@ -22,8 +22,8 @@
     <button class="btn" id="undoBtn" disabled title="Undo (⌘Z / Ctrl+Z)">↩</button>
     <button class="btn" id="redoBtn" disabled title="Redo (⇧⌘Z / Shift+Ctrl+Z)">↪</button>
     <button class="btn" id="packageBtn" title="Download this blueprint as a Crossplane Configuration package (.xpkg)">Package</button>
-    <button class="btn" id="importBtn" title="Import a blueprint .yaml, or adopt an existing Crossplane Composition (replaces the current document; undoable)">Import</button>
-    <input type="file" id="importFile" accept=".yaml,.yml" hidden>
+    <button class="btn" id="importBtn" title="Import a blueprint .yaml, or adopt Crossplane Composition &amp; XRD (combine or select both files for lossless adoption; undoable)">Import</button>
+    <input type="file" id="importFile" accept=".yaml,.yml" multiple hidden>
     <button class="btn" id="examplesBtn" title="Choose a starter blueprint (IRSA, RDS, K8s App...)">Examples</button>
     <button class="btn" id="themeBtn">Theme</button>
     <button class="btn" id="validateBtn" disabled title="Run a real crossplane composition render of this blueprint against a sample XR">Validate</button>

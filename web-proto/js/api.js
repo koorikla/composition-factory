@@ -382,9 +382,12 @@ export function importBlueprint(yamlText) {
  * @param {string} [provider] Default provider ref when not inferrable.
  * @returns {Promise<{blueprint:Object, lossReport?:{drops:{path:string,reason:string}[]}, persisted:boolean}>}
  */
-export function adoptComposition(yamlText, provider) {
-  return request("POST", "/api/blueprint/adopt",
-    { manifest: yamlText, persist: true, provider: provider || "" });
+export function adoptComposition(yamlText, provider, baseBlueprint) {
+  const payload = { manifest: yamlText, persist: true, provider: provider || "" };
+  if (baseBlueprint) {
+    payload.baseBlueprint = baseBlueprint;
+  }
+  return request("POST", "/api/blueprint/adopt", payload);
 }
 
 /** GET /api/package?format=yaml — the package.yaml document stream as text. */

@@ -259,6 +259,11 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	}
 
 	if compDoc == nil {
+		if xrdDoc != nil && opts.BaseBlueprint != nil {
+			if _, ok := xrdDoc["spec"].(map[string]any); ok {
+				return adoptXRDComplement(xrdDoc, opts)
+			}
+		}
 		return nil, nil, fmt.Errorf("no Composition document found in manifest")
 	}
 
@@ -406,6 +411,94 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	}
 
 	return bp, report, nil
+}
+
+func adoptXRDComplement(xrdDoc map[string]any, opts Options) (*blueprint.Blueprint, *LossReport, error) {
+	if opts.BaseBlueprint == nil {
+		return nil, nil, fmt.Errorf("no Composition document found in manifest (supply Composition and XRD together in one file or select both to adopt)")
+	}
+
+	spec, ok := xrdDoc["spec"].(map[string]any)
+	if !ok {
+		return nil, nil, fmt.Errorf("XRD document has no spec")
+	}
+
+	names, _ := spec["names"].(map[string]any)
+	xrdKind, _ := names["kind"].(string)
+	if opts.BaseBlueprint.Spec.XRD.Kind != "" && xrdKind != "" && !strings.EqualFold(opts.BaseBlueprint.Spec.XRD.Kind, xrdKind) {
+		return nil, nil, fmt.Errorf("no Composition document found in manifest")
+	}
+
+	bpData, err := json.Marshal(opts.BaseBlueprint)
+	if err != nil {
+		return nil, nil, fmt.Errorf("clone base blueprint: %w", err)
+	}
+	var bp blueprint.Blueprint
+	if err := json.Unmarshal(bpData, &bp); err != nil {
+		return nil, nil, fmt.Errorf("clone base blueprint: %w", err)
+	}
+
+	if bp.Spec.XRD.Parameters == nil {
+		bp.Spec.XRD.Parameters = make(map[string]blueprint.Parameter)
+	}
+
+	report := &LossReport{}
+
+	if group, ok := spec["group"].(string); ok && group != "" {
+		bp.Spec.XRD.Group = group
+	}
+	if xrdKind != "" {
+		bp.Spec.XRD.Kind = xrdKind
+	}
+	if plural, ok := names["plural"].(string); ok && plural != "" {
+		bp.Spec.XRD.Plural = plural
+	}
+	if scope, ok := spec["scope"].(string); ok && scope != "" {
+		bp.Spec.XRD.Scope = scope
+	}
+
+	if versions, ok := spec["versions"].([]any); ok && len(versions) > 0 {
+		var matchedVersion map[string]any
+		for _, v := range versions {
+			if vMap, ok := v.(map[string]any); ok {
+				vName, _ := vMap["name"].(string)
+				if bp.Spec.XRD.Version != "" && vName == bp.Spec.XRD.Version {
+					matchedVersion = vMap
+					break
+				}
+				if matchedVersion == nil {
+					matchedVersion = vMap
+				}
+			}
+		}
+		if matchedVersion != nil {
+			if vName, ok := matchedVersion["name"].(string); ok && vName != "" {
+				bp.Spec.XRD.Version = vName
+			}
+		}
+	}
+
+	parseXRDDoc(xrdDoc, &bp, report)
+
+	resolveXRDPlural(&bp)
+	if bp.Spec.XRD.Scope == "" {
+		bp.Spec.XRD.Scope = "Namespaced"
+	}
+	if bp.Spec.XRD.Scope == "Namespaced" {
+		if _, ok := bp.Spec.XRD.Parameters["providerName"]; !ok {
+			bp.Spec.XRD.Parameters["providerName"] = blueprint.Parameter{
+				Type:        "string",
+				Required:    true,
+				Description: "Crossplane ProviderConfig name to use for managed resources",
+			}
+		}
+	}
+
+	if err := bp.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("validate adopted blueprint: %w", err)
+	}
+
+	return &bp, report, nil
 }
 
 // splitYAML splits a multi-document YAML stream into individual maps.

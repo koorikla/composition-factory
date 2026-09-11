@@ -482,7 +482,7 @@ function ensureBp() {
 
   function updateImportTooltip() {
     var targetBp = cachedBlueprintName || getTargetBlueprintName();
-    btn.title = "Import a blueprint .yaml, or adopt an existing Crossplane Composition (replaces " + targetBp + " \u00b7 undoable)";
+    btn.title = "Import a blueprint .yaml, or adopt Crossplane Composition & XRD (combine or select both files for lossless adoption; replaces " + targetBp + " \u00b7 undoable)";
   }
 
   ensureBp().then(function () {
@@ -503,9 +503,9 @@ function ensureBp() {
   });
 
   file.addEventListener("change", function () {
-    var f = file.files && file.files[0];
+    var files = file.files ? Array.from(file.files) : [];
     file.value = "";
-    if (!f) return;
+    if (files.length === 0) return;
 
     var targetBp = cachedBlueprintName || getTargetBlueprintName();
     var ok = window.confirm("Import will replace " + targetBp + " (undoable).\n\nProceed?");
@@ -513,9 +513,17 @@ function ensureBp() {
 
     var prevDoc = store.state.doc ? JSON.parse(JSON.stringify(store.state.doc)) : null;
 
-    var reader = new FileReader();
-    reader.onload = function () {
-      var text = String(reader.result);
+    var readPromises = files.map(function (f) {
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () { resolve(String(reader.result)); };
+        reader.onerror = function (err) { reject(err); };
+        reader.readAsText(f);
+      });
+    });
+
+    Promise.all(readPromises).then(function (texts) {
+      var text = texts.join("\n---\n");
       // One Import button, two source formats: cf's own blueprint goes through
       // the import gate unchanged, and a real Crossplane Composition is adopted
       // into one. Routing on the manifest's own `kind:` means the user does not
@@ -534,8 +542,9 @@ function ensureBp() {
           clearNotice();
         }
       });
-    };
-    reader.readAsText(f);
+    }).catch(function (err) {
+      notice("failed to read file: " + (err && err.message ? err.message : err), true);
+    });
   });
 
   function summarizeChanges(prevDoc, nextDoc) {
