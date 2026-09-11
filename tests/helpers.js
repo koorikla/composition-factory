@@ -6,10 +6,33 @@ const { test, expect } = require('@playwright/test')
 const pristine = require('./fixtures/pristine-doc.json')
 const crypto = require('crypto')
 const fs = require('fs')
+const path = require('path')
 const { execSync } = require('child_process')
 
 if (!fs.existsSync('.testrun')) {
   fs.mkdirSync('.testrun', { recursive: true })
+}
+
+function getScratchDir() {
+  let toplevel = process.cwd()
+  try {
+    toplevel = execSync('git rev-parse --show-toplevel', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+  } catch (_) {}
+  const hash = crypto.createHash('sha256').update(toplevel).digest('hex').slice(0, 8)
+  return path.join(toplevel, `.testrun-${hash}`)
+}
+
+function seedCache() {
+  const scratch = getScratchDir()
+  const targetCache = path.join(scratch, 'cache')
+  let toplevel = process.cwd()
+  try {
+    toplevel = execSync('git rev-parse --show-toplevel', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+  } catch (_) {}
+  const fixtureCache = path.join(toplevel, 'tests', 'fixtures', 'cache')
+  if (fs.existsSync(fixtureCache) && fs.existsSync(targetCache)) {
+    fs.cpSync(fixtureCache, targetCache, { recursive: true })
+  }
 }
 
 function getEngineURL() {
@@ -28,6 +51,7 @@ function getEngineURL() {
 const ENGINE = getEngineURL()
 
 async function resetDoc(request) {
+  seedCache()
   let api
   try { api = await request.get(ENGINE + '/api/kinds') } catch (e) { api = null }
   test.skip(!api || !api.ok(), `cf serve is not running on ${ENGINE}`)
@@ -36,7 +60,7 @@ async function resetDoc(request) {
   if (!r.ok()) throw new Error('resetDoc failed: ' + (await r.text()))
 }
 
-module.exports = { resetDoc, ENGINE }
+module.exports = { resetDoc, ENGINE, seedCache }
 
 // Any uncaught error in the page fails the test that produced it. Without
 // this, a broken module import or a ReferenceError inside an event handler
