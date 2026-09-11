@@ -266,3 +266,173 @@ spec:
 		t.Errorf("expected wired project tag from customTags, got:\n%s", s)
 	}
 }
+
+func TestUntypedObjectParam(t *testing.T) {
+	crdYAML := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                properties:
+                  tags:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  nested:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+	crds, err := schema.ParseCRDs([][]byte{crdYAML})
+	if err != nil {
+		t.Fatalf("ParseCRDs failed: %v", err)
+	}
+
+	t.Run("NestedFieldsExercisesNativeTree", func(t *testing.T) {
+		b := &blueprint.Blueprint{
+			APIVersion: blueprint.APIVersion,
+			Kind:       blueprint.Kind,
+			Metadata:   blueprint.Metadata{Name: "test-untyped-obj-nested"},
+			Spec: blueprint.Spec{
+				XRD: blueprint.XRD{
+					Group:   "example.org",
+					Version: "v1alpha1",
+					Kind:    "XApp",
+					Plural:  "xapps",
+					Scope:   "Namespaced",
+					Parameters: map[string]blueprint.Parameter{
+						"providerName": {Type: "string", Required: true},
+						"customTags":   {Type: "object"},
+					},
+				},
+				Resources: []blueprint.Resource{
+					{
+						Name: "queue",
+						Kind: "Queue",
+						Fields: map[string]blueprint.Field{
+							"nested.enabled": {Value: "true"},
+							"tags":           {From: "params.customTags"},
+						},
+					},
+				},
+			},
+		}
+
+		if err := b.Validate(); err != nil {
+			t.Fatalf("Validate failed: %v", err)
+		}
+
+		out, err := emit.Composition(b, crds)
+		if err != nil {
+			t.Fatalf("Composition emit failed: %v", err)
+		}
+
+		s := string(out)
+		t.Logf("Emitted Composition (nested):\n%s", s)
+
+		if !strings.Contains(s, "enabled: true") {
+			t.Errorf("expected nested enabled field, got:\n%s", s)
+		}
+		if !strings.Contains(s, "{{- if hasKey $spec \"customTags\" }}") {
+			t.Errorf("expected conditional hasKey for customTags, got:\n%s", s)
+		}
+		if !strings.Contains(s, "tags:") {
+			t.Errorf("expected tags block, got:\n%s", s)
+		}
+		if !strings.Contains(s, "{{- range $k, $v := $spec.customTags }}") {
+			t.Errorf("expected range loop for customTags, got:\n%s", s)
+		}
+		if !strings.Contains(s, "{{ $k }}: {{ $v }}") {
+			t.Errorf("expected key-value output inside range loop, got:\n%s", s)
+		}
+
+		// Verify ordering: nested enabled -> if hasKey -> tags: -> range -> key:value -> end
+		nestedIdx := strings.Index(s, "enabled: true")
+		ifIdx := strings.Index(s, "{{- if hasKey $spec \"customTags\" }}")
+		tagsIdx := strings.Index(s, "tags:")
+		rangeIdx := strings.Index(s, "{{- range $k, $v := $spec.customTags }}")
+		kvIdx := strings.Index(s, "{{ $k }}: {{ $v }}")
+
+		if !(nestedIdx < ifIdx && ifIdx < tagsIdx && tagsIdx < rangeIdx && rangeIdx < kvIdx) {
+			t.Errorf("expected order: enabled -> if -> tags -> range -> kv, got indices: nested=%d, if=%d, tags=%d, range=%d, kv=%d",
+				nestedIdx, ifIdx, tagsIdx, rangeIdx, kvIdx)
+		}
+	})
+
+	t.Run("WithExplicitKeys", func(t *testing.T) {
+		b := &blueprint.Blueprint{
+			APIVersion: blueprint.APIVersion,
+			Kind:       blueprint.Kind,
+			Metadata:   blueprint.Metadata{Name: "test-untyped-obj-explicit"},
+			Spec: blueprint.Spec{
+				XRD: blueprint.XRD{
+					Group:   "example.org",
+					Version: "v1alpha1",
+					Kind:    "XApp",
+					Plural:  "xapps",
+					Scope:   "Namespaced",
+					Parameters: map[string]blueprint.Parameter{
+						"providerName": {Type: "string", Required: true},
+						"customTags":   {Type: "object"},
+					},
+				},
+				Resources: []blueprint.Resource{
+					{
+						Name: "queue",
+						Kind: "Queue",
+						Fields: map[string]blueprint.Field{
+							"tags":              {From: "params.customTags"},
+							"tags[Environment]": {Value: "prod"},
+						},
+					},
+				},
+			},
+		}
+
+		if err := b.Validate(); err != nil {
+			t.Fatalf("Validate failed: %v", err)
+		}
+
+		out, err := emit.Composition(b, crds)
+		if err != nil {
+			t.Fatalf("Composition emit failed: %v", err)
+		}
+
+		s := string(out)
+		t.Logf("Emitted Composition (explicit):\n%s", s)
+
+		if count := strings.Count(s, "tags:"); count != 1 {
+			t.Errorf("expected exactly 1 'tags:' occurrence, got %d:\n%s", count, s)
+		}
+		if !strings.Contains(s, "{{- range $k, $v := $spec.customTags }}") {
+			t.Errorf("expected range loop for customTags, got:\n%s", s)
+		}
+		if !strings.Contains(s, "Environment: 'prod'") {
+			t.Errorf("expected explicit Environment tag, got:\n%s", s)
+		}
+
+		rangeIdx := strings.Index(s, "range $k, $v := $spec.customTags")
+		explicitIdx := strings.Index(s, "Environment: 'prod'")
+		if rangeIdx == -1 || explicitIdx == -1 || rangeIdx > explicitIdx {
+			t.Errorf("expected dynamic range loop before explicit tag, got rangeIdx=%d, explicitIdx=%d", rangeIdx, explicitIdx)
+		}
+	})
+}

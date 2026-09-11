@@ -959,11 +959,13 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 
 	grouped := map[string][]forProviderField{}
 	isMapField := map[string]bool{}
+	seenBase := map[string]bool{}
 	var distinctBase []string
 
 	mapBaseStructured := map[string]structuredRHS{}
 	for _, l := range leaves {
-		if _, exists := grouped[l.basePath]; !exists {
+		if !seenBase[l.basePath] {
+			seenBase[l.basePath] = true
 			distinctBase = append(distinctBase, l.basePath)
 		}
 		if l.isMap {
@@ -976,11 +978,12 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 			})
 		} else if l.structured.targetType == "object" && l.structured.kind == rhsParam {
 			isMapField[l.basePath] = true
-			mapBaseStructured[l.basePath] = l.structured
+			hasProps := false
 			_, chain, err := blueprint.ParamChain(b.Spec.XRD, "", l.structured.param)
 			if err == nil && len(chain) > 0 {
 				wireDecl := chain[len(chain)-1]
 				if len(wireDecl.Properties) > 0 {
+					hasProps = true
 					for mName, mDecl := range wireDecl.Properties {
 						mRHS := fmt.Sprintf("{{ $spec.%s.%s }}", l.structured.param, mName)
 						if mDecl.Type == "string" {
@@ -1000,6 +1003,9 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 						})
 					}
 				}
+			}
+			if !hasProps {
+				mapBaseStructured[l.basePath] = l.structured
 			}
 		} else {
 			grouped[l.basePath] = append(grouped[l.basePath], forProviderField{
@@ -1399,6 +1405,9 @@ func writeMapField(d *Doc, keyIndent int, key string, childIndent int, plan []fo
 	var conds []string
 	for _, fld := range plan {
 		if fld.isMap {
+			if fld.structured.targetType == "object" && fld.structured.param != "" {
+				conds = append(conds, fmt.Sprintf("(hasKey $spec %q)", fld.structured.param))
+			}
 			for _, e := range fld.entries {
 				if e.guard != "" {
 					conds = append(conds, "("+e.guard+")")
@@ -1426,7 +1435,8 @@ func writeMapField(d *Doc, keyIndent int, key string, childIndent int, plan []fo
 // writeField emits one resolved field, gated on its guard when non-empty.
 func writeField(d *Doc, indent int, fld forProviderField) {
 	if fld.isMap {
-		if fld.structured.targetType == "object" && len(fld.entries) == 0 {
+		hasObjectParam := fld.structured.targetType == "object" && fld.structured.param != ""
+		if hasObjectParam && len(fld.entries) == 0 {
 			paramName := fld.structured.param
 			d.Line(indent, "{{- if hasKey $spec %q }}", paramName)
 			d.Line(indent, "%s:", formatKey(fld.path))
@@ -1445,11 +1455,21 @@ func writeField(d *Doc, indent int, fld forProviderField) {
 		}
 		if anyChildGuaranteed {
 			d.Line(indent, "%s:", formatKey(fld.path))
+			if hasObjectParam {
+				d.Line(indent+1, "{{- if hasKey $spec %q }}", fld.structured.param)
+				d.Line(indent+1, "{{- range $k, $v := $spec.%s }}", fld.structured.param)
+				d.Line(indent+1, "{{ $k }}: {{ $v }}")
+				d.Line(indent+1, "{{- end }}")
+				d.Line(indent+1, "{{- end }}")
+			}
 			for _, e := range fld.entries {
 				writeField(d, indent+1, e)
 			}
 		} else {
 			var conds []string
+			if hasObjectParam {
+				conds = append(conds, fmt.Sprintf("(hasKey $spec %q)", fld.structured.param))
+			}
 			for _, e := range fld.entries {
 				if e.guard != "" {
 					conds = append(conds, "("+e.guard+")")
@@ -1458,6 +1478,13 @@ func writeField(d *Doc, indent int, fld forProviderField) {
 			if len(conds) > 0 {
 				d.Line(indent, "{{- if or %s }}", strings.Join(conds, " "))
 				d.Line(indent, "%s:", formatKey(fld.path))
+				if hasObjectParam {
+					d.Line(indent+1, "{{- if hasKey $spec %q }}", fld.structured.param)
+					d.Line(indent+1, "{{- range $k, $v := $spec.%s }}", fld.structured.param)
+					d.Line(indent+1, "{{ $k }}: {{ $v }}")
+					d.Line(indent+1, "{{- end }}")
+					d.Line(indent+1, "{{- end }}")
+				}
 				for _, e := range fld.entries {
 					writeField(d, indent+1, e)
 				}

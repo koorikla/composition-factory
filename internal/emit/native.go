@@ -37,12 +37,13 @@ import (
 
 // nativeNode is one segment in the planned field tree.
 type nativeNode struct {
-	seg      string            // segment name, index stripped
-	idx      int               // element index for an indexed segment (0-based)
-	indexed  bool              // segment carried an [N] element index
-	leaf     *forProviderField // set when a planned field ends at this node
-	children []*nativeNode     // path-sorted insertion order (plan is sorted)
-	byName   map[string]*nativeNode
+	seg           string            // segment name, index stripped
+	idx           int               // element index for an indexed segment (0-based)
+	indexed       bool              // segment carried an [N] element index
+	leaf          *forProviderField // set when a planned field ends at this node
+	mapStructured *structuredRHS    // untyped object parameter wired into this map node
+	children      []*nativeNode     // path-sorted insertion order (plan is sorted)
+	byName        map[string]*nativeNode
 }
 
 // buildNativeTree folds the path-sorted plan into a tree, refusing the two
@@ -65,6 +66,19 @@ func buildNativeTree(resourceName string, plan []forProviderField) (*nativeNode,
 					segments := append(strings.Split(f.path, "."), entry.path)
 					if err := insertNativePath(resourceName, root, f.path+"["+entry.path+"]", segments, entry); err != nil {
 						return nil, err
+					}
+				}
+				if f.structured.targetType == "object" && f.structured.param != "" {
+					segments := strings.Split(f.path, ".")
+					node := root
+					for _, s := range segments {
+						if node != nil {
+							node = node.byName[s]
+						}
+					}
+					if node != nil {
+						sObj := f.structured
+						node.mapStructured = &sObj
 					}
 				}
 			}
@@ -146,11 +160,24 @@ func (n *nativeNode) analyze() (unconditional bool, guards []string) {
 	var walk func(*nativeNode)
 	walk = func(m *nativeNode) {
 		if m.leaf != nil {
-			if m.leaf.guard == "" {
+			if m.leaf.isMap && m.leaf.structured.targetType == "object" && m.leaf.rhs == "" {
+				g := fmt.Sprintf("hasKey $spec %q", m.leaf.structured.param)
+				if !seen[g] {
+					seen[g] = true
+					guards = append(guards, g)
+				}
+			} else if m.leaf.guard == "" {
 				unconditional = true
 			} else if !seen[m.leaf.guard] {
 				seen[m.leaf.guard] = true
 				guards = append(guards, m.leaf.guard)
+			}
+		}
+		if m.mapStructured != nil && m.mapStructured.targetType == "object" && m.mapStructured.param != "" {
+			g := fmt.Sprintf("hasKey $spec %q", m.mapStructured.param)
+			if !seen[g] {
+				seen[g] = true
+				guards = append(guards, g)
 			}
 		}
 		for _, c := range m.children {
@@ -367,6 +394,14 @@ func writeNativeNode(d *Doc, indent int, n *nativeNode) {
 	}
 
 	d.Line(indent, "%s:", formatKey(n.seg))
+	if n.mapStructured != nil && n.mapStructured.targetType == "object" && n.mapStructured.param != "" {
+		paramName := n.mapStructured.param
+		d.Line(indent+1, "{{- if hasKey $spec %q }}", paramName)
+		d.Line(indent+1, "{{- range $k, $v := $spec.%s }}", paramName)
+		d.Line(indent+1, "{{ $k }}: {{ $v }}")
+		d.Line(indent+1, "{{- end }}")
+		d.Line(indent+1, "{{- end }}")
+	}
 	// indexed nodes are grouped and rendered by writeNativeChildren — this
 	// node is a plain mapping key; its children may hold element runs
 	writeNativeChildren(d, indent+1, n.children)
@@ -381,6 +416,16 @@ func writeNativeNode(d *Doc, indent int, n *nativeNode) {
 // mapping on "containers[0]", say): the key opens a sequence whose single
 // element is the value.
 func writeNativeLeaf(d *Doc, indent int, n *nativeNode) {
+	if n.leaf.isMap && n.leaf.structured.targetType == "object" && n.leaf.rhs == "" {
+		paramName := n.leaf.structured.param
+		d.Line(indent, "{{- if hasKey $spec %q }}", paramName)
+		d.Line(indent, "%s:", formatKey(n.seg))
+		d.Line(indent+1, "{{- range $k, $v := $spec.%s }}", paramName)
+		d.Line(indent+1, "{{ $k }}: {{ $v }}")
+		d.Line(indent+1, "{{- end }}")
+		d.Line(indent, "{{- end }}")
+		return
+	}
 	if n.leaf.guard != "" {
 		d.Line(indent, "{{- if %s }}", n.leaf.guard)
 	}
