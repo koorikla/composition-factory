@@ -304,3 +304,41 @@ spec:
 		}
 	}
 }
+
+func TestAdoptEndpointErrorDoesNotDuplicatePrefix(t *testing.T) {
+	h, _ := testHandlerWithPath(t)
+
+	// Manifest with XRD but without Composition will fail adoption because no Composition document is found.
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xqueues.aws.example.org
+`
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"manifest": manifest,
+		"persist":  false,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/blueprint/adopt", bytes.NewReader(reqBody))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var res map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+
+	errMsg := res["error"]
+	if strings.HasPrefix(errMsg, "adopt failed:") {
+		t.Errorf("expected error message without 'adopt failed:' prefix, got %q", errMsg)
+	}
+	if errMsg != "no Composition document found in manifest" {
+		t.Errorf("error = %q, want %q", errMsg, "no Composition document found in manifest")
+	}
+}

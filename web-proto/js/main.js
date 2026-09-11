@@ -498,7 +498,8 @@ function ensureBp() {
   });
   store.subscribe("error", function (e) {
     if (!e || e.source !== "adoptComposition") return;
-    notice("adopt failed: " + e.message, true);
+    var msg = (e.message || "").replace(/^adopt failed:\s*/i, "");
+    notice("adopt failed: " + msg, true);
   });
 
   file.addEventListener("change", function () {

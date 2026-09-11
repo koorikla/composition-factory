@@ -65,7 +65,7 @@ func (srv *server) handleAdoptBlueprint(w http.ResponseWriter, r *http.Request) 
 	}
 	bp, report, err := adopt.Adopt([]byte(req.Manifest), opts)
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "adopt failed: "+err.Error())
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

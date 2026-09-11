@@ -192,3 +192,31 @@ test('a manifest that is neither reports the server error verbatim', async ({ pa
   await expect(warn).toBeVisible()
   await expect(warn).toContainText('import failed')
 })
+
+test('failed adopt displays error toast without duplicate prefix', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('.node')).toHaveCount(3)
+
+  // Manifest with XRD but no Composition routes to adopt and fails
+  const xrdOnly = `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xqueues.example.org
+spec:
+  group: example.org
+  names: {kind: XQueue, plural: xqueues}
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+`
+  await importFile(page, 'xrd-only.yaml', xrdOnly)
+
+  const warn = page.locator('#import-warn')
+  await expect(warn).toBeVisible()
+  await expect(warn).toContainText('adopt failed: no Composition document found in manifest')
+  await expect(warn).not.toContainText('adopt failed: adopt failed:')
+})
