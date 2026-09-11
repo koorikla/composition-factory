@@ -10,7 +10,7 @@ import (
 
 // InitCmd scaffolds a minimal valid blueprint file.
 type InitCmd struct {
-	Path string `arg:"" help:"Path to the blueprint file to create." default:"blueprint.cf.yaml" optional:""`
+	Path string `arg:"" help:"Path to the blueprint file to create." default:"doc.cf.yaml" optional:""`
 }
 
 const scaffoldBlueprint = `apiVersion: factory.crossplane.io/v1alpha1

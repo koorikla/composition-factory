@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alecthomas/kong"
@@ -53,6 +54,29 @@ func TestInitWritesAMinimalValidBlueprint(t *testing.T) {
 	}
 	if _, ok := b.Spec.XRD.Parameters["providerName"]; !ok {
 		t.Error("cf init omitted providerName, which every Namespaced XRD requires")
+	}
+}
+
+func TestInitDefaultsToDocCFYaml(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tempDir := t.TempDir()
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	out, err := runCF(t, "init")
+	if err != nil {
+		t.Fatalf("cf init default: %v", err)
+	}
+	if !strings.Contains(out, "scaffolded doc.cf.yaml") {
+		t.Errorf("expected output to mention scaffolded doc.cf.yaml, got: %s", out)
+	}
+	if _, err := os.Stat("doc.cf.yaml"); err != nil {
+		t.Errorf("expected doc.cf.yaml to exist, got: %v", err)
 	}
 }
 

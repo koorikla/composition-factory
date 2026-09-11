@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -84,21 +85,26 @@ func (c *FieldsCmd) Run(out io.Writer) error {
 			}
 		}
 		if len(candidates) == 0 {
-			// Try substring search
+			// Inexact kind match is refused: find closest kind and suggest "did you mean" like cf gen
+			var allKinds []string
+			seenKind := make(map[string]bool)
 			for _, k := range idx.All() {
-				if strings.Contains(strings.ToLower(k.Kind), strings.ToLower(c.Kind)) {
-					candidates = append(candidates, k)
+				if !seenKind[k.Kind] {
+					seenKind[k.Kind] = true
+					allKinds = append(allKinds, k.Kind)
 				}
 			}
-		}
-
-		if len(candidates) == 1 {
+			sort.Strings(allKinds)
+			if s := blueprint.ClosestPath(c.Kind, allKinds); s != "" {
+				return fmt.Errorf("kind %q not found in cache or blueprint sources; did you mean %q?", c.Kind, s)
+			}
+		} else if len(candidates) == 1 {
 			targetKind = candidates[0]
 			if crd, ok := idx.Lookup(targetKind.APIVersion, targetKind.Kind); ok {
 				targetCRD, found = crd, true
 			}
 		} else if len(candidates) > 1 {
-			// If multiple candidates, prefer namespaced (.m.) variant or first exact match
+			// If multiple exact matches (case-insensitive), prefer namespaced (.m.) variant
 			selected := candidates[0]
 			for _, cand := range candidates {
 				if strings.EqualFold(cand.Kind, c.Kind) && cand.Namespaced {

@@ -146,6 +146,19 @@ func TestFieldsCommand(t *testing.T) {
 	if err := unknownCmd.Run(&out); err == nil {
 		t.Fatal("expected error for unknown kind, got nil")
 	}
+
+	// 5. Inexact/fuzzy kind match is refused with "did you mean" suggestion (CF-150)
+	fuzzyCmd := &FieldsCmd{
+		Kind:      "Deploymen",
+		CacheDir:  cacheDir,
+		Blueprint: filepath.Join(dir, "doc.cf.yaml"),
+	}
+	out.Reset()
+	if err := fuzzyCmd.Run(&out); err == nil {
+		t.Fatal("expected error for fuzzy kind 'Deploymen', got nil")
+	} else if !strings.Contains(err.Error(), `did you mean "Deployment"?`) {
+		t.Errorf("expected error to suggest 'did you mean \"Deployment\"?', got: %v", err)
+	}
 }
 
 func TestCatalogueCommand(t *testing.T) {
