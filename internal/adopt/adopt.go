@@ -392,6 +392,10 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	// Prune unknown forProvider fields against CRD schema if store is available
 	pruneUnknownForProviderFields(bp, opts, report)
 
+	if xrdDoc == nil {
+		pruneOrphanedParameters(bp, opts.BaseBlueprint, report)
+	}
+
 	// No XRD alongside: the parameters above were inferred from their uses.
 	// Settle what the Composition proves and name the rest as lost.
 	if xrdDoc == nil {
@@ -2650,10 +2654,6 @@ func pruneUnknownForProviderFields(bp *blueprint.Blueprint, opts Options, report
 		sort.Strings(fNames)
 
 		for _, fieldPath := range fNames {
-			fld := r.Fields[fieldPath]
-			if fld.From != "" || fld.Raw != "" || fld.Template != "" {
-				continue
-			}
 			basePath, _, isMap := blueprint.ParseFieldPath(fieldPath)
 			lookup := reArrayIdx.ReplaceAllString(fieldPath, "[0]")
 			if isMap {
@@ -2668,6 +2668,189 @@ func pruneUnknownForProviderFields(bp *blueprint.Blueprint, opts Options, report
 				fmt.Sprintf("field %q is not in %s spec.forProvider (unknown field pruned by schema)", fieldPath, crd.Kind),
 			)
 			delete(r.Fields, fieldPath)
+		}
+	}
+}
+
+func matchesParamRef(s string, paramName, memberName string) bool {
+	if s == "" {
+		return false
+	}
+	if memberName != "" {
+		reMember := regexp.MustCompile(`(?:\$spec|\.spec|params)\.` + regexp.QuoteMeta(paramName) + `\.` + regexp.QuoteMeta(memberName) + `\b`)
+		if reMember.MatchString(s) {
+			return true
+		}
+		// Also check if the whole parent parameter is referenced directly (e.g. $spec.parent not followed by .)
+		reParent := regexp.MustCompile(`(?:\$spec|\.spec|params)\.` + regexp.QuoteMeta(paramName) + `\b`)
+		locs := reParent.FindAllStringIndex(s, -1)
+		for _, loc := range locs {
+			end := loc[1]
+			if end >= len(s) || s[end] != '.' {
+				return true
+			}
+		}
+		return false
+	}
+	reParam := regexp.MustCompile(`(?:\$spec|\.spec|params)\.` + regexp.QuoteMeta(paramName) + `\b`)
+	return reParam.MatchString(s)
+}
+
+func isParameterReferenced(bp *blueprint.Blueprint, paramName string, memberName string) bool {
+	targetFrom := "params." + paramName
+	if memberName != "" {
+		targetFrom = "params." + paramName + "." + memberName
+	}
+
+	checkField := func(f blueprint.Field) bool {
+		if f.From != "" {
+			if memberName != "" {
+				if f.From == "params."+paramName || f.From == targetFrom || strings.HasPrefix(f.From, targetFrom+".") {
+					return true
+				}
+			} else {
+				param, _, ok := blueprint.ParamRef(f.From)
+				if ok && param == paramName {
+					return true
+				}
+			}
+		}
+		if f.Raw != "" && matchesParamRef(f.Raw, paramName, memberName) {
+			return true
+		}
+		if f.Template != "" && matchesParamRef(f.Template, paramName, memberName) {
+			return true
+		}
+		return false
+	}
+
+	for _, r := range bp.Spec.Resources {
+		if r.ForEach != "" {
+			if memberName != "" {
+				if r.ForEach == "params."+paramName || r.ForEach == targetFrom || matchesParamRef(r.ForEach, paramName, memberName) {
+					return true
+				}
+			} else {
+				param, _, ok := blueprint.ParamRef(r.ForEach)
+				if (ok && param == paramName) || matchesParamRef(r.ForEach, paramName, "") {
+					return true
+				}
+			}
+		}
+		if r.When != "" {
+			if memberName != "" {
+				if matchesParamRef(r.When, paramName, memberName) {
+					return true
+				}
+			} else {
+				source, name, _, _, err := blueprint.ParseWhen(r.When)
+				if err == nil && (source == "params" || source == "") && name == paramName {
+					return true
+				}
+				if matchesParamRef(r.When, paramName, "") {
+					return true
+				}
+			}
+		}
+		for _, f := range r.Fields {
+			if checkField(f) {
+				return true
+			}
+		}
+		for _, f := range r.Envelope {
+			if checkField(f) {
+				return true
+			}
+		}
+		for _, f := range r.Annotations {
+			if checkField(f) {
+				return true
+			}
+		}
+	}
+
+	for _, tmpl := range bp.Spec.Templates {
+		if matchesParamRef(tmpl, paramName, memberName) {
+			return true
+		}
+	}
+
+	for _, env := range bp.Spec.Environment {
+		if matchesParamRef(env.Default, paramName, memberName) {
+			return true
+		}
+	}
+
+	for _, s := range bp.Spec.Pipeline {
+		if matchesParamRef(s.Input, paramName, memberName) {
+			return true
+		}
+	}
+
+	for _, c := range bp.Spec.Conventions {
+		if matchesParamRef(c.Template, paramName, memberName) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func pruneOrphanedParameters(bp *blueprint.Blueprint, baseBP *blueprint.Blueprint, report *LossReport) {
+	if bp == nil || bp.Spec.XRD.Parameters == nil {
+		return
+	}
+
+	paramNames := make([]string, 0, len(bp.Spec.XRD.Parameters))
+	for n := range bp.Spec.XRD.Parameters {
+		paramNames = append(paramNames, n)
+	}
+	sort.Strings(paramNames)
+
+	for _, name := range paramNames {
+		if name == "providerName" {
+			continue
+		}
+		if baseBP != nil && baseBP.Spec.XRD.Parameters != nil {
+			if _, ok := baseBP.Spec.XRD.Parameters[name]; ok {
+				continue
+			}
+		}
+
+		p := bp.Spec.XRD.Parameters[name]
+		if p.Type == "object" && len(p.Properties) > 0 {
+			memberNames := make([]string, 0, len(p.Properties))
+			for m := range p.Properties {
+				memberNames = append(memberNames, m)
+			}
+			sort.Strings(memberNames)
+
+			for _, m := range memberNames {
+				if baseBP != nil && baseBP.Spec.XRD.Parameters != nil {
+					if bpParent, ok := baseBP.Spec.XRD.Parameters[name]; ok && bpParent.Properties != nil {
+						if _, ok := bpParent.Properties[m]; ok {
+							continue
+						}
+					}
+				}
+				if !isParameterReferenced(bp, name, m) {
+					delete(p.Properties, m)
+					report.Record(fmt.Sprintf("xrd.parameters.%s.properties.%s", name, m), "parameter member orphaned by pruned unknown field dropped")
+				}
+			}
+
+			if len(p.Properties) == 0 && !isParameterReferenced(bp, name, "") {
+				delete(bp.Spec.XRD.Parameters, name)
+				report.Record("xrd.parameters."+name, "parameter orphaned by pruned unknown field dropped")
+			} else {
+				bp.Spec.XRD.Parameters[name] = p
+			}
+			continue
+		}
+
+		if !isParameterReferenced(bp, name, "") {
+			delete(bp.Spec.XRD.Parameters, name)
+			report.Record("xrd.parameters."+name, "parameter orphaned by pruned unknown field dropped")
 		}
 	}
 }
