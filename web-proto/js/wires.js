@@ -138,6 +138,11 @@ export function fanOutMap(doc) {
     const w = wires[i];
     if (w.kind === "param" && w.param) {
       map[w.param] = (map[w.param] || 0) + 1;
+      const parts = w.param.split(".");
+      for (let p = 1; p < parts.length; p++) {
+        const prefix = parts.slice(0, p).join(".");
+        map[prefix] = (map[prefix] || 0) + 1;
+      }
     } else if (w.kind === "env" && w.envKey) {
       map["env." + w.envKey] = (map["env." + w.envKey] || 0) + 1;
     }

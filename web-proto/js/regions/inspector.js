@@ -1384,7 +1384,11 @@ async function renderXRD() {
       var mh = (p.properties && Object.keys(p.properties).length ? "" :
         '<div class="g" style="padding:2px 0 2px">no members \u2192 free-form map (string values); add members for a typed schema</div>');
       mh += memberTreeHtml(n, "", p.properties, 0);
-      mh += '<div style="padding:3px 0 4px"><button class="btn sm" data-madd="' + esc(n + "|") + '">+ member</button></div>';
+      mh += '<div style="padding:3px 0 4px;display:flex;align-items:center;gap:4px">' +
+        '<button class="btn sm" data-madd="' + esc(n + "|") + '">+ member</button>' +
+        '<button class="del" data-pd="' + esc(n) + '"' +
+        (locked ? ' disabled title="providerName is required for managed resources in Namespaced XRD" style="cursor:not-allowed;opacity:0.5;margin-left:auto"' : ' title="Delete parameter" style="margin-left:auto"') +
+        '>&#215;</button></div>';
       return mh;
     }
     var h = '<div class="frow" style="margin-bottom:0;gap:4px">';
