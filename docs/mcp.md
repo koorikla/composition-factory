@@ -2,7 +2,7 @@
 
 `cf mcp` serves compositionfactory's core authoring surface as MCP tools over
 stdio: schema browsing, blueprint editing, provider management, generation and
-the render check (19 MCP tools bridging key operations from `cf serve`'s 36
+the render check (19 MCP tools bridging key operations from `cf serve`'s 35
 HTTP routes). Every tool is a thin bridge over the exact same handler
 `cf serve` exposes on HTTP, so the two front doors validate identically and
 report identical error messages — see `internal/mcp`'s package comment for the
@@ -11,7 +11,9 @@ architecture.
 Writes are confined to the declared workspace: the `--blueprint` file and the
 `--out` directory are the only paths the tools can write. `generate` checks
 every output path (absolute, cleaned, prefix) against `--out` before writing
-anything; a path outside it is refused with no files touched. `add_provider`
+anything; a path outside it is refused with no files touched (confinement checks
+lexical path prefixes without resolving symlinks; planting a redirecting symlink inside
+`--out` already requires write access beyond what the server grants). `add_provider`
 additionally maintains the schema cache (`--cache-dir`) and lockfile
 (`--lock`) at the fixed paths chosen at launch — server infrastructure no tool
 input can redirect.
