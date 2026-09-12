@@ -322,3 +322,73 @@ func TestGenerateProviderConfigsIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// --- AWS Emulator ProviderConfig (Lane D) -------------------------------
+
+func TestAWSEmulatorProviderConfigExactCasingAndFields(t *testing.T) {
+	out, err := AWSEmulatorProviderConfig("http://floci:4566", testCRDs(t))
+	if err != nil {
+		t.Fatalf("AWSEmulatorProviderConfig: %v", err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"apiVersion: aws.m.upbound.io/v1beta1",
+		"kind: ClusterProviderConfig",
+		"name: default",
+		"source: Secret",
+		"namespace: crossplane-system",
+		"name: aws-creds",
+		"key: creds",
+		"endpoint:",
+		"type: Static",
+		"static: http://floci:4566",
+		"hostnameImmutable: true",
+		"services:",
+		"- sqs",
+		"skip_credentials_validation: true",
+		"skip_region_validation: true",
+		"skip_requesting_account_id: true",
+		"skip_metadata_api_check: true",
+		"s3_use_path_style: true",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("AWSEmulatorProviderConfig missing %q;\ngot:\n%s", want, s)
+		}
+	}
+}
+
+func TestAWSEmulatorProviderConfigWithOptions(t *testing.T) {
+	opts := AWSEmulatorOptions{
+		Name:            "custom-emulator",
+		Endpoint:        "http://custom-host:4566",
+		Services:        []string{"sqs", "s3"},
+		SecretNamespace: "custom-ns",
+		SecretName:      "custom-secret",
+		SecretKey:       "custom-key",
+	}
+	out, err := AWSEmulatorProviderConfigWithOptions(opts, testCRDs(t))
+	if err != nil {
+		t.Fatalf("AWSEmulatorProviderConfigWithOptions: %v", err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"name: custom-emulator",
+		"static: http://custom-host:4566",
+		"services:",
+		"- sqs",
+		"- s3",
+		"namespace: custom-ns",
+		"name: custom-secret",
+		"key: custom-key",
+		"hostnameImmutable: true",
+		"skip_credentials_validation: true",
+		"skip_region_validation: true",
+		"skip_requesting_account_id: true",
+		"skip_metadata_api_check: true",
+		"s3_use_path_style: true",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("AWSEmulatorProviderConfigWithOptions missing %q;\ngot:\n%s", want, s)
+		}
+	}
+}

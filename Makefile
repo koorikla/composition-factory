@@ -1,4 +1,4 @@
-.PHONY: build test test-race test-docker test-e2e test-driver lint lint-strict serve clean cluster cluster-down deploy undeploy test-cluster
+.PHONY: build test test-race test-docker test-e2e test-driver lint lint-strict serve clean cluster cluster-down deploy undeploy test-cluster test-floci
 
 BIN       := bin/cf
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -40,6 +40,11 @@ test-driver:
 # Lane C: in-cluster verification using kind, Crossplane, and workspace isolation.
 test-cluster: build
 	./scripts/cluster/test-cluster.sh
+
+# Lane D: in-cluster verification using floci AWS emulator and provider-aws-sqs.
+test-floci: build
+	./scripts/cluster/test-floci.sh
+
 
 cluster:
 	./scripts/cluster/cluster.sh

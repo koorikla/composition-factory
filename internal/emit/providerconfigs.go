@@ -266,3 +266,96 @@ func familyProviderConfigCRD(fam string, crds []schema.CRD) (schema.CRD, bool) {
 	}
 	return schema.CRD{}, false
 }
+
+// AWSEmulatorOptions configures the generation of an AWS emulator ProviderConfig.
+type AWSEmulatorOptions struct {
+	Name            string   // metadata.name; defaults to "default" if empty
+	Endpoint        string   // spec.endpoint.url.static; defaults to "http://floci:4566" if empty
+	Services        []string // spec.endpoint.services; defaults to ["sqs"] if nil
+	SecretNamespace string   // spec.credentials.secretRef.namespace; defaults to "crossplane-system" if empty
+	SecretName      string   // spec.credentials.secretRef.name; defaults to "aws-creds" if empty
+	SecretKey       string   // spec.credentials.secretRef.key; defaults to "creds" if empty
+}
+
+// AWSEmulatorProviderConfig generates an AWS emulator ClusterProviderConfig manifest
+// pointing at the given emulator endpoint (defaulting to "http://floci:4566" if empty).
+// It configures the exact field casing required by Upbound provider-upjet-aws to
+// disable AWS cloud checks and direct requests to the emulator.
+func AWSEmulatorProviderConfig(endpoint string, crds []schema.CRD) ([]byte, error) {
+	return AWSEmulatorProviderConfigWithOptions(AWSEmulatorOptions{Endpoint: endpoint}, crds)
+}
+
+// AWSEmulatorProviderConfigWithOptions generates an AWS emulator ClusterProviderConfig manifest
+// using the specified options.
+func AWSEmulatorProviderConfigWithOptions(opts AWSEmulatorOptions, crds []schema.CRD) ([]byte, error) {
+	d := NewDoc()
+	header(d, "aws-emulator")
+
+	endpoint := opts.Endpoint
+	if endpoint == "" {
+		endpoint = "http://floci:4566"
+	}
+	name := opts.Name
+	if name == "" {
+		name = "default"
+	}
+	services := opts.Services
+	if services == nil {
+		services = []string{"sqs"}
+	}
+	secretNs := opts.SecretNamespace
+	if secretNs == "" {
+		secretNs = "crossplane-system"
+	}
+	secretName := opts.SecretName
+	if secretName == "" {
+		secretName = "aws-creds"
+	}
+	secretKey := opts.SecretKey
+	if secretKey == "" {
+		secretKey = "creds"
+	}
+
+	apiVersion, kind, assumed, err := providerConfigKind("aws", crds)
+	if err != nil {
+		return nil, err
+	}
+	if assumed {
+		d.Comment("ASSUMPTION: no ClusterProviderConfig CRD for provider family \"aws\" was found among the " +
+			"loaded schemas -- only its service package(s) are cached, not provider-family-aws itself. " +
+			"What follows is the well-known Upbound v2 family shape (<family>.m.upbound.io/v1beta1, " +
+			"kind ClusterProviderConfig), not a value read from a real CRD. Run " +
+			"`cf provider add xpkg.upbound.io/upbound/provider-family-aws` and regenerate to replace this " +
+			"guess with the real apiVersion/kind.")
+	}
+
+	d.Line(0, "apiVersion: %s", apiVersion)
+	d.Line(0, "kind: %s", kind)
+	d.Line(0, "metadata:")
+	d.Line(1, "name: %s", name)
+	d.Line(0, "spec:")
+	d.Line(1, "credentials:")
+	d.Line(2, "source: Secret")
+	d.Line(2, "secretRef:")
+	d.Line(3, "namespace: %s", secretNs)
+	d.Line(3, "name: %s", secretName)
+	d.Line(3, "key: %s", secretKey)
+	d.Line(1, "endpoint:")
+	d.Line(2, "url:")
+	d.Line(3, "type: Static")
+	d.Line(3, "static: %s", endpoint)
+	d.Line(2, "hostnameImmutable: true")
+	if len(services) > 0 {
+		d.Line(2, "services:")
+		for _, svc := range services {
+			d.Line(3, "- %s", svc)
+		}
+	}
+	d.Line(1, "skip_credentials_validation: true")
+	d.Line(1, "skip_region_validation: true")
+	d.Line(1, "skip_requesting_account_id: true")
+	d.Line(1, "skip_metadata_api_check: true")
+	d.Line(1, "s3_use_path_style: true")
+
+	return d.Bytes(), nil
+}
