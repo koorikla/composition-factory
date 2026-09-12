@@ -1112,11 +1112,12 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 
 var (
 	reDefine             = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
-	reParamVar           = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reParamVar           = regexp.MustCompile(`\{\{-?\s*\(?\s*(?:(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)|index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+?)["'])(?:\s*\|\s*quote)?\s*\)?(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reEvidenceIndexSpec  = regexp.MustCompile(`\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']`)
 	reEnvVar             = regexp.MustCompile(`\{\{-?\s*(?:default\s+(?:"[^"]*"|\S+)\s+)?(?:\$env\.([a-zA-Z0-9_.-]+?)|\(index\s+\$env\s+"([a-zA-Z0-9_.-]+?)"\)|index\s+\$env\s+"([a-zA-Z0-9_.-]+?)")(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*(?:\(index\s+(?:\$?[.]?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)|(?:\$?[.]?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+))\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reXRResourceRef      = regexp.MustCompile(`\{\{-?\s*\$xr\s*-?\}\}-([a-zA-Z0-9-]+)`)
-	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
+	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)|\(?\s*index\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s*-?\}\}`)
 	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+\(?eq\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]*)"\)?\s*-?\}\}`)
 	reWhenIfNe           = regexp.MustCompile(`\{\{-?\s*if\s+\(?ne\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]*)"\)?\s*-?\}\}`)
 	reWhenIfEqRev        = regexp.MustCompile(`\{\{-?\s*if\s+\(?eq\s+"([^"]*)"\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)?\s*-?\}\}`)
@@ -1176,6 +1177,18 @@ func templateExists(bp *blueprint.Blueprint, name string) bool {
 	}
 	_, ok := bp.Spec.Templates[name]
 	return ok
+}
+
+func matchParamVar(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if m := reParamVar.FindStringSubmatch(trimmed); len(m) > 1 && m[0] == trimmed {
+		for i := 1; i < len(m); i++ {
+			if m[i] != "" {
+				return m[i]
+			}
+		}
+	}
+	return ""
 }
 
 func matchEnvVar(s string) string {
@@ -1924,8 +1937,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 		ensureParamDeclaredTyped(bp, m[2], "string")
 		return fmt.Sprintf("params.%s != %q", m[2], m[1])
 	} else if m := reWhenIfSimple.FindStringSubmatch(text); len(m) >= 2 {
-		ensureParamDeclaredTyped(bp, m[1], "boolean")
-		return fmt.Sprintf("params.%s", m[1])
+		key := m[1]
+		if key == "" && len(m) >= 3 {
+			key = m[2]
+		}
+		ensureParamDeclaredTyped(bp, key, "boolean")
+		return fmt.Sprintf("params.%s", key)
 	}
 	return ""
 }
@@ -1989,6 +2006,14 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 				report.Record("template.param."+pName, "invalid parameter identifier")
 			}
 		}
+		for _, m := range reEvidenceIndexSpec.FindAllStringSubmatch(body, -1) {
+			pName := m[1]
+			if isValidParamIdentifier(pName) {
+				ensureParamDeclared(bp, pName)
+			} else {
+				report.Record("template.param."+pName, "invalid parameter identifier")
+			}
+		}
 		for _, m := range reEvidenceGuard.FindAllStringSubmatch(body, -1) {
 			pName := m[1]
 			if isValidParamIdentifier(pName) {
@@ -1998,10 +2023,10 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 			}
 		}
 	}
-	paramMatches := reParamVar.FindAllStringSubmatch(tmpl, -1)
-	for _, m := range paramMatches {
-		if len(m) >= 2 {
-			pName := m[1]
+	paramMatches := reParamVar.FindAllString(tmpl, -1)
+	for _, raw := range paramMatches {
+		pName := matchParamVar(raw)
+		if pName != "" {
 			if isValidParamIdentifier(pName) {
 				ensureParamDeclared(bp, pName)
 			} else {
@@ -2580,9 +2605,9 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 					continue
 				}
 				trimmed := strings.TrimSpace(rawStr)
-				if m := reParamVar.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
-					if isValidParamIdentifier(m[1]) {
-						res.Annotations[rawK] = blueprint.Field{From: "params." + m[1]}
+				if pName := matchParamVar(rawStr); pName != "" {
+					if isValidParamIdentifier(pName) {
+						res.Annotations[rawK] = blueprint.Field{From: "params." + pName}
 					} else {
 						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "invalid parameter reference")
 					}
@@ -2743,7 +2768,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 						pcrName, _ := pcrMap["name"].(string)
 						pcrKind, _ := pcrMap["kind"].(string)
 						pcrNameUnmasked := unmaskString(pcrName, placeholders)
-						if (pcrNameUnmasked == "{{ $spec.providerName }}" || pcrNameUnmasked == "{{ .spec.providerName }}") &&
+						if (pcrNameUnmasked == "{{ $spec.providerName }}" || pcrNameUnmasked == "{{ .spec.providerName }}" || matchParamVar(pcrNameUnmasked) == "providerName") &&
 							(pcrKind == "ClusterProviderConfig" || pcrKind == "") {
 							continue
 						}
@@ -2848,10 +2873,9 @@ func extractEnvelopeFields(prefix string, obj map[string]any, out map[string]blu
 				}
 				continue
 			}
-			trimmed := strings.TrimSpace(rawStr)
-			if m := reParamVar.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
-				if isValidParamIdentifier(m[1]) {
-					out[path] = blueprint.Field{From: "params." + m[1]}
+			if pName := matchParamVar(rawStr); pName != "" {
+				if isValidParamIdentifier(pName) {
+					out[path] = blueprint.Field{From: "params." + pName}
 				} else if report != nil {
 					report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path), "invalid parameter reference")
 				}
@@ -2967,9 +2991,9 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 				continue
 			}
 			trimmed := strings.TrimSpace(rawStr)
-			if m := reParamVar.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
-				if isValidParamIdentifier(m[1]) {
-					out[path] = blueprint.Field{From: "params." + m[1]}
+			if pName := matchParamVar(rawStr); pName != "" {
+				if isValidParamIdentifier(pName) {
+					out[path] = blueprint.Field{From: "params." + pName}
 				} else {
 					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid parameter reference")
 				}
@@ -3032,9 +3056,9 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 						continue
 					}
 					trimmed := strings.TrimSpace(rawStr)
-					if m := reParamVar.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
-						if isValidParamIdentifier(m[1]) {
-							out[elemPath] = blueprint.Field{From: "params." + m[1]}
+					if pName := matchParamVar(rawStr); pName != "" {
+						if isValidParamIdentifier(pName) {
+							out[elemPath] = blueprint.Field{From: "params." + pName}
 						} else {
 							report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid parameter reference")
 						}
@@ -3364,6 +3388,10 @@ func matchesParamRef(s string, paramName, memberName string) bool {
 	if reMember.MatchString(s) {
 		return true
 	}
+	reIndexMember := regexp.MustCompile(`\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']` + regexp.QuoteMeta(fullPath) + `["']`)
+	if reIndexMember.MatchString(s) {
+		return true
+	}
 
 	// 2. Direct reference to any ancestor object without trailing dot:
 	// e.g. if fullPath is "network.vpc.id", an unadorned reference to $spec.network or $spec.network.vpc
@@ -3379,6 +3407,10 @@ func matchesParamRef(s string, paramName, memberName string) bool {
 				if end >= len(s) || s[end] != '.' {
 					return true
 				}
+			}
+			reIndexAncestor := regexp.MustCompile(`\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']` + regexp.QuoteMeta(ancestor) + `["']`)
+			if reIndexAncestor.MatchString(s) {
+				return true
 			}
 		}
 	}
