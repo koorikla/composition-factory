@@ -1265,7 +1265,7 @@ var (
 	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?\)?\s*\)\s*-?\}\}`)
 	reForEachDefault     = regexp.MustCompile(`(?:default\s+(?:["']([^"']*)["']|([^\s)]+))|\|\s*default\s+(?:["']([^"']*)["']|([^\s)]+)))`)
 	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(?\s*\$env\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*index\s+\(?\s*\$env\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?\)?\s*\)\s*-?\}\}`)
-	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(*\s*index\s+\$?[.]?observed\.resources\s+["']([^"']+)["']\s*\)\.resource\.status\.([a-zA-Z0-9_.-]+)|\(*\s*\$?[.]?observed\.resources\.([a-zA-Z0-9_-]+)\.resource\.status\.([a-zA-Z0-9_.-]+))\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?\)*\s*\)\s*-?\}\}`)
+	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(*\s*index\s+\$?[.]?observed\.resources\s+["']([^"']+)["']\s*\)(?:\.resource)?\.status\.([a-zA-Z0-9_.-]+)|\(*\s*\$?[.]?observed\.resources\.([a-zA-Z0-9_-]+)(?:\.resource)?\.status\.([a-zA-Z0-9_.-]+)|\(*\s*\(+\s*getComposedResource\s+(?:(?:\([^)]+\)|[^\s"'\x60\)]+)\s+["'\x60]([^"'\x60]+)["'\x60]|["'\x60]([^"'\x60]+)["'\x60]\s+(?:\([^)]+\)|[^\s"'\x60\)]+))(?:\s*\))+\s*(?:\.resource)?\.status\.([a-zA-Z0-9_.-]+))\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?(?:\s*\))*\s*\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
 	reTemplateInclude    = regexp.MustCompile(`^\{\{-?\s*include\s+["']([^"']+)["'](?:\s+[^}]*)?-?\}\}$`)
 	reDocSeparator       = regexp.MustCompile(`(?m)^---\s*$`)
@@ -2301,11 +2301,21 @@ func extractForEachGuard(text string, bp *blueprint.Blueprint) string {
 	} else if m := reForEachStatusLoop.FindStringSubmatch(text); len(m) >= 3 {
 		resName := m[1]
 		statusPath := m[2]
-		if resName == "" && len(m) >= 5 {
+		if resName == "" && len(m) >= 5 && m[3] != "" {
 			resName = m[3]
 			statusPath = m[4]
 		}
-		return fmt.Sprintf("resources.%s.status.%s", resName, statusPath)
+		if resName == "" && len(m) >= 8 {
+			if m[5] != "" {
+				resName = m[5]
+			} else if m[6] != "" {
+				resName = m[6]
+			}
+			statusPath = m[7]
+		}
+		if resName != "" && statusPath != "" {
+			return fmt.Sprintf("resources.%s.status.%s", resName, statusPath)
+		}
 	} else if m := reForEachLoop.FindStringSubmatch(text); len(m) >= 2 {
 		pName := m[1]
 		if pName == "" && len(m) >= 3 {
