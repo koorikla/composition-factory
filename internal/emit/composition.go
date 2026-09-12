@@ -1040,17 +1040,25 @@ func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD,
 		} else if l.structured.targetType == "object" && l.structured.kind == rhsParam {
 			isMapField[l.basePath] = true
 			hasProps := false
-			_, chain, err := blueprint.ParamChain(b.Spec.XRD, "", l.structured.param)
+			chainSegs, chain, err := blueprint.ParamChain(b.Spec.XRD, "", l.structured.param)
 			if err == nil && len(chain) > 0 {
 				wireDecl := chain[len(chain)-1]
 				if len(wireDecl.Properties) > 0 {
 					hasProps = true
-					for mName, mDecl := range wireDecl.Properties {
+					var mNames []string
+					for mName := range wireDecl.Properties {
+						mNames = append(mNames, mName)
+					}
+					sort.Strings(mNames)
+					for _, mName := range mNames {
+						mDecl := wireDecl.Properties[mName]
 						mRHS := fmt.Sprintf("{{ $spec.%s.%s }}", l.structured.param, mName)
 						if mDecl.Type == "string" {
 							mRHS = fmt.Sprintf("{{ $spec.%s.%s | quote }}", l.structured.param, mName)
 						}
-						mGuard := fmt.Sprintf("hasKey $spec.%s %q", l.structured.param, mName)
+						mSegs := append(append([]string(nil), chainSegs...), mName)
+						mChain := append(append([]blueprint.Parameter(nil), chain...), mDecl)
+						mGuard := chainGuard(mSegs, mChain)
 						grouped[l.basePath] = append(grouped[l.basePath], forProviderField{
 							path:  mName,
 							rhs:   mRHS,

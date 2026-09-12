@@ -508,3 +508,173 @@ func TestTypedParamEmitIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestTypedObjectParamIntoMapFieldAbsentOptional(t *testing.T) {
+	crdYAML := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+                  tags:
+                    type: object
+                    additionalProperties: {type: string}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+	crds, err := schema.ParseCRDs([][]byte{crdYAML})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xqueue"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+					"tags": {
+						Type: "object",
+						Properties: map[string]blueprint.Parameter{
+							"env":  {Type: "string"},
+							"team": {Type: "string"},
+						},
+					},
+				},
+			},
+			Resources: []blueprint.Resource{{
+				Name: "main-queue", Kind: "Queue",
+				Fields: map[string]blueprint.Field{
+					"region": {Value: "eu-north-1"},
+					"tags":   {From: "params.tags"},
+				},
+			}},
+		},
+	}
+
+	got, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmplBody := extractTemplate(t, got)
+
+	if !strings.Contains(tmplBody, `{{- if or (and (hasKey $spec "tags") (hasKey $spec.tags "env")) (and (hasKey $spec "tags") (hasKey $spec.tags "team")) }}`) {
+		t.Errorf("expected outer guard to check parent hasKey $spec \"tags\", got:\n%s", tmplBody)
+	}
+	if !strings.Contains(tmplBody, `{{- if and (hasKey $spec "tags") (hasKey $spec.tags "env") }}`) {
+		t.Errorf("expected env guard to check parent hasKey $spec \"tags\", got:\n%s", tmplBody)
+	}
+	if !strings.Contains(tmplBody, `{{- if and (hasKey $spec "tags") (hasKey $spec.tags "team") }}`) {
+		t.Errorf("expected team guard to check parent hasKey $spec \"tags\", got:\n%s", tmplBody)
+	}
+
+	rendered, err := renderTemplate(t, tmplBody, map[string]any{
+		"providerName": "aws-provider",
+	})
+	if err != nil {
+		t.Fatalf("render failed when optional tags object is absent: %v\n---\n%s", err, tmplBody)
+	}
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(rendered), &doc); err != nil {
+		t.Fatalf("rendered output is not valid YAML: %v\n---\n%s", err, rendered)
+	}
+	spec, _ := doc["spec"].(map[string]any)
+	fp, _ := spec["forProvider"].(map[string]any)
+	if fp == nil {
+		t.Fatalf("no forProvider in rendered YAML:\n%s", rendered)
+	}
+	tags, ok := fp["tags"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected tags map in forProvider, got %T (%v)", fp["tags"], fp["tags"])
+	}
+	if len(tags) != 0 {
+		t.Errorf("expected empty tags map when tags param is absent, got %v", tags)
+	}
+
+	// Also verify that when tags are present, they render properly
+	renderedWithTags, err := renderTemplate(t, tmplBody, map[string]any{
+		"providerName": "aws-provider",
+		"tags": map[string]any{
+			"env": "prod",
+		},
+	})
+	if err != nil {
+		t.Fatalf("render failed when tags are present: %v\n---\n%s", err, tmplBody)
+	}
+	var docWithTags map[string]any
+	if err := yaml.Unmarshal([]byte(renderedWithTags), &docWithTags); err != nil {
+		t.Fatalf("rendered output is not valid YAML: %v\n---\n%s", err, renderedWithTags)
+	}
+	specWithTags, _ := docWithTags["spec"].(map[string]any)
+	fpWithTags, _ := specWithTags["forProvider"].(map[string]any)
+	tagsWithTags, _ := fpWithTags["tags"].(map[string]any)
+	if tagsWithTags["env"] != "prod" {
+		t.Errorf("expected tags.env == prod, got %v", tagsWithTags)
+	}
+	if _, hasTeam := tagsWithTags["team"]; hasTeam {
+		t.Errorf("expected tags.team to be omitted, got %v", tagsWithTags["team"])
+	}
+
+	// When parent tags object is required, member-level guard hasKey $spec.tags is emitted (no top-level check)
+	bReq := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xqueue"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.hooli.tech", Kind: "XQueue", Plural: "xqueues",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+					"tags": {
+						Type: "object", Required: true,
+						Properties: map[string]blueprint.Parameter{
+							"env":  {Type: "string"},
+							"team": {Type: "string"},
+						},
+					},
+				},
+			},
+			Resources: []blueprint.Resource{{
+				Name: "main-queue", Kind: "Queue",
+				Fields: map[string]blueprint.Field{
+					"region": {Value: "eu-north-1"},
+					"tags":   {From: "params.tags"},
+				},
+			}},
+		},
+	}
+	gotReq, err := Composition(bReq, crds)
+	if err != nil {
+		t.Fatalf("Composition (required tags): %v", err)
+	}
+	tmplReq := extractTemplate(t, gotReq)
+	if !strings.Contains(tmplReq, `{{- if or (hasKey $spec.tags "env") (hasKey $spec.tags "team") }}`) {
+		t.Errorf("required tags should omit top-level hasKey in outer guard, got:\n%s", tmplReq)
+	}
+	if !strings.Contains(tmplReq, `{{- if hasKey $spec.tags "env" }}`) {
+		t.Errorf("required tags should emit member-level guard, got:\n%s", tmplReq)
+	}
+}
