@@ -220,6 +220,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	var compDocs []map[string]any
 	var xrdDocs []map[string]any
 	var envConfigDocs []map[string]any
+	var configDocs []map[string]any
 
 	for _, d := range docs {
 		kind, _ := d["kind"].(string)
@@ -240,30 +241,58 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 				}
 			}
 		case "Configuration":
+			configDocs = append(configDocs, d)
 			if cSpec, ok := d["spec"].(map[string]any); ok {
 				if deps, ok := cSpec["dependsOn"].([]any); ok {
 					for _, depRaw := range deps {
 						if dep, ok := depRaw.(map[string]any); ok {
 							depKind, _ := dep["kind"].(string)
-							depFn, _ := dep["function"].(string)
-							depPkg, _ := dep["package"].(string)
-							depVer, _ := dep["version"].(string)
-							if depKind == "Function" || depFn != "" {
-								name := depFn
-								if name == "" {
-									name = depPkg
+							pkg, _ := dep["package"].(string)
+							if pkg == "" {
+								if p, ok := dep["provider"].(string); ok && p != "" {
+									pkg = p
+									depKind = "Provider"
 								}
-								pkg := depPkg
-								if pkg == "" {
-									pkg = depFn
+							}
+							if pkg == "" {
+								if f, ok := dep["function"].(string); ok && f != "" {
+									pkg = f
+									depKind = "Function"
 								}
-								cleanVer := strings.TrimPrefix(depVer, "=")
+							}
+							if depKind == "" {
+								last := pkg
+								if i := strings.LastIndex(last, "/"); i >= 0 {
+									last = last[i+1:]
+								}
+								if strings.HasPrefix(last, "function-") {
+									depKind = "Function"
+								} else if strings.HasPrefix(last, "provider-") {
+									depKind = "Provider"
+								}
+							}
+							ver, _ := dep["version"].(string)
+							if depKind == "Function" || (depKind == "" && dep["function"] != nil) {
+								fnName, _ := dep["function"].(string)
+								if fnName == "" {
+									fnName = pkg
+								}
+								fnPkg := pkg
+								if fnPkg == "" {
+									fnPkg = fnName
+								}
+								cleanVer := strings.TrimPrefix(ver, "=")
 								cleanVer = strings.TrimLeft(cleanVer, ">=<~^ ")
-								if cleanVer != "" && !strings.Contains(pkg, ":") && !strings.Contains(pkg, "@") {
-									pkg = pkg + ":" + cleanVer
+								if cleanVer != "" && !strings.Contains(fnPkg, ":") && !strings.Contains(fnPkg, "@") {
+									fnPkg = fnPkg + ":" + cleanVer
 								}
-								if name != "" && pkg != "" {
-									opts.FunctionPackages[name] = pkg
+								if fnName != "" && fnPkg != "" {
+									opts.FunctionPackages[fnName] = fnPkg
+									clean := fnName
+									if i := strings.LastIndex(clean, "/"); i >= 0 {
+										clean = clean[i+1:]
+									}
+									opts.FunctionPackages[clean] = fnPkg
 								}
 							}
 						}
@@ -372,6 +401,67 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		candidate := string(m[1])
 		if isValidMetadataName(candidate) {
 			bp.Metadata.Name = candidate
+		}
+	}
+	for _, cfgDoc := range configDocs {
+		if meta, ok := cfgDoc["metadata"].(map[string]any); ok {
+			if name, ok := meta["name"].(string); ok && name != "" {
+				if bp.Metadata.Name == "" {
+					bp.Metadata.Name = name
+				}
+			}
+		}
+		if spec, ok := cfgDoc["spec"].(map[string]any); ok {
+			if dependsOn, ok := spec["dependsOn"].([]any); ok {
+				for _, depRaw := range dependsOn {
+					dep, ok := depRaw.(map[string]any)
+					if !ok {
+						continue
+					}
+					depKind, _ := dep["kind"].(string)
+					pkg, _ := dep["package"].(string)
+					if pkg == "" {
+						if p, ok := dep["provider"].(string); ok && p != "" {
+							pkg = p
+							depKind = "Provider"
+						}
+					}
+					if depKind == "" {
+						last := pkg
+						if i := strings.LastIndex(last, "/"); i >= 0 {
+							last = last[i+1:]
+						}
+						if strings.HasPrefix(last, "function-") {
+							depKind = "Function"
+						} else if strings.HasPrefix(last, "provider-") {
+							depKind = "Provider"
+						}
+					}
+					ver, _ := dep["version"].(string)
+					if depKind == "Provider" || (depKind == "" && pkg != "" && dep["function"] == nil) {
+						providerRef := pkg
+						if ver != "" && !strings.Contains(providerRef, ":") && !strings.Contains(providerRef, "@") {
+							cleanVer := strings.TrimPrefix(ver, "=")
+							cleanVer = strings.TrimLeft(cleanVer, ">=<~^ ")
+							if cleanVer != "" {
+								providerRef = pkg + ":" + cleanVer
+							}
+						}
+						found := false
+						for _, s := range bp.Spec.Sources {
+							if s.Provider == providerRef {
+								found = true
+								break
+							}
+						}
+						if !found && providerRef != "" {
+							bp.Spec.Sources = append(bp.Spec.Sources, blueprint.Source{
+								Provider: providerRef,
+							})
+						}
+					}
+				}
+			}
 		}
 	}
 	if meta, ok := compDoc["metadata"].(map[string]any); ok {

@@ -222,6 +222,17 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 							depKind = "Function"
 						}
 					}
+					if depKind == "" {
+						last := pkg
+						if i := strings.LastIndex(last, "/"); i >= 0 {
+							last = last[i+1:]
+						}
+						if strings.HasPrefix(last, "function-") {
+							depKind = "Function"
+						} else if strings.HasPrefix(last, "provider-") {
+							depKind = "Provider"
+						}
+					}
 					ver, _ := dep["version"].(string)
 					if depKind == "Function" || (depKind == "" && dep["function"] != nil) {
 						fnName, _ := dep["function"].(string)

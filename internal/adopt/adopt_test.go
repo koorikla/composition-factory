@@ -10119,3 +10119,93 @@ spec:
 		t.Fatal("resource app-config not found")
 	}
 }
+
+func TestAdoptConfigurationDocument(t *testing.T) {
+	manifest := `apiVersion: meta.pkg.crossplane.io/v1
+kind: Configuration
+metadata:
+  name: my-cool-platform
+spec:
+  dependsOn:
+    - provider: xpkg.upbound.io/upbound/provider-aws-s3
+      version: "v1.14.0"
+    - package: xpkg.upbound.io/crossplane-contrib/function-cel
+      version: "v0.4.0"
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xbuckets.custom.example.org
+spec:
+  group: custom.example.org
+  names:
+    kind: XBucket
+    plural: xbuckets
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                region:
+                  type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xbuckets.custom.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: custom.example.org/v1alpha1
+    kind: XBucket
+  mode: Pipeline
+  pipeline:
+    - step: cel
+      functionRef:
+        name: function-cel
+      input:
+        apiVersion: cel.fn.crossplane.io/v1beta1
+        kind: Composition
+        source: Inline
+`
+
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if bp.Metadata.Name != "my-cool-platform" {
+		t.Errorf("expected bp.Metadata.Name to be %q, got %q", "my-cool-platform", bp.Metadata.Name)
+	}
+
+	hasProvider := false
+	for _, s := range bp.Spec.Sources {
+		if strings.Contains(s.Provider, "provider-aws-s3") {
+			hasProvider = true
+			break
+		}
+	}
+	if !hasProvider {
+		t.Errorf("expected provider-aws-s3 in bp.Spec.Sources, got %v", bp.Spec.Sources)
+	}
+
+	for _, step := range bp.Spec.Pipeline {
+		if step.Name == "cel" {
+			if step.Package != "xpkg.upbound.io/crossplane-contrib/function-cel:v0.4.0" {
+				t.Errorf("expected pipeline step cel package to be %q, got %q",
+					"xpkg.upbound.io/crossplane-contrib/function-cel:v0.4.0", step.Package)
+			}
+		}
+	}
+
+	for _, d := range report.Drops {
+		if strings.Contains(d.Reason, "Function package for \"function-cel\" was not found") {
+			t.Errorf("unexpected spurious loss report item: %v", d)
+		}
+	}
+}
