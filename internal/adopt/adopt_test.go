@@ -8993,3 +8993,57 @@ spec:
 		t.Errorf("bp.Validate() failed: %v", err)
 	}
 }
+
+func TestAdoptPipeline_EnvironmentConfigsAfterEngineStep_NormalizedToBefore(t *testing.T) {
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: role
+            base:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: Role
+              spec:
+                forProvider: {}
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+    - step: custom-env
+      functionRef:
+        name: function-environment-configs
+`
+
+	bp, _, err := Adopt([]byte(compYAML), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+
+	var foundEnvStep bool
+	for _, s := range bp.Spec.Pipeline {
+		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName || s.Name == "custom-env" {
+			foundEnvStep = true
+			if s.Position != blueprint.PositionBefore {
+				t.Errorf("expected function-environment-configs position to be %q, got %q", blueprint.PositionBefore, s.Position)
+			}
+		}
+	}
+	if !foundEnvStep {
+		t.Errorf("custom-env step not found in adopted pipeline: %+v", bp.Spec.Pipeline)
+	}
+}
