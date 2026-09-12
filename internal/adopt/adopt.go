@@ -1138,7 +1138,7 @@ var (
 	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(index\s+\$?[.]observed\.resources\s+"([^"]+)"\)\.resource\.status\.([a-zA-Z0-9_.-]+)|\$?[.]observed\.resources\.([a-zA-Z0-9_-]+)\.resource\.status\.([a-zA-Z0-9_.-]+))\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
 	reTemplateInclude    = regexp.MustCompile(`^\{\{-?\s*include\s+["']([^"']+)["'](?:\s+[^}]*)?-?\}\}$`)
-	reDocSeparator       = regexp.MustCompile(`(?m)^\s*---\s*$`)
+	reDocSeparator       = regexp.MustCompile(`(?m)^---\s*$`)
 	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+(?:\(printf\s+["']([^"']+)["']|["']([^"']+)["'])`)
 	reChunkResNameAnn    = regexp.MustCompile(`["']?(?:crossplane\.io|gotemplating\.fn\.crossplane\.io)/composition-resource-name["']?\s*:\s*["']?([a-zA-Z0-9._-]+)["']?`)
 	reChunkKind          = regexp.MustCompile(`(?m)^\s*kind:\s*["']?([a-zA-Z0-9]+)["']?`)

@@ -10077,3 +10077,45 @@ spec:
 		}
 	})
 }
+
+func TestAdoptGoTemplate_IndentedDocSeparatorInBlockScalar(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: app-config
+            data:
+              config.yaml: |
+                ---
+                server:
+                  port: 8080
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	res := bp.ResourceNamed("app-config")
+	if res == nil {
+		t.Fatal("resource app-config not found")
+	}
+}
