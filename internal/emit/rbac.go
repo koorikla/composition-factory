@@ -40,15 +40,15 @@ func NonPreGrantedNativeRules(b *blueprint.Blueprint, crds []schema.CRD) ([]rbac
 	var rules []rbacRule
 
 	for _, r := range b.Spec.Resources {
-		if r.Provider != blueprint.NativeProvider {
+		crd, err := resolveKind(crds, r, wantNamespaced)
+		if err != nil {
+			return nil, err
+		}
+		if !crd.Native {
 			continue
 		}
 		if IsPreGrantedNativeKind(r.Kind) {
 			continue
-		}
-		crd, err := resolveKind(crds, r, wantNamespaced)
-		if err != nil {
-			return nil, err
 		}
 		key := crd.Group + "/" + crd.Plural
 		if seen[key] {
