@@ -105,3 +105,13 @@ func formatEnvDefault(k blueprint.EnvironmentKey) string {
 		return fmt.Sprintf("%q", k.Default)
 	}
 }
+
+func envDefaultExpr(envKey string, envDecl blueprint.EnvironmentKey) string {
+	defVal := formatEnvDefault(envDecl)
+	switch envDecl.Type {
+	case "boolean", "integer", "number":
+		return fmt.Sprintf("ternary (index $env %q) %s (hasKey $env %q)", envKey, defVal, envKey)
+	default:
+		return fmt.Sprintf("default %s (index $env %q)", defVal, envKey)
+	}
+}

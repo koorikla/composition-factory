@@ -140,8 +140,7 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 					return nil, blueprint.UnknownEnvKeyError(fmt.Sprintf("resource %q annotation %q", r.Name, k), ref.Env, b.Spec.Environment)
 				}
 				if envDecl.Default != "" {
-					defVal := formatEnvDefault(envDecl)
-					expr := fmt.Sprintf("default %s (index $env %q)", defVal, ref.Env)
+					expr := envDefaultExpr(ref.Env, envDecl)
 					rhs := fmt.Sprintf("{{ %s | quote }}", expr)
 					plan = append(plan, forProviderField{
 						path: k,

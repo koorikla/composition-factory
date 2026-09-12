@@ -207,8 +207,7 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 						"which the API server rejects on apply", r.Name, p, n.Type, envKey, envDecl.Type)
 				}
 				if envDecl.Default != "" {
-					defVal := formatEnvDefault(envDecl)
-					expr := fmt.Sprintf("default %s (index $env %q)", defVal, envKey)
+					expr := envDefaultExpr(envKey, envDecl)
 					if n.Type == "string" {
 						e.rhs = fmt.Sprintf("{{ %s | quote }}", expr)
 					} else {

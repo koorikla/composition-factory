@@ -348,8 +348,7 @@ func resolveFieldRHSWithVisited(p string, f blueprint.Field, r blueprint.Resourc
 			if envDecl.Default != "" {
 				s.hasEnvDef = true
 				s.envDefault = envDecl.Default
-				defVal := formatEnvDefault(envDecl)
-				expr := fmt.Sprintf("default %s (index $env %q)", defVal, ref.Env)
+				expr := envDefaultExpr(ref.Env, envDecl)
 				s.optional = false
 				s.guard = ""
 				s.rawExpr = expr

@@ -275,8 +275,7 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 			loopGuarded = true
 		} else if envKey, ok := blueprint.EnvRef(r.ForEach); ok {
 			if envDecl, ok := b.Spec.Environment[envKey]; ok && envDecl.Default != "" {
-				defVal := formatEnvDefault(envDecl)
-				d.Line(ti, "{{- range $i := until (int (default %s (index $env %q))) }}", defVal, envKey)
+				d.Line(ti, "{{- range $i := until (int (%s)) }}", envDefaultExpr(envKey, envDecl))
 			} else {
 				d.Line(ti, "{{- if hasKey $env %q }}", envKey)
 				d.Line(ti, "{{- range $i := until (int $env.%s) }}", envKey)
@@ -751,8 +750,7 @@ func whenCondition(when string, b *blueprint.Blueprint) (string, error) {
 	if source == "env" {
 		if b != nil {
 			if envDecl, ok := b.Spec.Environment[param]; ok && envDecl.Default != "" {
-				defVal := formatEnvDefault(envDecl)
-				expr := fmt.Sprintf("default %s (index $env %q)", defVal, param)
+				expr := envDefaultExpr(param, envDecl)
 				switch op {
 				case "":
 					return expr, nil
