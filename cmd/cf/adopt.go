@@ -17,6 +17,8 @@ type AdoptCmd struct {
 	Provider    string `help:"Default provider package reference when not inferrable from CRDs."`
 	CacheDir    string `help:"Schema cache directory." default:"${cachedir}"`
 	Blueprint   string `short:"b" help:"Existing blueprint to compare against for parameter contract changes."`
+
+	errOut io.Writer
 }
 
 func (c *AdoptCmd) Run(out io.Writer) error {
@@ -109,6 +111,13 @@ func (c *AdoptCmd) run(out io.Writer) (int, error) {
 	} else {
 		if _, err := out.Write(outBytes); err != nil {
 			return 1, err
+		}
+		if report != nil && report.HasTrueLoss() {
+			errWriter := c.errOut
+			if errWriter == nil {
+				errWriter = os.Stderr
+			}
+			fmt.Fprint(errWriter, report.String())
 		}
 	}
 

@@ -1014,3 +1014,61 @@ func TestAdoptCLI_TruncatedOrMalformedGoTemplate(t *testing.T) {
 		t.Errorf("expected error to mention template failure, got: %v", err)
 	}
 }
+
+func TestAdoptCLILossyStdoutEmitsLossReportToStderr(t *testing.T) {
+	tmpDir := t.TempDir()
+	compPath := filepath.Join(tmpDir, "comp.yaml")
+
+	compContent := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: aws.example.org/v1alpha1
+    kind: XQueue
+  resources:
+    - name: sqs-queue
+      base:
+        apiVersion: sqs.aws.upbound.io/v1beta1
+        kind: Queue
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.arn
+          toFieldPath: status.arn
+`
+	if err := os.WriteFile(compPath, []byte(compContent), 0644); err != nil {
+		t.Fatalf("write composition: %v", err)
+	}
+
+	var stdoutBuf bytes.Buffer
+	var stderrBuf bytes.Buffer
+
+	cmd := &AdoptCmd{
+		Composition: compPath,
+		Out:         "", // stdout mode
+		CacheDir:    tmpDir,
+		errOut:      &stderrBuf,
+	}
+
+	code, err := cmd.run(&stdoutBuf)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2 for lossy adopt", code)
+	}
+
+	// stdout must contain clean blueprint YAML
+	if strings.Contains(stdoutBuf.String(), "Adopt loss report") {
+		t.Errorf("stdout must not contain loss report: corrupts yaml stream")
+	}
+
+	// stderr must contain the loss report
+	if !strings.Contains(stderrBuf.String(), "Adopt loss report") {
+		t.Errorf("stderr must contain loss report, got: %q", stderrBuf.String())
+	}
+}
