@@ -1646,3 +1646,134 @@ func TestCF433_KCLAnnotationsOptionalGuard(t *testing.T) {
 		t.Fatalf("expected example.com/app to be my-app, got:\n%s", outBStr)
 	}
 }
+
+func TestCF427_KCLOptionalMetadataNameFallback(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-optional-meta-name-kcl"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EngineKCL},
+			XRD: blueprint.XRD{
+				Group:   "platform.example.org",
+				Version: "v1alpha1",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+					"replicas":     {Type: "integer", Required: true},
+					"prefix":       {Type: "string"}, // optional
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "worker",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					ForEach:  "params.replicas",
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "params.prefix"},
+					},
+				},
+				{
+					Name:     "sa",
+					Kind:     "ServiceAccount",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "params.prefix"},
+					},
+				},
+				{
+					Name: "main-queue",
+					Kind: "Queue",
+					Fields: map[string]blueprint.Field{
+						"region": {Value: "eu-west-1"},
+					},
+				},
+				{
+					Name:     "consumer",
+					Kind:     "ServiceAccount",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "resources.main-queue.status.atProvider.url"},
+					},
+				},
+			},
+		},
+	}
+
+	crds := append(nativeTestCRDs(t), wireCRDs(t)...)
+	out, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition failed: %v", err)
+	}
+	s := string(out)
+
+	// Verify generated KCL code contains fallbacks
+	if !strings.Contains(s, "if _spec?.prefix:") ||
+		!strings.Contains(s, `name = "${_spec?.prefix}-${_i}"`) ||
+		!strings.Contains(s, `name = "${_xr}-worker-${_i}"`) {
+		t.Errorf("expected KCL looped metadata.name to have fallback, got:\n%s", s)
+	}
+
+	if !strings.Contains(s, "if _spec?.prefix:") ||
+		!strings.Contains(s, "name = _spec?.prefix") ||
+		!strings.Contains(s, `name = "${_xr}-sa"`) {
+		t.Errorf("expected KCL unlooped metadata.name to have fallback, got:\n%s", s)
+	}
+
+	if !strings.Contains(s, `if ocds?["main-queue"]?.Resource?.status?.atProvider?.url != None:`) ||
+		!strings.Contains(s, `name = "${_xr}-consumer"`) {
+		t.Errorf("expected KCL status metadata.name to have fallback, got:\n%s", s)
+	}
+
+	// Runtime verification via Docker
+	dockerBin, err := exec.LookPath("docker")
+	if err != nil {
+		return
+	}
+
+	kclBody, err := kclTemplateBody(bp, crds)
+	if err != nil {
+		t.Fatalf("kclTemplateBody: %v", err)
+	}
+
+	// Case 1: optional prefix omitted, status unobserved -> fallback to default deterministic names
+	cmd1 := exec.Command(dockerBin, "run", "-i", "--rm", "kcllang/kcl:v0.11.0", "kcl", "run",
+		"-D", `params={"oxr": {"metadata": {"name": "test-xr"}, "spec": {"providerName": "default", "replicas": 1}}}`, "-")
+	cmd1.Stdin = strings.NewReader(kclBody)
+	out1, err := cmd1.CombinedOutput()
+	if err != nil {
+		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out1)
+	}
+	out1Str := string(out1)
+	if !strings.Contains(out1Str, "name: test-xr-sa") {
+		t.Errorf("expected fallback name: test-xr-sa, got:\n%s", out1Str)
+	}
+	if !strings.Contains(out1Str, "name: test-xr-worker-0") {
+		t.Errorf("expected fallback name: test-xr-worker-0, got:\n%s", out1Str)
+	}
+	if !strings.Contains(out1Str, "name: test-xr-consumer") {
+		t.Errorf("expected fallback name: test-xr-consumer, got:\n%s", out1Str)
+	}
+
+	// Case 2: prefix provided and status observed -> use custom names
+	cmd2 := exec.Command(dockerBin, "run", "-i", "--rm", "kcllang/kcl:v0.11.0", "kcl", "run",
+		"-D", `params={"oxr": {"metadata": {"name": "test-xr"}, "spec": {"providerName": "default", "replicas": 1, "prefix": "custom"}}, "ocds": {"main-queue": {"Resource": {"status": {"atProvider": {"url": "https://sqs.aws/custom-url"}}}}}}`, "-")
+	cmd2.Stdin = strings.NewReader(kclBody)
+	out2, err := cmd2.CombinedOutput()
+	if err != nil {
+		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out2)
+	}
+	out2Str := string(out2)
+	if !strings.Contains(out2Str, "name: custom") {
+		t.Errorf("expected custom name: custom, got:\n%s", out2Str)
+	}
+	if !strings.Contains(out2Str, "name: custom-0") {
+		t.Errorf("expected custom name: custom-0, got:\n%s", out2Str)
+	}
+	if !strings.Contains(out2Str, "name: https://sqs.aws/custom-url") {
+		t.Errorf("expected custom name: https://sqs.aws/custom-url, got:\n%s", out2Str)
+	}
+}

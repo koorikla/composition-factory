@@ -1185,3 +1185,84 @@ func TestCompositionWithDigestPinnedProvider(t *testing.T) {
 		t.Fatalf("Composition failed with digest provider: %v", err)
 	}
 }
+
+func TestCF427_GoTemplateOptionalMetadataNameFallback(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-optional-meta-name"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "platform.example.org",
+				Version: "v1alpha1",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+					"replicas":     {Type: "integer", Required: true},
+					"prefix":       {Type: "string"}, // optional
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "worker",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					ForEach:  "params.replicas",
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "params.prefix"},
+					},
+				},
+				{
+					Name:     "sa",
+					Kind:     "ServiceAccount",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "params.prefix"},
+					},
+				},
+				{
+					Name: "main-queue",
+					Kind: "Queue",
+					Fields: map[string]blueprint.Field{
+						"region": {Value: "eu-west-1"},
+					},
+				},
+				{
+					Name:     "consumer",
+					Kind:     "ServiceAccount",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "resources.main-queue.status.atProvider.url"},
+					},
+				},
+			},
+		},
+	}
+
+	crds := append(nativeTestCRDs(t), wireCRDs(t)...)
+	out, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition failed: %v", err)
+	}
+	s := string(out)
+
+	// Verify looped resource has if/else fallback to default deterministic name
+	if !strings.Contains(s, `{{- if hasKey $spec "prefix" }}`) ||
+		!strings.Contains(s, `name: {{ printf "%s-%d" $spec.prefix $i }}`) ||
+		!strings.Contains(s, `name: {{ printf "%s-worker-%d" $xr $i }}`) {
+		t.Errorf("expected looped metadata.name to have fallback to {{ printf \"%%s-worker-%%d\" $xr $i }}, got:\n%s", s)
+	}
+
+	// Verify unlooped optional param has if/else fallback to default deterministic name
+	if !strings.Contains(s, `name: {{ $spec.prefix | quote }}`) ||
+		!strings.Contains(s, `name: {{ $xr }}-sa`) {
+		t.Errorf("expected unlooped metadata.name to have fallback to {{ $xr }}-sa, got:\n%s", s)
+	}
+
+	// Verify unlooped status wire has if/else fallback to default deterministic name
+	if !strings.Contains(s, `name: {{ $xr }}-consumer`) {
+		t.Errorf("expected status wired metadata.name to have fallback to {{ $xr }}-consumer, got:\n%s", s)
+	}
+}

@@ -87,10 +87,21 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 			}
 			if metaName != nil {
 				rhs := pythonStructuredRHS(metaName.structured, metaName.rhs)
+				isOptional := metaName.structured.optional || metaName.guard != "" || metaName.structured.kind == rhsStatus
 				if r.ForEach != "" {
-					rhs = pythonLoopedRHS(rhs)
+					if isOptional {
+						looped := pythonLoopedRHS(rhs)
+						sb.WriteString(fmt.Sprintf("%s\"name\": %s if %s else f\"{xr_name}-%s-{_i}\",\n", metaInner, looped, rhs, r.Name))
+					} else {
+						sb.WriteString(fmt.Sprintf("%s\"name\": %s,\n", metaInner, pythonLoopedRHS(rhs)))
+					}
+				} else {
+					if isOptional {
+						sb.WriteString(fmt.Sprintf("%s\"name\": %s or f\"{xr_name}-%s\",\n", metaInner, rhs, r.Name))
+					} else {
+						sb.WriteString(fmt.Sprintf("%s\"name\": %s,\n", metaInner, rhs))
+					}
 				}
-				sb.WriteString(fmt.Sprintf("%s\"name\": %s,\n", metaInner, rhs))
 			} else {
 				if r.ForEach != "" {
 					sb.WriteString(fmt.Sprintf("%s\"name\": f\"{xr_name}-%s-{_i}\",\n", metaInner, r.Name))

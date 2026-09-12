@@ -307,6 +307,12 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 				d.Line(ti, "  name: %s", metaName.rhs)
 			}
 			if metaName.guard != "" {
+				d.Line(ti, "  {{- else }}")
+				if looped {
+					d.Line(ti, `  name: {{ printf "%%s-%s-%%d" $xr $i }}`, r.Name)
+				} else {
+					d.Line(ti, "  name: {{ $xr }}-%s", r.Name)
+				}
 				d.Line(ti, "  {{- end }}")
 			}
 		} else {

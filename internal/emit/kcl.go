@@ -85,13 +85,15 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 				if r.ForEach != "" {
 					rhs = kclLoopedRHS(rhs)
 				}
-				if metaName.structured.kind == rhsStatus {
-					raw := kclRawStatusAccess(metaName.structured)
-					sb.WriteString(fmt.Sprintf("%sif %s != None:\n", metaInner, raw))
+				if guard := kclMetaNameGuard(metaName); guard != "" {
+					sb.WriteString(fmt.Sprintf("%sif %s:\n", metaInner, guard))
 					sb.WriteString(fmt.Sprintf("%s    name = %s\n", metaInner, rhs))
-				} else if isNested, guardExpr := kclNestedParamGuard(metaName.structured, metaName.rhs); isNested {
-					sb.WriteString(fmt.Sprintf("%sif %s != None:\n", metaInner, guardExpr))
-					sb.WriteString(fmt.Sprintf("%s    name = %s\n", metaInner, rhs))
+					sb.WriteString(fmt.Sprintf("%selse:\n", metaInner))
+					if r.ForEach != "" {
+						sb.WriteString(fmt.Sprintf("%s    name = \"${_xr}-%s-${_i}\"\n", metaInner, r.Name))
+					} else {
+						sb.WriteString(fmt.Sprintf("%s    name = \"${_xr}-%s\"\n", metaInner, r.Name))
+					}
 				} else {
 					sb.WriteString(fmt.Sprintf("%sname = %s\n", metaInner, rhs))
 				}
@@ -332,6 +334,30 @@ func kclNodeFieldGuard(f *forProviderField) string {
 		if strings.HasPrefix(inner, "$spec.") {
 			param := strings.TrimPrefix(inner, "$spec.")
 			return translateParamAccessToKCL(param) + " != None"
+		}
+	}
+	return ""
+}
+
+func kclMetaNameGuard(f *forProviderField) string {
+	if f == nil || (!f.structured.optional && f.guard == "") {
+		return ""
+	}
+	if f.structured.kind == rhsParam {
+		if len(f.structured.paramSegs) > 0 {
+			return "_spec?." + strings.Join(f.structured.paramSegs, "?.")
+		}
+		if f.structured.param != "" {
+			return translateParamAccessToKCL(f.structured.param)
+		}
+	} else if f.structured.kind == rhsStatus {
+		return kclRawStatusAccess(f.structured) + " != None"
+	} else if f.structured.kind == rhsEnv {
+		if len(f.structured.paramSegs) > 0 {
+			return "_env?." + strings.Join(f.structured.paramSegs, "?.")
+		}
+		if f.structured.param != "" {
+			return "_env?." + f.structured.param
 		}
 	}
 	return ""

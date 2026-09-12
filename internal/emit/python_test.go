@@ -1045,8 +1045,8 @@ func TestCF301_PythonLoopedCustomMetadataNameIncludesIndex(t *testing.T) {
 		t.Fatalf("Composition failed: %v", err)
 	}
 	s := string(out)
-	if !strings.Contains(s, `"name": f"{spec.get('prefix')}-{_i}",`) {
-		t.Fatalf("expected Python looped custom metadata.name to incorporate loop index _i, got:\n%s", s)
+	if !strings.Contains(s, `"name": f"{spec.get('prefix')}-{_i}" if spec.get("prefix") else f"{xr_name}-worker-{_i}",`) {
+		t.Fatalf("expected Python looped custom metadata.name to incorporate loop index _i with fallback, got:\n%s", s)
 	}
 }
 
@@ -1714,5 +1714,199 @@ print("OK")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("python execution failed: %v\nOutput:\n%s", err, out)
+	}
+}
+
+func TestCF427_PythonOptionalMetadataNameFallback(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-optional-meta-name-py"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EnginePython},
+			XRD: blueprint.XRD{
+				Group:   "platform.example.org",
+				Version: "v1alpha1",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+					"replicas":     {Type: "integer", Required: true},
+					"prefix":       {Type: "string"}, // optional
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "worker",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					ForEach:  "params.replicas",
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "params.prefix"},
+					},
+				},
+				{
+					Name:     "sa",
+					Kind:     "ServiceAccount",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "params.prefix"},
+					},
+				},
+				{
+					Name: "main-queue",
+					Kind: "Queue",
+					Fields: map[string]blueprint.Field{
+						"region": {Value: "eu-west-1"},
+					},
+				},
+				{
+					Name:     "consumer",
+					Kind:     "ServiceAccount",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {From: "resources.main-queue.status.atProvider.url"},
+					},
+				},
+			},
+		},
+	}
+
+	crds := append(nativeTestCRDs(t), wireCRDs(t)...)
+	out, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition failed: %v", err)
+	}
+	s := string(out)
+
+	// Verify generated Python code contains fallbacks
+	wantLooped := `"name": f"{spec.get('prefix')}-{_i}" if spec.get("prefix") else f"{xr_name}-worker-{_i}",`
+	if !strings.Contains(s, wantLooped) {
+		t.Errorf("expected Python looped metadata.name to have fallback, got:\n%s", s)
+	}
+
+	wantUnlooped := `"name": spec.get("prefix") or f"{xr_name}-sa",`
+	if !strings.Contains(s, wantUnlooped) {
+		t.Errorf("expected Python unlooped metadata.name to have fallback, got:\n%s", s)
+	}
+
+	wantStatus := `"name": _str(_get(ocds, "main-queue", "resource", "status", "atProvider", "url")) or f"{xr_name}-consumer",`
+	if !strings.Contains(s, wantStatus) {
+		t.Errorf("expected Python status metadata.name to have fallback, got:\n%s", s)
+	}
+
+	// Runtime verification
+	pyBin, err := exec.LookPath("python3")
+	if err != nil {
+		return
+	}
+
+	body, err := pythonTemplateBody(bp, crds)
+	if err != nil {
+		t.Fatalf("pythonTemplateBody: %v", err)
+	}
+
+	pyRunner := `
+import sys
+import types
+import json
+
+m1 = types.ModuleType("google.protobuf.json_format")
+m1.MessageToDict = lambda msg: msg if isinstance(msg, dict) else (getattr(msg, "__dict__", {}) if msg is not None else {})
+sys.modules["google.protobuf.json_format"] = m1
+
+m2 = types.ModuleType("crossplane.function.proto.v1")
+m2.run_function_pb2 = types.ModuleType("run_function_pb2")
+m2.run_function_pb2.RunFunctionRequest = object
+m2.run_function_pb2.RunFunctionResponse = object
+sys.modules["crossplane.function.proto.v1"] = m2
+sys.modules["crossplane.function.proto.v1.run_function_pb2"] = m2.run_function_pb2
+
+` + body + `
+
+class MockRes:
+    def __init__(self):
+        self.resource = {}
+    def update(self, d):
+        self.resource.update(d)
+
+class MockRsp:
+    def __init__(self):
+        self.desired = types.SimpleNamespace(resources={
+            "sa": MockRes(),
+            "worker-0": MockRes(),
+            "main-queue": MockRes(),
+            "consumer": MockRes(),
+        })
+
+# Case 1: optional prefix omitted, status unobserved -> fallback to deterministic default names
+req1 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={
+            "metadata": {"name": "test-xr"},
+            "spec": {"providerName": "default", "replicas": 1}
+        }),
+        resources={}
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={},
+)
+rsp1 = MockRsp()
+compose(req1, rsp1)
+sa1_name = rsp1.desired.resources["sa"].resource.get("metadata", {}).get("name")
+if sa1_name != "test-xr-sa":
+    print(f"FAIL: sa name expected 'test-xr-sa', got: {sa1_name}")
+    sys.exit(1)
+
+worker1_name = rsp1.desired.resources["worker-0"].resource.get("metadata", {}).get("name")
+if worker1_name != "test-xr-worker-0":
+    print(f"FAIL: worker name expected 'test-xr-worker-0', got: {worker1_name}")
+    sys.exit(1)
+
+consumer1_name = rsp1.desired.resources["consumer"].resource.get("metadata", {}).get("name")
+if consumer1_name != "test-xr-consumer":
+    print(f"FAIL: consumer name expected 'test-xr-consumer', got: {consumer1_name}")
+    sys.exit(1)
+
+# Case 2: prefix provided and status observed -> use custom names
+req2 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={
+            "metadata": {"name": "test-xr"},
+            "spec": {"providerName": "default", "replicas": 1, "prefix": "custom"}
+        }),
+        resources={
+            "main-queue": types.SimpleNamespace(resource={
+                "status": {"atProvider": {"url": "https://sqs.aws/custom-url"}}
+            })
+        }
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={},
+)
+rsp2 = MockRsp()
+compose(req2, rsp2)
+sa2_name = rsp2.desired.resources["sa"].resource.get("metadata", {}).get("name")
+if sa2_name != "custom":
+    print(f"FAIL: sa name expected 'custom', got: {sa2_name}")
+    sys.exit(2)
+
+worker2_name = rsp2.desired.resources["worker-0"].resource.get("metadata", {}).get("name")
+if worker2_name != "custom-0":
+    print(f"FAIL: worker name expected 'custom-0', got: {worker2_name}")
+    sys.exit(2)
+
+consumer2_name = rsp2.desired.resources["consumer"].resource.get("metadata", {}).get("name")
+if consumer2_name != "https://sqs.aws/custom-url":
+    print(f"FAIL: consumer name expected 'https://sqs.aws/custom-url', got: {consumer2_name}")
+    sys.exit(2)
+
+print("OK")
+`
+	cmd := exec.Command(pyBin, "-c", pyRunner)
+	pyOut, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("python execution failed: %v\nOutput:\n%s", err, pyOut)
 	}
 }
