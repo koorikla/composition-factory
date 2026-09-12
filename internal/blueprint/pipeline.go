@@ -108,9 +108,16 @@ func (b *Blueprint) validatePipeline() error {
 			return fmt.Errorf("%s.functionRef: %q is not a valid function name "+
 				"(must be a DNS label, e.g. function-auto-ready)", at, s.FunctionRef)
 		}
-		if s.FunctionRef == TemplatingFunctionName {
+		builtinFn := TemplatingFunctionName
+		switch b.Engine() {
+		case EngineKCL:
+			builtinFn = KCLFunctionName
+		case EnginePython:
+			builtinFn = PythonFunctionName
+		}
+		if s.FunctionRef == builtinFn {
 			return fmt.Errorf("%s.functionRef: %q is the built-in templating function, which the "+
-				"generator declares and pins itself; a second go-templating step is not supported yet",
+				"generator declares and pins itself; a second templating step for this engine is not supported yet",
 				at, s.FunctionRef)
 		}
 
@@ -147,6 +154,10 @@ func (b *Blueprint) validatePipeline() error {
 		default:
 			return fmt.Errorf("%s.position: %q is not valid (must be %q or %q, relative to the "+
 				"templating step; default %q)", at, s.Position, PositionBefore, PositionAfter, PositionAfter)
+		}
+		if s.FunctionRef == EnvironmentConfigsFunctionName && s.Position == PositionAfter {
+			return fmt.Errorf("%s.position: %q is not valid for %s (environment context must be provided before resource templating)",
+				at, s.Position, s.FunctionRef)
 		}
 
 		if s.Input != "" {
