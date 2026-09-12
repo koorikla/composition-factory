@@ -1669,6 +1669,9 @@ func matchesProvider(group, provider string) bool {
 	if idx := strings.LastIndex(p, "/"); idx != -1 {
 		p = p[idx+1:]
 	}
+	if idx := strings.Index(p, "@"); idx != -1 {
+		p = p[:idx]
+	}
 	if idx := strings.Index(p, ":"); idx != -1 {
 		p = p[:idx]
 	}

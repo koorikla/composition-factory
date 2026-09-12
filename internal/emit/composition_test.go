@@ -1165,3 +1165,23 @@ func TestResolveKindMismatchedProviderMultipleCandidates(t *testing.T) {
 		t.Fatal("Composition: expected error when resource provider does not match any candidate CRD, got nil")
 	}
 }
+
+func TestCompositionWithDigestPinnedProvider(t *testing.T) {
+	bp := testBlueprint()
+	digestRef := "xpkg.upbound.io/upbound/provider-aws-sqs@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	bp.Spec.Sources = []blueprint.Source{
+		{Provider: digestRef},
+	}
+	bp.Spec.Resources[0].Provider = digestRef
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate error: %v", err)
+	}
+
+	crds := testfixture.QueueBothCRDs(t)
+
+	_, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition failed with digest provider: %v", err)
+	}
+}
