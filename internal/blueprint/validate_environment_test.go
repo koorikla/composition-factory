@@ -67,3 +67,66 @@ spec:
 		})
 	}
 }
+
+func TestValidateEnvironmentConfigs_RejectsMatchLabelsControlCharacters(t *testing.T) {
+	cases := []struct {
+		name     string
+		selector string
+		wantErr  string
+	}{
+		{
+			name: "newline in matchLabels value",
+			selector: `selector:
+        matchLabels:
+          stage: "prod\ninjected: true"`,
+			wantErr: "control character",
+		},
+		{
+			name: "newline in matchLabels key",
+			selector: `selector:
+        matchLabels:
+          "stage\ninjected: true": prod`,
+			wantErr: "control character",
+		},
+		{
+			name: "carriage return in matchLabels value",
+			selector: `selector:
+        matchLabels:
+          stage: "prod\rinjected: true"`,
+			wantErr: "control character",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  sources: []
+  xrd:
+    group: test.org
+    version: v1alpha1
+    kind: Test
+    plural: tests
+    scope: Namespaced
+  environment:
+    region:
+      type: string
+  environmentConfigs:
+    - %s
+      data:
+        region: us-east-1`, tc.selector)
+
+			_, err := Load(write(t, manifest))
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("err = %q, want containing %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}

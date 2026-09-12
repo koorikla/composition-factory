@@ -87,8 +87,24 @@ func (b *Blueprint) validateEnvironmentConfigs() error {
 				return fmt.Errorf("spec.environmentConfigs[%d].name: %q is not a valid config name (must be a DNS label, e.g. dev-env, and not a YAML keyword like yes/no/on/off)", i, cfg.Name)
 			}
 		}
-		if cfg.Selector != nil && len(cfg.Selector.MatchLabels) == 0 {
-			return fmt.Errorf("spec.environmentConfigs[%d]: selector declared with empty matchLabels", i)
+		if cfg.Selector != nil {
+			if len(cfg.Selector.MatchLabels) == 0 {
+				return fmt.Errorf("spec.environmentConfigs[%d]: selector declared with empty matchLabels", i)
+			}
+			keys := make([]string, 0, len(cfg.Selector.MatchLabels))
+			for k := range cfg.Selector.MatchLabels {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				v := cfg.Selector.MatchLabels[k]
+				if err := checkScalar(fmt.Sprintf("spec.environmentConfigs[%d].selector.matchLabels key %q", i, k), k); err != nil {
+					return err
+				}
+				if err := checkScalar(fmt.Sprintf("spec.environmentConfigs[%d].selector.matchLabels[%s]", i, k), v); err != nil {
+					return err
+				}
+			}
 		}
 		effName := effConfigs[i].Name
 		if prev, ok := seenNames[effName]; ok {
