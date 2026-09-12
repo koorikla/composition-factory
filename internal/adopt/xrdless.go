@@ -65,6 +65,9 @@ func collectTemplateEvidence(tmpl string, ev map[string]*paramEvidence) {
 		for _, m := range reEvidenceAnySpec.FindAllStringSubmatch(body, -1) {
 			get(m[1]).refs++
 		}
+		for _, m := range reEvidenceIndexSpec.FindAllStringSubmatch(body, -1) {
+			get(m[1]).refs++
+		}
 	}
 	for _, m := range reEvidenceRef.FindAllStringSubmatchIndex(tmpl, -1) {
 		name := tmpl[m[2]:m[3]]

@@ -8265,3 +8265,187 @@ spec:
 		})
 	}
 }
+
+func TestAdoptGoTemplate_WhenParamIndexSpec(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition string
+		wantWhen  string
+		wantParam string
+	}{
+		{
+			name:      "param eq index $spec",
+			condition: `eq (index $spec "tier") "prod"`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param eq index .spec",
+			condition: `eq (index .spec "tier") "prod"`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param eq index $.spec",
+			condition: `eq (index $.spec "tier") "prod"`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param ne index $spec",
+			condition: `ne (index $spec "tier") "dev"`,
+			wantWhen:  `params.tier != "dev"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param eq reversed index $spec",
+			condition: `eq "prod" (index $spec "tier")`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+		},
+		{
+			name:      "param ne reversed index $spec",
+			condition: `ne "dev" (index $spec "tier")`,
+			wantWhen:  `params.tier != "dev"`,
+			wantParam: "tier",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-when-index
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- if %s }}
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: prod-bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            {{- end }}
+`, tc.condition)
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 1 {
+				t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+			}
+			r := bp.Spec.Resources[0]
+			if r.When != tc.wantWhen {
+				t.Errorf("r.When = %q, want %q", r.When, tc.wantWhen)
+			}
+			if _, ok := bp.Spec.XRD.Parameters[tc.wantParam]; !ok {
+				t.Errorf("parameter %q not declared in XRD parameters: %+v", tc.wantParam, bp.Spec.XRD.Parameters)
+			}
+		})
+	}
+}
+
+func TestAdoptGoTemplate_WhenParamIndexSpec_Truthiness(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition string
+		wantWhen  string
+		wantParam string
+	}{
+		{
+			name:      "param truthiness index $spec",
+			condition: `(index $spec "enabled")`,
+			wantWhen:  `params.enabled`,
+			wantParam: "enabled",
+		},
+		{
+			name:      "param truthiness index .spec",
+			condition: `(index .spec "enabled")`,
+			wantWhen:  `params.enabled`,
+			wantParam: "enabled",
+		},
+		{
+			name:      "param truthiness index $.spec",
+			condition: `(index $.spec "enabled")`,
+			wantWhen:  `params.enabled`,
+			wantParam: "enabled",
+		},
+		{
+			name:      "param truthiness unparenthesized index $spec",
+			condition: `index $spec "enabled"`,
+			wantWhen:  `params.enabled`,
+			wantParam: "enabled",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-when-index-truthiness
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- if %s }}
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: prod-bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            {{- end }}
+`, tc.condition)
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 1 {
+				t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+			}
+			r := bp.Spec.Resources[0]
+			if r.When != tc.wantWhen {
+				t.Errorf("r.When = %q, want %q", r.When, tc.wantWhen)
+			}
+			param, ok := bp.Spec.XRD.Parameters[tc.wantParam]
+			if !ok {
+				t.Fatalf("parameter %q not declared in XRD parameters: %+v", tc.wantParam, bp.Spec.XRD.Parameters)
+			}
+			if param.Type != "boolean" {
+				t.Errorf("param.Type = %q, want boolean", param.Type)
+			}
+		})
+	}
+}
