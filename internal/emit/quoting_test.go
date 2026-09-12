@@ -311,3 +311,45 @@ func TestCF114PythonEngineIntegerParamStringFormatting(t *testing.T) {
 		t.Errorf("Python engine expected integer-safe string conversion for port, got:\n%s", s)
 	}
 }
+
+// CF-344: Verify formatYAMLKey quotes YAML keywords and special characters.
+func TestFormatYAMLKey(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"on", "'on'"},
+		{"off", "'off'"},
+		{"yes", "'yes'"},
+		{"no", "'no'"},
+		{"true", "'true'"},
+		{"false", "'false'"},
+		{"null", "'null'"},
+		{"~", "'~'"},
+		{"y", "'y'"},
+		{"n", "'n'"},
+		{"ON", "'ON'"},
+		{"Off", "'Off'"},
+		{"YES", "'YES'"},
+		{"No", "'No'"},
+		{"True", "'True'"},
+		{"FALSE", "'FALSE'"},
+		{"Null", "'Null'"},
+		{"Y", "'Y'"},
+		{"N", "'N'"},
+		{"providerName", "providerName"},
+		{"myParam", "myParam"},
+		{"replicaCount", "replicaCount"},
+		{"foo/bar", "'foo/bar'"},
+		{"-leadingDash", "'-leadingDash'"},
+		{"has:colon", "'has:colon'"},
+		{"", "''"},
+	}
+
+	for _, tc := range tests {
+		got := formatYAMLKey(tc.input)
+		if got != tc.want {
+			t.Errorf("formatYAMLKey(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

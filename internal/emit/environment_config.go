@@ -29,7 +29,7 @@ func EnvironmentConfig(b *blueprint.Blueprint, cfg blueprint.EnvironmentConfig) 
 		sort.Strings(labelKeys)
 		for _, k := range labelKeys {
 			v := cfg.Selector.MatchLabels[k]
-			d.Line(2, "%s: %s", k, formatLabelValue(v))
+			d.Line(2, "%s: %s", formatYAMLKey(k), formatLabelValue(v))
 		}
 	}
 	d.Line(0, "data:")
@@ -42,12 +42,13 @@ func EnvironmentConfig(b *blueprint.Blueprint, cfg blueprint.EnvironmentConfig) 
 		data := cfg.EffectiveData()
 		for _, k := range envKeys {
 			envKey := b.Spec.Environment[k]
+			fk := formatYAMLKey(k)
 			if val, ok := data[k]; ok {
-				d.Line(1, "%s: %s", k, formatEnvVal(envKey, val))
+				d.Line(1, "%s: %s", fk, formatEnvVal(envKey, val))
 			} else if envKey.Default != "" {
-				d.Line(1, "%s: %s", k, formatEnvDefault(envKey))
+				d.Line(1, "%s: %s", fk, formatEnvDefault(envKey))
 			} else {
-				d.Line(1, "%s: %s", k, formatEnvVal(envKey, ""))
+				d.Line(1, "%s: %s", fk, formatEnvVal(envKey, ""))
 			}
 		}
 	}

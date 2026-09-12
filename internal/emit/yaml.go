@@ -64,6 +64,23 @@ func quoteYAML(s string) string {
 var yamlKeywords = map[string]bool{
 	"true": true, "false": true, "yes": true, "no": true,
 	"on": true, "off": true, "null": true, "y": true, "n": true,
+	"~": true,
+}
+
+// formatYAMLKey returns k quoted as a YAML single-quoted scalar if it is empty,
+// matches a YAML keyword (such as on, off, yes, no, true, false, null, ~, y, n,
+// case-insensitively), starts with '-', or contains characters that have special
+// meaning in YAML mapping keys or flow sequences. Otherwise it returns k unchanged.
+func formatYAMLKey(k string) string {
+	if k == "" || yamlKeywords[strings.ToLower(k)] || strings.ContainsAny(k, "/: \t\n\r\"'#@{}[]!*?|<>&%,`") || strings.HasPrefix(k, "-") {
+		return quoteYAML(k)
+	}
+	return k
+}
+
+// formatKey formats a key for emission into YAML, delegating to formatYAMLKey.
+func formatKey(k string) string {
+	return formatYAMLKey(k)
 }
 
 // header is the provenance every generated file carries, as comments.

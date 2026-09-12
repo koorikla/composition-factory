@@ -482,3 +482,98 @@ func TestObjectMemberScalarEnumValuesAreUnquoted(t *testing.T) {
 		}
 	}
 }
+
+// CF-344: Parameters named with YAML 1.1 boolean/null keywords (on, off, yes, no, etc.)
+// must be emitted quoted so Kubernetes YAML decoders (sigs.k8s.io/yaml) do not collapse
+// them into boolean or null keys, and required lists must quote them as well.
+func TestXRDKeywordParametersAndRequired(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "xflag"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XFlag", Plural: "xflags",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+					"on":           {Type: "string", Required: true},
+					"off":          {Type: "string"},
+					"yes":          {Type: "string"},
+					"no":           {Type: "string"},
+					"nested": {
+						Type: "object",
+						Properties: map[string]blueprint.Parameter{
+							"on":  {Type: "string", Required: true},
+							"off": {Type: "string"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	got, err := XRD(b)
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := yaml.Unmarshal(got, &parsed); err != nil {
+		t.Fatalf("sigs.k8s.io/yaml.Unmarshal failed: %v\n---\n%s", err, got)
+	}
+
+	props := dig(t, parsed, "spec", "versions", 0, "schema", "openAPIV3Schema",
+		"properties", "spec", "properties").(map[string]any)
+
+	for _, key := range []string{"on", "off", "yes", "no", "providerName", "nested"} {
+		if _, ok := props[key]; !ok {
+			t.Errorf("parameter property %q missing from decoded XRD properties: %v", key, props)
+		}
+	}
+	if _, ok := props["true"]; ok {
+		t.Errorf("properties contains key 'true', indicating boolean collapse: %v", props)
+	}
+	if _, ok := props["false"]; ok {
+		t.Errorf("properties contains key 'false', indicating boolean collapse: %v", props)
+	}
+
+	req := dig(t, parsed, "spec", "versions", 0, "schema", "openAPIV3Schema",
+		"properties", "spec", "required").([]any)
+
+	// Verify required contains string "on" and not boolean true
+	foundOn := false
+	for _, r := range req {
+		if r == true {
+			t.Errorf("required list contains boolean true instead of string %q: %v", "on", req)
+		}
+		if s, ok := r.(string); ok && s == "on" {
+			foundOn = true
+		}
+	}
+	if !foundOn {
+		t.Errorf("required list missing string %q: %v", "on", req)
+	}
+
+	// Verify nested object properties and required
+	nestedProps := dig(t, props, "nested", "properties").(map[string]any)
+	if _, ok := nestedProps["on"]; !ok {
+		t.Errorf("nested.properties missing key 'on': %v", nestedProps)
+	}
+	if _, ok := nestedProps["off"]; !ok {
+		t.Errorf("nested.properties missing key 'off': %v", nestedProps)
+	}
+	nestedReq := dig(t, props, "nested", "required").([]any)
+	foundNestedOn := false
+	for _, r := range nestedReq {
+		if r == true {
+			t.Errorf("nested required contains boolean true: %v", nestedReq)
+		}
+		if s, ok := r.(string); ok && s == "on" {
+			foundNestedOn = true
+		}
+	}
+	if !foundNestedOn {
+		t.Errorf("nested required missing string %q: %v", "on", nestedReq)
+	}
+}
