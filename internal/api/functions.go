@@ -99,6 +99,11 @@ func (srv *server) handleAddFunction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := srv.rebuildIndexLocked(); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"function": functionEntry{
 			Ref:    req.Ref,

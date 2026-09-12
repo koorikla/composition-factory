@@ -634,6 +634,13 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 	if srv.Store == nil || b == nil {
 		return nil
 	}
+	var currentPipeline []blueprint.PipelineStep
+	if srv.Blueprint != "" {
+		if cur, err := blueprint.Load(srv.Blueprint); err == nil && cur != nil {
+			currentPipeline = cur.Spec.Pipeline
+		}
+	}
+
 	existing := make(map[string]bool, len(srv.Providers))
 	for _, p := range srv.Providers {
 		existing[p] = true
@@ -708,7 +715,10 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 		}
 	}
 
-	if !reflect.DeepEqual(srv.Providers, origProviders) {
+	providersChanged := !reflect.DeepEqual(srv.Providers, origProviders)
+	pipelineChanged := !reflect.DeepEqual(currentPipeline, b.Spec.Pipeline)
+
+	if providersChanged || pipelineChanged {
 		if err := srv.rebuildIndexLocked(b); err != nil {
 			srv.Providers = origProviders
 			return err
