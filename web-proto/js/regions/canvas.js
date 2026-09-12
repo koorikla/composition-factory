@@ -674,8 +674,13 @@ function render() {
 /* ---------- wires ---------- */
 
 function portPos(owner, path, cwRect) {
-  const el = canvasEl.querySelector(
+  let el = canvasEl.querySelector(
     '.port[data-owner="' + CSS.escape(owner) + '"][data-path="' + CSS.escape(path) + '"] .d');
+  if (!el && owner === XR_ID && typeof path === "string" && path.indexOf(".") !== -1) {
+    const root = path.split(".")[0];
+    el = canvasEl.querySelector(
+      '.port[data-owner="' + CSS.escape(owner) + '"][data-path="' + CSS.escape(root) + '"] .d');
+  }
   if (!el) return null;
   const cw = cwRect || (cwEl ? cwEl.getBoundingClientRect() : { left: 0, top: 0 });
   const r = el.getBoundingClientRect();
@@ -726,7 +731,12 @@ function drawWires() {
   if (!d) { wiresEl.innerHTML = ""; return; }
   const ws = listWires(d);
   const fans = {};
-  ws.forEach(function (w) { if (w.kind === "param") fans[w.param] = (fans[w.param] || 0) + 1; });
+  ws.forEach(function (w) {
+    if (w.kind === "param" && w.param) {
+      const root = w.param.split(".")[0];
+      fans[root] = (fans[root] || 0) + 1;
+    }
+  });
   const cwRect = ws.length && cwEl ? cwEl.getBoundingClientRect() : null;
   let s = "";
   let delButtons = "";
@@ -745,9 +755,10 @@ function drawWires() {
       col = "var(--shared)";
       title = "env." + w.envKey + " \u2192 " + w.resource + "." + w.path;
     } else {
-      a = portPos(XR_ID, w.param, cwRect);
+      a = portPos(XR_ID, w.param, cwRect) || (w.param && portPos(XR_ID, w.param.split(".")[0], cwRect));
       b = portPos(w.resource, w.path, cwRect);
-      const shared = fans[w.param] > 1;
+      const root = w.param ? w.param.split(".")[0] : "";
+      const shared = (fans[root] || 0) > 1;
       cls = shared ? "wire-shared" : "wire-xrd";
       col = shared ? "var(--shared)" : "var(--wire-xrd)";
       title = "$" + w.param + " \u2192 " + w.resource + "." + w.path;
