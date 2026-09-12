@@ -53,4 +53,8 @@ export var state = {
   removeWire: function () {},
   snapshotFocusedEdit: function () { return null; },
   restoreFocusedEdit: function () {},
+  modeButtons: function () { return ""; },
+  wireSelectHtml: function () { return ""; },
+  isFieldEffectivelyRequired: function () { return false; },
+  boundChipHtml: function () { return ""; },
 };

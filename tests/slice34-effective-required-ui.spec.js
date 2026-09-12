@@ -18,7 +18,9 @@ test('a dropped Deployment card shows its true must-set fields, not a flood', as
   await expect(card).toContainText('selector')
   await expect(card).toContainText('template')
   const reqRows = await card.locator('.port.req').count()
-  expect(reqRows).toBeLessThanOrEqual(4)   // selector+template(+set rows), not hundreds
+  // selector+template, plus starter rows the schema marks required
+  // (containers[0].name, ports[0].containerPort): still not hundreds
+  expect(reqRows).toBeLessThanOrEqual(8)
 })
 
 test('the inspector Required filter shows the branches for Deployment', async ({ page }) => {

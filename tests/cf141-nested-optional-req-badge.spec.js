@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const { resetDoc, guardPageErrors, dropKind } = require('./helpers');
+const { resetDoc, ENGINE, guardPageErrors } = require('./helpers');
 
 test.describe('CF-141 — Inspector badges nested optional leaves correctly', () => {
   guardPageErrors();
@@ -9,11 +9,13 @@ test.describe('CF-141 — Inspector badges nested optional leaves correctly', ()
   });
 
 
-  test('nested leaf in an optional object is not badged REQ in All filter or counted in required when parent is unset', async ({ page }) => {
+  test('nested leaf in an optional object is not badged REQ in All filter or counted in required when parent is unset', async ({ page, request }) => {
+    // Seed an empty Deployment instead of dropping one: the CF-469 starter sets
+    // a container on drop, and this test's premise is that containers is unset.
+    const doc = await (await request.get(ENGINE + '/api/blueprint')).json();
+    doc.spec.resources.push({ name: 'deployment', kind: 'Deployment', provider: 'k8s', fields: {} });
+    expect((await request.put(ENGINE + '/api/blueprint', { data: doc })).status()).toBe(200);
     await page.goto('/');
-
-    // Drop Deployment (native kind with nested required leaves inside optional objects, e.g. containers[0].name / env[0].name)
-    await dropKind(page, 'Deployment', 'apps/v1', 400, 300);
     const card = page.locator('.node[data-id="deployment"]');
     await expect(card).toBeVisible();
 
@@ -24,9 +26,7 @@ test.describe('CF-141 — Inspector badges nested optional leaves correctly', ()
     // Inspector header should show the required count matching effective requiredness (selector + template branches = 2)
     // and NOT the ~250 raw required fields!
     const header = insp.locator('.insp-t .g');
-    await expect(header).toBeVisible();
-    const headerText = await header.textContent();
-    expect(headerText).toContain('2 required');
+    await expect(header).toContainText('2 required');
 
     // Switch to All filter
     await page.click('#fseg button[data-f="all"]');
@@ -44,7 +44,7 @@ test.describe('CF-141 — Inspector badges nested optional leaves correctly', ()
     const containerImageRow = insp.locator('.fld:has(.n:text-is("spec.template.spec.containers[0].image"))');
     await expect(containerImageRow).toBeVisible();
     const imageInput = containerImageRow.locator('input.val');
-    await imageInput.fill('nginx:latest');
+    await imageInput.fill('nginx:1.27');
     await imageInput.blur();
 
     // Now that containers[0] is set/present, required leaves inside containers[0] (like name) become effectively required!
