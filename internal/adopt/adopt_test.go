@@ -9557,3 +9557,204 @@ spec:
 		}
 	}
 }
+
+func TestAdoptGoTemplate_ForEachParamWithDefault(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp-foreach-default
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          ---
+          {{- range $i := until (int (default 1 $spec.count)) }}
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: replicated
+          spec:
+            forProvider:
+              region: us-east-1
+          {{- end }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+	if res.ForEach != "params.count" {
+		t.Errorf("res.ForEach = %q, want %q", res.ForEach, "params.count")
+	}
+}
+
+func TestAdoptGoTemplate_ForEachParamWithDefault_Variants(t *testing.T) {
+	tests := []struct {
+		name        string
+		loopExpr    string
+		wantParam   string
+		wantDefault string
+	}{
+		{
+			name:        "dot spec prefix",
+			loopExpr:    `until (int (default 5 .spec.replicas))`,
+			wantParam:   "replicas",
+			wantDefault: "5",
+		},
+		{
+			name:        "dollar dot spec prefix",
+			loopExpr:    `until (int (default 2 $.spec.instances))`,
+			wantParam:   "instances",
+			wantDefault: "2",
+		},
+		{
+			name:        "dot observed full path",
+			loopExpr:    `until (int (default 3 .observed.composite.resource.spec.shards))`,
+			wantParam:   "shards",
+			wantDefault: "3",
+		},
+		{
+			name:        "dollar observed full path",
+			loopExpr:    `until (int (default 4 $.observed.composite.resource.spec.nodes))`,
+			wantParam:   "nodes",
+			wantDefault: "4",
+		},
+		{
+			name:        "double quoted default value",
+			loopExpr:    `until (int (default "10" $spec.workers))`,
+			wantParam:   "workers",
+			wantDefault: "10",
+		},
+		{
+			name:        "single quoted default value",
+			loopExpr:    `until (int (default '15' $spec.threads))`,
+			wantParam:   "threads",
+			wantDefault: "15",
+		},
+		{
+			name:        "index spec double quoted",
+			loopExpr:    `until (int (default 1 (index $spec "pools")))`,
+			wantParam:   "pools",
+			wantDefault: "1",
+		},
+		{
+			name:        "index spec single quoted",
+			loopExpr:    `until (int (default 2 (index $spec 'queues')))`,
+			wantParam:   "queues",
+			wantDefault: "2",
+		},
+		{
+			name:        "piped default",
+			loopExpr:    `until (int ($spec.tasks | default 3))`,
+			wantParam:   "tasks",
+			wantDefault: "3",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp-foreach-variant
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          ---
+          {{- range $i := %s }}
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: replicated
+            annotations:
+              crossplane.io/composition-resource-name: replicated
+          data:
+            key: value
+          {{- end }}
+`, tc.loopExpr)
+
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 1 {
+				t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+			}
+			res := bp.Spec.Resources[0]
+			wantForEach := fmt.Sprintf("params.%s", tc.wantParam)
+			if res.ForEach != wantForEach {
+				t.Errorf("res.ForEach = %q, want %q", res.ForEach, wantForEach)
+			}
+
+			p, ok := bp.Spec.XRD.Parameters[tc.wantParam]
+			if !ok {
+				t.Fatalf("parameter %q not declared in XRD parameters: %+v", tc.wantParam, bp.Spec.XRD.Parameters)
+			}
+			if p.Type != "integer" {
+				t.Errorf("parameter %q Type = %q, want %q", tc.wantParam, p.Type, "integer")
+			}
+			if p.Required {
+				t.Errorf("parameter %q should be optional (Required: false), got Required: true", tc.wantParam)
+			}
+			if p.Default != tc.wantDefault {
+				t.Errorf("parameter %q Default = %q, want %q", tc.wantParam, p.Default, tc.wantDefault)
+			}
+
+			// Verify round-trip emission
+			nativeCRDs, err := k8s.Kinds()
+			if err != nil {
+				t.Fatalf("k8s.Kinds: %v", err)
+			}
+			outputs, err := emit.Generate(bp, nativeCRDs, "")
+			if err != nil {
+				t.Fatalf("emit.Generate failed on adopted blueprint: %v", err)
+			}
+			if len(outputs) == 0 {
+				t.Fatalf("emit.Generate returned 0 outputs")
+			}
+			var compContent string
+			for _, o := range outputs {
+				if strings.Contains(o.Path, "composition") {
+					compContent = string(o.Body)
+					break
+				}
+			}
+			if compContent == "" {
+				t.Fatalf("composition output not found in generated outputs")
+			}
+			expectedLoop := fmt.Sprintf(`{{- range $i := until (int $spec.%s) }}`, tc.wantParam)
+			if !strings.Contains(compContent, expectedLoop) {
+				t.Errorf("emitted composition missing expected loop %q:\n%s", expectedLoop, compContent)
+			}
+		})
+	}
+}

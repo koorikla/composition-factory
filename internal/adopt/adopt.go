@@ -1132,7 +1132,8 @@ var (
 	reWhenIfEnvNe        = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:or\s+\(not\s+\(hasKey\s+\$env\s+["'][^"']+["']\)\)\s+)?\(?ne\s+\$env\.([a-zA-Z0-9_.-]+)\s+["']?([^"']*?)["']?\)?|\(?ne\s+\(default\s+(?:["'][^"']*["']|\S+)\s+\(index\s+\$env\s+["']([a-zA-Z0-9_.-]+)["']\)\)\s+["']?([^"']*?)["']?\)?)\s*-?\}\}`)
 	reWhenIfEnvEqRev     = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:and\s+\(hasKey\s+\$env\s+["'][^"']+["']\)\s+)?\(?eq\s+["']?([^"']*?)["']?\s+\$env\.([a-zA-Z0-9_.-]+)\)?|\(?eq\s+["']?([^"']*?)["']?\s+\(default\s+(?:["'][^"']*["']|\S+)\s+\(index\s+\$env\s+["']([a-zA-Z0-9_.-]+)["']\)\)\)?)\s*-?\}\}`)
 	reWhenIfEnvNeRev     = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:or\s+\(not\s+\(hasKey\s+\$env\s+["'][^"']+["']\)\)\s+)?\(?ne\s+["']?([^"']*?)["']?\s+\$env\.([a-zA-Z0-9_.-]+)\)?|\(?ne\s+["']?([^"']*?)["']?\s+\(default\s+(?:["'][^"']*["']|\S+)\s+\(index\s+\$env\s+["']([a-zA-Z0-9_.-]+)["']\)\)\)?)\s*-?\}\}`)
-	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
+	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?\)?\s*\)\s*-?\}\}`)
+	reForEachDefault     = regexp.MustCompile(`(?:default\s+(?:["']([^"']*)["']|([^\s)]+))|\|\s*default\s+(?:["']([^"']*)["']|([^\s)]+)))`)
 	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$env\.([a-zA-Z0-9_.-]+)|\(default\s+(?:["'][^"']*["']|\S+)\s+\(index\s+\$env\s+["']([a-zA-Z0-9_.-]+)["']\)\))\)\s*-?\}\}`)
 	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(index\s+\$?[.]observed\.resources\s+"([^"]+)"\)\.resource\.status\.([a-zA-Z0-9_.-]+)|\$?[.]observed\.resources\.([a-zA-Z0-9_-]+)\.resource\.status\.([a-zA-Z0-9_.-]+))\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
@@ -2067,8 +2068,17 @@ func extractForEachGuard(text string, bp *blueprint.Blueprint) string {
 		}
 		return fmt.Sprintf("resources.%s.status.%s", resName, statusPath)
 	} else if m := reForEachLoop.FindStringSubmatch(text); len(m) >= 2 {
-		ensureParamDeclaredTyped(bp, m[1], "integer")
-		return fmt.Sprintf("params.%s", m[1])
+		pName := m[1]
+		if pName == "" && len(m) >= 3 {
+			pName = m[2]
+		}
+		if pName != "" {
+			ensureParamDeclaredTyped(bp, pName, "integer")
+			if defVal := extractForEachDefault(m[0]); defVal != "" {
+				ensureParamDefault(bp, pName, defVal)
+			}
+			return fmt.Sprintf("params.%s", pName)
+		}
 	}
 	return ""
 }
@@ -2137,6 +2147,18 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 				}
 				if pName != "" && isValidParamIdentifier(pName) {
 					ensureParamDeclaredTyped(bp, pName, "boolean")
+				}
+			}
+		}
+		if m := reForEachLoop.FindStringSubmatch(action[0]); len(m) >= 2 {
+			pName := m[1]
+			if pName == "" && len(m) >= 3 {
+				pName = m[2]
+			}
+			if pName != "" && isValidParamIdentifier(pName) {
+				ensureParamDeclaredTyped(bp, pName, "integer")
+				if defVal := extractForEachDefault(m[0]); defVal != "" {
+					ensureParamDefault(bp, pName, defVal)
 				}
 			}
 		}
@@ -2670,6 +2692,46 @@ func insertParamIntoMap(props map[string]blueprint.Parameter, parts []string, ty
 	}
 	insertParamIntoMap(p.Properties, parts[1:], typ)
 	props[head] = p
+}
+
+func extractForEachDefault(text string) string {
+	dm := reForEachDefault.FindStringSubmatch(text)
+	if len(dm) == 0 {
+		return ""
+	}
+	for i := 1; i < len(dm); i++ {
+		if dm[i] != "" {
+			return dm[i]
+		}
+	}
+	return ""
+}
+
+func ensureParamDefault(bp *blueprint.Blueprint, paramPath string, defVal string) {
+	if bp == nil || bp.Spec.XRD.Parameters == nil || defVal == "" {
+		return
+	}
+	parts := strings.Split(paramPath, ".")
+	if len(parts) == 0 || parts[0] == "" {
+		return
+	}
+	insertParamDefaultIntoMap(bp.Spec.XRD.Parameters, parts, defVal)
+}
+
+func insertParamDefaultIntoMap(props map[string]blueprint.Parameter, parts []string, defVal string) {
+	head := parts[0]
+	if len(parts) == 1 {
+		p, exists := props[head]
+		if exists && p.Default == "" {
+			p.Default = defVal
+			props[head] = p
+		}
+		return
+	}
+	p, exists := props[head]
+	if exists && p.Properties != nil {
+		insertParamDefaultIntoMap(p.Properties, parts[1:], defVal)
+	}
 }
 
 func ensureEnvDeclared(bp *blueprint.Blueprint, envKey, typ string) {
