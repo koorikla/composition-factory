@@ -79,6 +79,14 @@ func (b *Blueprint) validateEnvironmentConfigs() error {
 	effConfigs := b.EffectiveEnvironmentConfigs()
 	seenNames := make(map[string]int, len(effConfigs))
 	for i, cfg := range b.Spec.EnvironmentConfigs {
+		if cfg.Name != "" {
+			if err := checkScalar(fmt.Sprintf("spec.environmentConfigs[%d].name", i), cfg.Name); err != nil {
+				return err
+			}
+			if !resourceNameRE.MatchString(cfg.Name) || yamlKeywords[strings.ToLower(cfg.Name)] {
+				return fmt.Errorf("spec.environmentConfigs[%d].name: %q is not a valid config name (must be a DNS label, e.g. dev-env, and not a YAML keyword like yes/no/on/off)", i, cfg.Name)
+			}
+		}
 		if cfg.Selector != nil && len(cfg.Selector.MatchLabels) == 0 {
 			return fmt.Errorf("spec.environmentConfigs[%d]: selector declared with empty matchLabels", i)
 		}
