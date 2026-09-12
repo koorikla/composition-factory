@@ -181,11 +181,25 @@ func collectPatchEvidence(patches []any, ev map[string]*paramEvidence) {
 	}
 }
 
+// collectPatchSetEvidence scans patches defined in patchSets.
+func collectPatchSetEvidence(patchSets []any, ev map[string]*paramEvidence) {
+	for _, raw := range patchSets {
+		if ps, ok := raw.(map[string]any); ok {
+			if patches, ok := ps["patches"].([]any); ok {
+				collectPatchEvidence(patches, ev)
+			}
+		}
+	}
+}
+
 // compositionEvidence walks one Composition document for parameter evidence.
 func compositionEvidence(compDoc map[string]any, ev map[string]*paramEvidence) {
 	spec, _ := compDoc["spec"].(map[string]any)
 	if spec == nil {
 		return
+	}
+	if patchSets, ok := spec["patchSets"].([]any); ok {
+		collectPatchSetEvidence(patchSets, ev)
 	}
 	if resources, ok := spec["resources"].([]any); ok {
 		for _, raw := range resources {
@@ -205,6 +219,9 @@ func compositionEvidence(compDoc map[string]any, ev map[string]*paramEvidence) {
 		input, _ := step["input"].(map[string]any)
 		if input == nil {
 			continue
+		}
+		if patchSets, ok := input["patchSets"].([]any); ok {
+			collectPatchSetEvidence(patchSets, ev)
 		}
 		if inline, ok := input["inline"].(map[string]any); ok {
 			if tmpl, ok := inline["template"].(string); ok {

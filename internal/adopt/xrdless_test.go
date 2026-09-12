@@ -758,3 +758,206 @@ func TestResolveResourceCRDMismatchedProvider(t *testing.T) {
 		t.Errorf("expected crd1 for matching provider, got %v", got)
 	}
 }
+
+// TestAdoptXRDlessPatchSetsEvidence verifies that compositionEvidence scans both
+// spec.patchSets (classic mode) and input.patchSets (pipeline mode), inferring
+// required: true for parameters with policy.fromFieldPath: Required and avoiding
+// false loss reports for required (CF-441, #333).
+func TestAdoptXRDlessPatchSetsEvidence_Classic(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-patchset-xrdless
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: App
+  patchSets:
+  - name: common-patches
+    patches:
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.region
+      toFieldPath: spec.forProvider.region
+      policy:
+        fromFieldPath: Required
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.optionalTag
+      toFieldPath: spec.forProvider.tag
+      policy:
+        fromFieldPath: Optional
+  resources:
+  - name: bucket
+    base:
+      apiVersion: s3.aws.upbound.io/v1beta1
+      kind: Bucket
+    patches:
+    - type: PatchSet
+      patchSetName: common-patches
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	pRegion, ok := bp.Spec.XRD.Parameters["region"]
+	if !ok {
+		t.Fatalf("expected region parameter, got params: %+v", bp.Spec.XRD.Parameters)
+	}
+	if !pRegion.Required {
+		t.Errorf("expected region.Required to be true, got false")
+	}
+
+	pOpt, ok := bp.Spec.XRD.Parameters["optionalTag"]
+	if !ok {
+		t.Fatalf("expected optionalTag parameter, got params: %+v", bp.Spec.XRD.Parameters)
+	}
+	if pOpt.Required {
+		t.Errorf("expected optionalTag.Required to be false, got true")
+	}
+
+	for _, d := range report.Drops {
+		if d.Path == "xrd.parameters.region" && strings.Contains(d.Reason, "required") {
+			t.Errorf("expected region drop reason not to claim required could not be recovered, got %q", d.Reason)
+		}
+		if d.Path == "xrd.parameters.optionalTag" && strings.Contains(d.Reason, "required") {
+			t.Errorf("expected optionalTag drop reason not to claim required could not be recovered, got %q", d.Reason)
+		}
+	}
+}
+
+func TestAdoptXRDlessPatchSetsEvidence_Pipeline(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-patchset-pipeline-xrdless
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: App
+  mode: Pipeline
+  pipeline:
+  - step: patch-and-transform
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      patchSets:
+      - name: common-patches
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.region
+          toFieldPath: spec.forProvider.region
+          policy:
+            fromFieldPath: Required
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.optionalTag
+          toFieldPath: spec.forProvider.tag
+          policy:
+            fromFieldPath: Optional
+      resources:
+      - name: bucket
+        base:
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+        patches:
+        - type: PatchSet
+          patchSetName: common-patches
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	pRegion, ok := bp.Spec.XRD.Parameters["region"]
+	if !ok {
+		t.Fatalf("expected region parameter, got params: %+v", bp.Spec.XRD.Parameters)
+	}
+	if !pRegion.Required {
+		t.Errorf("expected region.Required to be true, got false")
+	}
+
+	pOpt, ok := bp.Spec.XRD.Parameters["optionalTag"]
+	if !ok {
+		t.Fatalf("expected optionalTag parameter, got params: %+v", bp.Spec.XRD.Parameters)
+	}
+	if pOpt.Required {
+		t.Errorf("expected optionalTag.Required to be false, got true")
+	}
+
+	for _, d := range report.Drops {
+		if d.Path == "xrd.parameters.region" && strings.Contains(d.Reason, "required") {
+			t.Errorf("expected region drop reason not to claim required could not be recovered, got %q", d.Reason)
+		}
+		if d.Path == "xrd.parameters.optionalTag" && strings.Contains(d.Reason, "required") {
+			t.Errorf("expected optionalTag drop reason not to claim required could not be recovered, got %q", d.Reason)
+		}
+	}
+}
+
+func TestCompositionEvidence_PatchSets(t *testing.T) {
+	docClassic := map[string]any{
+		"spec": map[string]any{
+			"patchSets": []any{
+				map[string]any{
+					"name": "classic-ps",
+					"patches": []any{
+						map[string]any{
+							"type":          "FromCompositeFieldPath",
+							"fromFieldPath": "spec.requiredField",
+							"policy": map[string]any{
+								"fromFieldPath": "Required",
+							},
+						},
+						map[string]any{
+							"fromFieldPath": "spec.optionalField",
+							"policy": map[string]any{
+								"fromFieldPath": "Optional",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	evClassic := make(map[string]*paramEvidence)
+	compositionEvidence(docClassic, evClassic)
+	if e := evClassic["requiredField"]; e == nil || !e.required || e.refs != 1 {
+		t.Errorf("classic patchSets: expected requiredField evidence with required=true, refs=1, got %+v", e)
+	}
+	if e := evClassic["optionalField"]; e == nil || !e.guarded || e.required || e.refs != 1 {
+		t.Errorf("classic patchSets: expected optionalField evidence with guarded=true, required=false, refs=1, got %+v", e)
+	}
+
+	docPipeline := map[string]any{
+		"spec": map[string]any{
+			"pipeline": []any{
+				map[string]any{
+					"input": map[string]any{
+						"patchSets": []any{
+							map[string]any{
+								"name": "pipeline-ps",
+								"patches": []any{
+									map[string]any{
+										"type":          "FromCompositeFieldPath",
+										"fromFieldPath": "spec.parameters.pipeRequired",
+										"policy": map[string]any{
+											"fromFieldPath": "Required",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	evPipeline := make(map[string]*paramEvidence)
+	compositionEvidence(docPipeline, evPipeline)
+	if e := evPipeline["pipeRequired"]; e == nil || !e.required || e.refs != 1 {
+		t.Errorf("pipeline patchSets: expected pipeRequired evidence with required=true, refs=1, got %+v", e)
+	}
+}
