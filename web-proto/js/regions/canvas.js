@@ -32,6 +32,13 @@ import {
   closeWirePicker,
   isPickerJustOpened,
 } from "./canvas/drag-to-wire.js";
+import {
+  escapeRegex,
+  isResourceRef,
+  isObjectReferencingResource,
+  findDownstreamRefs,
+  cleanDownstreamRefs,
+} from "./canvas/resource-ref.js";
 
 let S = defaultStore;
 let A = defaultApi;
@@ -1162,132 +1169,13 @@ function duplicateResource(src) {
   });
 }
 
-function escapeRegex(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function isResourceRef(val, name) {
-  if (typeof val !== "string" || !val || !name) return false;
-  if (val === "resources." + name || val.startsWith("resources." + name + ".")) return true;
-  const re = new RegExp("(?:^|[^a-zA-Z0-9_-])resources\\." + escapeRegex(name) + "(?:$|[^a-zA-Z0-9_-])");
-  return re.test(val);
-}
-
-function isObjectReferencingResource(obj, name) {
-  if (!obj || typeof obj !== "object") return false;
-  for (const k of Object.keys(obj)) {
-    const v = obj[k];
-    if (typeof v === "string" && isResourceRef(v, name)) return true;
-    if (typeof v === "object" && isObjectReferencingResource(v, name)) return true;
-  }
-  return false;
-}
-
-function findDownstreamRefs(resources, name) {
-  const downstream = [];
-  (resources || []).forEach(function (r) {
-    if (r.name === name) return;
-    const depFields = [];
-    if (r.fields) {
-      Object.keys(r.fields).forEach(function (k) {
-        const f = r.fields[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          depFields.push(k);
-        }
-      });
-    }
-    if (r.envelope) {
-      Object.keys(r.envelope).forEach(function (k) {
-        const f = r.envelope[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          depFields.push("envelope." + k);
-        }
-      });
-    }
-    if (r.annotations) {
-      Object.keys(r.annotations).forEach(function (k) {
-        const f = r.annotations[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          depFields.push("annotations." + k);
-        }
-      });
-    }
-    if (r.connectionSecret) {
-      if (typeof r.connectionSecret === "string" && isResourceRef(r.connectionSecret, name)) {
-        depFields.push("connectionSecret");
-      } else if (typeof r.connectionSecret === "object" && isObjectReferencingResource(r.connectionSecret, name)) {
-        depFields.push("connectionSecret");
-      }
-    }
-    if (r.when && isResourceRef(r.when, name)) {
-      depFields.push("when");
-    }
-    if (r.forEach && isResourceRef(r.forEach, name)) {
-      depFields.push("forEach");
-    }
-    if (depFields.length > 0) {
-      downstream.push({ name: r.name, fields: depFields });
-    }
-  });
-  return downstream;
-}
-
-function cleanDownstreamRefs(resources, name) {
-  (resources || []).forEach(function (r) {
-    if (r.name === name) return;
-    if (r.fields) {
-      Object.keys(r.fields).forEach(function (k) {
-        const f = r.fields[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          delete r.fields[k];
-        }
-      });
-    }
-    if (r.envelope) {
-      Object.keys(r.envelope).forEach(function (k) {
-        const f = r.envelope[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          delete r.envelope[k];
-        }
-      });
-      if (Object.keys(r.envelope).length === 0) delete r.envelope;
-    }
-    if (r.annotations) {
-      Object.keys(r.annotations).forEach(function (k) {
-        const f = r.annotations[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          delete r.annotations[k];
-        }
-      });
-      if (Object.keys(r.annotations).length === 0) delete r.annotations;
-    }
-    if (r.connectionSecret) {
-      if (typeof r.connectionSecret === "string") {
-        if (isResourceRef(r.connectionSecret, name)) delete r.connectionSecret;
-      } else if (typeof r.connectionSecret === "object") {
-        if (Array.isArray(r.connectionSecret.keys)) {
-          r.connectionSecret.keys = r.connectionSecret.keys.filter(function (item) {
-            if (typeof item === "string") return !isResourceRef(item, name);
-            if (item && typeof item === "object") {
-              if (item.from && isResourceRef(item.from, name)) return false;
-              if (item.fromNode && item.fromNode === name) return false;
-            }
-            return true;
-          });
-          if (r.connectionSecret.keys.length === 0) delete r.connectionSecret;
-        } else if (isObjectReferencingResource(r.connectionSecret, name)) {
-          delete r.connectionSecret;
-        }
-      }
-    }
-    if (r.when && isResourceRef(r.when, name)) {
-      delete r.when;
-    }
-    if (r.forEach && isResourceRef(r.forEach, name)) {
-      delete r.forEach;
-    }
-  });
-}
+export {
+  escapeRegex,
+  isResourceRef,
+  isObjectReferencingResource,
+  findDownstreamRefs,
+  cleanDownstreamRefs,
+};
 
 function removeResource(name) {
   const d = doc();
