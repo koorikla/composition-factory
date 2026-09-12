@@ -9048,6 +9048,146 @@ spec:
 	}
 }
 
+func TestCF401_AdoptPreservesCustomEnvironmentConfigsPipelineStep(t *testing.T) {
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-env-custom
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: environment-configs
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - ref:
+                name: my-custom-env
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- $env := index .context "apiextensions.crossplane.io/environment" | default dict -}}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+            data:
+              region: {{ $env.region }}
+`
+
+	bp, _, err := Adopt([]byte(compYAML), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.EnvironmentConfigs) != 1 || bp.Spec.EnvironmentConfigs[0].Name != "my-custom-env" {
+		t.Fatalf("expected EnvironmentConfigs to have 1 entry with name 'my-custom-env', got: %+v", bp.Spec.EnvironmentConfigs)
+	}
+
+	// The custom environment-configs step should NOT be retained in bp.Spec.Pipeline,
+	// because it is canonicalized into bp.Spec.EnvironmentConfigs.
+	for _, s := range bp.Spec.Pipeline {
+		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
+			t.Fatalf("expected function-environment-configs to be pruned from bp.Spec.Pipeline, but found: %+v", s)
+		}
+	}
+
+	crds, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds failed: %v", err)
+	}
+
+	// Update bp.Spec.EnvironmentConfigs and verify emit reflects the updated config
+	bp.Spec.EnvironmentConfigs[0].Name = "prod-env"
+	compBytes, err := emit.Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("emit.Composition failed: %v", err)
+	}
+	compStr := string(compBytes)
+	if !strings.Contains(compStr, "name: prod-env") {
+		t.Errorf("expected emitted Composition to contain 'name: prod-env', got:\n%s", compStr)
+	}
+	if strings.Contains(compStr, "my-custom-env") {
+		t.Errorf("emitted Composition still contains old 'my-custom-env', got:\n%s", compStr)
+	}
+
+	// Also verify with selector environment configs
+	compSelectorYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-env-selector
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: environment-configs
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Selector
+              selector:
+                matchLabels:
+                  stage: prod
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- $env := index .context "apiextensions.crossplane.io/environment" | default dict -}}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+            data:
+              region: {{ $env.region }}
+`
+	bpSel, _, err := Adopt([]byte(compSelectorYAML), Options{})
+	if err != nil {
+		t.Fatalf("Adopt selector failed: %v", err)
+	}
+	if len(bpSel.Spec.EnvironmentConfigs) != 1 || bpSel.Spec.EnvironmentConfigs[0].Selector == nil || bpSel.Spec.EnvironmentConfigs[0].Selector.MatchLabels["stage"] != "prod" {
+		t.Fatalf("expected 1 selector config with stage=prod, got: %+v", bpSel.Spec.EnvironmentConfigs)
+	}
+	for _, s := range bpSel.Spec.Pipeline {
+		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
+			t.Fatalf("expected function-environment-configs to be pruned from bpSel.Spec.Pipeline, but found: %+v", s)
+		}
+	}
+	bpSel.Spec.EnvironmentConfigs[0].Selector.MatchLabels["stage"] = "staging"
+	compSelBytes, err := emit.Composition(bpSel, crds)
+	if err != nil {
+		t.Fatalf("emit.Composition failed: %v", err)
+	}
+	compSelStr := string(compSelBytes)
+	if !strings.Contains(compSelStr, "stage: staging") {
+		t.Errorf("expected emitted Composition to contain 'stage: staging', got:\n%s", compSelStr)
+	}
+	if strings.Contains(compSelStr, "stage: prod") {
+		t.Errorf("emitted Composition still contains old 'stage: prod', got:\n%s", compSelStr)
+	}
+}
+
 func TestCF306_AdoptGoTemplateDuplicateResourceNames(t *testing.T) {
 	compYAML := `apiVersion: apiextensions.crossplane.io/v1
 kind: Composition

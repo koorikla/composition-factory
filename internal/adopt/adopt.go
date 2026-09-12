@@ -1938,6 +1938,9 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 					Ref  *struct {
 						Name string `json:"name"`
 					} `json:"ref"`
+					Selector *struct {
+						MatchLabels map[string]string `json:"matchLabels"`
+					} `json:"selector"`
 				} `json:"environmentConfigs"`
 			} `json:"spec"`
 		}
@@ -1945,7 +1948,46 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 			cfgs := stepDoc.Spec.EnvironmentConfigs
 			if len(cfgs) == 1 && (cfgs[0].Type == "Reference" || cfgs[0].Type == "") &&
 				(cfgs[0].Ref == nil || cfgs[0].Ref.Name == "" || cfgs[0].Ref.Name == "default") {
-				return true
+				if len(bp.Spec.EnvironmentConfigs) == 0 ||
+					(len(bp.Spec.EnvironmentConfigs) == 1 &&
+						bp.Spec.EnvironmentConfigs[0].Selector == nil &&
+						(bp.Spec.EnvironmentConfigs[0].Name == "" || bp.Spec.EnvironmentConfigs[0].Name == "default")) {
+					return true
+				}
+			}
+			if len(cfgs) == len(bp.Spec.EnvironmentConfigs) && len(cfgs) > 0 {
+				allMatch := true
+				for i, e := range cfgs {
+					bCfg := bp.Spec.EnvironmentConfigs[i]
+					if e.Selector != nil && len(e.Selector.MatchLabels) > 0 {
+						if bCfg.Selector == nil || len(bCfg.Selector.MatchLabels) != len(e.Selector.MatchLabels) {
+							allMatch = false
+							break
+						}
+						for k, v := range e.Selector.MatchLabels {
+							if bCfg.Selector.MatchLabels[k] != v {
+								allMatch = false
+								break
+							}
+						}
+						if !allMatch {
+							break
+						}
+					} else {
+						refName := ""
+						if e.Ref != nil {
+							refName = e.Ref.Name
+						}
+						bName := bCfg.Name
+						if bCfg.Selector != nil || (bName != refName && !(bName == "" && refName == "default") && !(bName == "default" && refName == "")) {
+							allMatch = false
+							break
+						}
+					}
+				}
+				if allMatch {
+					return true
+				}
 			}
 		}
 		return false
