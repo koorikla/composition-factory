@@ -8449,3 +8449,116 @@ spec:
 		})
 	}
 }
+
+func TestAdoptGoTemplate_SingleQuotedEnvVarWire(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-single-quoted-env-wire
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: subnet
+          spec:
+            forProvider:
+              region: {{ index $env 'region' }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+	f := res.Fields["region"]
+	wantFrom := "env.region"
+	if f.From != wantFrom {
+		t.Errorf("region.From = %q, want %q (got Raw: %q)", f.From, wantFrom, f.Raw)
+	}
+	if _, ok := bp.Spec.Environment["region"]; !ok {
+		t.Errorf("expected region in bp.Spec.Environment, got %+v", bp.Spec.Environment)
+	}
+}
+
+func TestAdoptGoTemplate_SingleQuotedEnvVar_Variations(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-single-quoted-variations
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- if eq (default 'dev' (index $env 'stage')) 'prod' }}
+          {{- range $i := until (int (default 1 (index $env 'count'))) }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: subnet
+          spec:
+            forProvider:
+              r1: {{ (index $env 'region1') }}
+              r2: {{ default 'us-east-1' (index $env 'region2') }}
+              r3: {{ default "us-west-2" (index $env 'region3') }}
+          {{- end }}
+          {{- end }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+	if res.When != `env.stage == "prod"` {
+		t.Errorf("res.When = %q, want %q", res.When, `env.stage == "prod"`)
+	}
+	if res.ForEach != "env.count" {
+		t.Errorf("res.ForEach = %q, want %q", res.ForEach, "env.count")
+	}
+	for field, wantFrom := range map[string]string{
+		"r1": "env.region1",
+		"r2": "env.region2",
+		"r3": "env.region3",
+	} {
+		f := res.Fields[field]
+		if f.From != wantFrom {
+			t.Errorf("%s.From = %q, want %q (Raw: %q)", field, f.From, wantFrom, f.Raw)
+		}
+	}
+	for _, expectedEnv := range []string{"stage", "count", "region1", "region2", "region3"} {
+		if _, ok := bp.Spec.Environment[expectedEnv]; !ok {
+			t.Errorf("expected %q in bp.Spec.Environment, got %+v", expectedEnv, bp.Spec.Environment)
+		}
+	}
+}
