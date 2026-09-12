@@ -250,7 +250,7 @@ func TestPythonCompositionWhenCondition(t *testing.T) {
 
 func TestPythonStatusWireWalksResourceStatus(t *testing.T) {
 	got := pythonStructuredRHS(structuredRHS{kind: rhsStatus, resource: "role", statusPath: "atProvider.arn"}, "")
-	want := `ocds.get("role", {}).get("resource", {}).get("status", {}).get("atProvider", {}).get("arn")`
+	want := `_get(ocds, "role", "resource", "status", "atProvider", "arn")`
 	if got != want {
 		t.Errorf("pythonStructuredRHS = %q, want %q", got, want)
 	}
@@ -262,14 +262,14 @@ func TestPythonStatusWireWalksResourceStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := lineContaining(t, string(out), `"queueUrl":`)
-	if !strings.Contains(line, `.get("resource", {}).get("status", {}).get("atProvider", {}).get("url")`) {
+	if !strings.Contains(line, `_get(ocds, "main-queue", "resource", "status", "atProvider", "url")`) {
 		t.Errorf("queueUrl wire = %s", line)
 	}
 }
 
 func TestTranslateForEachToPython_StatusBoundReadsPathOnce(t *testing.T) {
 	got := translateForEachToPython("resources.main-queue.status.atProvider.nodeCount")
-	want := `range(int(ocds.get("main-queue", {}).get("resource", {}).get("status", {}).get("atProvider", {}).get("nodeCount", 0)))`
+	want := `range(int(_get(ocds, "main-queue", "resource", "status", "atProvider", "nodeCount", default=0)))`
 	if got != want {
 		t.Errorf("translateForEachToPython = %q, want %q", got, want)
 	}
@@ -1187,5 +1187,204 @@ func TestMetadataRefCustomNameTargetParamPython(t *testing.T) {
 	}
 	if !strings.Contains(s, `"app.kubernetes.io/sa-ref": spec.get("saName")`) {
 		t.Fatalf("expected Python to contain annotation ref, got:\n%s", s)
+	}
+}
+
+func TestCF428_PythonSafeGetNested(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue
+spec:
+  emit:
+    engine: python
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XQueue
+    plural: xqueues
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+      database:
+        type: object
+        properties:
+          name:
+            type: string
+  resources:
+    - name: main-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      fields:
+        region:
+          value: "eu-north-1"
+    - name: queue-policy
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: QueuePolicy
+      fields:
+        region:
+          value: "eu-north-1"
+        queueUrl:
+          from: "resources.main-queue.status.atProvider.url"
+        policy:
+          from: "params.database.name"
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	if err := os.WriteFile(p, []byte(bpYAML), 0600); err != nil {
+		t.Fatal(err)
+	}
+	b, err := blueprint.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	crds := wireCRDs(t)
+	body, err := pythonTemplateBody(b, crds)
+	if err != nil {
+		t.Fatalf("pythonTemplateBody: %v", err)
+	}
+
+	if !strings.Contains(body, `_get = lambda d, *keys, default=None:`) {
+		t.Errorf("expected _get helper definition in python body:\n%s", body)
+	}
+	if !strings.Contains(body, `"policy": _get(spec, "database", "name")`) {
+		t.Errorf("expected safe nested param access _get(spec, ...) in python body:\n%s", body)
+	}
+	if !strings.Contains(body, `"queueUrl": _str(_get(ocds, "main-queue", "resource", "status", "atProvider", "url"))`) {
+		t.Errorf("expected safe status wire _get(ocds, ...) in python body:\n%s", body)
+	}
+
+	pyBin, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available in PATH")
+	}
+
+	pyRunner := `
+import sys, types
+
+m = types.ModuleType("google.protobuf.json_format")
+m.MessageToDict = lambda x: x
+sys.modules["google.protobuf.json_format"] = m
+m2 = types.ModuleType("crossplane.function.proto.v1")
+m2.run_function_pb2 = types.ModuleType("run_function_pb2")
+m2.run_function_pb2.RunFunctionRequest = object
+m2.run_function_pb2.RunFunctionResponse = object
+sys.modules["crossplane.function.proto.v1"] = m2
+sys.modules["crossplane.function.proto.v1.run_function_pb2"] = m2.run_function_pb2
+
+` + body + `
+
+class MockRes:
+    def __init__(self):
+        self.resource = {}
+    def update(self, d):
+        self.resource.update(d)
+
+class MockRsp:
+    def __init__(self):
+        self.desired = types.SimpleNamespace(
+            resources={
+                "main-queue": MockRes(),
+                "queue-policy": MockRes(),
+            }
+        )
+
+# Test case 1: atProvider is None, database is None
+req1 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={"spec": {"database": None}}),
+        resources={
+            "main-queue": types.SimpleNamespace(resource={
+                "status": {"atProvider": None}
+            }),
+        },
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={},
+)
+rsp1 = MockRsp()
+compose(req1, rsp1)
+qp1 = rsp1.desired.resources["queue-policy"].resource.get("spec", {}).get("forProvider", {})
+if "queueUrl" in qp1:
+    print(f"FAIL: queueUrl present when atProvider is None: {qp1}")
+    sys.exit(1)
+if "policy" in qp1:
+    print(f"FAIL: policy present when database is None: {qp1}")
+    sys.exit(1)
+
+# Test case 2: status is None
+req2 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={"spec": {"database": None}}),
+        resources={
+            "main-queue": types.SimpleNamespace(resource={
+                "status": None
+            }),
+        },
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={},
+)
+rsp2 = MockRsp()
+compose(req2, rsp2)
+qp2 = rsp2.desired.resources["queue-policy"].resource.get("spec", {}).get("forProvider", {})
+if "queueUrl" in qp2:
+    print(f"FAIL: queueUrl present when status is None: {qp2}")
+    sys.exit(2)
+
+# Test case 3: populated values work correctly
+req3 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={"spec": {"database": {"name": "mydb"}}}),
+        resources={
+            "main-queue": types.SimpleNamespace(resource={
+                "status": {"atProvider": {"url": "https://sqs.eu-north-1.amazonaws.com/123/q"}}
+            }),
+        },
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={},
+)
+rsp3 = MockRsp()
+compose(req3, rsp3)
+qp3 = rsp3.desired.resources["queue-policy"].resource.get("spec", {}).get("forProvider", {})
+if qp3.get("queueUrl") != "https://sqs.eu-north-1.amazonaws.com/123/q":
+    print(f"FAIL: queueUrl not populated: {qp3}")
+    sys.exit(3)
+if qp3.get("policy") != "mydb":
+    print(f"FAIL: policy not populated: {qp3}")
+    sys.exit(3)
+
+# Test case 4: unobserved resources and omitted params
+req4 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={"spec": {}}),
+        resources={},
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={},
+)
+rsp4 = MockRsp()
+compose(req4, rsp4)
+qp4 = rsp4.desired.resources["queue-policy"].resource.get("spec", {}).get("forProvider", {})
+if "queueUrl" in qp4:
+    print(f"FAIL: queueUrl present when unobserved: {qp4}")
+    sys.exit(4)
+if "policy" in qp4:
+    print(f"FAIL: policy present when omitted: {qp4}")
+    sys.exit(4)
+
+print("OK")
+`
+	cmd := exec.Command(pyBin, "-c", pyRunner)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("python execution failed: %v\nOutput:\n%s", err, out)
 	}
 }

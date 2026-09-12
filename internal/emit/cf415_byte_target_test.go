@@ -194,7 +194,7 @@ func TestCF415_FormatByteCRDTargetKCLAndPython(t *testing.T) {
 	if !strings.Contains(pyStr, `"normalStr": spec.get("text")`) {
 		t.Errorf("Python normalStr should not be base64-encoded:\n%s", pyStr)
 	}
-	if !strings.Contains(pyStr, `"fromStatus": _b64(ocds.get("src-container", {}).get("resource", {}).get("status", {}).get("atProvider", {}).get("token"))`) {
+	if !strings.Contains(pyStr, `"fromStatus": _b64(_get(ocds, "src-container", "resource", "status", "atProvider", "token"))`) {
 		t.Errorf("Python missing _b64 for Secret data status wire:\n%s", pyStr)
 	}
 }

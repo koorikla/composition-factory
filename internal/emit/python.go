@@ -29,7 +29,8 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 	// the way the go-templating engine's hasKey guard does.
 	sb.WriteString("_present = lambda d: {k: v for k, v in d.items() if v is not None}\n")
 	sb.WriteString("_str = lambda v: str(int(v)) if not isinstance(v, bool) and isinstance(v, (int, float)) and (isinstance(v, int) or v.is_integer()) else (str(v) if v is not None else None)\n")
-	sb.WriteString("_b64 = lambda v: base64.b64encode(v if isinstance(v, bytes) else str(v).encode(\"utf-8\")).decode(\"utf-8\") if v is not None else None\n\n\n")
+	sb.WriteString("_b64 = lambda v: base64.b64encode(v if isinstance(v, bytes) else str(v).encode(\"utf-8\")).decode(\"utf-8\") if v is not None else None\n")
+	sb.WriteString("_get = lambda d, *keys, default=None: default if d is None else (d if not keys else (_get(d.get(keys[0]), *keys[1:], default=default) if isinstance(d, dict) else default))\n\n\n")
 	sb.WriteString("def compose(req: fnv1.RunFunctionRequest, rsp: fnv1.RunFunctionResponse):\n")
 	sb.WriteString("    oxr = MessageToDict(req.observed.composite.resource)\n")
 	sb.WriteString("    ocds = {k: {\"resource\": MessageToDict(v.resource)} for k, v in req.observed.resources.items()}\n")
@@ -255,14 +256,11 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 				expr = fmt.Sprintf("spec.get(%q)", s.paramSegs[0])
 			} else {
 				var sb strings.Builder
-				sb.WriteString("spec")
-				for i, p := range s.paramSegs {
-					if i == len(s.paramSegs)-1 {
-						sb.WriteString(fmt.Sprintf(".get(%q)", p))
-					} else {
-						sb.WriteString(fmt.Sprintf(".get(%q, {})", p))
-					}
+				sb.WriteString("_get(spec")
+				for _, p := range s.paramSegs {
+					sb.WriteString(fmt.Sprintf(", %q", p))
 				}
+				sb.WriteString(")")
 				expr = sb.String()
 			}
 		} else {
@@ -278,17 +276,14 @@ func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 	case rhsStatus:
 		parts := strings.Split(s.statusPath, ".")
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("ocds.get(%q, {}).get(\"resource\", {}).get(\"status\", {})", s.resource))
-		for i, p := range parts {
+		sb.WriteString(fmt.Sprintf("_get(ocds, %q, \"resource\", \"status\"", s.resource))
+		for _, p := range parts {
 			if p == "" {
 				continue
 			}
-			if i == len(parts)-1 {
-				sb.WriteString(fmt.Sprintf(".get(%q)", p))
-			} else {
-				sb.WriteString(fmt.Sprintf(".get(%q, {})", p))
-			}
+			sb.WriteString(fmt.Sprintf(", %q", p))
 		}
+		sb.WriteString(")")
 		expr := sb.String()
 		if s.isByte {
 			return fmt.Sprintf("_b64(%s)", expr)
@@ -358,14 +353,11 @@ func translateParamAccessToPython(param string) string {
 		return fmt.Sprintf("spec.get(%q)", parts[0])
 	}
 	var sb strings.Builder
-	sb.WriteString("spec")
-	for i, p := range parts {
-		if i == len(parts)-1 {
-			sb.WriteString(fmt.Sprintf(".get(%q)", p))
-		} else {
-			sb.WriteString(fmt.Sprintf(".get(%q, {})", p))
-		}
+	sb.WriteString("_get(spec")
+	for _, p := range parts {
+		sb.WriteString(fmt.Sprintf(", %q", p))
 	}
+	sb.WriteString(")")
 	return sb.String()
 }
 
@@ -381,17 +373,14 @@ func translateObservedAccessToPython(expr string) string {
 			rem = strings.TrimPrefix(rem, "resource.")
 			parts := strings.Split(rem, ".")
 			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("ocds.get(%q, {}).get(\"resource\", {})", res))
-			for i, p := range parts {
+			sb.WriteString(fmt.Sprintf("_get(ocds, %q, \"resource\"", res))
+			for _, p := range parts {
 				if p == "" {
 					continue
 				}
-				if i == len(parts)-1 {
-					sb.WriteString(fmt.Sprintf(".get(%q, \"\")", p))
-				} else {
-					sb.WriteString(fmt.Sprintf(".get(%q, {})", p))
-				}
+				sb.WriteString(fmt.Sprintf(", %q", p))
 			}
+			sb.WriteString(")")
 			return sb.String()
 		}
 	}
@@ -509,14 +498,14 @@ func translateForEachToPython(forEach string, env ...map[string]blueprint.Enviro
 		res, path, _ := blueprint.StatusRef(forEach)
 		parts := strings.Split(path, ".")
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("range(int(ocds.get(%q, {}).get(\"resource\", {}).get(\"status\", {})", res))
-		for i, p := range parts {
-			if i == len(parts)-1 {
-				sb.WriteString(fmt.Sprintf(".get(%q, 0)))", p))
-			} else {
-				sb.WriteString(fmt.Sprintf(".get(%q, {})", p))
+		sb.WriteString(fmt.Sprintf("range(int(_get(ocds, %q, \"resource\", \"status\"", res))
+		for _, p := range parts {
+			if p == "" {
+				continue
 			}
+			sb.WriteString(fmt.Sprintf(", %q", p))
 		}
+		sb.WriteString(", default=0)))")
 		return sb.String()
 	}
 	return "range(0)"
