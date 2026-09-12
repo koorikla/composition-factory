@@ -90,6 +90,26 @@ Kinds without a profile (every provider resource) derive essentials from the sch
 chain-required leaves, `region` when present, plus every field already set. A Queue shows
 region and what the user set, not 57 rows.
 
+### Environment variables (added 2026-09-12 after Kaur's review)
+
+The schema lists arrays only as `[0]`, so today a second `env` entry cannot be added from
+the GUI at all. Workload essentials therefore end with an "Environment variables" repeater:
+one row per `containers[0].env[i]` with a NAME input, a value control that takes a literal
+or a wire (status outputs and parameters, the k8s-app example's `QUEUE_URL ←
+resources.queue.status.atProvider.url` pattern), a delete that renumbers the following
+indices, and "+ add variable". Every other array (ports beyond the first, volumes, probes)
+is authored in the manifest editor by adding a list item; a generic "+ element" for the
+Fields view is a follow-up.
+
+### Field search (added 2026-09-12 after Kaur's review)
+
+The inspector header gains a search box next to the view toggle. In Fields view it filters
+the loaded leaves on path and description (the fields API's `q` semantics, applied on top of
+Required / Set / All). In Manifest view it lists matching schema leaves under the editor,
+path with type and description, and clicking one switches to Fields view with the search
+kept so the row's Val / Wire / Raw controls are at hand. The branch row's "expand via All /
+search" text finally points at something that exists.
+
 ## 3. Manifest editor
 
 ### View
@@ -158,8 +178,15 @@ Playwright (spec first, then code):
 - Essentials: rows render for a Deployment; editing image commits a value; expose on image
   creates parameter `image` with default `nginx:1.27`, wires the field, XRD card shows it.
   A Queue shows region plus set fields only.
+- Essentials env repeater: "+ add variable" writes `env[1].name`; delete of `env[0]`
+  renumbers `env[1]` to `env[0]`.
 - Manifest: read-only view nests `containers:`; edit replicas, Apply, doc updated; unknown
-  key → 400 shown, line highlighted, editor stays open; Fields toggle restores the old list.
+  key → 400 shown, line highlighted, editor stays open; adding a second `ports` item lands
+  as `ports[1].containerPort`; Fields toggle restores the old list.
+- Search: typing `image` in Fields view leaves only rows whose path or description
+  matches; in Manifest view it lists the leaf and clicking it opens Fields view filtered.
+- The Playwright config seeds `cf-insp-view=fields` through `storageState`, so the 28
+  existing list specs run unchanged; the manifest spec opts out with an empty storageState.
 - `tests/cf439-auto-scaffold-drop.spec.js` moves to bracket keys. slice65's Sync test with
   `web:prod,v1` must still pass.
 
