@@ -12773,3 +12773,103 @@ func TestAdopt_RewriteRawResourceBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func TestCF456_AdoptNestedParamInWhenAndForEach(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-nested-when
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XExample
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- if $spec.cluster.enabled }}
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              name: bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            {{- end }}
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed with fatal error: %v", err)
+	}
+
+	res := bp.ResourceNamed("bucket")
+	if res == nil {
+		t.Fatalf("bucket resource not found in adopted blueprint")
+	}
+
+	if res.When != "" {
+		t.Errorf("expected res.When to be empty (unsupported nested guard dropped), got %q", res.When)
+	}
+
+	if len(report.Drops) == 0 {
+		t.Errorf("expected LossReport to record drop for unsupported nested when guard")
+	}
+}
+
+func TestCF456_AdoptNestedParamInForEach(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-nested-foreach
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XExample
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- range $i := until (int $spec.cluster.count) }}
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              name: bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            {{- end }}
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed with fatal error: %v", err)
+	}
+
+	res := bp.ResourceNamed("bucket")
+	if res == nil {
+		t.Fatalf("bucket resource not found in adopted blueprint")
+	}
+
+	if res.ForEach != "" {
+		t.Errorf("expected res.ForEach to be empty (unsupported nested forEach dropped), got %q", res.ForEach)
+	}
+
+	if len(report.Drops) == 0 {
+		t.Errorf("expected LossReport to record drop for unsupported nested forEach loop")
+	}
+}

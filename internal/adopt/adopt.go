@@ -1379,6 +1379,10 @@ func isValidParamIdentifier(name string) bool {
 	return true
 }
 
+func isFlatParamIdentifier(name string) bool {
+	return !strings.Contains(name, ".") && paramNameRE.MatchString(name) && !yamlKeywords[strings.ToLower(name)]
+}
+
 func normalizeDNSLabel(name string) string {
 	s := strings.ToLower(name)
 	s = dnsInvalidRE.ReplaceAllString(s, "-")
@@ -2167,7 +2171,7 @@ func validateGoTemplate(tmpl string) error {
 	return nil
 }
 
-func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
+func extractWhenGuard(text string, bp *blueprint.Blueprint, report *LossReport) string {
 	if text == "" {
 		return ""
 	}
@@ -2177,6 +2181,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 			key, lit = m[3], m[4]
 		}
 		if key != "" {
+			if !isFlatParamIdentifier(key) {
+				if report != nil {
+					report.Record("template.when", fmt.Sprintf("unsupported nested environment variable %q in when condition (conditions reference top-level parameters only in v1)", key))
+				}
+				return ""
+			}
 			ensureEnvDeclared(bp, key, "string")
 			return fmt.Sprintf("env.%s == %q", key, lit)
 		}
@@ -2186,6 +2196,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 			key, lit = m[3], m[4]
 		}
 		if key != "" {
+			if !isFlatParamIdentifier(key) {
+				if report != nil {
+					report.Record("template.when", fmt.Sprintf("unsupported nested environment variable %q in when condition (conditions reference top-level parameters only in v1)", key))
+				}
+				return ""
+			}
 			ensureEnvDeclared(bp, key, "string")
 			return fmt.Sprintf("env.%s != %q", key, lit)
 		}
@@ -2195,6 +2211,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 			lit, key = m[3], m[4]
 		}
 		if key != "" {
+			if !isFlatParamIdentifier(key) {
+				if report != nil {
+					report.Record("template.when", fmt.Sprintf("unsupported nested environment variable %q in when condition (conditions reference top-level parameters only in v1)", key))
+				}
+				return ""
+			}
 			ensureEnvDeclared(bp, key, "string")
 			return fmt.Sprintf("env.%s == %q", key, lit)
 		}
@@ -2204,6 +2226,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 			lit, key = m[3], m[4]
 		}
 		if key != "" {
+			if !isFlatParamIdentifier(key) {
+				if report != nil {
+					report.Record("template.when", fmt.Sprintf("unsupported nested environment variable %q in when condition (conditions reference top-level parameters only in v1)", key))
+				}
+				return ""
+			}
 			ensureEnvDeclared(bp, key, "string")
 			return fmt.Sprintf("env.%s != %q", key, lit)
 		}
@@ -2213,6 +2241,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 			key = m[2]
 		}
 		if key != "" {
+			if !isFlatParamIdentifier(key) {
+				if report != nil {
+					report.Record("template.when", fmt.Sprintf("unsupported nested environment variable %q in when condition (conditions reference top-level parameters only in v1)", key))
+				}
+				return ""
+			}
 			ensureEnvDeclared(bp, key, "boolean")
 			return fmt.Sprintf("env.%s", key)
 		}
@@ -2226,6 +2260,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 			lit = m[3]
 		}
 		if key != "" {
+			if !isFlatParamIdentifier(key) {
+				if report != nil {
+					report.Record("template.when", fmt.Sprintf("unsupported nested parameter %q in when condition (conditions reference top-level parameters only in v1)", key))
+				}
+				return ""
+			}
 			ensureParamDeclaredTyped(bp, key, "string")
 			return fmt.Sprintf("params.%s == %q", key, lit)
 		}
@@ -2239,6 +2279,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 			lit = m[3]
 		}
 		if key != "" {
+			if !isFlatParamIdentifier(key) {
+				if report != nil {
+					report.Record("template.when", fmt.Sprintf("unsupported nested parameter %q in when condition (conditions reference top-level parameters only in v1)", key))
+				}
+				return ""
+			}
 			ensureParamDeclaredTyped(bp, key, "string")
 			return fmt.Sprintf("params.%s != %q", key, lit)
 		}
@@ -2249,6 +2295,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 			key = m[3]
 		}
 		if key != "" {
+			if !isFlatParamIdentifier(key) {
+				if report != nil {
+					report.Record("template.when", fmt.Sprintf("unsupported nested parameter %q in when condition (conditions reference top-level parameters only in v1)", key))
+				}
+				return ""
+			}
 			ensureParamDeclaredTyped(bp, key, "string")
 			return fmt.Sprintf("params.%s == %q", key, lit)
 		}
@@ -2259,6 +2311,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 			key = m[3]
 		}
 		if key != "" {
+			if !isFlatParamIdentifier(key) {
+				if report != nil {
+					report.Record("template.when", fmt.Sprintf("unsupported nested parameter %q in when condition (conditions reference top-level parameters only in v1)", key))
+				}
+				return ""
+			}
 			ensureParamDeclaredTyped(bp, key, "string")
 			return fmt.Sprintf("params.%s != %q", key, lit)
 		}
@@ -2277,6 +2335,12 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 				key = m[2]
 			}
 			if key != "" {
+				if !isFlatParamIdentifier(key) {
+					if report != nil {
+						report.Record("template.when", fmt.Sprintf("unsupported nested parameter %q in when condition (conditions reference top-level parameters only in v1)", key))
+					}
+					return ""
+				}
 				ensureParamDeclaredTyped(bp, key, "boolean")
 				return fmt.Sprintf("params.%s", key)
 			}
@@ -2285,7 +2349,7 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 	return ""
 }
 
-func extractForEachGuard(text string, bp *blueprint.Blueprint) string {
+func extractForEachGuard(text string, bp *blueprint.Blueprint, report *LossReport) string {
 	if text == "" {
 		return ""
 	}
@@ -2295,6 +2359,12 @@ func extractForEachGuard(text string, bp *blueprint.Blueprint) string {
 			key = m[2]
 		}
 		if key != "" {
+			if !isFlatParamIdentifier(key) {
+				if report != nil {
+					report.Record("template.forEach", fmt.Sprintf("unsupported nested environment variable %q in forEach loop (loop bounds stay top-level integer parameters in v1)", key))
+				}
+				return ""
+			}
 			ensureEnvDeclared(bp, key, "integer")
 			return fmt.Sprintf("env.%s", key)
 		}
@@ -2322,6 +2392,12 @@ func extractForEachGuard(text string, bp *blueprint.Blueprint) string {
 			pName = m[2]
 		}
 		if pName != "" {
+			if !isFlatParamIdentifier(pName) {
+				if report != nil {
+					report.Record("template.forEach", fmt.Sprintf("unsupported nested parameter %q in forEach loop (loop bounds stay top-level integer parameters in v1)", pName))
+				}
+				return ""
+			}
 			ensureParamDeclaredTyped(bp, pName, "integer")
 			if defVal := extractForEachDefault(m[0]); defVal != "" {
 				ensureParamDefault(bp, pName, defVal)
@@ -2394,7 +2470,7 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 				if pName == "" && len(m) >= 3 {
 					pName = m[2]
 				}
-				if pName != "" && isValidParamIdentifier(pName) {
+				if pName != "" && isFlatParamIdentifier(pName) {
 					ensureParamDeclaredTyped(bp, pName, "boolean")
 				}
 			}
@@ -2404,7 +2480,7 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 			if pName == "" && len(m) >= 3 {
 				pName = m[2]
 			}
-			if pName != "" && isValidParamIdentifier(pName) {
+			if pName != "" && isFlatParamIdentifier(pName) {
 				ensureParamDeclaredTyped(bp, pName, "integer")
 				if defVal := extractForEachDefault(m[0]); defVal != "" {
 					ensureParamDefault(bp, pName, defVal)
@@ -2492,10 +2568,10 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 		}
 
 		if firstYAMLLine == -1 {
-			if w := extractWhenGuard(chunk, bp); w != "" {
+			if w := extractWhenGuard(chunk, bp, report); w != "" {
 				nextWhen = w
 			}
-			if f := extractForEachGuard(chunk, bp); f != "" {
+			if f := extractForEachGuard(chunk, bp, report); f != "" {
 				nextForEach = f
 			}
 			continue
@@ -2506,20 +2582,20 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 
 		when := nextWhen
 		nextWhen = ""
-		if w := extractWhenGuard(headText, bp); w != "" {
+		if w := extractWhenGuard(headText, bp, report); w != "" {
 			when = w
 		}
 
 		forEach := nextForEach
 		nextForEach = ""
-		if f := extractForEachGuard(headText, bp); f != "" {
+		if f := extractForEachGuard(headText, bp, report); f != "" {
 			forEach = f
 		}
 
-		if w := extractWhenGuard(tailText, bp); w != "" {
+		if w := extractWhenGuard(tailText, bp, report); w != "" {
 			nextWhen = w
 		}
-		if f := extractForEachGuard(tailText, bp); f != "" {
+		if f := extractForEachGuard(tailText, bp, report); f != "" {
 			nextForEach = f
 		}
 
