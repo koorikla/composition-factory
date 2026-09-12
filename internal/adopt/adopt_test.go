@@ -9844,3 +9844,104 @@ func TestCollectSourcesDeduplicatesCRDs(t *testing.T) {
 		}
 	}
 }
+
+func TestAdoptGoTemplate_ForEachParamIndexSpec_Variants(t *testing.T) {
+	tests := []struct {
+		name      string
+		rangeExpr string
+		wantParam string
+	}{
+		{
+			name:      "index dot-spec",
+			rangeExpr: `range $i := until (int (index .spec "replicas"))`,
+			wantParam: "replicas",
+		},
+		{
+			name:      "index dollar-dot-spec",
+			rangeExpr: `range $i := until (int (index $.spec "replicas"))`,
+			wantParam: "replicas",
+		},
+		{
+			name:      "index full observed path",
+			rangeExpr: `range $i := until (int (index .observed.composite.resource.spec "replicas"))`,
+			wantParam: "replicas",
+		},
+		{
+			name:      "index dollar observed path",
+			rangeExpr: `range $i := until (int (index $.observed.composite.resource.spec "replicas"))`,
+			wantParam: "replicas",
+		},
+		{
+			name:      "index single quotes",
+			rangeExpr: `range $i := until (int (index $spec 'replicas'))`,
+			wantParam: "replicas",
+		},
+		{
+			name:      "index unparenthesized",
+			rangeExpr: `range $i := until (int index $spec "replicas")`,
+			wantParam: "replicas",
+		},
+		{
+			name:      "dot syntax unchanged",
+			rangeExpr: `range $i := until (int $spec.replicas)`,
+			wantParam: "replicas",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp-foreach-variant
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          ---
+          {{- %s }}
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: bucket
+          spec:
+            forProvider:
+              region: us-east-1
+          {{- end }}
+`, tc.rangeExpr)
+
+			bp, report, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 1 {
+				t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+			}
+			r := bp.Spec.Resources[0]
+			wantForEach := "params." + tc.wantParam
+			if r.ForEach != wantForEach {
+				t.Errorf("r.ForEach = %q, want %q", r.ForEach, wantForEach)
+			}
+			param, ok := bp.Spec.XRD.Parameters[tc.wantParam]
+			if !ok {
+				t.Fatalf("expected parameter %q in XRD parameters: %+v (drops: %+v)", tc.wantParam, bp.Spec.XRD.Parameters, report.Drops)
+			}
+			if param.Type != "integer" {
+				t.Errorf("parameter %q Type = %q, want 'integer'", tc.wantParam, param.Type)
+			}
+		})
+	}
+}

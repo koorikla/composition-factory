@@ -329,6 +329,61 @@ spec:
 	if repParam.Type != "integer" {
 		t.Errorf("replicas parameter must have type integer, got Type: %q", repParam.Type)
 	}
+
+	// 4. Test loop bound with index syntax: {{- range $i := until (int (index $spec "replicas")) }}
+	manifestIndexLoop := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xclusters.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XCluster
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            {{- range $i := until (int (index $spec "replicas")) }}
+            ---
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: {{ printf "worker-%d" $i }}
+            spec:
+              replicas: 1
+            {{- end }}
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+	adoptedIndexLoop, _, err := Adopt([]byte(manifestIndexLoop), Options{
+		DefaultProviderRef: "xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.11.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed on index loop bound without XRD: %v", err)
+	}
+	if err := adoptedIndexLoop.Validate(); err != nil {
+		t.Fatalf("adopted blueprint with index loop bound failed validation: %v", err)
+	}
+
+	repParamIndex, ok := adoptedIndexLoop.Spec.XRD.Parameters["replicas"]
+	if !ok {
+		t.Fatalf("replicas parameter missing from adopted blueprint")
+	}
+	if !repParamIndex.Required {
+		t.Errorf("replicas parameter must be required, got Required: %v", repParamIndex.Required)
+	}
+	if repParamIndex.Type != "integer" {
+		t.Errorf("replicas parameter must have type integer, got Type: %q", repParamIndex.Type)
+	}
 }
 
 // TestCF190AdoptLossReportRequiredParamChange tests CF-190 (#76):

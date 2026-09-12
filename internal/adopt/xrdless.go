@@ -44,7 +44,7 @@ var (
 	reEvidenceIfSimple          = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
 	reEvidenceIfEq              = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*"[^"]*"\s*-?\}\}`)
 	reEvidenceIfEqRev           = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+"[^"]*"\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
-	reEvidenceLoop              = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
+	reEvidenceLoop              = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s*\)\s*-?\}\}`)
 	reTemplateAction            = regexp.MustCompile(`\{\{-?(.*?)-?\}\}`)
 	reEvidenceAnySpec           = regexp.MustCompile(`(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)`)
 	reArrayIdx                  = regexp.MustCompile(`\[\d+\]`)
@@ -115,7 +115,13 @@ func collectTemplateEvidence(tmpl string, ev map[string]*paramEvidence) {
 		get(m[1]).quoted++
 	}
 	for _, m := range reEvidenceLoop.FindAllStringSubmatch(tmpl, -1) {
-		get(m[1]).integer = true
+		pName := m[1]
+		if pName == "" && len(m) >= 3 {
+			pName = m[2]
+		}
+		if pName != "" {
+			get(pName).integer = true
+		}
 	}
 	for _, m := range reEvidenceGuard.FindAllStringSubmatch(tmpl, -1) {
 		get(m[1]).guarded = true
