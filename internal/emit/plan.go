@@ -96,11 +96,14 @@ func planSingleResource(r blueprint.Resource, b *blueprint.Blueprint, crds []sch
 	}, nil
 }
 
-// refuseGoTemplateOnlyFeatures rejects conventions, template: fields/annotations,
+// refuseGoTemplateOnlyFeatures rejects conventions, template: blocks, template: fields/annotations,
 // and Go-template syntax "{{ ... }}" in raw: fields when running non-Go engines (KCL, Python).
 func refuseGoTemplateOnlyFeatures(b *blueprint.Blueprint) error {
 	if len(b.Spec.Conventions) > 0 {
 		return fmt.Errorf("spec.conventions: engine %q does not support template: conventions", b.Engine())
+	}
+	if len(b.Spec.Templates) > 0 {
+		return fmt.Errorf("spec.templates: engine %q does not support template: blocks", b.Engine())
 	}
 	for _, r := range b.Spec.Resources {
 		for k, f := range r.Fields {
