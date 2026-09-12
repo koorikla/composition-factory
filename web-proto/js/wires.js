@@ -252,6 +252,25 @@ function extractForEachEnv(forEach) {
 }
 
 /**
+ * Check whether a raw template/expression string references parameter pn.
+ * Matches .spec.<pn>, $spec.<pn>, params.<pn>, parameters.<pn>, etc.
+ * Also matches index and hasKey expressions referencing pn.
+ * @param {string} raw
+ * @param {string} pn
+ * @returns {boolean}
+ */
+export function isRawParamRef(raw, pn) {
+  if (typeof raw !== "string" || !raw || !pn) return false;
+  const escaped = pn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const reDotted = new RegExp("(?:\\$spec|\\.spec|\\$params|\\.params|params|parameters)\\." + escaped + "(?:$|[^a-zA-Z0-9_])");
+  if (reDotted.test(raw)) return true;
+  const reIndex = new RegExp("\\bindex\\s+(?:(?:\\$|\\$\\.|\\.)?observed\\.composite\\.resource\\.spec|(?:\\$|\\$\\.|\\.)spec|(?:\\$|\\$\\.|\\.)?params)\\s+(?:\"" + escaped + "\"|'" + escaped + "'|`" + escaped + "`)(?:$|[^a-zA-Z0-9_])");
+  if (reIndex.test(raw)) return true;
+  const reHasKey = new RegExp("\\bhasKey\\s+(?:(?:\\$|\\$\\.|\\.)?observed\\.composite\\.resource\\.spec|(?:\\$|\\$\\.|\\.)spec|(?:\\$|\\$\\.|\\.)?params)\\s+(?:\"" + escaped + "\"|'" + escaped + "'|`" + escaped + "`)(?:$|[^a-zA-Z0-9_])");
+  return reHasKey.test(raw);
+}
+
+/**
  * Compute the fan-out count map for every parameter in the document in a single pass.
  * @param {Object} doc The full blueprint document.
  * @returns {Record<string, number>} Map from param name to count.
@@ -297,6 +316,36 @@ export function fanOutMap(doc) {
     if (r.forEach) {
       addParam(extractForEachParam(r.forEach));
       addEnv(extractForEachEnv(r.forEach));
+    }
+  }
+
+  const templates = (doc && doc.spec && doc.spec.templates) || {};
+  if (templates && typeof templates === "object") {
+    const declaredParams = Object.keys((doc.spec && doc.spec.xrd && doc.spec.xrd.parameters) || {});
+    const tmplKeys = Object.keys(templates);
+    for (let i = 0; i < tmplKeys.length; i++) {
+      const body = templates[tmplKeys[i]];
+      if (typeof body !== "string") continue;
+      const seen = new Set();
+      for (let p = 0; p < declaredParams.length; p++) {
+        const pn = declaredParams[p];
+        if (isRawParamRef(body, pn)) {
+          seen.add(pn);
+        }
+      }
+      const rawParamRegex = /(?:\$spec|\.spec|\$params|\.params|params|parameters)\.([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)*)/g;
+      let m;
+      while ((m = rawParamRegex.exec(body)) !== null) {
+        seen.add(m[1]);
+      }
+      for (const p of seen) {
+        const hasMoreSpecific = Array.from(seen).some(function (other) {
+          return other !== p && other.startsWith(p + ".");
+        });
+        if (!hasMoreSpecific) {
+          addParam(p);
+        }
+      }
     }
   }
 

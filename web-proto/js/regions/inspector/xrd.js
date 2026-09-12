@@ -4,10 +4,10 @@
  */
 
 import { esc } from "../../dom.js";
-import { fanOut } from "../../wires.js";
+import { fanOut, isRawParamRef } from "../../wires.js";
 import { state, PARAM_TYPES } from "./state.js";
 
-export { PARAM_TYPES };
+export { PARAM_TYPES, isRawParamRef };
 
 export function parseWhen(str) {
   if (!str || typeof str !== "string") return {};
@@ -47,13 +47,6 @@ export function isParamRef(ref, pn) {
   return false;
 }
 
-export function isRawParamRef(raw, pn) {
-  if (typeof raw !== "string" || !raw || !pn) return false;
-  var escaped = pn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  var re = new RegExp("(?:\\$spec|\\.spec|\\$params|\\.params|params|parameters)\\." + escaped + "(?:$|[^a-zA-Z0-9_])");
-  return re.test(raw);
-}
-
 export function isObjectReferencingParam(obj, pn) {
   if (!obj || typeof obj !== "object") return false;
   for (var k of Object.keys(obj)) {
@@ -79,12 +72,32 @@ export function cleanParamRefs(draft, pn) {
   if (draft.spec.xrd && draft.spec.xrd.parameters) {
     delete draft.spec.xrd.parameters[pn];
   }
+  var deletedTemplates = [];
+  if (draft.spec.templates && typeof draft.spec.templates === "object") {
+    Object.keys(draft.spec.templates).forEach(function (tName) {
+      if (typeof draft.spec.templates[tName] === "string" && isRawParamRef(draft.spec.templates[tName], pn)) {
+        delete draft.spec.templates[tName];
+        deletedTemplates.push(tName);
+      }
+    });
+    if (Object.keys(draft.spec.templates).length === 0) {
+      delete draft.spec.templates;
+    }
+    if (deletedTemplates.length > 0 && Array.isArray(draft.spec.conventions)) {
+      draft.spec.conventions = draft.spec.conventions.filter(function (c) {
+        return c && deletedTemplates.indexOf(c.template) === -1;
+      });
+      if (draft.spec.conventions.length === 0) {
+        delete draft.spec.conventions;
+      }
+    }
+  }
   var resources = draft.spec.resources || [];
   resources.forEach(function (r) {
     if (r.fields) {
       Object.keys(r.fields).forEach(function (k) {
         var f = r.fields[k];
-        if (f && (isParamRef(f.from, pn) || isRawParamRef(f.raw, pn))) {
+        if (f && (isParamRef(f.from, pn) || isRawParamRef(f.raw, pn) || (f.template && deletedTemplates.indexOf(f.template) !== -1))) {
           delete r.fields[k];
         }
       });
@@ -92,7 +105,7 @@ export function cleanParamRefs(draft, pn) {
     if (r.envelope) {
       Object.keys(r.envelope).forEach(function (k) {
         var f = r.envelope[k];
-        if (f && (isParamRef(f.from, pn) || isRawParamRef(f.raw, pn))) {
+        if (f && (isParamRef(f.from, pn) || isRawParamRef(f.raw, pn) || (f.template && deletedTemplates.indexOf(f.template) !== -1))) {
           delete r.envelope[k];
         }
       });
@@ -101,7 +114,7 @@ export function cleanParamRefs(draft, pn) {
     if (r.annotations) {
       Object.keys(r.annotations).forEach(function (k) {
         var f = r.annotations[k];
-        if (f && (isParamRef(f.from, pn) || isRawParamRef(f.raw, pn))) {
+        if (f && (isParamRef(f.from, pn) || isRawParamRef(f.raw, pn) || (f.template && deletedTemplates.indexOf(f.template) !== -1))) {
           delete r.annotations[k];
         }
       });
