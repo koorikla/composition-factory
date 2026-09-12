@@ -224,7 +224,11 @@ func rawReferencesResource(raw, name string) bool {
 		return true
 	}
 	reGetComposed := regexp.MustCompile(`\bgetComposedResource\s+[^\s"'` + "`" + `]+\s+(?:"` + q + `"|'` + q + `'|` + "`" + q + "`)" + `($|[^a-zA-Z0-9_-])`)
-	return reGetComposed.MatchString(raw)
+	if reGetComposed.MatchString(raw) {
+		return true
+	}
+	reDig := regexp.MustCompile(`\bdig\s+(?:"resources"|'resources'|` + "`resources`" + `)\s+(?:"` + q + `"|'` + q + `'|` + "`" + q + "`)" + `($|[^a-zA-Z0-9_-])`)
+	return reDig.MatchString(raw)
 }
 
 // anyRawParam reports whether any entry in fields has a raw expression referencing param name.
@@ -274,6 +278,9 @@ func rewriteRawResource(raw, from, to string) string {
 
 		reGetComposed := regexp.MustCompile(`(\bgetComposedResource\s+[^\s"'` + "`" + `]+\s+` + regexp.QuoteMeta(q) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(q) + `)`)
 		r = reGetComposed.ReplaceAllString(r, "${1}"+to+"${2}")
+
+		reDig := regexp.MustCompile(`(\bdig\s+(?:"resources"|'resources'|` + "`resources`" + `)\s+` + regexp.QuoteMeta(q) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(q) + `)`)
+		r = reDig.ReplaceAllString(r, "${1}"+to+"${2}")
 	}
 	return r
 }

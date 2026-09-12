@@ -404,6 +404,48 @@ func TestRewriteRawResourceBoundaries(t *testing.T) {
 			to:       "primary",
 			expected: `{{ .observed.resources.primary.url }} and {{ .observed.resources.main-queue.url }}`,
 		},
+		{
+			name:     "dig resources double quoted exact",
+			raw:      `hasKey (dig "resources" "main" "resource" "status" dict $.observed) "url"`,
+			from:     "main",
+			to:       "primary",
+			expected: `hasKey (dig "resources" "primary" "resource" "status" dict $.observed) "url"`,
+		},
+		{
+			name:     "dig resources double quoted prefix-sharing left alone",
+			raw:      `hasKey (dig "resources" "main-queue" "resource" "status" dict $.observed) "url"`,
+			from:     "main",
+			to:       "primary",
+			expected: `hasKey (dig "resources" "main-queue" "resource" "status" dict $.observed) "url"`,
+		},
+		{
+			name:     "dig resources single quoted exact",
+			raw:      `hasKey (dig 'resources' 'main' 'resource' 'status' dict $.observed) 'url'`,
+			from:     "main",
+			to:       "primary",
+			expected: `hasKey (dig 'resources' 'primary' 'resource' 'status' dict $.observed) 'url'`,
+		},
+		{
+			name:     "dig resources backtick exact",
+			raw:      "hasKey (dig `resources` `main` `resource` `status` dict $.observed) `url`",
+			from:     "main",
+			to:       "primary",
+			expected: "hasKey (dig `resources` `primary` `resource` `status` dict $.observed) `url`",
+		},
+		{
+			name:     "dig resources mixed quotes",
+			raw:      `dig "resources" 'main' "status"`,
+			from:     "main",
+			to:       "primary",
+			expected: `dig "resources" 'primary' "status"`,
+		},
+		{
+			name:     "dig non-resources left alone",
+			raw:      `dig "params" "main" "status"`,
+			from:     "main",
+			to:       "primary",
+			expected: `dig "params" "main" "status"`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -683,5 +725,195 @@ func TestRenameResource_RewritesHasKeyObservedResources(t *testing.T) {
 	}
 	if got := b.Spec.Templates["check"]; got != `{{- if hasKey .observed.resources "primary-queue" }}found{{ end }}` {
 		t.Errorf("template = %q, want hasKey primary-queue", got)
+	}
+}
+
+func TestRawReferencesResource_DigResources(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		resName  string
+		expected bool
+	}{
+		{
+			name:     "status guard with dig double quotes",
+			raw:      `{{- if hasKey (dig "resources" "main-queue" "resource" "status" "atProvider" dict $.observed) "url" }}ready{{ end }}`,
+			resName:  "main-queue",
+			expected: true,
+		},
+		{
+			name:     "status guard with dig single quotes",
+			raw:      `{{- if hasKey (dig 'resources' 'main-queue' 'resource' 'status' 'atProvider' dict $.observed) 'url' }}ready{{ end }}`,
+			resName:  "main-queue",
+			expected: true,
+		},
+		{
+			name:     "status guard with dig backticks",
+			raw:      "{{- if hasKey (dig `resources` `main-queue` `resource` `status` `atProvider` dict $.observed) `url` }}ready{{ end }}",
+			resName:  "main-queue",
+			expected: true,
+		},
+		{
+			name:     "dig mixed quotes double and single",
+			raw:      `{{ dig "resources" 'main-queue' "status" }}`,
+			resName:  "main-queue",
+			expected: true,
+		},
+		{
+			name:     "dig mixed quotes single and backtick",
+			raw:      "{{ dig 'resources' `main-queue` \"status\" }}",
+			resName:  "main-queue",
+			expected: true,
+		},
+		{
+			name:     "dig mixed quotes backtick and double",
+			raw:      `{{ dig ` + "`resources`" + ` "main-queue" "status" }}`,
+			resName:  "main-queue",
+			expected: true,
+		},
+		{
+			name:     "dig prefix-sharing double quotes rejected",
+			raw:      `{{- if hasKey (dig "resources" "main-queue-dlq" "resource" "status" "atProvider" dict $.observed) "url" }}ready{{ end }}`,
+			resName:  "main-queue",
+			expected: false,
+		},
+		{
+			name:     "dig prefix-sharing single quotes rejected",
+			raw:      `{{ dig 'resources' 'main-queue-dlq' 'status' }}`,
+			resName:  "main-queue",
+			expected: false,
+		},
+		{
+			name:     "dig prefix-sharing backticks rejected",
+			raw:      "{{ dig `resources` `main-queue-dlq` `status` }}",
+			resName:  "main-queue",
+			expected: false,
+		},
+		{
+			name:     "dig non-resources key rejected",
+			raw:      `{{ dig "parameters" "main-queue" "status" }}`,
+			resName:  "main-queue",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rawReferencesResource(tt.raw, tt.resName)
+			if got != tt.expected {
+				t.Errorf("rawReferencesResource(%q, %q) = %v, want %v", tt.raw, tt.resName, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDeleteResource_RefusesWhenDigResourcesExists(t *testing.T) {
+	b := editable()
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name: "consumer", Kind: "Queue",
+		Fields: map[string]Field{
+			"dep": {Raw: `{{- if hasKey (dig "resources" "main-queue" "resource" "status" "atProvider" dict $.observed) "url" }}ready{{ end }}`},
+		},
+	})
+
+	// 1. DeleteResource succeeds instead of refusing:
+	err := b.DeleteResource("main-queue")
+	if err == nil {
+		t.Fatal("DeleteResource = nil, want refusal naming consumer when raw dig resources reference exists")
+	}
+	if !strings.Contains(err.Error(), "consumer") {
+		t.Errorf("DeleteResource err = %q, want mention of consumer", err.Error())
+	}
+}
+
+func TestDeleteResource_RefusesWhenDigResourcesInTemplate(t *testing.T) {
+	b := editable()
+	b.Spec.Templates = map[string]string{
+		"tmpl": `{{- if hasKey (dig "resources" "main-queue" "resource" "status" "atProvider" dict $.observed) "url" }}ready{{ end }}`,
+	}
+
+	err := b.DeleteResource("main-queue")
+	if err == nil {
+		t.Fatal("DeleteResource = nil, want refusal when template dig resources reference exists")
+	}
+	if !strings.Contains(err.Error(), "tmpl") {
+		t.Errorf("DeleteResource err = %q, want mention of tmpl", err.Error())
+	}
+}
+
+func TestRenameResource_RewritesDigResources(t *testing.T) {
+	b := editable()
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name: "consumer", Kind: "Queue",
+		Fields: map[string]Field{
+			"dep":           {Raw: `{{- if hasKey (dig "resources" "main-queue" "resource" "status" "atProvider" dict $.observed) "url" }}ready{{ end }}`},
+			"single":        {Raw: `{{ dig 'resources' 'main-queue' 'resource' }}`},
+			"backtick":      {Raw: "{{ dig `resources` `main-queue` `resource` }}"},
+			"mixed":         {Raw: `{{ dig "resources" 'main-queue' "resource" }}`},
+			"prefixSharing": {Raw: `{{ dig "resources" "main-queue-dlq" "resource" }}`},
+		},
+		Envelope: map[string]Field{
+			"env": {Raw: `{{ dig "resources" "main-queue" "resource" }}`},
+		},
+		Annotations: map[string]Field{
+			"ann": {Raw: `{{ dig "resources" "main-queue" "resource" }}`},
+		},
+	})
+	b.Spec.Templates = map[string]string{
+		"guard": `{{- if hasKey (dig "resources" "main-queue" "resource" "status" "atProvider" dict $.observed) "url" }}ready{{ end }}`,
+	}
+
+	// 2. RenameResource fails to rewrite the reference:
+	err := b.RenameResource("main-queue", "primary-queue")
+	if err != nil {
+		t.Fatalf("RenameResource failed: %v", err)
+	}
+
+	depGot := b.Spec.Resources[1].Fields["dep"].Raw
+	depWant := `{{- if hasKey (dig "resources" "primary-queue" "resource" "status" "atProvider" dict $.observed) "url" }}ready{{ end }}`
+	if depGot != depWant {
+		t.Errorf("dep field = %q, want %q", depGot, depWant)
+	}
+
+	singleGot := b.Spec.Resources[1].Fields["single"].Raw
+	singleWant := `{{ dig 'resources' 'primary-queue' 'resource' }}`
+	if singleGot != singleWant {
+		t.Errorf("single field = %q, want %q", singleGot, singleWant)
+	}
+
+	backtickGot := b.Spec.Resources[1].Fields["backtick"].Raw
+	backtickWant := "{{ dig `resources` `primary-queue` `resource` }}"
+	if backtickGot != backtickWant {
+		t.Errorf("backtick field = %q, want %q", backtickGot, backtickWant)
+	}
+
+	mixedGot := b.Spec.Resources[1].Fields["mixed"].Raw
+	mixedWant := `{{ dig "resources" 'primary-queue' "resource" }}`
+	if mixedGot != mixedWant {
+		t.Errorf("mixed field = %q, want %q", mixedGot, mixedWant)
+	}
+
+	prefixGot := b.Spec.Resources[1].Fields["prefixSharing"].Raw
+	prefixWant := `{{ dig "resources" "main-queue-dlq" "resource" }}`
+	if prefixGot != prefixWant {
+		t.Errorf("prefixSharing field = %q, want %q", prefixGot, prefixWant)
+	}
+
+	envGot := b.Spec.Resources[1].Envelope["env"].Raw
+	envWant := `{{ dig "resources" "primary-queue" "resource" }}`
+	if envGot != envWant {
+		t.Errorf("envelope field = %q, want %q", envGot, envWant)
+	}
+
+	annGot := b.Spec.Resources[1].Annotations["ann"].Raw
+	annWant := `{{ dig "resources" "primary-queue" "resource" }}`
+	if annGot != annWant {
+		t.Errorf("annotation field = %q, want %q", annGot, annWant)
+	}
+
+	tmplGot := b.Spec.Templates["guard"]
+	tmplWant := `{{- if hasKey (dig "resources" "primary-queue" "resource" "status" "atProvider" dict $.observed) "url" }}ready{{ end }}`
+	if tmplGot != tmplWant {
+		t.Errorf("template guard = %q, want %q", tmplGot, tmplWant)
 	}
 }
