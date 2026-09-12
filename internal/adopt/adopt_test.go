@@ -8026,3 +8026,165 @@ spec:
 		t.Fatalf("expected drop for template.resource.broken-bucket, got drops: %+v", report.Drops)
 	}
 }
+
+func TestAdoptGoTemplate_IndexSpecParamRef(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp-index
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: my-bucket
+          spec:
+            forProvider:
+              region: {{ index $spec "region" }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	f, ok := bp.Spec.Resources[0].Fields["region"]
+	if !ok {
+		t.Fatalf("field region not found: %+v", bp.Spec.Resources[0].Fields)
+	}
+	if f.From != "params.region" {
+		t.Errorf("field region From = %q, Raw = %q, want From = %q", f.From, f.Raw, "params.region")
+	}
+	if _, ok := bp.Spec.XRD.Parameters["region"]; !ok {
+		t.Errorf("parameter region not found in XRD parameters: %+v", bp.Spec.XRD.Parameters)
+	}
+}
+
+func TestAdoptGoTemplate_IndexSpecParamRef_Variants(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp-index-variants
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render-resources
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- $spec := .observed.composite.resource.spec -}}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: my-bucket
+              custom-ann: '{{ index $spec "annParam" }}'
+          spec:
+            forProvider:
+              region: {{ (index $spec "region") }}
+              acl: {{ (index .observed.composite.resource.spec "acl") | quote }}
+              tier: {{ index .spec 'tier' }}
+              loggingEnabled: {{ (index $spec "enableLogging") }}
+              interpField: "arn:aws:s3:::{{ index $spec "bucketName" }}/*"
+            writeConnectionSecretToRef:
+              name: {{ index $.spec "secretName" }}
+              namespace: {{ (index $spec "secretNs" | quote) }}
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: BucketLogging
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: my-bucket-logging
+          spec:
+            forProvider:
+              targetBucket: {{ (index $spec "targetBucket") }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+
+	// Check fields
+	if f := r.Fields["region"]; f.From != "params.region" {
+		t.Errorf("region From = %q, want params.region", f.From)
+	}
+	if f := r.Fields["acl"]; f.From != "params.acl" {
+		t.Errorf("acl From = %q, want params.acl", f.From)
+	}
+	if f := r.Fields["tier"]; f.From != "params.tier" {
+		t.Errorf("tier From = %q, want params.tier", f.From)
+	}
+	if f := r.Fields["loggingEnabled"]; f.From != "params.enableLogging" {
+		t.Errorf("loggingEnabled From = %q, want params.enableLogging", f.From)
+	}
+	if f := r.Fields["interpField"]; f.Raw == "" || f.From != "" {
+		t.Errorf("interpField Raw = %q, From = %q, want Raw populated and From empty", f.Raw, f.From)
+	}
+
+	// Check second resource
+	r2 := bp.Spec.Resources[1]
+	if f := r2.Fields["targetBucket"]; f.From != "params.targetBucket" {
+		t.Errorf("targetBucket From = %q, want params.targetBucket", f.From)
+	}
+
+	// Check annotations
+	if ann := r.Annotations["custom-ann"]; ann.From != "params.annParam" {
+		t.Errorf("custom-ann From = %q, want params.annParam", ann.From)
+	}
+
+	// Check envelope
+	if f := r.Envelope["writeConnectionSecretToRef.name"]; f.From != "params.secretName" {
+		t.Errorf("secretName From = %q, want params.secretName", f.From)
+	}
+	if f := r.Envelope["writeConnectionSecretToRef.namespace"]; f.From != "params.secretNs" {
+		t.Errorf("secretNs From = %q, want params.secretNs", f.From)
+	}
+
+	// Check parameters declared in XRD
+	expectedParams := []string{
+		"region",
+		"acl",
+		"tier",
+		"bucketName",
+		"annParam",
+		"secretName",
+		"secretNs",
+		"enableLogging",
+		"targetBucket",
+	}
+	for _, p := range expectedParams {
+		if _, ok := bp.Spec.XRD.Parameters[p]; !ok {
+			t.Errorf("parameter %q not declared in XRD parameters: %+v", p, bp.Spec.XRD.Parameters)
+		}
+	}
+}
