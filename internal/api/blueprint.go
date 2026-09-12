@@ -688,12 +688,13 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 	// Reconcile srv.Providers with b.Spec.Sources in document order.
 	// Providers dropped from b.Spec.Sources are evicted from srv.Providers (and thus the index).
 	// cluster.ProviderLabel is preserved if currently held.
+	// Cached providers loaded at startup are also preserved unless explicitly deleted (CF-345).
 	currentProviders := make(map[string]bool, len(srv.Providers))
 	for _, p := range srv.Providers {
 		currentProviders[p] = true
 	}
-	reconciled := make([]string, 0, len(b.Spec.Sources)+1)
-	seen := make(map[string]bool, len(b.Spec.Sources)+1)
+	reconciled := make([]string, 0, len(b.Spec.Sources)+len(srv.cachedProviders)+1)
+	seen := make(map[string]bool, len(b.Spec.Sources)+len(srv.cachedProviders)+1)
 	for _, s := range b.Spec.Sources {
 		if s.Provider != "" && s.Provider != blueprint.NativeProvider && !seen[s.Provider] {
 			if currentProviders[s.Provider] {
@@ -703,7 +704,7 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 		}
 	}
 	for _, p := range srv.Providers {
-		if p == cluster.ProviderLabel && !seen[p] {
+		if (p == cluster.ProviderLabel || srv.cachedProviders[p]) && !seen[p] {
 			seen[p] = true
 			reconciled = append(reconciled, p)
 		}

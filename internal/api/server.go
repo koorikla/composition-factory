@@ -49,14 +49,15 @@ import (
 type Options struct {
 	// Version is the build version string the UI's wordmark shows
 	// (main.version via ldflags). Empty renders as "dev".
-	Version       string
-	Index         *index.Index
-	Store         *cache.Store
-	Blueprint     string          // path to the blueprint file on disk
-	OutDir        string          // where generate writes
-	Lock          string          // path to the lockfile POST /api/providers pins digests into
-	Providers     []string        // xpkg refs Index was built over, in blueprint-source order
-	ClusterClient *cluster.Client // optional live Kubernetes cluster client
+	Version         string
+	Index           *index.Index
+	Store           *cache.Store
+	Blueprint       string          // path to the blueprint file on disk
+	OutDir          string          // where generate writes
+	Lock            string          // path to the lockfile POST /api/providers pins digests into
+	Providers       []string        // xpkg refs Index was built over, in blueprint-source order
+	CachedProviders []string        // cached providers loaded at startup to retain across saves
+	ClusterClient   *cluster.Client // optional live Kubernetes cluster client
 
 	// fetch is swapped in tests so POST /api/providers never hits the
 	// network — the same unexported seam ProviderAddCmd carries in
@@ -135,8 +136,9 @@ type server struct {
 	// add or delete) and srv.Providers (appended to / removed from).
 	// Handlers that read either take mu for the snapshot — see server.index
 	// and handleListProviders.
-	mu            sync.Mutex
-	failedSources map[string]error
+	mu              sync.Mutex
+	failedSources   map[string]error
+	cachedProviders map[string]bool
 }
 
 // index returns the server's current index. It is a snapshot: POST
@@ -164,9 +166,31 @@ func New(o Options) (http.Handler, error) {
 		return nil, err
 	}
 
+	cachedMap := make(map[string]bool)
+	if o.CachedProviders != nil {
+		for _, p := range o.CachedProviders {
+			cachedMap[p] = true
+		}
+	} else if o.Blueprint != "" {
+		if cur, err := blueprint.Load(o.Blueprint); err == nil && cur != nil {
+			declared := make(map[string]bool)
+			for _, s := range cur.Spec.Sources {
+				if s.Provider != "" {
+					declared[s.Provider] = true
+				}
+			}
+			for _, p := range o.Providers {
+				if p != cluster.ProviderLabel && !declared[p] {
+					cachedMap[p] = true
+				}
+			}
+		}
+	}
+
 	srv := &server{
-		Options:       o,
-		failedSources: make(map[string]error),
+		Options:         o,
+		failedSources:   make(map[string]error),
+		cachedProviders: cachedMap,
 	}
 	// srv.Providers is mutable state (POST /api/providers appends to it), so
 	// it must not share a backing array with the caller's slice — an append

@@ -262,6 +262,7 @@ func (srv *server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	if replaces != "" {
 		replaceProvider(b, replaces, req.Ref)
 		delete(srv.failedSources, replaces)
+		delete(srv.cachedProviders, replaces)
 		remaining := make([]string, 0, len(srv.Providers))
 		for _, p := range srv.Providers {
 			if p != replaces {
@@ -406,6 +407,8 @@ func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	wasCached := srv.cachedProviders[ref]
+	delete(srv.cachedProviders, ref)
 	remaining := make([]string, 0, len(srv.Providers)-1)
 	for _, p := range srv.Providers {
 		if p != ref {
@@ -416,6 +419,9 @@ func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) 
 	srv.Providers = remaining
 	if err := srv.rebuildIndexLocked(); err != nil {
 		srv.Providers = oldProviders
+		if wasCached {
+			srv.cachedProviders[ref] = true
+		}
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

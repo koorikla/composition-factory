@@ -31,15 +31,22 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string, cl *clust
 		return api.Options{}, err
 	}
 
+	var cachedRefs []string
+	if b == nil || len(b.Spec.Sources) == 0 {
+		cached, _ := store.List()
+		cachedRefs = cached
+	}
+
 	return api.Options{
-		Index:         idx,
-		Store:         store,
-		Blueprint:     blueprintPath,
-		OutDir:        outDir,
-		Lock:          lockPath,
-		Providers:     refs,
-		Version:       version,
-		ClusterClient: cl,
+		Index:           idx,
+		Store:           store,
+		Blueprint:       blueprintPath,
+		OutDir:          outDir,
+		Lock:            lockPath,
+		Providers:       refs,
+		CachedProviders: cachedRefs,
+		Version:         version,
+		ClusterClient:   cl,
 	}, nil
 }
 

@@ -1,12 +1,19 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/koorikla/compositionfactory/internal/api"
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/index"
 )
 
 // A missing blueprint file scaffolds a blank, valid document — the "start
@@ -80,5 +87,113 @@ func TestBuildAPIOptionsSurvivesUncachedSource(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("cached source lost: %v", o.Providers)
+	}
+}
+
+// TestBlankBlueprintRetainsCachedProvidersAcrossSaves verifies CF-345 from the CLI wiring:
+// when started with a blank blueprint and cached providers, saving the blueprint
+// (PUT /api/blueprint) does NOT discard the cached providers or their kinds.
+func TestBlankBlueprintRetainsCachedProvidersAcrossSaves(t *testing.T) {
+	dir, _, cacheDir := seed(t)
+	blankPath := filepath.Join(dir, "blank.cf.yaml")
+	created, err := ensureBlueprint(blankPath)
+	if err != nil || !created {
+		t.Fatalf("ensureBlueprint failed: created=%v err=%v", created, err)
+	}
+
+	o, err := buildAPIOptions(blankPath, cacheDir, dir, filepath.Join(dir, ".cf.lock"), nil, false)
+	if err != nil {
+		t.Fatalf("buildAPIOptions: %v", err)
+	}
+	if len(o.CachedProviders) == 0 {
+		t.Fatalf("expected CachedProviders to be populated, got empty")
+	}
+
+	h, err := api.New(o)
+	if err != nil {
+		t.Fatalf("api.New: %v", err)
+	}
+
+	// 1. Initial kinds should include the cached provider's kinds
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/kinds", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/kinds: %d", rec.Code)
+	}
+	var kindsResp struct{ Kinds []index.Kind }
+	if err := json.NewDecoder(rec.Body).Decode(&kindsResp); err != nil {
+		t.Fatalf("decode kinds: %v", err)
+	}
+	foundTestProviderKind := false
+	for _, k := range kindsResp.Kinds {
+		if k.Provider == "example.org/provider-test:v2" {
+			foundTestProviderKind = true
+			break
+		}
+	}
+	if !foundTestProviderKind {
+		t.Fatalf("expected example.org/provider-test:v2 kind in kinds, got %d kinds", len(kindsResp.Kinds))
+	}
+
+	// 2. Fetch current blueprint and PUT it back unchanged
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/blueprint", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/blueprint: %d", rec.Code)
+	}
+	docBytes, _ := io.ReadAll(rec.Body)
+
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/blueprint", bytes.NewReader(docBytes))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT /api/blueprint: %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	// 3. Kinds must STILL include the cached provider
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/kinds", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/kinds after save: %d", rec.Code)
+	}
+	var kindsRespAfter struct{ Kinds []index.Kind }
+	if err := json.NewDecoder(rec.Body).Decode(&kindsRespAfter); err != nil {
+		t.Fatalf("decode kinds after save: %v", err)
+	}
+	foundAfter := false
+	for _, k := range kindsRespAfter.Kinds {
+		if k.Provider == "example.org/provider-test:v2" {
+			foundAfter = true
+			break
+		}
+	}
+	if !foundAfter {
+		t.Fatalf("cached provider example.org/provider-test:v2 was dropped after PUT! got %d kinds", len(kindsRespAfter.Kinds))
+	}
+
+	// 4. /api/providers must STILL list the provider
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/providers", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/providers after save: %d", rec.Code)
+	}
+	var provsResp struct {
+		Providers []struct {
+			Ref string `json:"ref"`
+		} `json:"providers"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&provsResp); err != nil {
+		t.Fatalf("decode providers: %v", err)
+	}
+	foundProv := false
+	for _, p := range provsResp.Providers {
+		if p.Ref == "example.org/provider-test:v2" {
+			foundProv = true
+			break
+		}
+	}
+	if !foundProv {
+		t.Fatalf("cached provider example.org/provider-test:v2 missing from /api/providers after save")
 	}
 }
