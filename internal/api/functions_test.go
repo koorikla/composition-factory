@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
+	"github.com/koorikla/compositionfactory/internal/index"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
 )
@@ -203,4 +205,115 @@ func TestAddFunctionRefusesProviderPackageWithoutPinningLock(t *testing.T) {
 			t.Errorf("provider %q was pinned as function into lockfile despite 400 refusal", providerRef)
 		}
 	})
+}
+
+func TestAddFunctionOmitsInputCRDFromIndex(t *testing.T) {
+	const functionRef = "xpkg.crossplane.io/crossplane-contrib/function-environment-configs:v0.4.0"
+	h, _ := testProviderServer(t, func(ref string) (*xpkg.Package, error) {
+		return &xpkg.Package{
+			Ref:    ref,
+			Digest: "sha256:envdigest",
+			Docs: [][]byte{
+				[]byte(`apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: input.environmentconfigs.fn.crossplane.io
+spec:
+  group: environmentconfigs.fn.crossplane.io
+  names:
+    kind: Input
+    plural: inputs
+  scope: Namespaced
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+`),
+			},
+		}, nil
+	})
+
+	rec := do(t, h, "POST", "/api/functions", `{"ref":"`+functionRef+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	var kinds struct{ Kinds []index.Kind }
+	if code := getJSON(t, h, "/api/kinds?q=Input", &kinds); code != 200 {
+		t.Fatalf("GET /api/kinds after add: status %d", code)
+	}
+	found := false
+	for _, k := range kinds.Kinds {
+		if k.Kind == "Input" && k.Group == "environmentconfigs.fn.crossplane.io" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Input kind from added function not found in /api/kinds: %+v", kinds.Kinds)
+	}
+}
+
+func TestPutBlueprintWithPipelineStepOmitsInputCRDFromIndex(t *testing.T) {
+	const functionRef = "xpkg.crossplane.io/crossplane-contrib/function-environment-configs:v0.4.0"
+	h, o := testProviderServer(t, nil)
+
+	crds := []schema.CRD{{
+		Group:    "environmentconfigs.fn.crossplane.io",
+		Kind:     "Input",
+		Plural:   "inputs",
+		Function: true,
+		Versions: []schema.Version{
+			{
+				Name:    "v1beta1",
+				Served:  true,
+				Storage: true,
+			},
+		},
+	}}
+	if err := o.Store.Save(&xpkg.Package{Ref: functionRef, Digest: "sha256:envdigest"}, crds); err != nil {
+		t.Fatalf("Store.Save: %v", err)
+	}
+
+	current, err := blueprint.Load(o.Blueprint)
+	if err != nil {
+		t.Fatalf("load bp: %v", err)
+	}
+	updated := *current
+	updated.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "env-configs",
+			FunctionRef: "function-environment-configs",
+			Package:     functionRef,
+		},
+	}
+	body, err := json.Marshal(updated)
+	if err != nil {
+		t.Fatalf("marshal bp: %v", err)
+	}
+	rec := do(t, h, "PUT", "/api/blueprint", string(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT /api/blueprint: status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	var kinds struct{ Kinds []index.Kind }
+	if code := getJSON(t, h, "/api/kinds?q=Input", &kinds); code != 200 {
+		t.Fatalf("GET /api/kinds after PUT blueprint: status %d", code)
+	}
+	found := false
+	for _, k := range kinds.Kinds {
+		if k.Kind == "Input" && k.Group == "environmentconfigs.fn.crossplane.io" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Input kind from pipeline step not found in /api/kinds: %+v", kinds.Kinds)
+	}
 }

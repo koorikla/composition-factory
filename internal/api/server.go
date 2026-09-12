@@ -480,7 +480,7 @@ func etagMatches(ifNoneMatch, etag string) bool {
 
 // BuildIndex builds an index.Index over the given cache store, provider refs,
 // blueprint CRD sources, and native Kubernetes kinds.
-func BuildIndex(store *cache.Store, providers []string, b *blueprint.Blueprint, dir string) (*index.Index, error) {
+func BuildIndex(store *cache.Store, providers []string, b *blueprint.Blueprint, dir string, lockPaths ...string) (*index.Index, error) {
 	byProvider := make(map[string][]schema.CRD, len(providers)+2)
 	if store != nil {
 		for _, ref := range providers {
@@ -519,6 +519,27 @@ func BuildIndex(store *cache.Store, providers []string, b *blueprint.Blueprint, 
 			}
 		}
 	}
+
+	lockPath := ""
+	if len(lockPaths) > 0 && lockPaths[0] != "" {
+		lockPath = lockPaths[0]
+	} else if dir != "" {
+		lockPath = filepath.Join(dir, ".cf.lock")
+	} else {
+		lockPath = ".cf.lock"
+	}
+	if store != nil && lockPath != "" {
+		if lock, err := cache.ReadLock(lockPath); err == nil && lock != nil {
+			for _, f := range lock.Functions {
+				if f.Ref != "" && byProvider[f.Ref] == nil {
+					if funcCRDs, err := store.Load(f.Ref); err == nil {
+						byProvider[f.Ref] = funcCRDs
+					}
+				}
+			}
+		}
+	}
+
 	native, err := k8s.Kinds()
 	if err != nil {
 		return nil, fmt.Errorf("load native kubernetes kinds: %w", err)
@@ -579,7 +600,7 @@ func (srv *server) rebuildIndexLocked(optB ...*blueprint.Blueprint) error {
 		dir = filepath.Dir(srv.Blueprint)
 	}
 
-	idx, err := BuildIndex(srv.Store, srv.Providers, b, dir)
+	idx, err := BuildIndex(srv.Store, srv.Providers, b, dir, srv.Lock)
 	if err != nil {
 		return err
 	}
