@@ -238,6 +238,22 @@ func writePythonNodes(sb *strings.Builder, indent string, nodes []*nativeNode, i
 	}
 }
 
+func pythonParamExpr(s *structuredRHS) string {
+	if len(s.paramSegs) > 0 {
+		if len(s.paramSegs) == 1 {
+			return fmt.Sprintf("spec.get(%q)", s.paramSegs[0])
+		}
+		var sb strings.Builder
+		sb.WriteString("_get(spec")
+		for _, p := range s.paramSegs {
+			sb.WriteString(fmt.Sprintf(", %q", p))
+		}
+		sb.WriteString(")")
+		return sb.String()
+	}
+	return translateParamAccessToPython(s.param)
+}
+
 func writePythonNode(sb *strings.Builder, indent string, n *nativeNode, isTopLevelNative bool) {
 	if n.leaf != nil {
 		rhs := pythonStructuredRHS(n.leaf.structured, n.leaf.rhs)
@@ -245,6 +261,9 @@ func writePythonNode(sb *strings.Builder, indent string, n *nativeNode, isTopLev
 		return
 	}
 	sb.WriteString(fmt.Sprintf("%s%q: _present({\n", indent, n.seg))
+	if n.mapStructured != nil && n.mapStructured.targetType == "object" && n.mapStructured.param != "" {
+		sb.WriteString(fmt.Sprintf("%s**(%s or {}),\n", indent+"    ", pythonParamExpr(n.mapStructured)))
+	}
 	writePythonNodes(sb, indent+"    ", n.children, false)
 	if isTopLevelNative {
 		sb.WriteString(fmt.Sprintf("%s}),\n", indent))
@@ -260,6 +279,9 @@ func writePythonElement(sb *strings.Builder, indent string, elem *nativeNode) {
 		return
 	}
 	sb.WriteString(fmt.Sprintf("%s_present({\n", indent))
+	if elem.mapStructured != nil && elem.mapStructured.targetType == "object" && elem.mapStructured.param != "" {
+		sb.WriteString(fmt.Sprintf("%s**(%s or {}),\n", indent+"    ", pythonParamExpr(elem.mapStructured)))
+	}
 	writePythonNodes(sb, indent+"    ", elem.children, false)
 	sb.WriteString(fmt.Sprintf("%s}),\n", indent))
 }

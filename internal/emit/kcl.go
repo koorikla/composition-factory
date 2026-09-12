@@ -291,6 +291,11 @@ func kclNestedParamGuard(s structuredRHS, fallbackRHS string) (bool, string) {
 
 // nativeNodeAllOptional returns true if every leaf in the subtree rooted at n is optional.
 func nativeNodeAllOptional(n *nativeNode) bool {
+	if n.mapStructured != nil && n.mapStructured.targetType == "object" && n.mapStructured.param != "" {
+		if !n.mapStructured.optional && n.mapStructured.guard == "" {
+			return false
+		}
+	}
 	if len(n.children) == 0 {
 		return n.leaf != nil && (n.leaf.structured.optional || n.leaf.guard != "")
 	}
@@ -363,6 +368,13 @@ func kclMetaNameGuard(f *forProviderField) string {
 	return ""
 }
 
+func kclParamExpr(s *structuredRHS) string {
+	if len(s.paramSegs) > 0 {
+		return "_spec?." + strings.Join(s.paramSegs, "?.")
+	}
+	return translateParamAccessToKCL(s.param)
+}
+
 func collectKCLNativeSubtreeGuards(n *nativeNode, guards *[]string, seen map[string]bool) {
 	if n.leaf != nil {
 		if g := kclNodeFieldGuard(n.leaf); g != "" {
@@ -370,6 +382,13 @@ func collectKCLNativeSubtreeGuards(n *nativeNode, guards *[]string, seen map[str
 				seen[g] = true
 				*guards = append(*guards, g)
 			}
+		}
+	}
+	if n.mapStructured != nil && n.mapStructured.targetType == "object" && n.mapStructured.param != "" && (n.mapStructured.optional || n.mapStructured.guard != "") {
+		g := kclParamExpr(n.mapStructured) + " != None"
+		if !seen[g] {
+			seen[g] = true
+			*guards = append(*guards, g)
 		}
 	}
 	for _, child := range n.children {
@@ -416,6 +435,9 @@ func writeKCLNode(sb *strings.Builder, indent string, n *nativeNode, inheritedGu
 	}
 
 	sb.WriteString(fmt.Sprintf("%s%s = {\n", curIndent, quoteKCLKey(n.seg)))
+	if n.mapStructured != nil && n.mapStructured.targetType == "object" && n.mapStructured.param != "" {
+		sb.WriteString(fmt.Sprintf("%s**(%s or {})\n", curIndent+"    ", kclParamExpr(n.mapStructured)))
+	}
 	writeKCLNodes(sb, curIndent+"    ", n.children, childInheritedGuard)
 	sb.WriteString(fmt.Sprintf("%s}\n", curIndent))
 }
@@ -427,6 +449,9 @@ func writeKCLElement(sb *strings.Builder, indent string, elem *nativeNode, inher
 		return
 	}
 	sb.WriteString(fmt.Sprintf("%s{\n", indent))
+	if elem.mapStructured != nil && elem.mapStructured.targetType == "object" && elem.mapStructured.param != "" {
+		sb.WriteString(fmt.Sprintf("%s**(%s or {})\n", indent+"    ", kclParamExpr(elem.mapStructured)))
+	}
 	writeKCLNodes(sb, indent+"    ", elem.children, inheritedGuard)
 	sb.WriteString(fmt.Sprintf("%s}\n", indent))
 }
