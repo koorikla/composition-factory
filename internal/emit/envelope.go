@@ -227,6 +227,7 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 						hasEnvDef:  true,
 						optional:   false,
 						guard:      "",
+						isByte:     n != nil && n.Format == "byte",
 					}
 				} else {
 					deref := "$env." + envKey
@@ -246,6 +247,7 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 						sourceType: envDecl.Type,
 						optional:   true,
 						guard:      g,
+						isByte:     n != nil && n.Format == "byte",
 					}
 				}
 				plan = append(plan, e)
@@ -295,6 +297,7 @@ func planEnvelope(r blueprint.Resource, b *blueprint.Blueprint, nodes map[string
 				rawExpr:    deref,
 				targetType: n.Type,
 				sourceType: wireDecl.Type,
+				isByte:     n != nil && n.Format == "byte",
 			}
 			switch {
 			case member != "":

@@ -40,6 +40,7 @@ type structuredRHS struct {
 	sourceType string   // Source type of param/status/env leaf: "string", "integer", "number", "boolean"
 	envDefault string   // Declared default for rhsEnv if any
 	hasEnvDef  bool     // Whether an environment default was declared
+	isByte     bool     // Whether target is a byte/base64 target (Secret data or format: byte)
 }
 
 func isByteTarget(node *schema.Node, r blueprint.Resource, p string, isMap bool) bool {
@@ -150,8 +151,8 @@ func resolveFieldRHSWithVisited(p string, f blueprint.Field, r blueprint.Resourc
 		targetType = "string"
 	}
 	s.targetType = targetType
-	isByte := isByteTarget(node, r, p, isMap)
-	_ = isByte
+	s.isByte = isByteTarget(node, r, p, isMap)
+	isByte := s.isByte
 
 	switch {
 	case f.Value != "":
@@ -264,7 +265,15 @@ func resolveFieldRHSWithVisited(p string, f blueprint.Field, r blueprint.Resourc
 			}
 
 			if ref.IsMetadataName() {
-				return resolveMetadataNameRef(r, fmt.Sprintf("field %q", p), ref, b, crds, wantNamespaced, targetType, isMap, visited)
+				sMeta, rhsMeta, guardMeta, err := resolveMetadataNameRef(r, fmt.Sprintf("field %q", p), ref, b, crds, wantNamespaced, targetType, isMap, visited)
+				if err != nil {
+					return sMeta, "", "", err
+				}
+				sMeta.isByte = isByte
+				if isByte {
+					rhsMeta = fmt.Sprintf("{{ %s | b64enc | quote }}", sMeta.rawExpr)
+				}
+				return sMeta, rhsMeta, guardMeta, nil
 			}
 
 			g, expr, leafType, err := statusWire(ref, r, fmt.Sprintf("field %q", p), b, crds, wantNamespaced)
