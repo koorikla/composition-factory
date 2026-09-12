@@ -726,14 +726,28 @@ type adoptInput struct {
 	Manifest string `json:"manifest" jsonschema:"The raw Crossplane Composition (and optional XRD) YAML manifest to import."`
 	Persist  bool   `json:"persist,omitempty" jsonschema:"When true, saves the adopted blueprint to disk at the workspace blueprint path."`
 	Provider string `json:"provider,omitempty" jsonschema:"Default provider package reference to use when not inferrable from CRDs."`
+	Revision string `json:"revision,omitempty" jsonschema:"Optional current blueprint revision (from get_blueprint metadata). When persist is true, the adopt is refused with precondition failed if the revision does not match the server's current blueprint revision."`
+	IfMatch  string `json:"if_match,omitempty" jsonschema:"Alias for revision: conditional adopt requiring current ETag/revision to match."`
 }
 
 func (s *server) adoptComposition(_ context.Context, _ *sdk.CallToolRequest, in adoptInput) (*sdk.CallToolResult, any, error) {
+	headers := make(http.Header)
+	revision := in.Revision
+	if revision == "" {
+		revision = in.IfMatch
+	}
+	if revision != "" {
+		headers.Set("If-Match", revision)
+	}
 	body, err := json.Marshal(in)
 	if err != nil {
 		return nil, nil, fmt.Errorf("encode request: %w", err)
 	}
-	return s.bridge(http.MethodPost, "/api/blueprint/adopt", body)
+	status, resp, respHeader, err := s.callWithHeaders(http.MethodPost, "/api/blueprint/adopt", body, headers)
+	if err != nil {
+		return nil, nil, err
+	}
+	return resultWithHeader(status, resp, respHeader)
 }
 
 type addFunctionInput struct {

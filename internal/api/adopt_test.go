@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -340,5 +341,115 @@ metadata:
 	}
 	if errMsg != "no Composition document found in manifest" {
 		t.Errorf("error = %q, want %q", errMsg, "no Composition document found in manifest")
+	}
+}
+
+func TestAdoptEndpoint_IfMatchStaleRejected(t *testing.T) {
+	h, bpPath := testHandlerWithPath(t)
+
+	initialDisk, err := os.ReadFile(bpPath)
+	if err != nil {
+		t.Fatalf("ReadFile initial blueprint: %v", err)
+	}
+
+	getRec := httptest.NewRecorder()
+	getReq := httptest.NewRequest("GET", "/api/blueprint", nil)
+	h.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/blueprint status = %d, want 200", getRec.Code)
+	}
+	etag := getRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("empty ETag from GET /api/blueprint")
+	}
+
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-adopted-if-match
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: {{ $spec.region }}
+`
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"manifest": manifest,
+		"persist":  true,
+		"provider": testProviderRef,
+	})
+
+	// 1. Send adopt request with mismatched If-Match header.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/blueprint/adopt", bytes.NewReader(reqBody))
+	req.Header.Set("If-Match", `"mismatched-etag"`)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("status = %d, want 412 Precondition Failed, body: %s", rec.Code, rec.Body.String())
+	}
+	var errResp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	wantMsg := "precondition failed: If-Match header does not match current blueprint revision"
+	if !strings.Contains(errResp["error"], wantMsg) {
+		t.Errorf("error = %q, want it to contain %q", errResp["error"], wantMsg)
+	}
+
+	// Verify disk was not modified.
+	diskAfterStale, err := os.ReadFile(bpPath)
+	if err != nil {
+		t.Fatalf("ReadFile bpPath after stale adopt: %v", err)
+	}
+	if !bytes.Equal(initialDisk, diskAfterStale) {
+		t.Fatalf("blueprint on disk was modified despite stale If-Match")
+	}
+
+	// 2. Send adopt request with matching If-Match header.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/blueprint/adopt", bytes.NewReader(reqBody))
+	req.Header.Set("If-Match", etag)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 OK with matching ETag, body: %s", rec.Code, rec.Body.String())
+	}
+	var okResp adoptResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &okResp); err != nil {
+		t.Fatalf("unmarshal adopt response: %v", err)
+	}
+	if !okResp.Persisted {
+		t.Fatalf("expected persisted = true")
+	}
+	if okResp.Blueprint.Metadata.Name != "test-adopted-if-match" {
+		t.Errorf("name = %q, want test-adopted-if-match", okResp.Blueprint.Metadata.Name)
+	}
+
+	// Verify disk was updated.
+	diskAfterMatch, err := os.ReadFile(bpPath)
+	if err != nil {
+		t.Fatalf("ReadFile bpPath after matching adopt: %v", err)
+	}
+	if bytes.Equal(initialDisk, diskAfterMatch) {
+		t.Fatalf("blueprint on disk was not updated after successful persist")
 	}
 }
