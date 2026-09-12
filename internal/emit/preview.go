@@ -76,7 +76,7 @@ func PreviewExpressionContext(ctx context.Context, b *blueprint.Blueprint, resou
 
 	xrSpec := make(map[string]any)
 	for name, p := range b.Spec.XRD.Parameters {
-		xrSpec[name] = placeholderValue(p)
+		xrSpec[name] = previewPlaceholderValue(p)
 	}
 
 	xrMeta := map[string]any{

@@ -59,6 +59,14 @@ func isForEachParam(b *blueprint.Blueprint, paramName string) bool {
 }
 
 func placeholderValue(p blueprint.Parameter) any {
+	return paramPlaceholder(p, false)
+}
+
+func previewPlaceholderValue(p blueprint.Parameter) any {
+	return paramPlaceholder(p, true)
+}
+
+func paramPlaceholder(p blueprint.Parameter, allProperties bool) any {
 	if p.Default != "" {
 		if v := parseParamScalar(p.Default, p.Type); v != nil {
 			return v
@@ -78,8 +86,8 @@ func placeholderValue(p blueprint.Parameter) any {
 	case "object":
 		obj := map[string]any{}
 		for name, member := range p.Properties {
-			if hasRequiredOrDefault(member) {
-				obj[name] = placeholderValue(member)
+			if allProperties || hasRequiredOrDefault(member) {
+				obj[name] = paramPlaceholder(member, allProperties)
 			}
 		}
 		return obj
