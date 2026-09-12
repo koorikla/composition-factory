@@ -623,3 +623,65 @@ func TestRenameResource_RewritesGetComposedResource_Variants(t *testing.T) {
 		t.Errorf("template = %q, want %q", gotTmpl, wantTmpl)
 	}
 }
+
+func TestRawReferencesResource_HasKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		resName  string
+		expected bool
+	}{
+		{"hasKey dollar dot observed.resources", `{{- if hasKey $.observed.resources "main-queue" }}ready{{ end }}`, "main-queue", true},
+		{"hasKey dot observed.resources", `{{- if hasKey .observed.resources "main-queue" }}ready{{ end }}`, "main-queue", true},
+		{"hasKey observed.resources single quote", `{{- if hasKey .observed.resources 'main-queue' }}ready{{ end }}`, "main-queue", true},
+		{"hasKey observed.resources backtick", "{{- if hasKey .observed.resources `main-queue` }}ready{{ end }}", "main-queue", true},
+		{"hasKey unrelated prefix", `{{- if hasKey $.observed.resources "main-queue-dlq" }}ready{{ end }}`, "main-queue", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rawReferencesResource(tt.raw, tt.resName)
+			if got != tt.expected {
+				t.Errorf("rawReferencesResource(%q, %q) = %v, want %v", tt.raw, tt.resName, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDeleteResource_RefusesWhenHasKeyObservedResources(t *testing.T) {
+	b := editable()
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name: "worker-queue", Kind: "Queue",
+		Fields: map[string]Field{
+			"dep": {Raw: `{{- if hasKey $.observed.resources "main-queue" }}ready{{ end }}`},
+		},
+	})
+
+	err := b.DeleteResource("main-queue")
+	if err == nil {
+		t.Fatal("DeleteResource = nil, want refusal when raw field references resource via hasKey observed.resources")
+	}
+}
+
+func TestRenameResource_RewritesHasKeyObservedResources(t *testing.T) {
+	b := editable()
+	b.Spec.Resources = append(b.Spec.Resources, Resource{
+		Name: "worker-queue", Kind: "Queue",
+		Fields: map[string]Field{
+			"dep": {Raw: `{{- if hasKey $.observed.resources "main-queue" }}ready{{ end }}`},
+		},
+	})
+	b.Spec.Templates = map[string]string{
+		"check": `{{- if hasKey .observed.resources "main-queue" }}found{{ end }}`,
+	}
+
+	if err := b.RenameResource("main-queue", "primary-queue"); err != nil {
+		t.Fatalf("RenameResource: %v", err)
+	}
+
+	if got := b.Spec.Resources[1].Fields["dep"].Raw; got != `{{- if hasKey $.observed.resources "primary-queue" }}ready{{ end }}` {
+		t.Errorf("raw field = %q, want hasKey primary-queue", got)
+	}
+	if got := b.Spec.Templates["check"]; got != `{{- if hasKey .observed.resources "primary-queue" }}found{{ end }}` {
+		t.Errorf("template = %q, want hasKey primary-queue", got)
+	}
+}
