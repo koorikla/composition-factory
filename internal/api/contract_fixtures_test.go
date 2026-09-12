@@ -117,6 +117,12 @@ func TestContractFixtureCatalogueRoundTripsKeySet(t *testing.T) {
 	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "catalogue.json"), &catalogueResponse{})
 }
 
+// GET /api/blueprint/resources/{name}/manifest marshals manifestResponse
+// (manifest.go), the {yaml} envelope PUT takes back.
+func TestContractFixtureManifestRoundTripsKeySet(t *testing.T) {
+	checkFixtureKeySetRoundTrips(t, filepath.Join(fixturesDir, "manifest.json"), &manifestResponse{})
+}
+
 // POST /api/render's envelope has a real production type (renderResponse in
 // render.go, no omitempty on any key — the contract is that all four keys
 // are always present), so unlike kindResponse/generateResponse there is no

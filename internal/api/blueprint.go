@@ -292,7 +292,7 @@ func (srv *server) mutate(w http.ResponseWriter, r *http.Request, fn func(*bluep
 	}
 
 	if status, err := fn(b); err != nil {
-		writeJSONError(w, status, err.Error())
+		writeMutateError(w, status, err)
 		return
 	}
 
@@ -300,6 +300,27 @@ func (srv *server) mutate(w http.ResponseWriter, r *http.Request, fn func(*bluep
 		return
 	}
 	writeJSON(w, http.StatusOK, b)
+}
+
+// detailedError lets a mutation return extra JSON fields beside "error"
+// (the manifest endpoints add path and line so a UI can highlight them).
+type detailedError interface {
+	error
+	Body() map[string]any
+}
+
+// writeMutateError writes a failed mutation's error body: the plain
+// {"error": msg} shape every other route uses, plus whatever extra fields a
+// detailedError carries. "error" always wins over a same-named extra.
+func writeMutateError(w http.ResponseWriter, status int, err error) {
+	var de detailedError
+	if errors.As(err, &de) {
+		body := de.Body()
+		body["error"] = err.Error()
+		writeJSON(w, status, body)
+		return
+	}
+	writeJSONError(w, status, err.Error())
 }
 
 // handleAddParameter serves POST /api/blueprint/parameters: declare a new

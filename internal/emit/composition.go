@@ -1587,6 +1587,12 @@ func writeField(d *Doc, indent int, fld forProviderField) {
 // than the author meant — with no error anywhere. So a native kind is never
 // selected without provider: k8s on the resource; a bare kind that matches
 // only a native kind fails with the hint instead of being auto-upgraded.
+// ResolveKind is resolveKind for callers outside emit that need the CRD a
+// resource composes against (the manifest endpoints).
+func ResolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (schema.CRD, error) {
+	return resolveKind(crds, r, wantNamespaced)
+}
+
 func resolveKind(crds []schema.CRD, r blueprint.Resource, wantNamespaced bool) (schema.CRD, error) {
 	// Two providers name the strictly object-rooted family: "k8s" (vendored native
 	// kinds) and a crds: source's file path (Validate pins those to a .yaml/.yml
