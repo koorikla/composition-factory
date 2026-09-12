@@ -695,3 +695,40 @@ func TestCF098AddProviderReportsLockWriteError(t *testing.T) {
 		t.Fatalf("expected HTTP error when lockfile cannot be written, got 200: %s", rec.Body.String())
 	}
 }
+
+func TestAddProviderRefusesFunctionPackageWithoutPinningLock(t *testing.T) {
+	const fnRef = "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0"
+	h, o := testProviderServer(t, func(ref string) (*xpkg.Package, error) {
+		return &xpkg.Package{
+			Ref:    ref,
+			Digest: "sha256:fndigest",
+			Docs: [][]byte{[]byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: autoreadies.autoready.fn.crossplane.io}
+spec:
+  group: autoready.fn.crossplane.io
+  scope: Namespaced
+  names: {kind: AutoReady, plural: autoreadies}
+  versions:
+  - {name: v1alpha1, served: true, storage: true}
+`)},
+		}, nil
+	})
+
+	rec := do(t, h, "POST", "/api/providers", `{"ref":"`+fnRef+`"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+
+	l, err := cache.ReadLock(o.Lock)
+	if err != nil {
+		t.Fatalf("read lock: %v", err)
+	}
+	if _, ok := l.FindProvider(fnRef); ok {
+		t.Errorf("function %q was pinned into lockfile as provider despite 400 refusal", fnRef)
+	}
+	if _, ok := l.FindFunction(fnRef); ok {
+		t.Errorf("function %q was pinned into lockfile as function despite 400 refusal", fnRef)
+	}
+}
