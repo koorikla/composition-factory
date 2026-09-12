@@ -3401,6 +3401,25 @@ func insertParamDefaultIntoMap(props map[string]blueprint.Parameter, parts []str
 	}
 }
 
+func widenEnvType(existing, incoming string) string {
+	if existing == "" {
+		existing = "string"
+	}
+	if incoming == "" {
+		incoming = "string"
+	}
+	if existing == incoming {
+		return existing
+	}
+	if existing == "string" || incoming == "string" {
+		return "string"
+	}
+	if (existing == "integer" && incoming == "number") || (existing == "number" && incoming == "integer") {
+		return "number"
+	}
+	return "string"
+}
+
 func ensureEnvDeclared(bp *blueprint.Blueprint, envKey, typ string) {
 	if !isFlatParamIdentifier(envKey) {
 		return
@@ -3418,8 +3437,9 @@ func ensureEnvDeclared(bp *blueprint.Blueprint, envKey, typ string) {
 		}
 		return
 	}
-	if existing.Type == "string" && typ != "string" {
-		existing.Type = typ
+	widened := widenEnvType(existing.Type, typ)
+	if existing.Type != widened {
+		existing.Type = widened
 		bp.Spec.Environment[envKey] = existing
 	}
 }
