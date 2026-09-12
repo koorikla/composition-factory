@@ -1265,7 +1265,7 @@ var (
 	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?\)?\s*\)\s*-?\}\}`)
 	reForEachDefault     = regexp.MustCompile(`(?:default\s+(?:["']([^"']*)["']|([^\s)]+))|\|\s*default\s+(?:["']([^"']*)["']|([^\s)]+)))`)
 	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(?\s*\$env\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*index\s+\(?\s*\$env\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?\)?\s*\)\s*-?\}\}`)
-	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(index\s+\$?[.]observed\.resources\s+"([^"]+)"\)\.resource\.status\.([a-zA-Z0-9_.-]+)|\$?[.]observed\.resources\.([a-zA-Z0-9_-]+)\.resource\.status\.([a-zA-Z0-9_.-]+))\)\s*-?\}\}`)
+	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(*\s*index\s+\$?[.]?observed\.resources\s+["']([^"']+)["']\s*\)\.resource\.status\.([a-zA-Z0-9_.-]+)|\(*\s*\$?[.]?observed\.resources\.([a-zA-Z0-9_-]+)\.resource\.status\.([a-zA-Z0-9_.-]+))\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?\)*\s*\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
 	reTemplateInclude    = regexp.MustCompile(`^\{\{-?\s*include\s+["']([^"']+)["'](?:\s+[^}]*)?-?\}\}$`)
 	reDocSeparator       = regexp.MustCompile(`(?m)^---\s*$`)
