@@ -632,8 +632,8 @@ function workloadPresetHtml(res, doc, _allParams, _otherResources) {
       return "";
     }
 
-    const selAppF = fields["spec.selector.matchLabels"] || fields["spec.selector.matchLabels.app"] || fields["spec.selector.matchLabels[app]"];
-    const tmplAppF = fields["spec.template.metadata.labels"] || fields["spec.template.metadata.labels.app"] || fields["spec.template.metadata.labels[app]"];
+    const selAppF = fields["spec.selector.matchLabels[app]"] || fields["spec.selector.matchLabels"] || fields["spec.selector.matchLabels.app"];
+    const tmplAppF = fields["spec.template.metadata.labels[app]"] || fields["spec.template.metadata.labels"] || fields["spec.template.metadata.labels.app"];
     const selAppVal = extractApp(selAppF);
     const tmplAppVal = extractApp(tmplAppF);
     const appLabel = selAppVal || tmplAppVal || res.name;
@@ -670,7 +670,7 @@ function workloadPresetHtml(res, doc, _allParams, _otherResources) {
   }
 
   if (kind === "Service") {
-    const selAppF = fields["spec.selector"] || fields["spec.selector.app"] || fields["spec.selector[app]"];
+    const selAppF = fields["spec.selector[app]"] || fields["spec.selector"] || fields["spec.selector.app"];
     let selAppVal = "";
     if (selAppF) {
       if (selAppF.value) selAppVal = selAppF.value;
@@ -712,9 +712,11 @@ function workloadPresetHtml(res, doc, _allParams, _otherResources) {
         '<span class="dg" style="font-size:10px">Quick match:</span>';
       candidateWorkloads.forEach(function (cw) {
         var cwFields = cw.fields || {};
-        var cwMatchF = cwFields["spec.selector.matchLabels"] || cwFields["spec.template.metadata.labels"];
+        var cwMatchF = cwFields["spec.selector.matchLabels[app]"] || cwFields["spec.selector.matchLabels"] || cwFields["spec.template.metadata.labels"];
         var cwApp = "";
-        if (cwMatchF && cwMatchF.raw) {
+        if (cwMatchF && cwMatchF.value) {
+          cwApp = cwMatchF.value;
+        } else if (cwMatchF && cwMatchF.raw) {
           try {
             var parsed = JSON.parse(cwMatchF.raw);
             if (parsed && typeof parsed === "object" && parsed.app) cwApp = parsed.app;
