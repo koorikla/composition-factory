@@ -1245,7 +1245,7 @@ var (
 	reParamVar           = regexp.MustCompile(`\{\{-?\s*\(?\s*(?:default\s+(?:\([^)]+\)|["'][^"']*["']|\S+)\s+)?\(?\s*(?:(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)|index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+?)["'])\s*\)?(?:\s*\|\s*default\s+(?:\([^)]+\)|["'][^"']*["']|\S+))?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reEvidenceIndexSpec  = regexp.MustCompile(`\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']`)
 	reEnvVar             = regexp.MustCompile(`\{\{-?\s*\(?\s*(?:default\s+(?:["'][^"']*["']|\S+)\s+)?\(?\s*(?:\$env\.([a-zA-Z0-9_.-]+?)|\(index\s+\$env\s+["']([a-zA-Z0-9_.-]+?)["']\)|index\s+\$env\s+["']([a-zA-Z0-9_.-]+?)["'])\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*-?\}\}`)
-	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*\(?\s*(?:\(index\s+(?:\$?[.]?observed(?:\.resources)?|\$observed)\s+["']([^"']+)["']\)|(?:\$?[.]?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+))\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*\(?\s*(?:\(index\s+(?:\$?[.]?observed(?:\.resources)?|\$observed)\s+["']([^"']+)["']\)|(?:\$?[.]?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+)|\(+\s*getComposedResource\s+(?:(?:\([^)]+\)|[^\s"'\x60\)]+)\s+["'\x60]([^"'\x60]+)["'\x60]|["'\x60]([^"'\x60]+)["'\x60]\s+(?:\([^)]+\)|[^\s"'\x60\)]+))\s*\)+)(?:\.resource)?\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reXRResourceRef      = regexp.MustCompile(`\{\{-?\s*(?:\$xr|\$?[.]observed\.composite\.resource\.metadata\.name)\s*-?\}\}-([a-zA-Z0-9_-]+)`)
 	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+\(?(?:(?:and\s+\(\s*hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["'][^"']+["']\s*\)|or\s+\(\s*not\s+\(\s*hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["'][^"']+["']\s*\)\s*\))\s+)?\(?(?:(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)|\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\)*\s*-?\}\}`)
 	reWhenIfBoolEq       = regexp.MustCompile(`\{\{-?\s*if\s+\(?(?:(?:and\s+\(\s*hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["'][^"']+["']\s*\)|or\s+\(\s*not\s+\(\s*hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["'][^"']+["']\s*\)\s*\))\s+)?\(?eq\s+(?:\(?\s*(?:default\s+false\s+)?(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*(?:default\s+false\s+)?index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s+true\)*\s*-?\}\}`)
@@ -1338,6 +1338,23 @@ func matchEnvVar(s string) string {
 		}
 	}
 	return ""
+}
+
+func matchObservedStatus(s string) (srcRes, targetKind, targetField string, ok bool) {
+	trimmed := strings.TrimSpace(s)
+	m := reObservedStatus.FindStringSubmatch(trimmed)
+	if len(m) < 7 || m[0] != trimmed {
+		return "", "", "", false
+	}
+	for i := 1; i <= 4; i++ {
+		if m[i] != "" {
+			srcRes = m[i]
+			break
+		}
+	}
+	targetKind = m[5]
+	targetField = m[6]
+	return srcRes, targetKind, targetField, true
 }
 
 func isReservedCompositeField(name string) bool {
@@ -3185,18 +3202,12 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 					} else {
 						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "invalid environment reference")
 					}
-				} else if m := reObservedStatus.FindStringSubmatch(trimmed); len(m) >= 5 && m[0] == trimmed {
-					srcRes := m[1]
-					if srcRes == "" {
-						srcRes = m[2]
-					}
+				} else if srcRes, targetKind, targetField, ok := matchObservedStatus(trimmed); ok {
 					if nameMapping != nil && nameMapping[srcRes] != "" {
 						srcRes = nameMapping[srcRes]
 					} else {
 						srcRes = normalizeDNSLabel(srcRes)
 					}
-					targetKind := m[3]
-					targetField := m[4]
 					var fromPath string
 					if strings.HasPrefix(targetKind, "status") {
 						field := targetField
@@ -3583,18 +3594,12 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 				} else {
 					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid environment reference")
 				}
-			} else if m := reObservedStatus.FindStringSubmatch(trimmed); len(m) >= 5 && m[0] == trimmed {
-				srcRes := m[1]
-				if srcRes == "" {
-					srcRes = m[2]
-				}
+			} else if srcRes, targetKind, targetField, ok := matchObservedStatus(trimmed); ok {
 				if nameMapping != nil && nameMapping[srcRes] != "" {
 					srcRes = nameMapping[srcRes]
 				} else {
 					srcRes = normalizeDNSLabel(srcRes)
 				}
-				targetKind := m[3]
-				targetField := m[4]
 				if targetKind == "metadata" && targetField != "name" {
 					out[path] = blueprint.Field{Raw: rawStr}
 				} else {
@@ -3656,18 +3661,12 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 						} else {
 							report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid environment reference")
 						}
-					} else if m := reObservedStatus.FindStringSubmatch(trimmed); len(m) >= 5 && m[0] == trimmed {
-						srcRes := m[1]
-						if srcRes == "" {
-							srcRes = m[2]
-						}
+					} else if srcRes, targetKind, targetField, ok := matchObservedStatus(trimmed); ok {
 						if nameMapping != nil && nameMapping[srcRes] != "" {
 							srcRes = nameMapping[srcRes]
 						} else {
 							srcRes = normalizeDNSLabel(srcRes)
 						}
-						targetKind := m[3]
-						targetField := m[4]
 						if targetKind == "metadata" && targetField != "name" {
 							out[elemPath] = blueprint.Field{Raw: rawStr}
 						} else {

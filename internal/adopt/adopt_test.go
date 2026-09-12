@@ -11615,3 +11615,337 @@ spec:
 		}
 	})
 }
+
+func TestAdoptGoTemplate_GetComposedResourceStatusWire(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-getcomposedresource-wire
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          ---
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: subnet
+          spec:
+            forProvider:
+              cidrBlock: 10.0.0.0/24
+          ---
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: RouteTable
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: route-table
+          spec:
+            forProvider:
+              subnetId: {{ (getComposedResource . "subnet").status.atProvider.id }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(bp.Spec.Resources))
+	}
+	rt := bp.Spec.Resources[1]
+	f := rt.Fields["subnetId"]
+	wantFrom := "resources.subnet.status.atProvider.id"
+	if f.From != wantFrom {
+		t.Errorf("subnetId.From = %q, want %q (got Raw: %q)", f.From, wantFrom, f.Raw)
+	}
+}
+
+func TestAdoptGoTemplate_GetComposedResourceVariations(t *testing.T) {
+	tests := []struct {
+		name     string
+		resName  string
+		expr     string
+		wantFrom string
+		wantRaw  string
+	}{
+		{
+			name:     "dot dollar double quotes",
+			expr:     `{{ (getComposedResource . "subnet").status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "dollar double quotes",
+			expr:     `{{ (getComposedResource $ "subnet").status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "dollar dot double quotes",
+			expr:     `{{ (getComposedResource $. "subnet").status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "observed double quotes",
+			expr:     `{{ (getComposedResource $observed "subnet").status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "item variable double quotes",
+			expr:     `{{ (getComposedResource $item "subnet").status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "inverted args dot",
+			expr:     `{{ (getComposedResource "subnet" .).status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "inverted args dollar",
+			expr:     `{{ (getComposedResource "subnet" $).status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "single quotes",
+			expr:     `{{ (getComposedResource . 'subnet').status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "inverted single quotes",
+			expr:     `{{ (getComposedResource 'subnet' .).status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "backtick quotes",
+			expr:     "{{ (getComposedResource . `subnet`).status.atProvider.id }}",
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "inverted backtick quotes",
+			expr:     "{{ (getComposedResource `subnet` .).status.atProvider.id }}",
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "with optional resource segment",
+			expr:     `{{ (getComposedResource . "subnet").resource.status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "direct status without atProvider",
+			expr:     `{{ (getComposedResource . "subnet").status.id }}`,
+			wantFrom: "resources.subnet.status.id",
+		},
+		{
+			name:     "condition status path",
+			expr:     `{{ (getComposedResource . "subnet").status.conditions.Ready.status }}`,
+			wantFrom: "resources.subnet.status.conditions.Ready.status",
+		},
+		{
+			name:     "metadata name",
+			expr:     `{{ (getComposedResource . "subnet").metadata.name }}`,
+			wantFrom: "resources.subnet.metadata.name",
+		},
+		{
+			name:     "piped quote",
+			expr:     `{{ (getComposedResource . "subnet").status.atProvider.id | quote }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "piped b64enc",
+			expr:     `{{ (getComposedResource . "subnet").status.atProvider.id | b64enc }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "piped b64enc and quote",
+			expr:     `{{ (getComposedResource . "subnet").status.atProvider.id | b64enc | quote }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "extra outer parentheses",
+			expr:     `{{ ((getComposedResource . "subnet").status.atProvider.id) }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "double parens around helper",
+			expr:     `{{ ((getComposedResource . "subnet")).status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "spaces inside parens",
+			expr:     `{{ ( getComposedResource . "subnet" ).status.atProvider.id }}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "trim markers",
+			expr:     `{{- (getComposedResource . "subnet").status.atProvider.id -}}`,
+			wantFrom: "resources.subnet.status.atProvider.id",
+		},
+		{
+			name:     "normalize DNS label underscores",
+			resName:  "sub_net",
+			expr:     `{{ (getComposedResource . "sub_net").status.atProvider.id }}`,
+			wantFrom: "resources.sub-net.status.atProvider.id",
+		},
+		{
+			name:    "spec path not status or metadata stays raw",
+			expr:    `{{ (getComposedResource . "subnet").spec.forProvider.cidrBlock }}`,
+			wantRaw: `{{ (getComposedResource . "subnet").spec.forProvider.cidrBlock }}`,
+		},
+		{
+			name:    "metadata other than name stays raw",
+			expr:    `{{ (getComposedResource . "subnet").metadata.namespace }}`,
+			wantRaw: `{{ (getComposedResource . "subnet").metadata.namespace }}`,
+		},
+		{
+			name:    "interpolated prefix stays raw",
+			expr:    `prefix-{{ (getComposedResource . "subnet").status.atProvider.id }}`,
+			wantRaw: `prefix-{{ (getComposedResource . "subnet").status.atProvider.id }}`,
+		},
+		{
+			name:    "interpolated suffix stays raw",
+			expr:    `{{ (getComposedResource . "subnet").status.atProvider.id }}-suffix`,
+			wantRaw: `{{ (getComposedResource . "subnet").status.atProvider.id }}-suffix`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resName := tc.resName
+			if resName == "" {
+				resName = "subnet"
+			}
+			manifest := fmt.Sprintf(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-variations
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          ---
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: %s
+          spec:
+            forProvider:
+              cidrBlock: 10.0.0.0/24
+          ---
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: RouteTable
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: route-table
+          spec:
+            forProvider:
+              subnetId: %s
+`, resName, tc.expr)
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 2 {
+				t.Fatalf("expected 2 resources, got %d", len(bp.Spec.Resources))
+			}
+			rt := bp.Spec.Resources[1]
+			f := rt.Fields["subnetId"]
+			if tc.wantFrom != "" && f.From != tc.wantFrom {
+				t.Errorf("subnetId.From = %q, want %q (got Raw: %q)", f.From, tc.wantFrom, f.Raw)
+			}
+			if tc.wantRaw != "" && f.Raw != tc.wantRaw {
+				t.Errorf("subnetId.Raw = %q, want %q (got From: %q)", f.Raw, tc.wantRaw, f.From)
+			}
+		})
+	}
+}
+
+func TestAdoptGoTemplate_GetComposedResource_AnnotationsAndSlices(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-annotations-slices
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          ---
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: subnet
+          spec:
+            forProvider:
+              cidrBlock: 10.0.0.0/24
+          ---
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: RouteTable
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: route-table
+              example.com/subnet-id: '{{ (getComposedResource . "subnet").status.atProvider.id }}'
+              example.com/subnet-name: '{{ (getComposedResource . "subnet").metadata.name }}'
+            name: route-table
+          spec:
+            forProvider:
+              subnets:
+              - '{{ (getComposedResource . "subnet").status.atProvider.id }}'
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(bp.Spec.Resources))
+	}
+	rt := bp.Spec.Resources[1]
+
+	annId := rt.Annotations["example.com/subnet-id"]
+	wantAnnId := "resources.subnet.status.atProvider.id"
+	if annId.From != wantAnnId {
+		t.Errorf("annotation subnet-id From = %q, want %q", annId.From, wantAnnId)
+	}
+
+	annName := rt.Annotations["example.com/subnet-name"]
+	wantAnnName := "resources.subnet.metadata.name"
+	if annName.From != wantAnnName {
+		t.Errorf("annotation subnet-name From = %q, want %q", annName.From, wantAnnName)
+	}
+
+	sliceElem := rt.Fields["subnets[0]"]
+	wantSliceElem := "resources.subnet.status.atProvider.id"
+	if sliceElem.From != wantSliceElem {
+		t.Errorf("slice element subnets[0] From = %q, want %q", sliceElem.From, wantSliceElem)
+	}
+}
