@@ -1092,3 +1092,53 @@ func TestApplyXRDlessEvidence_ForEachVariants(t *testing.T) {
 		})
 	}
 }
+
+func TestAdoptXRDless_IndexSyntaxEvidence(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.apps.sparky.ee
+spec:
+  compositeTypeRef:
+    apiVersion: apps.sparky.ee/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        options: ["missingkey=error"]
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            {{- if (index $spec "enabled") }}
+            ---
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: app
+            spec:
+              replicas: 1
+            {{- end }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.11.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	p, ok := bp.Spec.XRD.Parameters["enabled"]
+	if !ok {
+		t.Fatalf("enabled parameter missing from adopted blueprint")
+	}
+	if p.Type != "boolean" {
+		t.Errorf("enabled parameter type = %q, want boolean", p.Type)
+	}
+	if !p.Required {
+		t.Errorf("enabled parameter must be required (dereferenced unguarded in when condition), got Required: false")
+	}
+}
