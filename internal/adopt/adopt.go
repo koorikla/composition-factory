@@ -1267,7 +1267,7 @@ var (
 	reForEachDefault     = regexp.MustCompile(`(?:default\s+(?:["']([^"']*)["']|([^\s)]+))|\|\s*default\s+(?:["']([^"']*)["']|([^\s)]+)))`)
 	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(?\s*\$env\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*index\s+\(?\s*\$env\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?\)?\s*\)\s*-?\}\}`)
 	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(*\s*index\s+\$?[.]?observed\.resources\s+["']([^"']+)["']\s*\)(?:\.resource)?\.status\.([a-zA-Z0-9_.-]+)|\(*\s*\$?[.]?observed\.resources\.([a-zA-Z0-9_-]+)(?:\.resource)?\.status\.([a-zA-Z0-9_.-]+)|\(*\s*\(+\s*getComposedResource\s+(?:(?:\([^)]+\)|[^\s"'\x60\)]+)\s+["'\x60]([^"'\x60]+)["'\x60]|["'\x60]([^"'\x60]+)["'\x60]\s+(?:\([^)]+\)|[^\s"'\x60\)]+))(?:\s*\))+\s*(?:\.resource)?\.status\.([a-zA-Z0-9_.-]+))\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?(?:\s*\))*\s*\)\s*-?\}\}`)
-	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
+	reMustacheExpr       = regexp.MustCompile(`(?s)\{\{.*?\}\}`)
 	reTemplateInclude    = regexp.MustCompile(`^\{\{-?\s*include\s+["']([^"']+)["'](?:\s+[^}]*)?-?\}\}$`)
 	reDocSeparator       = regexp.MustCompile(`(?m)^---\s*$`)
 	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+(?:\(printf\s+["']([^"']+)["']|["']([^"']+)["'])`)
