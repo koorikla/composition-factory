@@ -2975,7 +2975,29 @@ func parseClassicComposition(resources []any, patchSets []any, bp *blueprint.Blu
 		}
 
 		// Ensure unique name
+		origName := res.Name
 		uniqueName(bp, res)
+		if res.Name != origName && nameMapping != nil {
+			if resName != "" {
+				nameMapping[resName] = res.Name
+				if clean := extractCleanName(resName); clean != "" && clean != res.Name {
+					nameMapping[clean] = res.Name
+				}
+			} else {
+				rawName := extractResourceName(base, res.Kind, nil)
+				if rawName != "" && rawName != strings.ToLower(res.Kind) {
+					nameMapping[rawName] = res.Name
+					if clean := extractCleanName(rawName); clean != "" && clean != res.Name {
+						nameMapping[clean] = res.Name
+					}
+				}
+			}
+			for k, v := range nameMapping {
+				if v == origName && (k == resName || (resName != "" && k == extractCleanName(resName))) {
+					nameMapping[k] = res.Name
+				}
+			}
+		}
 
 		// Apply patches
 		if patches, ok := resMap["patches"].([]any); ok {
@@ -3566,8 +3588,6 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 				} else if srcRes, targetKind, targetField, ok := matchObservedStatus(trimmed); ok {
 					if nameMapping != nil && nameMapping[srcRes] != "" {
 						srcRes = nameMapping[srcRes]
-					} else {
-						srcRes = normalizeDNSLabel(srcRes)
 					}
 					var fromPath string
 					if strings.HasPrefix(targetKind, "status") {
@@ -3586,8 +3606,6 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 				} else if srcRes := matchResourceRef(trimmed); srcRes != "" {
 					if nameMapping != nil && nameMapping[srcRes] != "" {
 						srcRes = nameMapping[srcRes]
-					} else {
-						srcRes = normalizeDNSLabel(srcRes)
 					}
 					res.Annotations[rawK] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
 				} else if tmplName := matchTemplateInclude(rawStr); tmplName != "" {
@@ -3968,8 +3986,6 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 			} else if srcRes, targetKind, targetField, ok := matchObservedStatus(trimmed); ok {
 				if nameMapping != nil && nameMapping[srcRes] != "" {
 					srcRes = nameMapping[srcRes]
-				} else {
-					srcRes = normalizeDNSLabel(srcRes)
 				}
 				if targetKind == "metadata" && targetField != "name" {
 					out[path] = blueprint.Field{Raw: rawStr}
@@ -3979,8 +3995,6 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 			} else if srcRes := matchResourceRef(trimmed); srcRes != "" {
 				if nameMapping != nil && nameMapping[srcRes] != "" {
 					srcRes = nameMapping[srcRes]
-				} else {
-					srcRes = normalizeDNSLabel(srcRes)
 				}
 				out[path] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
 			} else if tmplName := matchTemplateInclude(rawStr); tmplName != "" && !isNative {
@@ -4038,8 +4052,6 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 					} else if srcRes, targetKind, targetField, ok := matchObservedStatus(trimmed); ok {
 						if nameMapping != nil && nameMapping[srcRes] != "" {
 							srcRes = nameMapping[srcRes]
-						} else {
-							srcRes = normalizeDNSLabel(srcRes)
 						}
 						if targetKind == "metadata" && targetField != "name" {
 							out[elemPath] = blueprint.Field{Raw: rawStr}
@@ -4049,8 +4061,6 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 					} else if srcRes := matchResourceRef(trimmed); srcRes != "" {
 						if nameMapping != nil && nameMapping[srcRes] != "" {
 							srcRes = nameMapping[srcRes]
-						} else {
-							srcRes = normalizeDNSLabel(srcRes)
 						}
 						out[elemPath] = blueprint.Field{From: "resources." + srcRes + ".metadata.name"}
 					} else if tmplName := matchTemplateInclude(rawStr); tmplName != "" && !isNative {
@@ -4165,7 +4175,7 @@ func unmaskString(s string, placeholders []string) string {
 }
 
 func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]string) {
-	if bp == nil || len(nameMapping) == 0 {
+	if bp == nil {
 		return
 	}
 
@@ -4178,9 +4188,6 @@ func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]str
 		if from != "" && to != "" && from != to {
 			renames = append(renames, renamePair{from: from, to: to})
 		}
-	}
-	if len(renames) == 0 {
-		return
 	}
 	sort.Slice(renames, func(i, j int) bool {
 		if len(renames[i].from) != len(renames[j].from) {
@@ -4199,7 +4206,7 @@ func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]str
 				f.From = rewriteFromWire(f.From, nameMapping)
 				r.Fields[fName] = f
 			}
-			if f.Raw != "" {
+			if f.Raw != "" && len(renames) > 0 {
 				for _, rn := range renames {
 					if rawReferencesResource(f.Raw, rn.from) {
 						f.Raw = rewriteRawResource(f.Raw, rn.from, rn.to)
@@ -4213,7 +4220,7 @@ func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]str
 				a.From = rewriteFromWire(a.From, nameMapping)
 				r.Annotations[aName] = a
 			}
-			if a.Raw != "" {
+			if a.Raw != "" && len(renames) > 0 {
 				for _, rn := range renames {
 					if rawReferencesResource(a.Raw, rn.from) {
 						a.Raw = rewriteRawResource(a.Raw, rn.from, rn.to)
@@ -4227,7 +4234,7 @@ func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]str
 				e.From = rewriteFromWire(e.From, nameMapping)
 				r.Envelope[eName] = e
 			}
-			if e.Raw != "" {
+			if e.Raw != "" && len(renames) > 0 {
 				for _, rn := range renames {
 					if rawReferencesResource(e.Raw, rn.from) {
 						e.Raw = rewriteRawResource(e.Raw, rn.from, rn.to)
@@ -4237,13 +4244,15 @@ func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]str
 			}
 		}
 	}
-	for tName, body := range bp.Spec.Templates {
-		for _, rn := range renames {
-			if rawReferencesResource(body, rn.from) {
-				body = rewriteRawResource(body, rn.from, rn.to)
+	if len(renames) > 0 {
+		for tName, body := range bp.Spec.Templates {
+			for _, rn := range renames {
+				if rawReferencesResource(body, rn.from) {
+					body = rewriteRawResource(body, rn.from, rn.to)
+				}
 			}
+			bp.Spec.Templates[tName] = body
 		}
-		bp.Spec.Templates[tName] = body
 	}
 }
 
@@ -4312,8 +4321,14 @@ func rewriteFromWire(wire string, nameMapping map[string]string) string {
 	parts := strings.SplitN(rest, ".", 3)
 	if len(parts) >= 3 && (parts[1] == "status" || parts[1] == "metadata") {
 		origName := parts[0]
-		if newName, ok := nameMapping[origName]; ok {
-			return fmt.Sprintf("resources.%s.%s.%s", newName, parts[1], parts[2])
+		if nameMapping != nil {
+			if newName, ok := nameMapping[origName]; ok {
+				return fmt.Sprintf("resources.%s.%s.%s", newName, parts[1], parts[2])
+			}
+		}
+		normName := normalizeDNSLabel(origName)
+		if normName != origName {
+			return fmt.Sprintf("resources.%s.%s.%s", normName, parts[1], parts[2])
 		}
 	}
 	return wire
