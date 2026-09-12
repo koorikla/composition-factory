@@ -55,7 +55,7 @@ func (b *Blueprint) validateResources() error {
 					break
 				}
 			}
-			isSpecial := r.Provider == NativeProvider || r.Provider == "cluster" || crdsSource
+			isSpecial := r.Provider == NativeProvider || r.Provider == ClusterProvider || crdsSource
 			if !isSpecial && !providerRefRE.MatchString(r.Provider) {
 				return fmt.Errorf("spec.resources[%d].provider: %q is not a valid provider reference "+
 					"(e.g. ghcr.io/org/provider-name:v1.2.3, or ...@sha256:<digest>)", i, r.Provider)

@@ -24,9 +24,10 @@ import (
 // digest-pins a source named "k8s" — which is why Validate refuses it in
 // spec.sources.
 const (
-	NativeProvider = "k8s"
-	APIVersion     = "factory.crossplane.io/v1alpha1"
-	Kind           = "Blueprint"
+	NativeProvider  = "k8s"
+	ClusterProvider = "cluster"
+	APIVersion      = "factory.crossplane.io/v1alpha1"
+	Kind            = "Blueprint"
 )
 
 // Blueprint is the root document.

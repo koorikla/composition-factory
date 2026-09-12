@@ -99,3 +99,33 @@ func TestValidateRootMetadataName(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSourcesRejectsClusterPseudoProvider(t *testing.T) {
+	bp := &Blueprint{
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "app"},
+		Spec: Spec{
+			XRD: XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "App",
+				Plural:  "apps",
+				Scope:   "Namespaced",
+				Parameters: map[string]Parameter{
+					"region": {Type: "string"},
+				},
+			},
+			Sources: []Source{
+				{Provider: "cluster"},
+			},
+		},
+	}
+	err := bp.Validate()
+	if err == nil {
+		t.Fatal("expected bp.Validate() to reject provider: cluster, got nil")
+	}
+	if !strings.Contains(err.Error(), "cluster") || !strings.Contains(err.Error(), "not a package source") {
+		t.Fatalf("expected error mentioning cluster not a package source, got: %v", err)
+	}
+}

@@ -78,6 +78,11 @@ func validateSources(sources []Source) error {
 				"kinds are vendored into cf itself and always available. Delete this source entry and set "+
 				"provider: %s on the resources that compose native kinds", i, s.Provider, NativeProvider)
 		}
+		if s.Provider == ClusterProvider {
+			return fmt.Errorf("spec.sources[%d].provider: %q is not a package source -- %q is a live "+
+				"discovery pseudo-provider. Delete this source entry and set provider: %s on the "+
+				"resources that compose cluster-discovered kinds", i, s.Provider, s.Provider, ClusterProvider)
+		}
 		if err := checkScalar(fmt.Sprintf("spec.sources[%d].provider", i), s.Provider); err != nil {
 			return err
 		}
