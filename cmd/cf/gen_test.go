@@ -277,6 +277,26 @@ func TestGenGroupSuffix(t *testing.T) {
 	}
 }
 
+func TestGenGroupSuffixRejectsNameOver63Chars(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	out := filepath.Join(dir, "out")
+
+	var genBuf bytes.Buffer
+	cmd := &GenCmd{
+		Blueprint:   bp,
+		Out:         out,
+		CacheDir:    cacheDir,
+		GroupSuffix: "verylonggroupsuffixthatpushesnameover63chars",
+	}
+	err := cmd.Run(&genBuf)
+	if err == nil {
+		t.Fatalf("expected error for group-suffix pushing name over 63 characters, got nil")
+	}
+	if !strings.Contains(err.Error(), "must be at most 63 characters") {
+		t.Errorf("error %q does not mention 63 characters limit", err.Error())
+	}
+}
+
 func TestGenEmitsRBACForNonPreGrantedKinds(t *testing.T) {
 	dir := t.TempDir()
 	bpPath := filepath.Join(dir, "k8s-ingress.cf.yaml")
