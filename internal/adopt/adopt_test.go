@@ -10301,3 +10301,85 @@ func TestNativeOnlyRoundTripDoesNotInjectProviderName(t *testing.T) {
 		t.Errorf("adopt.Adopt injected providerName into native-only blueprint: %+v", adoptedBP.Spec.XRD.Parameters)
 	}
 }
+
+func TestInferProviderMatchesDigestPinnedSource(t *testing.T) {
+	digestRef := "xpkg.upbound.io/upbound/provider-aws-sqs@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	bp := &blueprint.Blueprint{
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{
+				{Provider: digestRef},
+			},
+		},
+	}
+
+	got := inferProvider("sqs.aws.upbound.io/v1beta1", "Queue", "", nil, bp)
+	if got != digestRef {
+		t.Fatalf("inferProvider() = %q, want existing blueprint source %q", got, digestRef)
+	}
+}
+
+func TestAdoptPreservesDigestPinnedBlueprintSource(t *testing.T) {
+	digestRef := "xpkg.upbound.io/upbound/provider-aws-sqs@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	compositionYAML := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: App
+  resources:
+    - name: test-queue
+      base:
+        apiVersion: sqs.aws.upbound.io/v1beta1
+        kind: Queue
+        spec:
+          forProvider:
+            delaySeconds: 10
+`
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "app"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "App",
+				Plural:  "apps",
+				Scope:   "Namespaced",
+			},
+			Sources: []blueprint.Source{
+				{Provider: digestRef},
+			},
+		},
+	}
+
+	adoptedBP, _, err := Adopt([]byte(compositionYAML), Options{
+		BaseBlueprint: bp,
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(adoptedBP.Spec.Resources) == 0 {
+		t.Fatal("Adopt produced no resources")
+	}
+	r := adoptedBP.Spec.Resources[0]
+	if r.Provider != digestRef {
+		t.Errorf("resource Provider = %q, want existing digest-pinned source %q", r.Provider, digestRef)
+	}
+
+	foundDigest := false
+	for _, s := range adoptedBP.Spec.Sources {
+		if s.Provider == digestRef {
+			foundDigest = true
+		} else if strings.Contains(s.Provider, "provider-aws-sqs") {
+			t.Errorf("found duplicate/inferred provider source %q alongside digest ref %q in bp.Spec.Sources", s.Provider, digestRef)
+		}
+	}
+	if !foundDigest {
+		t.Errorf("digestRef %q missing from adopted bp.Spec.Sources: %+v", digestRef, adoptedBP.Spec.Sources)
+	}
+}

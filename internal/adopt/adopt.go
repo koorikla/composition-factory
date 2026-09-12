@@ -394,6 +394,9 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 			Resources: []blueprint.Resource{},
 		},
 	}
+	if opts.BaseBlueprint != nil {
+		bp.Spec.Sources = append(bp.Spec.Sources, opts.BaseBlueprint.Spec.Sources...)
+	}
 
 	// 1. Metadata
 	if m := srcCommentRE.FindSubmatch(manifest); len(m) >= 2 && string(m[1]) != "blueprint" {
@@ -1350,6 +1353,9 @@ func inferProvider(apiVersion, kind string, defaultProvider string, store *cache
 				pkgName := s.Provider
 				if i := strings.LastIndex(pkgName, "/"); i >= 0 {
 					pkgName = pkgName[i+1:]
+				}
+				if i := strings.Index(pkgName, "@"); i >= 0 {
+					pkgName = pkgName[:i]
 				}
 				if i := strings.Index(pkgName, ":"); i >= 0 {
 					pkgName = pkgName[:i]

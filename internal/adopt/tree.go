@@ -193,6 +193,9 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 			Resources: []blueprint.Resource{},
 		},
 	}
+	if opts.BaseBlueprint != nil {
+		bp.Spec.Sources = append(bp.Spec.Sources, opts.BaseBlueprint.Spec.Sources...)
+	}
 
 	// 1. Process Configuration package metadata and dependencies from crossplane.yaml
 	for _, cfgDoc := range configDocs {
