@@ -25,8 +25,7 @@ func TestKindsCommand(t *testing.T) {
 
 	// 1. List all kinds (cached Widget + native kinds like Deployment)
 	kindsCmd := &KindsCmd{
-		CacheDir:  cacheDir,
-		Blueprint: filepath.Join(dir, "doc.cf.yaml"),
+		CacheDir: cacheDir,
 	}
 	var out bytes.Buffer
 	if err := kindsCmd.Run(&out); err != nil {
@@ -42,9 +41,8 @@ func TestKindsCommand(t *testing.T) {
 
 	// 2. Filter kinds by query
 	kindsCmdQ := &KindsCmd{
-		Q:         "Widget",
-		CacheDir:  cacheDir,
-		Blueprint: filepath.Join(dir, "doc.cf.yaml"),
+		Q:        "Widget",
+		CacheDir: cacheDir,
 	}
 	out.Reset()
 	if err := kindsCmdQ.Run(&out); err != nil {
@@ -60,9 +58,8 @@ func TestKindsCommand(t *testing.T) {
 
 	// 3. Filter kinds by non-matching query
 	kindsCmdNone := &KindsCmd{
-		Q:         "NonExistentKind123",
-		CacheDir:  cacheDir,
-		Blueprint: filepath.Join(dir, "doc.cf.yaml"),
+		Q:        "NonExistentKind123",
+		CacheDir: cacheDir,
 	}
 	out.Reset()
 	if err := kindsCmdNone.Run(&out); err != nil {
@@ -79,9 +76,8 @@ func TestFieldsCommand(t *testing.T) {
 
 	// 1. Fields for Deployment (native kind)
 	fieldsCmd := &FieldsCmd{
-		Kind:      "Deployment",
-		CacheDir:  cacheDir,
-		Blueprint: filepath.Join(dir, "doc.cf.yaml"),
+		Kind:     "Deployment",
+		CacheDir: cacheDir,
 	}
 	var out bytes.Buffer
 	if err := fieldsCmd.Run(&out); err != nil {
@@ -97,10 +93,9 @@ func TestFieldsCommand(t *testing.T) {
 
 	// 2. Fields with --required
 	fieldsReqCmd := &FieldsCmd{
-		Kind:      "Deployment",
-		Required:  true,
-		CacheDir:  cacheDir,
-		Blueprint: filepath.Join(dir, "doc.cf.yaml"),
+		Kind:     "Deployment",
+		Required: true,
+		CacheDir: cacheDir,
 	}
 	out.Reset()
 	if err := fieldsReqCmd.Run(&out); err != nil {
@@ -113,10 +108,9 @@ func TestFieldsCommand(t *testing.T) {
 
 	// 3. Fields with --status
 	fieldsStatusCmd := &FieldsCmd{
-		Kind:      "Deployment",
-		Status:    true,
-		CacheDir:  cacheDir,
-		Blueprint: filepath.Join(dir, "doc.cf.yaml"),
+		Kind:     "Deployment",
+		Status:   true,
+		CacheDir: cacheDir,
 	}
 	out.Reset()
 	if err := fieldsStatusCmd.Run(&out); err != nil {
@@ -132,9 +126,8 @@ func TestFieldsCommand(t *testing.T) {
 
 	// 4. Unknown kind returns error
 	unknownCmd := &FieldsCmd{
-		Kind:      "NoSuchResourceKind",
-		CacheDir:  cacheDir,
-		Blueprint: filepath.Join(dir, "doc.cf.yaml"),
+		Kind:     "NoSuchResourceKind",
+		CacheDir: cacheDir,
 	}
 	if err := unknownCmd.Run(&out); err == nil {
 		t.Fatal("expected error for unknown kind, got nil")
@@ -142,9 +135,8 @@ func TestFieldsCommand(t *testing.T) {
 
 	// 5. Inexact/fuzzy kind match is refused with "did you mean" suggestion (CF-150)
 	fuzzyCmd := &FieldsCmd{
-		Kind:      "Deploymen",
-		CacheDir:  cacheDir,
-		Blueprint: filepath.Join(dir, "doc.cf.yaml"),
+		Kind:     "Deploymen",
+		CacheDir: cacheDir,
 	}
 	out.Reset()
 	if err := fuzzyCmd.Run(&out); err == nil {
