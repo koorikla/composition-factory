@@ -262,6 +262,30 @@ func applyXRDlessEvidence(bp *blueprint.Blueprint, compDocs []map[string]any, sy
 	}
 
 	for _, r := range bp.Spec.Resources {
+		if r.ForEach != "" {
+			if !strings.HasPrefix(r.ForEach, "env.") && !strings.HasPrefix(r.ForEach, "resources.") {
+				param := strings.TrimSpace(strings.TrimPrefix(r.ForEach, "params."))
+				if param != "" {
+					e := ev[param]
+					if e == nil {
+						e = &paramEvidence{}
+						ev[param] = e
+					}
+					hasDefault := false
+					if bpParam, ok := bp.Spec.XRD.Parameters[param]; ok && bpParam.Default != "" {
+						hasDefault = true
+					} else if baseBP != nil {
+						if bpParam, ok := baseBP.Spec.XRD.Parameters[param]; ok && bpParam.Default != "" {
+							hasDefault = true
+						}
+					}
+					if !hasDefault {
+						e.required = true
+					}
+					e.integer = true
+				}
+			}
+		}
 		if r.When != "" {
 			source, param, op, _, err := blueprint.ParseWhen(r.When)
 			if err == nil && (source == "params" || source == "") {

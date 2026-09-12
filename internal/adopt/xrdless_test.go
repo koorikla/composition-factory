@@ -961,3 +961,134 @@ func TestCompositionEvidence_PatchSets(t *testing.T) {
 		t.Errorf("pipeline patchSets: expected pipeRequired evidence with required=true, refs=1, got %+v", e)
 	}
 }
+
+// TestAdoptXRDlessGuardedLoopBound reproduces CF-446 (#338):
+// When adopting a Composition without an XRD where a forEach loop bound is
+// guarded in the template (e.g. {{- if hasKey $spec "replicas" }} wrapping
+// {{- range $i := until (int $spec.replicas) }}), applyXRDlessEvidence must
+// mark the parameter required and integer so bp.Validate() passes.
+func TestAdoptXRDlessGuardedLoopBound(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xclusters.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XCluster
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            {{- if hasKey $spec "replicas" }}
+            {{- range $i := until (int $spec.replicas) }}
+            ---
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: {{ printf "worker-%d" $i }}
+            spec:
+              replicas: 1
+            {{- end }}
+            {{- end }}
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate() failed: %v", err)
+	}
+	param, ok := bp.Spec.XRD.Parameters["replicas"]
+	if !ok {
+		t.Fatalf("expected parameter 'replicas' in bp.Spec.XRD.Parameters, got: %+v", bp.Spec.XRD.Parameters)
+	}
+	if !param.Required {
+		t.Errorf("replicas.Required = %v, want true", param.Required)
+	}
+	if param.Type != "integer" {
+		t.Errorf("replicas.Type = %q, want integer", param.Type)
+	}
+}
+
+func TestApplyXRDlessEvidence_ForEachVariants(t *testing.T) {
+	tests := []struct {
+		name         string
+		forEach      string
+		initialParam blueprint.Parameter
+		wantRequired bool
+		wantType     string
+	}{
+		{
+			name:         "params prefix without default",
+			forEach:      "params.replicas",
+			initialParam: blueprint.Parameter{},
+			wantRequired: true,
+			wantType:     "integer",
+		},
+		{
+			name:         "plain param name without default",
+			forEach:      "replicas",
+			initialParam: blueprint.Parameter{},
+			wantRequired: true,
+			wantType:     "integer",
+		},
+		{
+			name:         "params prefix with existing default",
+			forEach:      "params.replicas",
+			initialParam: blueprint.Parameter{Default: "3"},
+			wantRequired: false,
+			wantType:     "integer",
+		},
+		{
+			name:         "env prefix ignored",
+			forEach:      "env.replicas",
+			initialParam: blueprint.Parameter{},
+			wantRequired: false,
+			wantType:     "string", // settle fallback when not integer
+		},
+		{
+			name:         "resources prefix ignored",
+			forEach:      "resources.worker.status.replicas",
+			initialParam: blueprint.Parameter{},
+			wantRequired: false,
+			wantType:     "string", // settle fallback when not integer
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bp := &blueprint.Blueprint{
+				Spec: blueprint.Spec{
+					Resources: []blueprint.Resource{
+						{Name: "worker", ForEach: tc.forEach},
+					},
+					XRD: blueprint.XRD{
+						Parameters: map[string]blueprint.Parameter{
+							"replicas": tc.initialParam,
+						},
+					},
+				},
+			}
+			report := &LossReport{}
+			applyXRDlessEvidence(bp, nil, nil, report, nil, nil)
+			p := bp.Spec.XRD.Parameters["replicas"]
+			if p.Required != tc.wantRequired {
+				t.Errorf("replicas.Required = %v, want %v", p.Required, tc.wantRequired)
+			}
+			if p.Type != tc.wantType {
+				t.Errorf("replicas.Type = %q, want %q", p.Type, tc.wantType)
+			}
+		})
+	}
+}
