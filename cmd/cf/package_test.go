@@ -130,3 +130,23 @@ func TestPushPushesToRegistry(t *testing.T) {
 		t.Fatal("pushed package stream lacks the Configuration meta doc")
 	}
 }
+
+func TestPackageRejectsInvalidBlueprint(t *testing.T) {
+	dir, bp, cacheDir := seed(t)
+	raw, err := os.ReadFile(bp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidRaw := bytes.Replace(raw, []byte("group: platform.sparky.ee"), []byte("group: INVALID_UPPERCASE_GROUP"), 1)
+	invalidBP := filepath.Join(dir, "invalid.yaml")
+	if err := os.WriteFile(invalidBP, invalidRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "invalid.xpkg")
+	cmd := &PackageCmd{Blueprint: invalidBP, Out: out, CacheDir: cacheDir}
+	var buf bytes.Buffer
+	err = cmd.Run(&buf)
+	if err == nil {
+		t.Fatal("cf package succeeded on invalid blueprint, want error")
+	}
+}
