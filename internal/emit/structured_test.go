@@ -245,3 +245,133 @@ spec:
 		t.Errorf("expected templated: {{ $xr }}, got:\n%s", s)
 	}
 }
+
+// TestStatusWireSchemaTypeCompatibility verifies CF-349:
+// Wiring a status leaf to a field with an incompatible schema type must fail with
+// an isFieldTypeCompatible error naming the mismatched types, while compatible status
+// wires succeed.
+func TestStatusWireSchemaTypeCompatibility(t *testing.T) {
+	crdDoc := []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              forProvider:
+                required: [region]
+                properties:
+                  region: {type: string}
+                  fifoQueue: {type: boolean}
+                  maxMessageSize: {type: integer}
+                  url: {type: string}
+          status:
+            properties:
+              atProvider:
+                properties:
+                  arn: {type: string}
+                  fifoQueue: {type: boolean}
+                  maxMessageSize: {type: integer}
+`)
+	crds, err := schema.ParseCRDs([][]byte{crdDoc})
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+
+	newBlueprint := func(targetField string, fromWire string) *blueprint.Blueprint {
+		return &blueprint.Blueprint{
+			APIVersion: blueprint.APIVersion,
+			Kind:       blueprint.Kind,
+			Metadata:   blueprint.Metadata{Name: "xqueue"},
+			Spec: blueprint.Spec{
+				XRD: blueprint.XRD{
+					Group:   "platform.example.org",
+					Kind:    "XQueue",
+					Plural:  "xqueues",
+					Version: "v1alpha1",
+					Scope:   "Namespaced",
+					Parameters: map[string]blueprint.Parameter{
+						"providerName": {Type: "string", Required: true},
+					},
+				},
+				Resources: []blueprint.Resource{
+					{
+						Name: "queue1",
+						Kind: "Queue",
+						Fields: map[string]blueprint.Field{
+							"region": {Value: "eu-north-1"},
+						},
+					},
+					{
+						Name: "queue2",
+						Kind: "Queue",
+						Fields: map[string]blueprint.Field{
+							"region":    {Value: "eu-north-1"},
+							targetField: {From: fromWire},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("string status to boolean field fails with type incompatibility", func(t *testing.T) {
+		bp := newBlueprint("fifoQueue", "resources.queue1.status.atProvider.arn")
+		_, err := Composition(bp, crds)
+		if err == nil {
+			t.Fatal("expected Composition to fail when wiring string status to boolean field, got nil")
+		}
+		errMsg := err.Error()
+		if !strings.Contains(errMsg, "the wire would render a YAML scalar of the wrong type") {
+			t.Errorf("expected type incompatibility error, got: %s", errMsg)
+		}
+		if !strings.Contains(errMsg, `"boolean"`) || !strings.Contains(errMsg, `"string"`) {
+			t.Errorf("expected error to name mismatched types \"boolean\" and \"string\", got: %s", errMsg)
+		}
+	})
+
+	t.Run("string status to integer field fails with type incompatibility", func(t *testing.T) {
+		bp := newBlueprint("maxMessageSize", "resources.queue1.status.atProvider.arn")
+		_, err := Composition(bp, crds)
+		if err == nil {
+			t.Fatal("expected Composition to fail when wiring string status to integer field, got nil")
+		}
+		errMsg := err.Error()
+		if !strings.Contains(errMsg, "the wire would render a YAML scalar of the wrong type") {
+			t.Errorf("expected type incompatibility error, got: %s", errMsg)
+		}
+		if !strings.Contains(errMsg, `"integer"`) || !strings.Contains(errMsg, `"string"`) {
+			t.Errorf("expected error to name mismatched types \"integer\" and \"string\", got: %s", errMsg)
+		}
+	})
+
+	t.Run("compatible status types succeed", func(t *testing.T) {
+		// String status to string target
+		bpStr := newBlueprint("url", "resources.queue1.status.atProvider.arn")
+		if _, err := Composition(bpStr, crds); err != nil {
+			t.Errorf("wiring string status to string target failed: %v", err)
+		}
+
+		// Boolean status to boolean target
+		bpBool := newBlueprint("fifoQueue", "resources.queue1.status.atProvider.fifoQueue")
+		if _, err := Composition(bpBool, crds); err != nil {
+			t.Errorf("wiring boolean status to boolean target failed: %v", err)
+		}
+
+		// Integer status to integer target
+		bpInt := newBlueprint("maxMessageSize", "resources.queue1.status.atProvider.maxMessageSize")
+		if _, err := Composition(bpInt, crds); err != nil {
+			t.Errorf("wiring integer status to integer target failed: %v", err)
+		}
+	})
+}

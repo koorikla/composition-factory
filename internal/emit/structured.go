@@ -271,6 +271,9 @@ func resolveFieldRHSWithVisited(p string, f blueprint.Field, r blueprint.Resourc
 			if err != nil {
 				return s, "", "", err
 			}
+			if !isFieldTypeCompatible(targetType, leafType, isMap) {
+				return s, "", "", fmt.Errorf("resource %q field %q has type %q in the CRD schema, but status path %q has type %q — the wire would render a YAML scalar of the wrong type, which the API server rejects on apply", r.Name, p, targetType, strings.Join(ref.StatusPath, "."), leafType)
+			}
 			s.kind = rhsStatus
 			s.resource = ref.Resource
 			s.statusPath = strings.Join(ref.StatusPath, ".")
