@@ -406,7 +406,12 @@ export const store = {
    * @returns {Promise<Blueprint|null>}
    */
   async renameResource(name, to) {
-    return this._paramOp("renameResource", function () { return api.renameResource(name, to); });
+    const self = this;
+    return this._paramOp("renameResource", async function () {
+      const doc = await api.renameResource(name, to);
+      self.renamePosition(name, to);
+      return doc;
+    });
   },
 
   /**

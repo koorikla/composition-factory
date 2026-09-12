@@ -448,6 +448,7 @@ function resourceCardHTML(d, r, sel) {
 /* ---------- dependency layout (slice 46) ----------
    Delegated to canvas/layout.js for standalone unit-testability. */
 const autoPlaced = new Set(); // cards the layout owns until the user drags them
+if (typeof window !== "undefined") window._canvasAutoPlaced = autoPlaced;
 let lastLayoutSig = "";       // measured-size signature; re-lay only on change
 
 function getVisibleCanvasBounds() {
@@ -1054,8 +1055,27 @@ function openCtxMenu(x, y, resName) {
         rename: function () {
           const to = window.prompt('Rename "' + resName + '" to:', resName);
           if (!to || to === resName) return;
+          const wasAutoPlaced = autoPlaced.has(resName);
+          if (wasAutoPlaced) {
+            autoPlaced.delete(resName);
+            autoPlaced.add(to);
+          }
+          if (cardSizes[resName]) {
+            cardSizes[to] = cardSizes[resName];
+            delete cardSizes[resName];
+          }
           S.renameResource(resName, to).then(function (ok) {
-            if (!ok) return;
+            if (!ok) {
+              if (wasAutoPlaced) {
+                autoPlaced.delete(to);
+                autoPlaced.add(resName);
+              }
+              if (cardSizes[to]) {
+                cardSizes[resName] = cardSizes[to];
+                delete cardSizes[to];
+              }
+              return;
+            }
             const p = S.getPosition(resName);
             if (p) {
               if (typeof S.renamePosition === "function") {

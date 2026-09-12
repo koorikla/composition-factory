@@ -37,4 +37,6 @@ interface HTMLElement {
 interface Window {
   store?: any;
   clearErrorToast?: () => void;
+  _canvasAutoPlaced?: Set<string>;
 }
+
