@@ -155,11 +155,14 @@ export function triggerExpressionPreview(textarea, isEnv, path) {
     return;
   }
 
-  if (previewTimers[previewKey]) {
-    clearTimeout(previewTimers[previewKey]);
+  // One debounce per editor, not per path: after a commit re-render both
+  // copies trigger, and a shared key would let the second cancel the first.
+  var timerKey = previewKey + "|" + (scope.classList && scope.classList.contains("essentials") ? "ess" : "fld");
+  if (previewTimers[timerKey]) {
+    clearTimeout(previewTimers[timerKey]);
   }
 
-  previewTimers[previewKey] = setTimeout(function () {
+  previewTimers[timerKey] = setTimeout(function () {
     var selRes = state.selectedResource ? state.selectedResource() : null;
     var resName = selRes ? selRes.name : "";
     state.api.previewExpression(val, resName).then(function (resp) {

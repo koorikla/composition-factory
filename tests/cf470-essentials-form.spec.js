@@ -174,4 +174,24 @@ test.describe('CF-470 — essentials form', () => {
       return !!(r && r.fields['spec.type']);
     }).toBe(false);
   });
+
+  test('the essentials raw editor keeps its own expression preview across a re-render', async ({ page }) => {
+    await page.goto('/');
+    await dropKind(page, 'Deployment', 'apps/v1', 400, 300);
+    await page.click('.node[data-id="deployment"] .node-h');
+    // All view: the field list shows the same path, so two raw editors exist.
+    await page.click('#fseg button[data-f="all"]');
+    const row = page.locator(`#insp .essentials [data-ess-row="${IMG}"]`);
+    await row.locator('button[data-m="r"]').click();
+    const ta = row.locator(`textarea[data-raw="${IMG}"]`);
+    await ta.fill('{{ $xr }}-x');
+    await expect(row.locator('.expr-preview')).toBeVisible();
+    await expect(row.locator('.expr-preview')).toHaveClass(/ok/);
+    await ta.press('Tab'); // blur commits the raw value; the pane re-renders
+    const listRow = page.locator('#insp .fld').filter({ has: page.locator(`textarea[data-raw="${IMG}"]`) });
+    await expect(listRow.locator('.expr-preview')).toBeVisible();
+    // The essentials copy must keep its own preview, not lose it to the list copy.
+    await expect(row.locator('.expr-preview')).toBeVisible();
+    await expect(row.locator('.expr-preview')).toHaveClass(/ok/);
+  });
 });
