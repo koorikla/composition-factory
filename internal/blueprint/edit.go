@@ -210,13 +210,13 @@ func rawReferencesResource(raw, name string) bool {
 	if raw == "" || name == "" {
 		return false
 	}
-	if strings.Contains(raw, `"`+name+`"`) ||
-		strings.Contains(raw, `'`+name+`'`) ||
-		strings.Contains(raw, "`"+name+"`") {
+	q := regexp.QuoteMeta(name)
+	reDotted := regexp.MustCompile(`(?:(?:\$|\$\.|\.)?observed\.resources|resources)\.` + q + `($|[^a-zA-Z0-9_-])`)
+	if reDotted.MatchString(raw) {
 		return true
 	}
-	re := regexp.MustCompile(`(?:\$?\.observed\.resources|\$observed\.resources|resources)\.` + regexp.QuoteMeta(name) + `($|[^a-zA-Z0-9_-])`)
-	return re.MatchString(raw)
+	reIndex := regexp.MustCompile(`\bindex\s+(?:(?:\$|\$\.|\.)?(?:observed\.)?resources)\s+(?:"` + q + `"|'` + q + `'|` + "`" + q + "`)" + `($|[^a-zA-Z0-9_-])`)
+	return reIndex.MatchString(raw)
 }
 
 // anyRawParam reports whether any entry in fields has a raw expression referencing param name.
@@ -245,11 +245,14 @@ func rewriteRawResource(raw, from, to string) string {
 		return raw
 	}
 	r := raw
-	r = strings.ReplaceAll(r, `"`+from+`"`, `"`+to+`"`)
-	r = strings.ReplaceAll(r, `'`+from+`'`, `'`+to+`'`)
-	r = strings.ReplaceAll(r, "`"+from+"`", "`"+to+"`")
-	re := regexp.MustCompile(`((?:\$?\.observed\.resources|\$observed\.resources|resources)\.)` + regexp.QuoteMeta(from) + `($|[^a-zA-Z0-9_-])`)
-	return re.ReplaceAllString(r, "${1}"+to+"${2}")
+	reDotted := regexp.MustCompile(`((?:(?:\$|\$\.|\.)?observed\.resources|resources)\.)` + regexp.QuoteMeta(from) + `($|[^a-zA-Z0-9_-])`)
+	r = reDotted.ReplaceAllString(r, "${1}"+to+"${2}")
+
+	for _, q := range []string{`"`, `'`, "`"} {
+		reIndex := regexp.MustCompile(`(\bindex\s+(?:(?:\$|\$\.|\.)?(?:observed\.)?resources)\s+` + regexp.QuoteMeta(q) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(q) + `)`)
+		r = reIndex.ReplaceAllString(r, "${1}"+to+"${2}")
+	}
+	return r
 }
 
 // rewriteRawParam replaces references to from with to in a raw template/expression.
