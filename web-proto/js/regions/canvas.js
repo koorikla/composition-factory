@@ -1322,16 +1322,21 @@ function onKeyDown(e) {
     return;
   }
 
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && e.key === "v" && copiedResource) {
+    e.preventDefault();
+    duplicateResource(copiedResource);
+    return;
+  }
+
   const sel = S.state.selectedResource;
   if (!sel || sel === XR_ID || sel === ENV_ID) return;
   const d = doc();
   const res = d && (d.spec.resources || []).find(function (r) { return r.name === sel; });
-  const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key === "c") {
     if (String(window.getSelection && window.getSelection())) return; // real text copy wins
     if (res) { copiedResource = JSON.parse(JSON.stringify(res)); }
-  } else if (mod && e.key === "v" && copiedResource) { e.preventDefault(); duplicateResource(copiedResource); }
-  else if ((e.key === "Delete" || e.key === "Backspace") && res) { e.preventDefault(); removeResource(sel); }
+  } else if ((e.key === "Delete" || e.key === "Backspace") && res) { e.preventDefault(); removeResource(sel); }
 }
 
 function onCwClick(e) {
