@@ -237,3 +237,78 @@ func TestPipelinePositionsAreAccepted(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 }
+
+func TestValidatePipelineKCLBuiltinCollision(t *testing.T) {
+	s := pipelined(PipelineStep{
+		Name:        "step-a",
+		FunctionRef: KCLFunctionName,
+		Package:     "xpkg.upbound.io/crossplane-contrib/function-kcl:v0.11.0",
+	})
+	s = strings.Replace(s, "spec:\n", "spec:\n  emit:\n    engine: kcl\n", 1)
+	_, err := Load(write(t, s))
+	if err == nil {
+		t.Fatalf("validate accepted functionRef %q which collides with engine's built-in function", KCLFunctionName)
+	}
+}
+
+func TestValidatePipelineKCLAllowsGoTemplating(t *testing.T) {
+	s := pipelined(PipelineStep{
+		Name:        "step-a",
+		FunctionRef: TemplatingFunctionName,
+		Package:     "xpkg.upbound.io/crossplane-contrib/function-go-templating:v0.11.0",
+	})
+	s = strings.Replace(s, "spec:\n", "spec:\n  emit:\n    engine: kcl\n", 1)
+	if _, err := Load(write(t, s)); err != nil {
+		t.Fatalf("validate rejected functionRef %q under engine: kcl: %v", TemplatingFunctionName, err)
+	}
+}
+
+func TestValidatePipeline_EnvironmentConfigsPositionAfterRejected(t *testing.T) {
+	bp := &Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata: Metadata{
+			Name: "test-env-pos",
+		},
+		Spec: Spec{
+			XRD: XRD{
+				Group:   "example.org",
+				Kind:    "TestXR",
+				Plural:  "testxrs",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+				Parameters: map[string]Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+			Environment: map[string]EnvironmentKey{
+				"region": {Type: "string"},
+			},
+			Resources: []Resource{
+				{
+					Name: "bucket",
+					Kind: "Bucket",
+					Fields: map[string]Field{
+						"region": {From: "env.region"},
+					},
+				},
+			},
+			Pipeline: []PipelineStep{
+				{
+					Name:        "env-conf",
+					FunctionRef: EnvironmentConfigsFunctionName,
+					Package:     EnvironmentConfigsFunctionPackage,
+					Position:    PositionAfter,
+				},
+			},
+		},
+	}
+
+	err := bp.Validate()
+	if err == nil {
+		t.Fatal("expected Validate to reject function-environment-configs with position: after, got nil")
+	}
+	if !strings.Contains(err.Error(), "function-environment-configs") || !strings.Contains(err.Error(), "position") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
