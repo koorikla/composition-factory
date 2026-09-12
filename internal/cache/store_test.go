@@ -966,3 +966,18 @@ func TestLockFindFunctionQualifiedRepoMismatch(t *testing.T) {
 		t.Fatalf("expected unqualified bare fallback to find function, got (%+v, %v)", entry, ok)
 	}
 }
+
+func TestStoreLoadUncachedFunctionRefError(t *testing.T) {
+	s := New(t.TempDir())
+	ref := "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0"
+	_, err := s.Load(ref)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "run: cf function add") {
+		t.Errorf("got error %q, expected suggestion 'run: cf function add'", err.Error())
+	}
+	if strings.Contains(err.Error(), "provider ") {
+		t.Errorf("function ref was called provider in error: %q", err.Error())
+	}
+}

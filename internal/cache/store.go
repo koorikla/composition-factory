@@ -142,6 +142,9 @@ func (s *Store) loadEntry(ref string) (*Entry, error) {
 	path := filepath.Join(s.Root, slug(ref), "crds.json")
 	body, err := os.ReadFile(path)
 	if err != nil {
+		if isFunctionRef(ref) {
+			return nil, fmt.Errorf("function %q is not in the cache; run: cf function add %s", ref, ref)
+		}
 		return nil, fmt.Errorf("provider %q is not in the cache; run: cf provider add %s", ref, ref)
 	}
 	var entry Entry
