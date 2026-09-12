@@ -396,7 +396,7 @@ export var boxClickActions = [
         "cel-filter": {
           name: "cel-filter",
           functionRef: "function-cel-filter",
-          package: "xpkg.crossplane.io/crossplane-contrib/function-cel-filter:v0.3.0",
+          package: "xpkg.crossplane.io/crossplane-contrib/function-cel-filter:v0.2.0",
           position: "after"
         },
         "extra-resources": {
@@ -408,11 +408,16 @@ export var boxClickActions = [
         "custom": {
           name: "custom-step",
           functionRef: "function-custom",
-          package: "xpkg.crossplane.io/crossplane-contrib/function-custom:v0.1.0",
+          package: "",
           position: "after"
         }
       };
-      var newStep = pipePresetMap[preset] || pipePresetMap.custom;
+      var newStep = Object.assign({}, pipePresetMap[preset] || pipePresetMap.custom);
+      if (preset === "custom") {
+        var pkg = window.prompt("Function package reference (e.g. xpkg.crossplane.io/...):");
+        if (!pkg || !pkg.trim()) return;
+        newStep.package = pkg.trim();
+      }
       state.op(function () {
         return state.store.replaceDoc(function (d) {
           d.spec.pipeline = d.spec.pipeline || [];
