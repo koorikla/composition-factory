@@ -300,8 +300,7 @@ function drawKindsEmpty(q) {
 
   if (kindsCatMatches && kindsCatMatches.length > 0) {
     const doc = store && store.state && store.state.doc;
-    const docSources = (doc && doc.spec && doc.spec.sources) || [];
-    const installed = providers !== null ? providers : docSources;
+    const installed = (doc && doc.spec && doc.spec.sources) || [];
     const qLower = (q || "").toLowerCase();
     const rankedCat = kindsCatMatches.slice();
     if (qLower) {
@@ -318,10 +317,10 @@ function drawKindsEmpty(q) {
     h += '<div style="padding:6px 10px;font-size:10px;font-weight:600;color:var(--muted);background:var(--sunk);border-bottom:1px solid var(--rule);text-transform:uppercase;letter-spacing:0.5px">Matching Catalogue Providers</div>';
     rankedCat.slice(0, 5).forEach(function (c) {
       const isInstalled = (installed || []).some(function (s) {
-        if (s.error) return false;
-        const sp = (s.provider || "").split(":")[0];
+        if (/** @type {any} */ (s).error) return false;
+        const sp = (s.provider || s.crds || "").split(":")[0];
         const cr = (c.ref || "").split(":")[0];
-        return s.provider === c.ref || (cr && sp && sp === cr);
+        return (s.provider || s.crds) === c.ref || (cr && sp && sp === cr);
       });
       const instInfo = (providers || []).find(function (p) { return p.ref === c.ref; });
       const countLabel = instInfo && instInfo.kinds ? 'Installed \u00b7 ' + instInfo.kinds + ' kinds' : 'Installed';
@@ -688,16 +687,65 @@ function drawSources() {
   }
 
   // Providers tab
-  let sources = providers !== null
-    ? providers.map(function (p) { return { provider: p.ref, digest: p.digest, kinds: p.kinds, error: p.error || "", status: p.status || "" }; })
-    : (doc.spec && doc.spec.sources || []).slice();
+  const declaredSources = (doc.spec && doc.spec.sources || []).map(function (s) {
+    const ref = s.provider || s.crds || "";
+    const p = (providers || []).find(function (item) {
+      if (item.ref === ref) return true;
+      if (s.provider && item.ref) {
+        const sp = s.provider.split(":")[0];
+        const ip = item.ref.split(":")[0];
+        return sp && ip && sp === ip;
+      }
+      return false;
+    });
+    /** @type {{ provider: string, digest: string, kinds: number, error: string, status: string, crds?: string, native?: boolean }} */
+    const itemEntry = {
+      provider: ref,
+      digest: (p && p.digest) || "",
+      kinds: (p && p.kinds) !== undefined ? p.kinds : 0,
+      error: (p && p.error) || "",
+      status: (p && p.status) || "",
+      crds: s.crds,
+      native: false
+    };
+    return itemEntry;
+  });
+  let sources = declaredSources.slice();
+  (providers || []).forEach(function (p) {
+    if (p.status === "loading") {
+      const already = sources.some(function (s) {
+        if (s.provider === p.ref) return true;
+        if (s.provider && p.ref) {
+          const sp = s.provider.split(":")[0];
+          const ip = p.ref.split(":")[0];
+          return sp && ip && sp === ip;
+        }
+        return false;
+      });
+      if (!already) {
+        /** @type {{ provider: string, digest: string, kinds: number, error: string, status: string, crds?: string, native?: boolean }} */
+        const loadEntry = {
+          provider: p.ref,
+          digest: p.digest || "",
+          kinds: p.kinds || 0,
+          error: p.error || "",
+          status: "loading",
+          native: false
+        };
+        sources.push(loadEntry);
+      }
+    }
+  });
   const nativeCount = kinds.filter(function (k) { return k.provider === "k8s"; }).length;
-  if (nativeCount) sources = sources.concat([{ provider: "k8s", digest: "", kinds: nativeCount, native: true }]);
+  const docUsesK8s = (doc.spec && doc.spec.resources || []).some(function (r) { return r.provider === "k8s"; });
+  if (nativeCount || docUsesK8s) {
+    sources = sources.concat([{ provider: "k8s", digest: "", kinds: nativeCount, error: "", status: "", native: true }]);
+  }
   h += '<div class="grp"><span class="lbl">Installed Providers</span><span class="n">' + sources.length + "</span></div>";
   h += '<div style="padding:2px 10px 8px"><button class="btn" id="addCrdsBtn" ' +
     'title="Add any CRD-backed kind (an Argo Workflow, another composition\u2019s XR\u2026) from a CRD manifest file">+ Add CRDs from file</button>' +
     '<input type="file" id="addCrdsFile" accept=".yaml,.yml" hidden></div>';
-  if (!sources.length) h += '<div class="empty">No sources declared.</div>';
+  if (!declaredSources.length && !sources.some(function (s) { return s.status === "loading"; })) h += '<div class="empty">No sources declared.</div>';
   sources.forEach(function (s) {
     const ref = s && s.provider || "";
     if (s.error) {
