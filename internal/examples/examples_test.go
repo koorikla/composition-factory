@@ -45,7 +45,7 @@ func TestAllExamplesAreValidBlueprints(t *testing.T) {
 }
 
 func TestGetExample(t *testing.T) {
-	for _, id := range []string{"irsa", "rds-postgres", "k8s-app", "k8s-workload", "k8s-cronjob", "s3-bucket", "sqs-queue"} {
+	for _, id := range []string{"irsa", "rds-postgres", "k8s-app", "k8s-workload", "k8s-cronjob", "s3-bucket", "sqs-queue", "gcp-storage", "azure-postgres", "cloud-database", "external-secrets"} {
 		ex, err := Get(id)
 		if err != nil {
 			t.Errorf("Get(%q) returned error: %v", id, err)

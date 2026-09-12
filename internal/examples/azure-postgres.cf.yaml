@@ -1,0 +1,71 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: azure-postgres
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-azure-dbforpostgresql:v2.7.0
+  xrd:
+    group: db.azure.sparky.ee
+    kind: XAzurePostgreSQL
+    plural: xazurepostgresqls
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: ProviderConfig reference to reconcile against.
+      location:
+        type: string
+        default: westeurope
+        description: Azure region for PostgreSQL Flexible Server.
+      resourceGroupName:
+        type: string
+        required: true
+        description: Azure Resource Group name.
+      serverName:
+        type: string
+        required: true
+        description: Azure Flexible Server PostgreSQL name.
+      skuName:
+        type: string
+        default: B_Standard_B1ms
+        description: SKU tier and size for the Flexible Server.
+      version:
+        type: string
+        default: "15"
+        description: PostgreSQL major version.
+      storageMb:
+        type: integer
+        default: "32768"
+        description: Storage limit for the server in MB.
+      startIpAddress:
+        type: string
+        default: 0.0.0.0
+        description: Start IP address for firewall rule.
+      endIpAddress:
+        type: string
+        default: 0.0.0.0
+        description: End IP address for firewall rule.
+  resources:
+    - name: server
+      kind: FlexibleServer
+      provider: ghcr.io/crossplane-contrib/provider-azure-dbforpostgresql:v2.7.0
+      envelope:
+        writeConnectionSecretToRef.name: {from: params.serverName}
+      fields:
+        location: {from: params.location}
+        resourceGroupName: {from: params.resourceGroupName}
+        skuName: {from: params.skuName}
+        version: {from: params.version}
+        storageMb: {from: params.storageMb}
+        administratorLogin: {value: "psqladmin"}
+    - name: firewall-rule
+      kind: FirewallRule
+      provider: ghcr.io/crossplane-contrib/provider-azure-dbforpostgresql:v2.7.0
+      fields:
+        serverId: {from: resources.server.status.atProvider.id}
+        resourceGroupName: {from: params.resourceGroupName}
+        startIpAddress: {from: params.startIpAddress}
+        endIpAddress: {from: params.endIpAddress}

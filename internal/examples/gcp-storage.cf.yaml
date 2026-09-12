@@ -1,0 +1,47 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: gcp-storage
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-gcp-storage:v3.0.0
+  xrd:
+    group: storage.gcp.sparky.ee
+    kind: XGCPStorageBucket
+    plural: xgcpstoragebuckets
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: ProviderConfig reference to reconcile against.
+      location:
+        type: string
+        default: US
+        description: Google Cloud Storage bucket location or multi-region.
+      bucketName:
+        type: string
+        required: true
+        description: Globally unique GCS bucket name.
+      storageClass:
+        type: string
+        default: STANDARD
+        enum:
+          - STANDARD
+          - NEARLINE
+          - COLDLINE
+          - ARCHIVE
+        description: Default storage class for objects stored in the bucket.
+      versioning:
+        type: boolean
+        default: "true"
+        description: Whether object versioning is enabled on the bucket.
+  resources:
+    - name: bucket
+      kind: Bucket
+      provider: ghcr.io/crossplane-contrib/provider-gcp-storage:v3.0.0
+      fields:
+        location: {from: params.location}
+        storageClass: {from: params.storageClass}
+        versioning[0].enabled: {from: params.versioning}

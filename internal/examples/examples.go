@@ -35,6 +35,18 @@ var k8sWorkloadYAML string
 //go:embed k8s-cronjob.cf.yaml
 var k8sCronJobYAML string
 
+//go:embed gcp-storage.cf.yaml
+var gcpStorageYAML string
+
+//go:embed azure-postgres.cf.yaml
+var azurePostgresYAML string
+
+//go:embed cloud-database.cf.yaml
+var cloudDatabaseYAML string
+
+//go:embed external-secrets.cf.yaml
+var externalSecretsYAML string
+
 // Example represents a curated starter blueprint available in Composition Factory.
 type ExampleIcon struct {
 	Label string `json:"label"`
@@ -122,6 +134,42 @@ func All() []Example {
 			Sources:     []string{"ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0"},
 			Icon:        ExampleIcon{Label: "SQS", Color: "#e11d48"},
 			YAML:        strings.TrimSpace(sqsQueueYAML),
+		},
+		{
+			ID:          "gcp-storage",
+			Name:        "Google Cloud Storage Bucket",
+			Description: "Production-ready Google Cloud Storage bucket with configurable location, storage class, and object versioning.",
+			Tags:        []string{"GCP", "Storage", "GCS", "Bucket"},
+			Sources:     []string{"ghcr.io/crossplane-contrib/provider-gcp-storage:v3.0.0"},
+			Icon:        ExampleIcon{Label: "GCS", Color: "#0284c7"},
+			YAML:        strings.TrimSpace(gcpStorageYAML),
+		},
+		{
+			ID:          "azure-postgres",
+			Name:        "Azure Flexible Server PostgreSQL",
+			Description: "Production-ready Azure Database for PostgreSQL Flexible Server with compute sizing, storage allocation, and integrated firewall rule.",
+			Tags:        []string{"Azure", "PostgreSQL", "Database", "FlexibleServer", "Firewall"},
+			Sources:     []string{"ghcr.io/crossplane-contrib/provider-azure-dbforpostgresql:v2.7.0"},
+			Icon:        ExampleIcon{Label: "AZURE", Color: "#0891b2"},
+			YAML:        strings.TrimSpace(azurePostgresYAML),
+		},
+		{
+			ID:          "cloud-database",
+			Name:        "Cloud-Agnostic Portable Database",
+			Description: "Zero-dependency portable database abstraction composing an in-cluster PostgreSQL StatefulSet, Service, and credentials Secret.",
+			Tags:        []string{"Cloud-Agnostic", "Database", "PostgreSQL", "Kubernetes", "StatefulSet"},
+			Sources:     []string{},
+			Icon:        ExampleIcon{Label: "DB", Color: "#059669"},
+			YAML:        strings.TrimSpace(cloudDatabaseYAML),
+		},
+		{
+			ID:          "external-secrets",
+			Name:        "External Secrets Operator Integration",
+			Description: "Kubernetes secret synchronization topology integrating External Secrets Operator with vault backends via SecretStore and ExternalSecret annotations.",
+			Tags:        []string{"Security", "Kubernetes", "External Secrets", "Vault", "Annotations"},
+			Sources:     []string{},
+			Icon:        ExampleIcon{Label: "ESO", Color: "#e11d48"},
+			YAML:        strings.TrimSpace(externalSecretsYAML),
 		},
 	}
 }

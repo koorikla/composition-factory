@@ -1,0 +1,64 @@
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: cloud-database
+spec:
+  sources: []
+  xrd:
+    group: database.sparky.ee
+    kind: XDatabase
+    plural: xdatabases
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: ProviderConfig reference to reconcile against.
+      dbName:
+        type: string
+        default: postgres
+        description: Name of the PostgreSQL database.
+      username:
+        type: string
+        default: postgres
+        description: Master username for PostgreSQL.
+      password:
+        type: string
+        default: postgres
+        description: Master password for PostgreSQL.
+      image:
+        type: string
+        default: postgres:15-alpine
+        description: Container image for PostgreSQL.
+      replicas:
+        type: integer
+        default: "1"
+        description: Number of database replicas in the StatefulSet.
+  resources:
+    - name: db-secret
+      kind: Secret
+      provider: k8s
+      fields:
+        stringData[POSTGRES_DB]: {from: params.dbName}
+        stringData[POSTGRES_USER]: {from: params.username}
+        stringData[POSTGRES_PASSWORD]: {from: params.password}
+    - name: db-service
+      kind: Service
+      provider: k8s
+      fields:
+        spec.selector[app]: {value: postgres}
+        spec.ports[0].port: {value: 5432}
+        spec.ports[0].targetPort: {value: 5432}
+    - name: db-statefulset
+      kind: StatefulSet
+      provider: k8s
+      fields:
+        spec.serviceName: {from: resources.db-service.metadata.name}
+        spec.replicas: {from: params.replicas}
+        spec.selector.matchLabels[app]: {value: postgres}
+        spec.template.metadata.labels[app]: {value: postgres}
+        spec.template.spec.containers[0].name: {value: postgres}
+        spec.template.spec.containers[0].image: {from: params.image}
+        spec.template.spec.containers[0].ports[0].containerPort: {value: 5432}
+        spec.template.spec.containers[0].envFrom[0].secretRef.name: {from: resources.db-secret.metadata.name}

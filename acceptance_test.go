@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
+	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/emit"
 	"github.com/koorikla/compositionfactory/internal/examples"
 	"github.com/koorikla/compositionfactory/internal/rendertest"
@@ -1955,6 +1956,12 @@ func TestAcceptanceAllStarterExamplesRender(t *testing.T) {
 			// Copy lockfile to bpDir so cf gen can resolve locked providers
 			if lockData, err := os.ReadFile(lockFile); err == nil {
 				_ = os.WriteFile(filepath.Join(bpDir, ".cf.lock"), lockData, 0o644)
+			}
+
+			// Skip examples whose sources are not pre-cached in testCacheDir
+			store := cache.New(cacheDir)
+			if _, err := cache.LoadSources(store, b, bpDir); err != nil {
+				t.Skipf("sources not pre-cached in %s: %v", cacheDir, err)
 			}
 
 			outDir := filepath.Join(bpDir, "out")
