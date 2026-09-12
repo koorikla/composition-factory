@@ -233,6 +233,9 @@ func (b *Blueprint) validateFields(r Resource) error {
 				r.Name, p, f.Raw, b.Engine())
 		}
 		if f.Template != "" {
+			if b.Engine() != EngineGoTemplating {
+				return fmt.Errorf("resource %q field %q: engine %q does not support template: fields", r.Name, p, b.Engine())
+			}
 			if _, ok := b.Spec.Templates[f.Template]; !ok {
 				return fmt.Errorf("resource %q field %q: references unknown template %q "+
 					"(declare it under spec.templates)", r.Name, p, f.Template)

@@ -138,3 +138,65 @@ func TestValidateRejectsFileSystemWithPythonEngine(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateRejectsGoTemplateFeaturesWithNonGoEngines(t *testing.T) {
+	baseNoRes := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue
+spec:
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2
+  xrd:
+    group: platform.sparky.ee
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+`
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name:    "kcl with templates",
+			yaml:    valid + "  emit:\n    engine: kcl\n  templates:\n    cf.tag: \"value\"\n",
+			wantErr: `spec.templates: engine "kcl" does not support template: blocks`,
+		},
+		{
+			name:    "python with conventions",
+			yaml:    valid + "  emit:\n    engine: python\n  templates:\n    cf.tag: \"value\"\n  conventions:\n    - match: tags\n      template: cf.tag\n",
+			wantErr: `spec.conventions: engine "python" does not support template: conventions`,
+		},
+		{
+			name:    "kcl with environment",
+			yaml:    valid + "  emit:\n    engine: kcl\n  environment:\n    vpcId:\n      type: string\n",
+			wantErr: `spec.environment: engine "kcl" does not support spec.environment`,
+		},
+		{
+			name:    "python with field template",
+			yaml:    baseNoRes + "  emit:\n    engine: python\n  resources:\n    - name: queue\n      kind: Queue\n      fields:\n        region:\n          template: cf.tag\n",
+			wantErr: `engine "python" does not support template: fields`,
+		},
+		{
+			name:    "kcl with annotation template",
+			yaml:    baseNoRes + "  emit:\n    engine: kcl\n  resources:\n    - name: queue\n      kind: Queue\n      annotations:\n        example.com/tag:\n          template: cf.tag\n",
+			wantErr: `engine "kcl" does not support template: fields`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(write(t, tt.yaml))
+			if err == nil {
+				t.Fatalf("Load() succeeded, want error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Load() error = %q, want containing %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
