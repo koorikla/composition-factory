@@ -2502,7 +2502,7 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 	envMatches := reEnvVar.FindAllString(tmpl, -1)
 	for _, raw := range envMatches {
 		key := matchEnvVar(raw)
-		if key != "" && isValidParamIdentifier(key) {
+		if key != "" && isFlatParamIdentifier(key) {
 			ensureEnvDeclared(bp, key, "string")
 		}
 	}
@@ -2680,7 +2680,7 @@ func discoverObjectParamsFromPatches(resources []any, patchSetsMap map[string][]
 		pType, _ := pMap["type"].(string)
 		if pType == "FromEnvironmentFieldPath" {
 			fromPath, _ := pMap["fromFieldPath"].(string)
-			if fromPath != "" && isValidParamIdentifier(fromPath) {
+			if fromPath != "" && isFlatParamIdentifier(fromPath) {
 				ensureEnvDeclared(bp, fromPath, "string")
 			}
 			return
@@ -2987,8 +2987,12 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 		}
 	} else if pType == "FromEnvironmentFieldPath" {
 		envKey := fromPath
-		if envKey == "" || !isValidParamIdentifier(envKey) {
-			report.Record(patchPath, fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
+		if envKey == "" || !isFlatParamIdentifier(envKey) {
+			if strings.Contains(fromPath, ".") {
+				report.Record(patchPath, fmt.Sprintf("unsupported nested fromFieldPath %q in patch: environment keys must be flat camelCase identifiers", fromPath))
+			} else {
+				report.Record(patchPath, fmt.Sprintf("unsupported fromFieldPath %q in patch: environment keys must be flat camelCase identifiers", fromPath))
+			}
 			return
 		}
 		ensureEnvDeclared(bp, envKey, "string")
@@ -3193,6 +3197,9 @@ func insertParamDefaultIntoMap(props map[string]blueprint.Parameter, parts []str
 }
 
 func ensureEnvDeclared(bp *blueprint.Blueprint, envKey, typ string) {
+	if !isFlatParamIdentifier(envKey) {
+		return
+	}
 	if bp.Spec.Environment == nil {
 		bp.Spec.Environment = make(map[string]blueprint.EnvironmentKey)
 	}
@@ -3280,13 +3287,17 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "invalid parameter reference")
 					}
 				} else if key := matchEnvVar(rawStr); key != "" {
-					if isValidParamIdentifier(key) {
+					if isFlatParamIdentifier(key) {
 						res.Annotations[rawK] = blueprint.Field{From: "env." + key}
 						if bp != nil {
 							ensureEnvDeclared(bp, key, "string")
 						}
 					} else {
-						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "invalid environment reference")
+						if strings.Contains(key, ".") {
+							report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), fmt.Sprintf("unsupported nested environment variable %q: environment keys must be flat camelCase identifiers", key))
+						} else {
+							report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "invalid environment reference")
+						}
 					}
 				} else if srcRes, targetKind, targetField, ok := matchObservedStatus(trimmed); ok {
 					if nameMapping != nil && nameMapping[srcRes] != "" {
@@ -3549,13 +3560,17 @@ func extractEnvelopeFields(prefix string, obj map[string]any, out map[string]blu
 					report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path), "invalid parameter reference")
 				}
 			} else if key := matchEnvVar(rawStr); key != "" {
-				if isValidParamIdentifier(key) {
+				if isFlatParamIdentifier(key) {
 					out[path] = blueprint.Field{From: "env." + key}
 					if bp != nil {
 						ensureEnvDeclared(bp, key, "string")
 					}
 				} else if report != nil {
-					report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path), "invalid environment reference")
+					if strings.Contains(key, ".") {
+						report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path), fmt.Sprintf("unsupported nested environment variable %q: environment keys must be flat camelCase identifiers", key))
+					} else {
+						report.Record(fmt.Sprintf("resource.%s.envelope.%s", resName, path), "invalid environment reference")
+					}
 				}
 			} else if strings.Contains(rawStr, "{{") {
 				out[path] = blueprint.Field{Raw: rawStr}
@@ -3672,13 +3687,17 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid parameter reference")
 				}
 			} else if key := matchEnvVar(rawStr); key != "" {
-				if isValidParamIdentifier(key) {
+				if isFlatParamIdentifier(key) {
 					out[path] = blueprint.Field{From: "env." + key}
 					if bp != nil {
 						ensureEnvDeclared(bp, key, "string")
 					}
 				} else {
-					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid environment reference")
+					if strings.Contains(key, ".") {
+						report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), fmt.Sprintf("unsupported nested environment variable %q: environment keys must be flat camelCase identifiers", key))
+					} else {
+						report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid environment reference")
+					}
 				}
 			} else if srcRes, targetKind, targetField, ok := matchObservedStatus(trimmed); ok {
 				if nameMapping != nil && nameMapping[srcRes] != "" {
@@ -3739,13 +3758,17 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 							report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid parameter reference")
 						}
 					} else if key := matchEnvVar(rawStr); key != "" {
-						if isValidParamIdentifier(key) {
+						if isFlatParamIdentifier(key) {
 							out[elemPath] = blueprint.Field{From: "env." + key}
 							if bp != nil {
 								ensureEnvDeclared(bp, key, "string")
 							}
 						} else {
-							report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid environment reference")
+							if strings.Contains(key, ".") {
+								report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), fmt.Sprintf("unsupported nested environment variable %q: environment keys must be flat camelCase identifiers", key))
+							} else {
+								report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid environment reference")
+							}
 						}
 					} else if srcRes, targetKind, targetField, ok := matchObservedStatus(trimmed); ok {
 						if nameMapping != nil && nameMapping[srcRes] != "" {

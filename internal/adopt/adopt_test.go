@@ -12873,3 +12873,109 @@ spec:
 		t.Errorf("expected LossReport to record drop for unsupported nested forEach loop")
 	}
 }
+
+func TestCF455_AdoptNestedEnvironmentPath(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-env-nested
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XExample
+  environment:
+    environmentConfigs:
+      - type: Reference
+        ref:
+          name: default
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider: {}
+      patches:
+        - type: FromEnvironmentFieldPath
+          fromFieldPath: cluster.region
+          toFieldPath: spec.forProvider.region
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed with fatal error: %v", err)
+	}
+
+	if _, ok := bp.Spec.Environment["cluster.region"]; ok {
+		t.Errorf("bp.Spec.Environment should not contain nested key \"cluster.region\"")
+	}
+
+	found := false
+	for _, d := range report.Drops {
+		if strings.Contains(d.Reason, "cluster.region") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected LossReport to record drop for nested environment path \"cluster.region\"")
+	}
+}
+
+func TestCF455_AdoptNestedEnvironmentPath_GoTemplate(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-env-nested-gotmpl
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XExample
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              name: bucket
+            spec:
+              forProvider:
+                region: '{{ $env.cluster.region }}'
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed with fatal error: %v", err)
+	}
+
+	if _, ok := bp.Spec.Environment["cluster.region"]; ok {
+		t.Errorf("bp.Spec.Environment should not contain nested key \"cluster.region\"")
+	}
+
+	res := bp.ResourceNamed("bucket")
+	if res == nil {
+		t.Fatalf("bucket resource not found in adopted blueprint")
+	}
+	if f, ok := res.Fields["region"]; ok && strings.HasPrefix(f.From, "env.") {
+		t.Errorf("res.Fields[\"region\"] should not have invalid env. wire, got %+v", f)
+	}
+
+	found := false
+	for _, d := range report.Drops {
+		if strings.Contains(d.Reason, "cluster.region") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected LossReport to record drop for nested environment path \"cluster.region\"")
+	}
+}
