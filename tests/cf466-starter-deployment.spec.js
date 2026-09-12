@@ -150,4 +150,26 @@ test.describe('CF-466 — starters are valid good-practice minimums in map-entry
       };
     }).toEqual({ sel: 'deployment', port: '80', target: '80', anyRaw: false });
   });
+
+  test('a whole-raw pod spec satisfies the required check at any depth', async ({ page, request }) => {
+    const doc = await (await request.get(ENGINE + '/api/blueprint')).json();
+    doc.spec.resources.push({
+      name: 'raw-pod-deploy',
+      kind: 'Deployment',
+      provider: 'k8s',
+      fields: {
+        'spec.selector.matchLabels[app]': { value: 'raw-pod-deploy' },
+        'spec.template.metadata.labels[app]': { value: 'raw-pod-deploy' },
+        'spec.template.spec': { raw: "{containers: [{name: raw-pod-deploy, image: 'nginx:1.27'}]}" },
+      },
+    });
+    expect((await request.put(ENGINE + '/api/blueprint', { data: doc })).status()).toBe(200);
+    // The engine accepts this grammar, so the inspector must not call it incomplete.
+    expect((await request.post(ENGINE + '/api/generate', { data: { write: false } })).status()).toBe(200);
+
+    await page.goto('/');
+    await page.click('.node[data-id="raw-pod-deploy"] .node-h');
+    await expect(page.locator('#insp .workload-card')).toBeVisible();
+    await expect(page.locator('#insp [data-scaffold-required]')).toHaveCount(0);
+  });
 });

@@ -783,6 +783,12 @@ function coveredByWhole(fields, k) {
   return false;
 }
 
+/** The mirror image: the doc already sets something inside k, so a
+ *  whole-value default at k would collide with it the other way round. */
+function hasPartUnder(fields, k) {
+  return Object.keys(fields).some(function (x) { return x.indexOf(k + ".") === 0 || x.indexOf(k + "[") === 0; });
+}
+
 function checkMissingRequired(res, flds) {
   if (!res) return false;
   var rf = res.fields || {};
@@ -790,20 +796,22 @@ function checkMissingRequired(res, flds) {
     if (isFieldSet(rf[p])) return true;
     return Object.keys(rf).some(function (k) { return (k === p || k.startsWith(p + ".") || k.startsWith(p + "[")) && isFieldSet(rf[k]); });
   }
-  // Only a pod template set as one whole entry excuses its parts; a template
-  // that has labels but no container is still missing the container.
-  var wholeTemplate = isFieldSet(rf["spec.template"]);
+  // A path is missing when nothing at or under it is set and no whole-value
+  // entry above it covers it (spec.template, spec.template.spec or
+  // spec.template.spec.containers as raw all supply the container). A
+  // template that only has labels still lacks its container.
+  function missing(p) { return !hasField(p) && !coveredByWhole(rf, p); }
   var k = res.kind;
   if (k === "Deployment" || k === "StatefulSet" || k === "DaemonSet") {
-    if (!hasField("spec.selector.matchLabels") && !hasField("spec.selector")) return true;
-    if (!hasField("spec.template.metadata.labels") && !wholeTemplate) return true;
-    if (!hasField("spec.template.spec.containers[0].name") && !wholeTemplate) return true;
-    if (!hasField("spec.template.spec.containers[0].image") && !wholeTemplate) return true;
-    if (k === "StatefulSet" && !hasField("spec.serviceName")) return true;
+    if (missing("spec.selector.matchLabels") && missing("spec.selector")) return true;
+    if (missing("spec.template.metadata.labels")) return true;
+    if (missing("spec.template.spec.containers[0].name")) return true;
+    if (missing("spec.template.spec.containers[0].image")) return true;
+    if (k === "StatefulSet" && missing("spec.serviceName")) return true;
   } else if (k === "Job") {
-    if (!hasField("spec.template.metadata.labels") && !wholeTemplate) return true;
-    if (!hasField("spec.template.spec.containers[0].name") && !wholeTemplate) return true;
-    if (!hasField("spec.template.spec.containers[0].image") && !wholeTemplate) return true;
+    if (missing("spec.template.metadata.labels")) return true;
+    if (missing("spec.template.spec.containers[0].name")) return true;
+    if (missing("spec.template.spec.containers[0].image")) return true;
   } else if (k === "CronJob") {
     if (!hasField("spec.schedule") || !hasField("spec.jobTemplate.spec.template.spec.containers[0].name") || !hasField("spec.jobTemplate.spec.template.spec.containers[0].image")) return true;
   } else if (k === "Service") {
@@ -831,14 +839,15 @@ async function scaffoldResource(resName) {
   if (!res) return;
   var flds = null;
   try { var meta = await kindMeta(res); if (meta) flds = await fieldsFor(meta.apiVersion, res.kind); } catch (_) {}
-  var defaults = scaffoldResourceFields(res, flds, doc);
+  var defaults = scaffoldResourceFields(res, flds);
   await op(function () {
     return store.replaceDoc(function (d) {
       var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === resName; });
       if (!r) return;
       r.fields = r.fields || {};
       Object.keys(defaults).forEach(function (k) {
-        if (!isFieldSet(r.fields[k]) && !coveredByWhole(r.fields, k)) r.fields[k] = defaults[k];
+        if (isFieldSet(r.fields[k]) || coveredByWhole(r.fields, k) || hasPartUnder(r.fields, k)) return;
+        r.fields[k] = defaults[k];
       });
     });
   });

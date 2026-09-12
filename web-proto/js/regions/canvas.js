@@ -1625,7 +1625,7 @@ function onDragLeave(e) {
   if (e.target === cwEl) cwEl.style.outline = "";
 }
 
-export function scaffoldResourceFields(res, flds, _doc) {
+export function scaffoldResourceFields(res, flds) {
   const fields = {};
   const kind = res && res.kind || "";
   const name = res && res.name || "";
@@ -1775,8 +1775,7 @@ async function onDrop(e) {
 
   const scaffoldedFields = scaffoldResourceFields(
     { name: name, kind: entry.kind, provider: entry.provider || "", apiVersion: entry.apiVersion || "" },
-    flds,
-    d
+    flds
   );
 
   S.replaceDoc(function (next) {
