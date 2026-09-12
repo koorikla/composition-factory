@@ -1717,7 +1717,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 				}
 			}
 			pos := "after"
-			if !seenEngineStep {
+			if !seenEngineStep || fnName == blueprint.EnvironmentConfigsFunctionName || fnName == "function-environment-configs" {
 				pos = "before"
 			}
 			otherSteps = append(otherSteps, parsedStep{

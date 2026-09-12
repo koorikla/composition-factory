@@ -1002,6 +1002,48 @@ spec:
 	}
 }
 
+func TestAdoptPipeline_EnvironmentConfigsForcedBefore(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-env-after
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: queue
+            base:
+              apiVersion: sqs.aws.m.upbound.io/v1beta1
+              kind: Queue
+    - step: custom-env
+      functionRef:
+        name: function-environment-configs
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("Adopted blueprint failed validation: %v", err)
+	}
+	if len(bp.Spec.Pipeline) != 1 {
+		t.Fatalf("expected 1 pipeline step, got %d", len(bp.Spec.Pipeline))
+	}
+	if bp.Spec.Pipeline[0].Position != "before" {
+		t.Errorf("expected Position: before for function-environment-configs, got %q", bp.Spec.Pipeline[0].Position)
+	}
+}
+
 func TestAdoptNativeKubernetesResources(t *testing.T) {
 	manifest := `
 apiVersion: apiextensions.crossplane.io/v1
