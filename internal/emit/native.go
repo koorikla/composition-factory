@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/koorikla/compositionfactory/internal/blueprint"
 )
 
 // This file renders the composed-resource body for a NATIVE Kubernetes kind
@@ -216,6 +218,54 @@ func otherNativeMetadata(metaPlan []forProviderField) []forProviderField {
 		otherMeta = append(otherMeta, fldCopy)
 	}
 	return otherMeta
+}
+
+// mergeNativeAnnotations merges any metadata.annotations authored under fields:
+// on native resources into the resource's AnnPlan, sorted by annotation key.
+// Explicit entries from fields: override entries from the resource's annotations:
+// block if the same key is authored in both. Reserved annotation keys
+// (composition-resource-name) are refused.
+func mergeNativeAnnotations(resourceName string, annPlan []forProviderField, metaPlan []forProviderField) ([]forProviderField, error) {
+	byKey := make(map[string]forProviderField, len(annPlan))
+	for _, ann := range annPlan {
+		byKey[ann.path] = ann
+	}
+
+	for _, fld := range metaPlan {
+		if fld.path == "metadata.annotations" {
+			if fld.isMap {
+				for _, entry := range fld.entries {
+					if blueprint.ReservedAnnotationKey(entry.path) {
+						return nil, fmt.Errorf("resource %q annotation %q: this key is the composition-resource-name "+
+							"annotation, written by the generator itself via setResourceNameAnnotation (node identity); "+
+							"a blueprint entry for it would silently collide with the function-set value (see "+
+							"blueprint.Validate)", resourceName, entry.path)
+					}
+					byKey[entry.path] = entry
+				}
+			}
+		} else if strings.HasPrefix(fld.path, "metadata.annotations.") {
+			annKey := strings.TrimPrefix(fld.path, "metadata.annotations.")
+			if blueprint.ReservedAnnotationKey(annKey) {
+				return nil, fmt.Errorf("resource %q annotation %q: this key is the composition-resource-name "+
+					"annotation, written by the generator itself via setResourceNameAnnotation (node identity); "+
+					"a blueprint entry for it would silently collide with the function-set value (see "+
+					"blueprint.Validate)", resourceName, annKey)
+			}
+			entry := fld
+			entry.path = annKey
+			byKey[annKey] = entry
+		}
+	}
+
+	merged := make([]forProviderField, 0, len(byKey))
+	for _, v := range byKey {
+		merged = append(merged, v)
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].path < merged[j].path
+	})
+	return merged, nil
 }
 
 // cutArrayIndex splits a path segment's trailing [N] element index. A

@@ -1176,3 +1176,210 @@ func TestMetadataRefCustomNameTargetAnnotation(t *testing.T) {
 		t.Fatalf("annotation sa-ref = %q, want custom-sa", saRef)
 	}
 }
+
+func TestCF452_NativeMetadataAnnotationsInFields(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "native-ann"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "App",
+				Plural:  "apps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "sa",
+					Provider: blueprint.NativeProvider,
+					Kind:     "ServiceAccount",
+					Fields: map[string]blueprint.Field{
+						"metadata.annotations[example.com/team]": {Value: "infra"},
+					},
+				},
+			},
+		},
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	crds := nativeTestCRDs(t)
+
+	// 1. Go-template
+	bp.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineGoTemplating}
+	compGo, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition(go): %v", err)
+	}
+	goStr := string(compGo)
+	if !strings.Contains(goStr, "'example.com/team': 'infra'") {
+		t.Errorf("Go-template missing metadata.annotations from fields:\n%s", goStr)
+	}
+
+	// 2. KCL
+	bp.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+	compKCL, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition(kcl): %v", err)
+	}
+	kclStr := string(compKCL)
+	if !strings.Contains(kclStr, `"example.com/team" = "infra"`) {
+		t.Errorf("KCL missing metadata.annotations from fields:\n%s", kclStr)
+	}
+
+	// 3. Python
+	bp.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	compPy, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition(python): %v", err)
+	}
+	pyStr := string(compPy)
+	if !strings.Contains(pyStr, `"example.com/team": "infra"`) {
+		t.Errorf("Python missing metadata.annotations from fields:\n%s", pyStr)
+	}
+}
+
+func TestCF452_NativeMetadataAnnotations_WiresAndCoexistence(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "native-ann-wires"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "App",
+				Plural:  "apps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+					"team":         {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "sa",
+					Provider: blueprint.NativeProvider,
+					Kind:     "ServiceAccount",
+					Annotations: map[string]blueprint.Field{
+						"example.com/canonical": {Value: "v1"},
+						"example.com/override":  {Value: "old"},
+					},
+					Fields: map[string]blueprint.Field{
+						"metadata.annotations[example.com/override]": {Value: "new"},
+						"metadata.annotations[example.com/wired]":    {From: "params.team"},
+					},
+				},
+			},
+		},
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	crds := nativeTestCRDs(t)
+
+	// 1. Go-template
+	bp.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineGoTemplating}
+	compGo, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition(go): %v", err)
+	}
+	goStr := string(compGo)
+	if !strings.Contains(goStr, "'example.com/canonical': 'v1'") {
+		t.Errorf("Go-template missing canonical annotation:\n%s", goStr)
+	}
+	if !strings.Contains(goStr, "'example.com/override': 'new'") {
+		t.Errorf("Go-template missing overridden annotation:\n%s", goStr)
+	}
+	if strings.Contains(goStr, "'example.com/override': 'old'") {
+		t.Errorf("Go-template leaked overridden annotation value 'old':\n%s", goStr)
+	}
+	if !strings.Contains(goStr, "'example.com/wired': {{ $spec.team | quote }}") {
+		t.Errorf("Go-template missing wired annotation:\n%s", goStr)
+	}
+
+	// 2. KCL
+	bp.Spec.Emit = &blueprint.Emit{Engine: blueprint.EngineKCL}
+	compKCL, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition(kcl): %v", err)
+	}
+	kclStr := string(compKCL)
+	if !strings.Contains(kclStr, `"example.com/canonical" = "v1"`) {
+		t.Errorf("KCL missing canonical annotation:\n%s", kclStr)
+	}
+	if !strings.Contains(kclStr, `"example.com/override" = "new"`) {
+		t.Errorf("KCL missing overridden annotation:\n%s", kclStr)
+	}
+	if strings.Contains(kclStr, `"example.com/override" = "old"`) {
+		t.Errorf("KCL leaked overridden annotation value 'old':\n%s", kclStr)
+	}
+	if !strings.Contains(kclStr, `"example.com/wired" = _spec?.team`) {
+		t.Errorf("KCL missing wired annotation:\n%s", kclStr)
+	}
+
+	// 3. Python
+	bp.Spec.Emit = &blueprint.Emit{Engine: blueprint.EnginePython}
+	compPy, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition(python): %v", err)
+	}
+	pyStr := string(compPy)
+	if !strings.Contains(pyStr, `"example.com/canonical": "v1"`) {
+		t.Errorf("Python missing canonical annotation:\n%s", pyStr)
+	}
+	if !strings.Contains(pyStr, `"example.com/override": "new"`) {
+		t.Errorf("Python missing overridden annotation:\n%s", pyStr)
+	}
+	if strings.Contains(pyStr, `"example.com/override": "old"`) {
+		t.Errorf("Python leaked overridden annotation value 'old':\n%s", pyStr)
+	}
+	if !strings.Contains(pyStr, `"example.com/wired": spec.get("team")`) {
+		t.Errorf("Python missing wired annotation:\n%s", pyStr)
+	}
+}
+
+func TestCF452_NativeMetadataAnnotations_ReservedKeyRefused(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "native-ann-reserved"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "App",
+				Plural:  "apps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "sa",
+					Provider: blueprint.NativeProvider,
+					Kind:     "ServiceAccount",
+					Fields: map[string]blueprint.Field{
+						"metadata.annotations[crossplane.io/composition-resource-name]": {Value: "custom-name"},
+					},
+				},
+			},
+		},
+	}
+	crds := nativeTestCRDs(t)
+	_, err := Composition(bp, crds)
+	if err == nil {
+		t.Fatalf("expected error for reserved composition-resource-name annotation under fields:, got nil")
+	}
+	if !strings.Contains(err.Error(), "composition-resource-name") {
+		t.Errorf("expected error mentioning composition-resource-name, got: %v", err)
+	}
+}

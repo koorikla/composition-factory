@@ -74,6 +74,11 @@ func planSingleResource(r blueprint.Resource, b *blueprint.Blueprint, crds []sch
 				bodyPlan = append(bodyPlan, fld)
 			}
 		}
+		var err error
+		annPlan, err = mergeNativeAnnotations(r.Name, annPlan, metaPlan)
+		if err != nil {
+			return plannedResource{}, err
+		}
 	} else {
 		bodyPlan = plan
 	}
