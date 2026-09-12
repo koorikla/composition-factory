@@ -8,9 +8,9 @@ package webproto
 import "embed"
 
 // Files holds the canvas app: index.html at the FS root plus its css/, js/
-// and fonts/ asset trees, embedded recursively. README.md and
+// and fonts/ asset trees, and favicon assets, embedded recursively. README.md and
 // prototype-source.html are deliberately NOT embedded — they are dev-workflow
 // files not app assets a served canvas ever fetches.
 //
-//go:embed index.html css js fonts
+//go:embed index.html css js fonts favicon.svg favicon.ico
 var Files embed.FS
