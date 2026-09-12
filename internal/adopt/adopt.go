@@ -1179,7 +1179,8 @@ func templateExists(bp *blueprint.Blueprint, name string) bool {
 }
 
 func matchEnvVar(s string) string {
-	if m := reEnvVar.FindStringSubmatch(s); len(m) > 1 {
+	trimmed := strings.TrimSpace(s)
+	if m := reEnvVar.FindStringSubmatch(trimmed); len(m) > 1 && m[0] == trimmed {
 		for i := 1; i < len(m); i++ {
 			if m[i] != "" {
 				return m[i]
@@ -2574,7 +2575,8 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 					report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "contains newlines or control characters")
 					continue
 				}
-				if m := reParamVar.FindStringSubmatch(rawStr); len(m) >= 2 {
+				trimmed := strings.TrimSpace(rawStr)
+				if m := reParamVar.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
 					if isValidParamIdentifier(m[1]) {
 						res.Annotations[rawK] = blueprint.Field{From: "params." + m[1]}
 					} else {
@@ -2589,7 +2591,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 					} else {
 						report.Record(fmt.Sprintf("resource.%s.annotations[%s]", res.Name, rawK), "invalid environment reference")
 					}
-				} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 5 {
+				} else if m := reObservedStatus.FindStringSubmatch(trimmed); len(m) >= 5 && m[0] == trimmed {
 					srcRes := m[1]
 					if srcRes == "" {
 						srcRes = m[2]
@@ -2612,7 +2614,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 						fromPath = "resources." + srcRes + ".metadata." + targetField
 					}
 					res.Annotations[rawK] = blueprint.Field{From: fromPath}
-				} else if m := reXRResourceRef.FindStringSubmatch(rawStr); len(m) >= 2 {
+				} else if m := reXRResourceRef.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
 					srcRes := m[1]
 					if nameMapping != nil && nameMapping[srcRes] != "" {
 						srcRes = nameMapping[srcRes]
@@ -2842,7 +2844,8 @@ func extractEnvelopeFields(prefix string, obj map[string]any, out map[string]blu
 				}
 				continue
 			}
-			if m := reParamVar.FindStringSubmatch(rawStr); len(m) >= 2 {
+			trimmed := strings.TrimSpace(rawStr)
+			if m := reParamVar.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
 				if isValidParamIdentifier(m[1]) {
 					out[path] = blueprint.Field{From: "params." + m[1]}
 				} else if report != nil {
@@ -2959,7 +2962,8 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 					"multi-line scalar contains newlines, which is not supported in blueprint values")
 				continue
 			}
-			if m := reParamVar.FindStringSubmatch(rawStr); len(m) >= 2 {
+			trimmed := strings.TrimSpace(rawStr)
+			if m := reParamVar.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
 				if isValidParamIdentifier(m[1]) {
 					out[path] = blueprint.Field{From: "params." + m[1]}
 				} else {
@@ -2974,7 +2978,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 				} else {
 					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid environment reference")
 				}
-			} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 5 {
+			} else if m := reObservedStatus.FindStringSubmatch(trimmed); len(m) >= 5 && m[0] == trimmed {
 				srcRes := m[1]
 				if srcRes == "" {
 					srcRes = m[2]
@@ -2987,7 +2991,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 				targetKind := m[3]
 				targetField := m[4]
 				out[path] = blueprint.Field{From: "resources." + srcRes + "." + targetKind + "." + targetField}
-			} else if m := reXRResourceRef.FindStringSubmatch(rawStr); len(m) >= 2 {
+			} else if m := reXRResourceRef.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
 				srcRes := m[1]
 				if nameMapping != nil && nameMapping[srcRes] != "" {
 					srcRes = nameMapping[srcRes]
@@ -3023,7 +3027,8 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 							"multi-line scalar contains newlines, which is not supported in blueprint values")
 						continue
 					}
-					if m := reParamVar.FindStringSubmatch(rawStr); len(m) >= 2 {
+					trimmed := strings.TrimSpace(rawStr)
+					if m := reParamVar.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
 						if isValidParamIdentifier(m[1]) {
 							out[elemPath] = blueprint.Field{From: "params." + m[1]}
 						} else {
@@ -3038,7 +3043,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 						} else {
 							report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, elemPath), "invalid environment reference")
 						}
-					} else if m := reObservedStatus.FindStringSubmatch(rawStr); len(m) >= 5 {
+					} else if m := reObservedStatus.FindStringSubmatch(trimmed); len(m) >= 5 && m[0] == trimmed {
 						srcRes := m[1]
 						if srcRes == "" {
 							srcRes = m[2]
@@ -3051,7 +3056,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 						targetKind := m[3]
 						targetField := m[4]
 						out[elemPath] = blueprint.Field{From: "resources." + srcRes + "." + targetKind + "." + targetField}
-					} else if m := reXRResourceRef.FindStringSubmatch(rawStr); len(m) >= 2 {
+					} else if m := reXRResourceRef.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
 						srcRes := m[1]
 						if nameMapping != nil && nameMapping[srcRes] != "" {
 							srcRes = nameMapping[srcRes]

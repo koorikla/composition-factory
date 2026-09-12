@@ -7671,3 +7671,249 @@ spec:
 		}
 	}
 }
+
+func TestAdoptGoTemplate_InterpolatedStringField(t *testing.T) {
+	nativeCRDs, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-interpolated-string
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResource
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+              annotations:
+                crossplane.io/composition-resource-name: test-cm
+            data:
+              arn: "arn:aws:s3:::{{ $spec.bucketName }}/*"
+              prefixName: "prefix-{{ $spec.bucketName }}"
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+
+	arnField, ok := r.Fields["data[arn]"]
+	if !ok {
+		arnField, ok = r.Fields["data.arn"]
+	}
+	if !ok {
+		t.Fatalf("data.arn field missing from fields: %+v", r.Fields)
+	}
+	if arnField.Raw != `"arn:aws:s3:::{{ $spec.bucketName }}/*"` && arnField.Raw != `arn:aws:s3:::{{ $spec.bucketName }}/*` {
+		t.Errorf("arnField.Raw = %q, want interpolated raw string; From was %q", arnField.Raw, arnField.From)
+	}
+
+	prefixField, ok := r.Fields["data[prefixName]"]
+	if !ok {
+		prefixField, ok = r.Fields["data.prefixName"]
+	}
+	if !ok {
+		t.Fatalf("data.prefixName field missing from fields: %+v", r.Fields)
+	}
+	if prefixField.Raw != `"prefix-{{ $spec.bucketName }}"` && prefixField.Raw != `prefix-{{ $spec.bucketName }}` {
+		t.Errorf("prefixField.Raw = %q, want interpolated raw string; From was %q", prefixField.Raw, prefixField.From)
+	}
+
+	// Downstream round-trip check: emitting this blueprint produces valid template output
+	outputs, err := emit.Generate(bp, nativeCRDs, "")
+	if err != nil {
+		t.Fatalf("emit.Generate failed: %v", err)
+	}
+	for _, o := range outputs {
+		if strings.Contains(o.Path, "compositions") {
+			s := string(o.Body)
+			if !strings.Contains(s, "arn:aws:s3:::") {
+				t.Errorf("emitted composition lost 'arn:aws:s3:::' prefix! Content:\n%s", s)
+			}
+			if !strings.Contains(s, "prefix-") {
+				t.Errorf("emitted composition lost 'prefix-' prefix! Content:\n%s", s)
+			}
+		}
+	}
+}
+
+func TestAdoptGoTemplate_InterpolatedAndPureVariants(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-variants
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResource
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: dep
+              annotations:
+                crossplane.io/composition-resource-name: dep
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+              annotations:
+                crossplane.io/composition-resource-name: test-cm
+                interp-ann: "prefix-{{ $spec.annVal }}"
+                pure-ann: "{{ $spec.pureAnnVal }}"
+            data:
+              pureParam: "{{ $spec.bucketName }}"
+              pureEnv: "{{ $env.stage }}"
+              interpEnv: "stage-{{ $env.stage }}-val"
+              pureStatus: '{{ (index .observed.resources "dep").resource.status.atProvider.id }}'
+              interpStatus: 'https://{{ (index .observed.resources "dep").resource.status.atProvider.endpoint }}/api'
+              pureXRRef: '{{ $xr }}-dep'
+              interpXRRef: 'prefix-{{ $xr }}-dep'
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	var r blueprint.Resource
+	found := false
+	for _, res := range bp.Spec.Resources {
+		if res.Name == "test-cm" {
+			r = res
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("test-cm resource not found in %+v", bp.Spec.Resources)
+	}
+
+	// Check annotations
+	if ann := r.Annotations["pure-ann"]; ann.From != "params.pureAnnVal" {
+		t.Errorf("pure-ann From = %q, want params.pureAnnVal", ann.From)
+	}
+	if ann := r.Annotations["interp-ann"]; ann.Raw == "" || ann.From != "" {
+		t.Errorf("interp-ann Raw = %q, From = %q; want Raw non-empty and From empty", ann.Raw, ann.From)
+	}
+
+	// Pure param
+	if f := r.Fields["data[pureParam]"]; f.From != "params.bucketName" {
+		t.Errorf("pureParam From = %q, want params.bucketName", f.From)
+	}
+
+	// Pure env
+	if f := r.Fields["data[pureEnv]"]; f.From != "env.stage" {
+		t.Errorf("pureEnv From = %q, want env.stage", f.From)
+	}
+
+	// Interp env
+	if f := r.Fields["data[interpEnv]"]; f.Raw == "" || f.From != "" {
+		t.Errorf("interpEnv Raw = %q, From = %q; want Raw set and From empty", f.Raw, f.From)
+	}
+
+	// Pure status
+	if f := r.Fields["data[pureStatus]"]; f.From != "resources.dep.status.atProvider.id" {
+		t.Errorf("pureStatus From = %q, want resources.dep.status.atProvider.id", f.From)
+	}
+
+	// Interp status
+	if f := r.Fields["data[interpStatus]"]; f.Raw == "" || f.From != "" {
+		t.Errorf("interpStatus Raw = %q, From = %q; want Raw set and From empty", f.Raw, f.From)
+	}
+
+	// Pure XR ref
+	if f := r.Fields["data[pureXRRef]"]; f.From != "resources.dep.metadata.name" {
+		t.Errorf("pureXRRef From = %q, want resources.dep.metadata.name", f.From)
+	}
+
+	// Interp XR ref
+	if f := r.Fields["data[interpXRRef]"]; f.Raw == "" || f.From != "" {
+		t.Errorf("interpXRRef Raw = %q, From = %q; want Raw set and From empty", f.Raw, f.From)
+	}
+}
+
+func TestAdoptGoTemplate_InterpolatedSliceElements(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-slice
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResource
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+              annotations:
+                crossplane.io/composition-resource-name: test-cm
+            items:
+              - "prefix-{{ $spec.foo }}"
+              - "{{ $spec.foo }}"
+              - "env-{{ $env.bar }}"
+              - "{{ $env.bar }}"
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	r := bp.Spec.Resources[0]
+	if f := r.Fields["items[0]"]; f.Raw == "" || f.From != "" {
+		t.Errorf("items[0] Raw = %q, From = %q; want Raw set and From empty", f.Raw, f.From)
+	}
+	if f := r.Fields["items[1]"]; f.From != "params.foo" {
+		t.Errorf("items[1] From = %q, want params.foo", f.From)
+	}
+	if f := r.Fields["items[2]"]; f.Raw == "" || f.From != "" {
+		t.Errorf("items[2] Raw = %q, From = %q; want Raw set and From empty", f.Raw, f.From)
+	}
+	if f := r.Fields["items[3]"]; f.From != "env.bar" {
+		t.Errorf("items[3] From = %q, want env.bar", f.From)
+	}
+}
