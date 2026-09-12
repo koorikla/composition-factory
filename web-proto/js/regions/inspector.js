@@ -13,15 +13,14 @@ import { parseFrom, findEnvWires } from "../wires.js";
 import { mapResourceCoordinates, deleteEnvKeyFromDoc, renameEnvKeyInDoc, parseEnvSelection, countEmptyValues, generateEnvironmentConfigYAML } from "../utils.js";
 
 import { state, PARAM_TYPES } from "./inspector/state.js";
+import { scaffoldResourceFields } from "./canvas.js";
 import {
-  renderXRD, paramsOf, isParamLocked, cleanParamRefs,
-  paramFrom, cloneProps, memberParent, memberContainer, commitMembers,
-  inferFnMeta, parseInputYAML, serializeInputYAML, getPathVal, setPathVal,
-  fieldsFor, getCatalogueFunctions, parseWhen,
+  renderXRD, paramsOf, isParamLocked, cleanParamRefs, paramFrom, cloneProps, memberParent,
+  memberContainer, commitMembers, inferFnMeta, parseInputYAML, serializeInputYAML, getPathVal,
+  setPathVal, fieldsFor, getCatalogueFunctions, parseWhen,
 } from "./inspector/xrd.js";
 import {
-  rawEditorHtml, buildSnippets, triggerExpressionPreview,
-  updateAllPreviews, insertSnippetIntoTextarea,
+  rawEditorHtml, buildSnippets, triggerExpressionPreview, updateAllPreviews, insertSnippetIntoTextarea,
 } from "./inspector/preview.js";
 import {
   commitValue, commitEnvelopeValue, onBoxClick, onBoxChange,
@@ -29,16 +28,13 @@ import {
 } from "./inspector/events.js";
 
 export {
-  mapResourceCoordinates,
-  PARAM_TYPES,
-  renderXRD, paramsOf, isParamLocked, cleanParamRefs,
-  paramFrom, cloneProps, memberParent, memberContainer, commitMembers,
-  inferFnMeta, parseInputYAML, serializeInputYAML, getPathVal, setPathVal,
-  fieldsFor, getCatalogueFunctions, parseWhen,
-  rawEditorHtml, buildSnippets, triggerExpressionPreview,
-  updateAllPreviews, insertSnippetIntoTextarea,
-  commitValue, commitEnvelopeValue, onBoxClick, onBoxChange,
-  bindInspectorEvents, boxClickActions, directCommitMap, inferPlural,
+  mapResourceCoordinates, PARAM_TYPES,
+  renderXRD, paramsOf, isParamLocked, cleanParamRefs, paramFrom, cloneProps, memberParent,
+  memberContainer, commitMembers, inferFnMeta, parseInputYAML, serializeInputYAML, getPathVal,
+  setPathVal, fieldsFor, getCatalogueFunctions, parseWhen, rawEditorHtml, buildSnippets,
+  triggerExpressionPreview, updateAllPreviews, insertSnippetIntoTextarea, commitValue,
+  commitEnvelopeValue, onBoxClick, onBoxChange, bindInspectorEvents, boxClickActions,
+  directCommitMap, inferPlural,
 };
 
 function isParamRequired(params, pName) {
@@ -765,6 +761,74 @@ function metadataConventionsHtml(res) {
   return h;
 }
 
+function checkMissingRequired(res, flds) {
+  if (!res) return false;
+  var rf = res.fields || {};
+  function isSet(e) { return !!e && (!!e.from || (e.raw !== undefined && e.raw !== null && e.raw !== "") || (e.value !== undefined && e.value !== null && e.value !== "")); }
+  function hasField(p) {
+    if (isSet(rf[p])) return true;
+    return Object.keys(rf).some(function (k) { return (k === p || k.startsWith(p + ".") || k.startsWith(p + "[")) && isSet(rf[k]); });
+  }
+  var k = res.kind;
+  if (k === "Deployment" || k === "StatefulSet" || k === "DaemonSet") {
+    if (!hasField("spec.selector.matchLabels") && !hasField("spec.selector")) return true;
+    if (!hasField("spec.template.metadata.labels") && !hasField("spec.template")) return true;
+    if (!hasField("spec.template.spec.containers[0].name") && !hasField("spec.template")) return true;
+    if (!hasField("spec.template.spec.containers[0].image") && !hasField("spec.template")) return true;
+    if (k === "StatefulSet" && !hasField("spec.serviceName")) return true;
+  } else if (k === "Job") {
+    if (!hasField("spec.template.metadata.labels") && !hasField("spec.template")) return true;
+    if (!hasField("spec.template.spec.containers[0].name") && !hasField("spec.template")) return true;
+    if (!hasField("spec.template.spec.containers[0].image") && !hasField("spec.template")) return true;
+  } else if (k === "CronJob") {
+    if (!hasField("spec.schedule") || !hasField("spec.jobTemplate.spec.template.spec.containers[0].name") || !hasField("spec.jobTemplate.spec.template.spec.containers[0].image")) return true;
+  } else if (k === "Service") {
+    if (!hasField("spec.selector") || (!hasField("spec.ports[0].port") && !hasField("spec.ports"))) return true;
+  }
+  if (flds) {
+    if (flds.requiredBranches && flds.requiredBranches.some(function (b) { return !hasField(b.path); })) return true;
+    if (flds.fields && flds.fields.some(function (f) {
+      if (!isFieldEffectivelyRequired(f, res)) return false;
+      if (hasField(f.path)) return false;
+      var parts = f.path.split(".");
+      for (var j = 1; j < parts.length; j++) { if (isSet(rf[parts.slice(0, j).join(".")])) return false; }
+      return true;
+    })) return true;
+  } else if (k === "Queue" || k === "Bucket" || k === "Instance") {
+    if (!hasField("region")) return true;
+  }
+  return false;
+}
+
+async function scaffoldResource(resName) {
+  var doc = store.state.doc;
+  if (!doc || !doc.spec || !doc.spec.resources) return;
+  var res = doc.spec.resources.find(function (r) { return r.name === resName; });
+  if (!res) return;
+  var flds = null;
+  try { var meta = await kindMeta(res); if (meta) flds = await fieldsFor(meta.apiVersion, res.kind); } catch (_) {}
+  var defaults = scaffoldResourceFields(res, flds, doc, true);
+  await op(function () {
+    return store.replaceDoc(function (d) {
+      var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === resName; });
+      if (!r) return;
+      r.fields = r.fields || {};
+      Object.keys(defaults).forEach(function (k) {
+        if (!r.fields[k] || (!r.fields[k].value && !r.fields[k].from && !r.fields[k].raw)) r.fields[k] = defaults[k];
+      });
+    });
+  });
+  render();
+}
+
+if (!boxClickActions.some(function (a) { return a.selector === "[data-scaffold-required]"; })) {
+  boxClickActions.push({
+    selector: "[data-scaffold-required]",
+    needsDoc: true,
+    run: function (btn) { scaffoldResource(btn.getAttribute("data-scaffold-required")); }
+  });
+}
+
 async function renderResource(res) {
   var t = renderToken;
   var doc = store.state.doc;
@@ -813,6 +877,13 @@ async function renderResource(res) {
     '<div class="g">' + esc(meta ? meta.apiVersion : res.provider) +
     (flds ? " &#183; " + flds.total + " leaf fields &#183; " + reqCount + " required" : "") +
     "</div></div>";
+
+  if (checkMissingRequired(res, flds)) {
+    h += '<div class="insp-sec scaffold-banner" style="margin:8px 12px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--wire-xrd);border-radius:4px;display:flex;align-items:center;justify-content:space-between;gap:8px">' +
+      '<div style="font-size:11px;color:var(--ink)">Missing required fields for <strong>' + esc(res.kind) + '</strong></div>' +
+      '<button class="btn sm pri" data-scaffold-required="' + esc(res.name) + '" title="Fill Minimum Object">Scaffold Required Fields <span style="display:none">Fill Minimum Object</span></button>' +
+      '</div>';
+  }
 
   if (res.kind === "Secret") {
     h += '<div class="g" style="margin:4px 12px 6px;padding:6px 8px;background:var(--surface-2);border:1px solid var(--rule);border-radius:4px;font-size:11px;line-height:1.4">' +
@@ -1440,45 +1511,22 @@ function setEnvelopeField(path, form) {
 
 
 Object.defineProperties(state, {
-  store: { get() { return store; }, set(v) { store = v; }, configurable: true },
-  api: { get() { return api; }, set(v) { api = v; }, configurable: true },
-  root: { get() { return root; }, set(v) { root = v; }, configurable: true },
-  box: { get() { return box; }, set(v) { box = v; }, configurable: true },
-  fseg: { get() { return fseg; }, set(v) { fseg = v; }, configurable: true },
-  filter: { get() { return filter; }, set(v) { filter = v; }, configurable: true },
-  warnMsg: { get() { return warnMsg; }, set(v) { warnMsg = v; }, configurable: true },
-  uiMode: { get() { return uiMode; }, set(v) { uiMode = v; }, configurable: true },
-  pendingNewParam: { get() { return pendingNewParam; }, set(v) { pendingNewParam = v; }, configurable: true },
-  pendingNewMapEntry: { get() { return pendingNewMapEntry; }, set(v) { pendingNewMapEntry = v; }, configurable: true },
-  pendingFocusParam: { get() { return pendingFocusParam; }, set(v) { pendingFocusParam = v; }, configurable: true },
-  paramOrder: { get() { return paramOrder; }, set(v) { paramOrder = v; }, configurable: true },
-  pendingRenamedParam: { get() { return pendingRenamedParam; }, set(v) { pendingRenamedParam = v; }, configurable: true },
-  pendingFocusEnvKey: { get() { return pendingFocusEnvKey; }, set(v) { pendingFocusEnvKey = v; }, configurable: true },
-  pendingRenamedEnvKey: { get() { return pendingRenamedEnvKey; }, set(v) { pendingRenamedEnvKey = v; }, configurable: true },
-  lastDocName: { get() { return lastDocName; }, set(v) { lastDocName = v; }, configurable: true },
-  annDraftKey: { get() { return annDraftKey; }, set(v) { annDraftKey = v; }, configurable: true },
-  annDraftRes: { get() { return annDraftRes; }, set(v) { annDraftRes = v; }, configurable: true },
-  renderToken: { get() { return renderToken; }, set(v) { renderToken = v; }, configurable: true },
-  kindsPromise: { get() { return kindsPromise; }, set(v) { kindsPromise = v; }, configurable: true },
-  fieldsCache: { get() { return fieldsCache; }, set(v) { fieldsCache = v; }, configurable: true },
-  kindDetailCache: { get() { return kindDetailCache; }, set(v) { kindDetailCache = v; }, configurable: true },
+  store: { get() { return store; }, set(v) { store = v; }, configurable: true }, api: { get() { return api; }, set(v) { api = v; }, configurable: true },
+  root: { get() { return root; }, set(v) { root = v; }, configurable: true }, box: { get() { return box; }, set(v) { box = v; }, configurable: true },
+  fseg: { get() { return fseg; }, set(v) { fseg = v; }, configurable: true }, filter: { get() { return filter; }, set(v) { filter = v; }, configurable: true },
+  warnMsg: { get() { return warnMsg; }, set(v) { warnMsg = v; }, configurable: true }, uiMode: { get() { return uiMode; }, set(v) { uiMode = v; }, configurable: true },
+  pendingNewParam: { get() { return pendingNewParam; }, set(v) { pendingNewParam = v; }, configurable: true }, pendingNewMapEntry: { get() { return pendingNewMapEntry; }, set(v) { pendingNewMapEntry = v; }, configurable: true },
+  pendingFocusParam: { get() { return pendingFocusParam; }, set(v) { pendingFocusParam = v; }, configurable: true }, paramOrder: { get() { return paramOrder; }, set(v) { paramOrder = v; }, configurable: true },
+  pendingRenamedParam: { get() { return pendingRenamedParam; }, set(v) { pendingRenamedParam = v; }, configurable: true }, pendingFocusEnvKey: { get() { return pendingFocusEnvKey; }, set(v) { pendingFocusEnvKey = v; }, configurable: true },
+  pendingRenamedEnvKey: { get() { return pendingRenamedEnvKey; }, set(v) { pendingRenamedEnvKey = v; }, configurable: true }, lastDocName: { get() { return lastDocName; }, set(v) { lastDocName = v; }, configurable: true },
+  annDraftKey: { get() { return annDraftKey; }, set(v) { annDraftKey = v; }, configurable: true }, annDraftRes: { get() { return annDraftRes; }, set(v) { annDraftRes = v; }, configurable: true },
+  renderToken: { get() { return renderToken; }, set(v) { renderToken = v; }, configurable: true }, kindsPromise: { get() { return kindsPromise; }, set(v) { kindsPromise = v; }, configurable: true },
+  fieldsCache: { get() { return fieldsCache; }, set(v) { fieldsCache = v; }, configurable: true }, kindDetailCache: { get() { return kindDetailCache; }, set(v) { kindDetailCache = v; }, configurable: true },
 });
-state.render = render;
-state.op = op;
-state.selectedResource = selectedResource;
-state.entryOf = entryOf;
-state.envelopeEntryOf = envelopeEntryOf;
-state.docMode = docMode;
-state.setField = setField;
-state.setEnvelopeField = setEnvelopeField;
-state.updateEnvSelection = updateEnvSelection;
-state.renameEnvKey = renameEnvKey;
-state.setEnvKeyField = setEnvKeyField;
-state.deleteEnvKey = deleteEnvKey;
-state.addEnvKey = addEnvKey;
-state.removeWire = removeWire;
-state.snapshotFocusedEdit = snapshotFocusedEdit;
-state.restoreFocusedEdit = restoreFocusedEdit;
+Object.assign(state, {
+  render, op, selectedResource, entryOf, envelopeEntryOf, docMode, setField, setEnvelopeField,
+  updateEnvSelection, renameEnvKey, setEnvKeyField, deleteEnvKey, addEnvKey, removeWire, snapshotFocusedEdit, restoreFocusedEdit
+});
 
 var initialized = false;
 

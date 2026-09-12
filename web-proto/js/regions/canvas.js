@@ -1606,16 +1606,167 @@ function onDragLeave(e) {
   if (e.target === cwEl) cwEl.style.outline = "";
 }
 
-function onDrop(e) {
+export function scaffoldResourceFields(res, flds, _doc, isExplicit) {
+  const fields = {};
+  const kind = res && res.kind || "";
+  const name = res && res.name || "";
+
+  // 1. Native Kubernetes Workloads: nested required trees
+  if (kind === "Deployment") {
+    fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: name }) };
+    fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: name }) };
+    if (isExplicit) {
+      fields["spec.template.spec.containers[0].name"] = { value: name };
+      fields["spec.template.spec.containers[0].image"] = { value: "nginx:latest" };
+    }
+  } else if (kind === "StatefulSet" || kind === "DaemonSet") {
+    fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: name }) };
+    fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: name }) };
+    fields["spec.template.spec.containers[0].name"] = { value: name };
+    fields["spec.template.spec.containers[0].image"] = { value: "nginx:latest" };
+    if (kind === "StatefulSet") {
+      fields["spec.serviceName"] = { value: name };
+    }
+  } else if (kind === "Job") {
+    fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: name }) };
+    fields["spec.template.spec.containers[0].name"] = { value: name };
+    fields["spec.template.spec.containers[0].image"] = { value: "nginx:latest" };
+    fields["spec.template.spec.restartPolicy"] = { value: "Never" };
+  } else if (kind === "CronJob") {
+    fields["spec.schedule"] = { value: "*/5 * * * *" };
+    fields["spec.jobTemplate.spec.template.spec.containers[0].name"] = { value: name };
+    fields["spec.jobTemplate.spec.template.spec.containers[0].image"] = { value: "nginx:latest" };
+    fields["spec.jobTemplate.spec.template.spec.restartPolicy"] = { value: "Never" };
+  } else if (kind === "Service") {
+    fields["spec.selector"] = { raw: JSON.stringify({ app: name }) };
+    fields["spec.ports[0].port"] = { raw: "80" };
+    fields["spec.type"] = { value: "ClusterIP" };
+  }
+
+  // 2. Required branches from schema
+  const branches = (flds && flds.requiredBranches) || [];
+  branches.forEach(function (b) {
+    if (b.path === "spec.selector") {
+      if (!fields["spec.selector.matchLabels"] && !fields["spec.selector"]) {
+        fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: name }) };
+      }
+    } else if (b.path === "spec.template") {
+      if (!fields["spec.template.metadata.labels"]) {
+        fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: name }) };
+      }
+      if (isExplicit || kind !== "Deployment") {
+        if (!fields["spec.template.spec.containers[0].name"]) {
+          fields["spec.template.spec.containers[0].name"] = { value: name };
+        }
+        if (!fields["spec.template.spec.containers[0].image"]) {
+          fields["spec.template.spec.containers[0].image"] = { value: "nginx:latest" };
+        }
+      }
+    }
+  });
+
+  // 3. Schema-required fields
+  const reqFields = (flds && flds.fields) || [];
+  reqFields.forEach(function (f) {
+    if (!f || !f.path) return;
+    const isReq = f.requiredChain || (f.required && !f.path.includes("."));
+    if (!isReq) return;
+    if (fields[f.path]) return;
+
+    const parts = f.path.split(".");
+    for (let i = 1; i < parts.length; i++) {
+      const anc = parts.slice(0, i).join(".");
+      if (fields[anc]) return;
+    }
+
+    if (f.default !== undefined && f.default !== null) {
+      if (typeof f.default === "object") {
+        fields[f.path] = { raw: JSON.stringify(f.default) };
+      } else {
+        fields[f.path] = { value: String(f.default) };
+      }
+      return;
+    }
+
+    if (f.enum && Array.isArray(f.enum) && f.enum.length > 0) {
+      fields[f.path] = { value: String(f.enum[0]) };
+      return;
+    }
+
+    if (f.path === "region" || f.path.endsWith(".region")) {
+      fields[f.path] = { value: "us-east-1" };
+      return;
+    }
+
+    if (f.type === "integer" || f.type === "number") {
+      let numVal = "1";
+      if (f.minimum !== undefined && f.minimum !== null) {
+        numVal = String(f.minimum);
+      } else if (/port/i.test(f.path)) {
+        numVal = "8080";
+      } else if (/storage/i.test(f.path)) {
+        numVal = "20";
+      }
+      fields[f.path] = { value: numVal };
+    } else if (f.type === "boolean") {
+      fields[f.path] = { value: "false" };
+    } else if (f.type === "object") {
+      fields[f.path] = { raw: "{}" };
+    } else if (f.type === "array") {
+      fields[f.path] = { raw: "[]" };
+    } else {
+      let strVal;
+      if (/engine/i.test(f.path)) {
+        strVal = "postgres";
+      } else if (/instanceclass/i.test(f.path)) {
+        strVal = "db.t3.micro";
+      } else if (/databaseversion/i.test(f.path)) {
+        strVal = "POSTGRES_15";
+      } else if (/name$/i.test(f.path) || /id$/i.test(f.path)) {
+        strVal = name;
+      } else {
+        const seg = f.path.split(".").pop() || "placeholder";
+        strVal = seg.toLowerCase();
+      }
+      fields[f.path] = { value: strVal };
+    }
+  });
+
+  // Fallback defaults if schema fields could not be fetched
+  if (kind === "Queue" && !fields["region"]) {
+    fields["region"] = { value: "us-east-1" };
+  } else if (kind === "Instance" && !fields["region"]) {
+    fields["region"] = { value: "us-east-1" };
+    if (!fields["instanceClass"]) fields["instanceClass"] = { value: "db.t3.micro" };
+  } else if (kind === "Bucket" && !fields["region"]) {
+    fields["region"] = { value: "us-east-1" };
+  }
+
+  return fields;
+}
+
+async function onDrop(e) {
   const preview = document.getElementById("kind-preview");
   if (preview) { preview.hidden = true; preview.remove(); }
   cwEl.style.outline = "";
   const pl = parseDropPayload(e.dataTransfer);
   if (!pl) return;
   e.preventDefault();
-  const entry = resolveDropKind(pl);
+  let entry = resolveDropKind(pl);
   const d = doc();
   if (!entry || !d) return;
+
+  if (!entry.apiVersion || !entry.provider) {
+    if (!kindsCache) {
+      try {
+        const kRes = await A.getKinds();
+        if (kRes && kRes.kinds) kindsCache = kRes.kinds;
+      } catch (_) {}
+    }
+    const resolved = resolveDropKind(pl);
+    if (resolved) entry = resolved;
+  }
+
   const rect = cwEl.getBoundingClientRect();
   const pt = toCanvas(e.clientX - rect.left, e.clientY - rect.top);
   const bounds = getVisibleCanvasBounds();
@@ -1627,6 +1778,20 @@ function onDrop(e) {
   autoPlaced.delete(name);
   S.setPosition(name, { x: x, y: y }, true);
   S.select(name);
+
+  let flds = null;
+  if (entry.apiVersion && entry.kind) {
+    try {
+      flds = await A.getKindFields(entry.apiVersion, entry.kind, { requiredOnly: true });
+    } catch (_) {}
+  }
+
+  const scaffoldedFields = scaffoldResourceFields(
+    { name: name, kind: entry.kind, provider: entry.provider || "", apiVersion: entry.apiVersion || "" },
+    flds,
+    d
+  );
+
   S.replaceDoc(function (next) {
     // sources is the dependency manifest the server loads providers from at
     // startup — a dropped kind's provider must be declared there or generate
@@ -1647,7 +1812,7 @@ function onDrop(e) {
       name: name,
       kind: entry.kind,
       provider: entry.provider || "",
-      fields: {},
+      fields: scaffoldedFields,
     });
   }).then(function (res) {
     if (res) S.select(name);
