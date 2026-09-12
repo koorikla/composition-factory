@@ -193,3 +193,183 @@ func TestDeleteResourceAllowsSelfRawReference(t *testing.T) {
 		t.Fatalf("DeleteResource failed: %v", err)
 	}
 }
+
+func TestRenameResourceDoesNotRewritePrefixSharingRawReferences(t *testing.T) {
+	b := wiredBlueprint(func(b *Blueprint) {
+		b.Spec.Resources = append(b.Spec.Resources, Resource{
+			Name: "main", Kind: "Queue", Fields: map[string]Field{},
+		})
+		b.Spec.Resources[1].Fields["rawField"] = Field{
+			Raw: `{{ .observed.resources.main-queue.resource.status.url }}`,
+		}
+	})
+
+	if err := b.RenameResource("main", "primary"); err != nil {
+		t.Fatalf("RenameResource: %v", err)
+	}
+
+	got := b.Spec.Resources[1].Fields["rawField"].Raw
+	want := `{{ .observed.resources.main-queue.resource.status.url }}`
+	if got != want {
+		t.Errorf("raw field = %q, want %q", got, want)
+	}
+}
+
+func TestDeleteResourceDoesNotRefuseOnPrefixSharingRawReference(t *testing.T) {
+	b := wiredBlueprint(func(b *Blueprint) {
+		b.Spec.Resources = append(b.Spec.Resources, Resource{
+			Name: "main", Kind: "Queue", Fields: map[string]Field{},
+		})
+		b.Spec.Resources[1].Fields["queueUrl"] = Field{Value: "static"}
+		b.Spec.Resources[1].Fields["rawField"] = Field{
+			Raw: `{{ .observed.resources.main-queue.resource.status.url }}`,
+		}
+	})
+
+	if err := b.DeleteResource("main"); err != nil {
+		t.Fatalf("DeleteResource failed: %v", err)
+	}
+}
+
+func TestRawReferencesResourceBoundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		resName  string
+		expected bool
+	}{
+		{"quoted exact", `"main"`, "main", true},
+		{"quoted prefix-sharing", `"main-queue"`, "main", false},
+		{"single quoted exact", `'main'`, "main", true},
+		{"single quoted prefix-sharing", `'main-queue'`, "main", false},
+		{"backtick exact", "`main`", "main", true},
+		{"backtick prefix-sharing", "`main-queue`", "main", false},
+		{"dot observed dot status", ".observed.resources.main.resource.status", "main", true},
+		{"dot observed prefix-sharing", ".observed.resources.main-queue.resource.status", "main", false},
+		{"dollar dot observed dot status", "$.observed.resources.main.resource.status", "main", true},
+		{"dollar dot observed prefix-sharing", "$.observed.resources.main-queue.resource.status", "main", false},
+		{"dollar observed dot status", "$observed.resources.main.resource.status", "main", true},
+		{"dollar observed prefix-sharing", "$observed.resources.main-queue.resource.status", "main", false},
+		{"resources dot", "resources.main.status", "main", true},
+		{"resources dot prefix-sharing", "resources.main-queue.status", "main", false},
+		{"resources space", "resources.main == true", "main", true},
+		{"resources brace", "{{ resources.main }}", "main", true},
+		{"resources paren", "(resources.main)", "main", true},
+		{"resources end of string", "resources.main", "main", true},
+		{"resources prefix-sharing identifier chars", "resources.main2", "main", false},
+		{"resources prefix-sharing underscore", "resources.main_service", "main", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rawReferencesResource(tt.raw, tt.resName)
+			if got != tt.expected {
+				t.Errorf("rawReferencesResource(%q, %q) = %v, want %v", tt.raw, tt.resName, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestRewriteRawResourceBoundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		from     string
+		to       string
+		expected string
+	}{
+		{
+			name:     "quoted exact",
+			raw:      `{{ index $.observed.resources "main" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ index $.observed.resources "primary" }}`,
+		},
+		{
+			name:     "quoted prefix-sharing left alone",
+			raw:      `{{ index $.observed.resources "main-queue" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ index $.observed.resources "main-queue" }}`,
+		},
+		{
+			name:     "dot observed rewrites exact",
+			raw:      `{{ .observed.resources.main.resource.status.url }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ .observed.resources.primary.resource.status.url }}`,
+		},
+		{
+			name:     "dot observed leaves prefix-sharing alone",
+			raw:      `{{ .observed.resources.main-queue.resource.status.url }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ .observed.resources.main-queue.resource.status.url }}`,
+		},
+		{
+			name:     "dollar dot observed rewrites exact",
+			raw:      `{{ $.observed.resources.main.resource.status.url }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ $.observed.resources.primary.resource.status.url }}`,
+		},
+		{
+			name:     "dollar dot observed leaves prefix-sharing alone",
+			raw:      `{{ $.observed.resources.main-queue.resource.status.url }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ $.observed.resources.main-queue.resource.status.url }}`,
+		},
+		{
+			name:     "dollar observed rewrites exact",
+			raw:      `$observed.resources.main.resource.status.url`,
+			from:     "main",
+			to:       "primary",
+			expected: `$observed.resources.primary.resource.status.url`,
+		},
+		{
+			name:     "dollar observed leaves prefix-sharing alone",
+			raw:      `$observed.resources.main-queue.resource.status.url`,
+			from:     "main",
+			to:       "primary",
+			expected: `$observed.resources.main-queue.resource.status.url`,
+		},
+		{
+			name:     "resources dot rewrites exact",
+			raw:      `resources.main.status.url`,
+			from:     "main",
+			to:       "primary",
+			expected: `resources.primary.status.url`,
+		},
+		{
+			name:     "resources dot leaves prefix-sharing alone",
+			raw:      `resources.main-queue.status.url`,
+			from:     "main",
+			to:       "primary",
+			expected: `resources.main-queue.status.url`,
+		},
+		{
+			name:     "resources with space and brace",
+			raw:      `{{ resources.main }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ resources.primary }}`,
+		},
+		{
+			name:     "multiple occurrences in same string",
+			raw:      `{{ .observed.resources.main.url }} and {{ .observed.resources.main-queue.url }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ .observed.resources.primary.url }} and {{ .observed.resources.main-queue.url }}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rewriteRawResource(tt.raw, tt.from, tt.to)
+			if got != tt.expected {
+				t.Errorf("rewriteRawResource(%q, %q, %q) = %q, want %q", tt.raw, tt.from, tt.to, got, tt.expected)
+			}
+		})
+	}
+}
