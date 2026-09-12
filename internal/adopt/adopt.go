@@ -1118,6 +1118,11 @@ var (
 	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*(?:\(index\s+(?:\$?[.]?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)|(?:\$?[.]?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+))\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reXRResourceRef      = regexp.MustCompile(`\{\{-?\s*\$xr\s*-?\}\}-([a-zA-Z0-9-]+)`)
 	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+(?:(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)|\(?\s*index\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s*-?\}\}`)
+	reWhenIfBoolEq       = regexp.MustCompile(`\{\{-?\s*if\s+\(?eq\s+(?:\(?\s*(?:default\s+false\s+)?(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*(?:default\s+false\s+)?index\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s+true\)?\s*-?\}\}`)
+	reWhenIfBoolEqRev    = regexp.MustCompile(`\{\{-?\s*if\s+\(?eq\s+true\s+(?:\(?\s*(?:default\s+false\s+)?(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*(?:default\s+false\s+)?index\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\)?\s*-?\}\}`)
+	reWhenIfBoolNe       = regexp.MustCompile(`\{\{-?\s*if\s+\(?ne\s+(?:\(?\s*(?:default\s+false\s+)?(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*(?:default\s+false\s+)?index\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s+false\)?\s*-?\}\}`)
+	reWhenIfBoolNeRev    = regexp.MustCompile(`\{\{-?\s*if\s+\(?ne\s+false\s+(?:\(?\s*(?:default\s+false\s+)?(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*(?:default\s+false\s+)?index\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\)?\s*-?\}\}`)
+	reWhenIfDefault      = regexp.MustCompile(`\{\{-?\s*if\s+\(?default\s+false\s+(?:\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*index\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\)?\s*-?\}\}`)
 	reWhenIfEq           = regexp.MustCompile(`\{\{-?\s*if\s+\(?eq\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]*)"\)?\s*-?\}\}`)
 	reWhenIfNe           = regexp.MustCompile(`\{\{-?\s*if\s+\(?ne\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s+"([^"]*)"\)?\s*-?\}\}`)
 	reWhenIfEqRev        = regexp.MustCompile(`\{\{-?\s*if\s+\(?eq\s+"([^"]*)"\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)?\s*-?\}\}`)
@@ -1936,13 +1941,25 @@ func extractWhenGuard(text string, bp *blueprint.Blueprint) string {
 	} else if m := reWhenIfNeRev.FindStringSubmatch(text); len(m) >= 3 {
 		ensureParamDeclaredTyped(bp, m[2], "string")
 		return fmt.Sprintf("params.%s != %q", m[2], m[1])
-	} else if m := reWhenIfSimple.FindStringSubmatch(text); len(m) >= 2 {
-		key := m[1]
-		if key == "" && len(m) >= 3 {
-			key = m[2]
+	}
+	for _, re := range []*regexp.Regexp{
+		reWhenIfBoolEq,
+		reWhenIfBoolEqRev,
+		reWhenIfBoolNe,
+		reWhenIfBoolNeRev,
+		reWhenIfDefault,
+		reWhenIfSimple,
+	} {
+		if m := re.FindStringSubmatch(text); len(m) >= 2 {
+			key := m[1]
+			if key == "" && len(m) >= 3 {
+				key = m[2]
+			}
+			if key != "" {
+				ensureParamDeclaredTyped(bp, key, "boolean")
+				return fmt.Sprintf("params.%s", key)
+			}
 		}
-		ensureParamDeclaredTyped(bp, key, "boolean")
-		return fmt.Sprintf("params.%s", key)
 	}
 	return ""
 }
@@ -2020,6 +2037,24 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 				ensureParamDeclared(bp, pName)
 			} else {
 				report.Record("template.param."+pName, "invalid parameter identifier")
+			}
+		}
+		for _, re := range []*regexp.Regexp{
+			reWhenIfBoolEq,
+			reWhenIfBoolEqRev,
+			reWhenIfBoolNe,
+			reWhenIfBoolNeRev,
+			reWhenIfDefault,
+			reWhenIfSimple,
+		} {
+			if m := re.FindStringSubmatch(action[0]); len(m) >= 2 {
+				pName := m[1]
+				if pName == "" && len(m) >= 3 {
+					pName = m[2]
+				}
+				if pName != "" && isValidParamIdentifier(pName) {
+					ensureParamDeclaredTyped(bp, pName, "boolean")
+				}
 			}
 		}
 	}

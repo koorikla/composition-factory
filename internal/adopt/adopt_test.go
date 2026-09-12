@@ -8188,3 +8188,80 @@ spec:
 		}
 	}
 }
+
+func TestAdoptGoTemplate_BooleanWhenGuard(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition string
+		wantWhen  string
+	}{
+		{
+			name:      "eq spec true",
+			condition: `eq $spec.enabled true`,
+			wantWhen:  "params.enabled",
+		},
+		{
+			name:      "eq true spec",
+			condition: `eq true $spec.enabled`,
+			wantWhen:  "params.enabled",
+		},
+		{
+			name:      "dot spec eq true",
+			condition: `eq .spec.enabled true`,
+			wantWhen:  "params.enabled",
+		},
+		{
+			name:      "default false spec",
+			condition: `default false $spec.enabled`,
+			wantWhen:  "params.enabled",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-boolean-when
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResource
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- if %s }}
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+              annotations:
+                crossplane.io/composition-resource-name: test-cm
+            data:
+              key: value
+            {{- end }}
+`, tc.condition)
+
+			bp, report, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 1 {
+				t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+			}
+			res := bp.Spec.Resources[0]
+			if res.When != tc.wantWhen {
+				t.Errorf("res.When = %q, want %q (report drops: %+v)", res.When, tc.wantWhen, report.Drops)
+			}
+		})
+	}
+}
