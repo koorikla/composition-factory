@@ -12,6 +12,10 @@
 // validation PUT /api/blueprint/resources/{name} does. A manifest-level
 // rejection (unknown key, scalar at an object, a bad wrapper) answers 400
 // with "path" and "line" beside "error" so the editor can highlight it.
+// Both keys are always present on such a body, but "path" may be "" and
+// "line" may be 0 when the error has no location (a syntax error yaml.v3
+// could not place, a conflict between two field paths on GET); a UI treats
+// those as "no location" rather than as the first line or the root.
 package api
 
 import (
@@ -64,12 +68,18 @@ func (srv *server) fieldTreeFor(b *blueprint.Blueprint, r blueprint.Resource) ([
 }
 
 // handleGetResourceManifest serves GET /api/blueprint/resources/{name}/manifest.
-// The lock is held for the same reason handleGenerate holds it: the view
-// must describe a document that existed as a whole, not one an edit was
-// midway through replacing.
+// Like handleRender it first waits for any background fetch of the
+// blueprint's sources, so a cold-start GET resolves the kind instead of
+// answering 400 while a provider is still loading. The lock is then held for
+// the same reason handleGenerate holds it: the view must describe a
+// document that existed as a whole, not one an edit was midway through
+// replacing.
 func (srv *server) handleGetResourceManifest(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
+	if cur, err := blueprint.Load(srv.Blueprint); err == nil && cur != nil {
+		srv.awaitBlueprintSources(cur)
+	}
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 

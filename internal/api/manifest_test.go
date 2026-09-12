@@ -105,3 +105,32 @@ func TestPutResourceManifestRunsCRDValidation(t *testing.T) {
 		t.Errorf("error should come from CRD validation: %s", rec.Body)
 	}
 }
+
+func TestGetResourceManifestUnknownResourceIs404(t *testing.T) {
+	h := testHandler(t)
+	if rec := do(t, h, "GET", "/api/blueprint/resources/nope/manifest", ""); rec.Code != 404 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+}
+
+// A syntax error has a line but no field path: the body still carries
+// both keys so the editor can rely on their presence, with path "".
+func TestPutResourceManifestSyntaxErrorBodyShape(t *testing.T) {
+	h := testHandler(t)
+	seedDeployment(t, h)
+	body, _ := json.Marshal(map[string]string{"yaml": "spec: [\n"})
+	rec := do(t, h, "PUT", "/api/blueprint/resources/web/manifest", string(body))
+	if rec.Code != 400 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var e map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatal(err)
+	}
+	msg, _ := e["error"].(string)
+	path, hasPath := e["path"]
+	line, _ := e["line"].(float64)
+	if !strings.HasPrefix(msg, "line 1: ") || !hasPath || path != "" || line != 1 {
+		t.Errorf("got %s", rec.Body)
+	}
+}

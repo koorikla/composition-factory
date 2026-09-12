@@ -77,8 +77,8 @@ column names the route each tool bridges to.
 | `delete_parameter` | `DELETE /api/blueprint/parameters/{name}` | Delete a parameter; refused while resource fields still reference it. |
 | `add_resource` | `POST /api/blueprint/resources` | Declare a new composed resource; duplicates refused. |
 | `update_resource` | `PUT /api/blueprint/resources/{name}` | Replace a composed resource's declaration in full. |
-| `get_resource_manifest` | `GET /api/blueprint/resources/{name}/manifest` | The resource's set fields as nested manifest-shaped YAML; wires and raw values as `{from: …}` / `{raw: …}` wrappers. |
-| `set_resource_manifest` | `PUT /api/blueprint/resources/{name}/manifest` | Replace the resource's fields in full from manifest-shaped YAML; the kind's schema decides map/array/object grammar, unknown keys fail with `path` and `line`. |
+| `get_resource_manifest` | `GET /api/blueprint/resources/{name}/manifest` | The resource's set fields as nested manifest-shaped YAML (`{yaml}`); wires and raw values as `{from: …}` / `{raw: …}` wrappers. |
+| `set_resource_manifest` | `PUT /api/blueprint/resources/{name}/manifest` | Replace the resource's fields in full from manifest-shaped YAML; the kind's schema decides map/array/object grammar. An unknown key or malformed wrapper fails naming the path and line in the error text. |
 | `rename_resource` | `POST /api/blueprint/resources/{name}/rename` | Rename a composed resource and atomically rewrite status references. |
 | `delete_resource` | `DELETE /api/blueprint/resources/{name}` | Delete a composed resource; refused while other resources wire from its status or metadata. |
 | `add_provider` | `POST /api/providers` | Fetch a provider package (network), cache its schemas, pin its digest, index its kinds. |

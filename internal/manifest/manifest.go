@@ -19,7 +19,9 @@ package manifest
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"sort"
 	"strconv"
@@ -363,8 +365,15 @@ func toYAML(n *node, isRoot bool) *yaml.Node {
 	}
 	for _, c := range n.children {
 		v := toYAML(c, false)
-		if allWrapperKeys && v.Kind == yaml.ScalarNode {
-			v = flowMap("value", v)
+		if allWrapperKeys {
+			switch {
+			case v.Kind == yaml.ScalarNode:
+				v = flowMap("value", v)
+			case v.Kind == yaml.SequenceNode && c.field != nil:
+				// A list-of-scalars literal: Parse reads {value: [a, b]} as a
+				// malformed wrapper, so carry the comma-joined value instead.
+				v = flowMap("value", strScalar(c.field.Value))
+			}
 		}
 		out.Content = append(out.Content, strScalar(c.label), v)
 	}
@@ -378,23 +387,32 @@ func toYAML(n *node, isRoot bool) *yaml.Node {
 // value is a wrapper; a null scalar leaves its field unset. Every error is
 // an *Error carrying the field path and the line of the offending node.
 func Parse(nodes []*schema.Node, text string) (map[string]blueprint.Field, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal([]byte(text), &doc); err != nil {
-		line := yamlErrLine(err)
-		msg := strings.TrimPrefix(err.Error(), "yaml: ")
-		if line > 0 {
-			// Error() names the line itself; drop yaml.v3's own "line N: "
-			// so the message carries it exactly once.
-			msg = strings.TrimPrefix(msg, fmt.Sprintf("line %d: ", line))
-		}
-		return nil, &Error{Line: line, Msg: msg}
-	}
 	out := map[string]blueprint.Field{}
+	dec := yaml.NewDecoder(strings.NewReader(text))
+	var doc yaml.Node
+	if err := dec.Decode(&doc); err != nil {
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		return nil, syntaxError(err)
+	}
+	// A single-node decode would silently keep the first document and drop
+	// the rest; a second document is refused at its --- marker instead.
+	var second yaml.Node
+	if err := dec.Decode(&second); err == nil {
+		line := second.Line
+		if line == 0 && len(second.Content) > 0 {
+			line = second.Content[0].Line
+		}
+		return nil, &Error{Line: line, Msg: "a manifest is one YAML document; remove the --- and what follows it"}
+	} else if !errors.Is(err, io.EOF) {
+		return nil, syntaxError(err)
+	}
 	if doc.Kind == 0 || len(doc.Content) == 0 {
 		return out, nil
 	}
-	body := doc.Content[0]
-	if body.Kind == yaml.ScalarNode && body.Tag == "!!null" {
+	body := deref(doc.Content[0])
+	if isNull(body) {
 		return out, nil
 	}
 	if body.Kind != yaml.MappingNode {
@@ -404,6 +422,31 @@ func Parse(nodes []*schema.Node, text string) (map[string]blueprint.Field, error
 		return nil, err
 	}
 	return out, nil
+}
+
+// syntaxError turns a yaml.v3 parse error into an *Error. Error() names the
+// line itself, so yaml.v3's own "yaml: line N: " prefix is dropped and the
+// message carries the line exactly once.
+func syntaxError(err error) *Error {
+	line := yamlErrLine(err)
+	msg := strings.TrimPrefix(err.Error(), "yaml: ")
+	if line > 0 {
+		msg = strings.TrimPrefix(msg, fmt.Sprintf("line %d: ", line))
+	}
+	return &Error{Line: line, Msg: msg}
+}
+
+// deref follows an alias (*anchor) to the node it names, so an anchored
+// scalar or mapping reads the same through every alias of it.
+func deref(n *yaml.Node) *yaml.Node {
+	for n != nil && n.Kind == yaml.AliasNode && n.Alias != nil {
+		n = n.Alias
+	}
+	return n
+}
+
+func isMergeKey(k *yaml.Node) bool {
+	return k.Tag == "!!merge" || k.Value == "<<"
 }
 
 // yamlErrLine pulls the line out of a yaml.v3 syntax error ("yaml: line 3:
@@ -420,33 +463,46 @@ func isNull(n *yaml.Node) bool {
 	return n.Kind == yaml.ScalarNode && n.Tag == "!!null"
 }
 
-// wrapper recognises {value|from|raw|template: scalar}. A mapping that pairs
-// two wrapper keys with scalar values, or wraps a null, is reported rather
-// than fallen through: both are certainly meant as wrappers and would
-// otherwise surface as a confusing "unknown field value" one level down.
-// Two wrapper-named keys whose values are themselves mappings are entries
-// (Render writes `from: {value: x}` for an annotation called "from").
-func wrapper(n *yaml.Node) (blueprint.Field, bool, *Error) {
-	if n.Kind != yaml.MappingNode {
+const wrapperMsg = "a wrapper takes exactly one of value, from, raw, template with a scalar value"
+
+// wrapper recognises {value|from|raw|template: scalar}. member reports
+// whether a key is a declared member at this position, and decides what a
+// mapping that is SHAPED like a wrapper but malformed means — a wrapper key
+// with a list or object value, or several wrapper keys: an error when the
+// keys are not members (a mistyped wrapper at a leaf), entries when they
+// all are. The schema has to arbitrate: a Deployment's spec has a member
+// called template, an annotation may be called "from" (Render writes it as
+// `from: {value: x}`), and neither is a wrapper. A wrapped null is always an
+// error: leaving the field out is how a value is unset.
+func wrapper(n *yaml.Node, member func(string) bool) (blueprint.Field, bool, *Error) {
+	if n.Kind != yaml.MappingNode || len(n.Content) < 2 {
 		return blueprint.Field{}, false, nil
 	}
-	if len(n.Content) == 4 && wrapperKeys[n.Content[0].Value] && wrapperKeys[n.Content[2].Value] &&
-		n.Content[1].Kind == yaml.ScalarNode && n.Content[3].Kind == yaml.ScalarNode {
-		return blueprint.Field{}, false, &Error{Line: n.Line, Msg: "a wrapper takes exactly one of value, from, raw, template" +
-			" (entries that merely share those names take {value: ...} each)"}
+	allMembers := true
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k := n.Content[i].Value
+		if !wrapperKeys[k] {
+			return blueprint.Field{}, false, nil
+		}
+		if !member(k) {
+			allMembers = false
+		}
 	}
-	if len(n.Content) != 2 {
-		return blueprint.Field{}, false, nil
+	if len(n.Content) > 2 {
+		if allMembers {
+			return blueprint.Field{}, false, nil
+		}
+		return blueprint.Field{}, false, &Error{Line: n.Line, Msg: wrapperMsg}
 	}
-	k, v := n.Content[0], n.Content[1]
-	if !wrapperKeys[k.Value] {
-		return blueprint.Field{}, false, nil
-	}
+	k, v := n.Content[0], deref(n.Content[1])
 	if isNull(v) {
 		return blueprint.Field{}, false, &Error{Line: v.Line, Msg: fmt.Sprintf("{%s: ...} needs a scalar; leave the field out to unset it", k.Value)}
 	}
 	if v.Kind != yaml.ScalarNode {
-		return blueprint.Field{}, false, nil
+		if member(k.Value) {
+			return blueprint.Field{}, false, nil
+		}
+		return blueprint.Field{}, false, &Error{Line: v.Line, Msg: wrapperMsg}
 	}
 	switch k.Value {
 	case "value":
@@ -457,6 +513,24 @@ func wrapper(n *yaml.Node) (blueprint.Field, bool, *Error) {
 		return blueprint.Field{Raw: v.Value}, true, nil
 	default:
 		return blueprint.Field{Template: v.Value}, true, nil
+	}
+}
+
+// noMember is the member predicate where nothing nests: a map entry, or a
+// position whose value can only be a scalar or a wrapper.
+func noMember(string) bool { return false }
+
+// memberOf is the member predicate for an object position: its declared
+// children. A map position takes any key; an array position takes none
+// (its items do, see the element loop in walkValue).
+func memberOf(sn *schema.Node) func(string) bool {
+	switch {
+	case sn.Type == "map":
+		return func(string) bool { return true }
+	case sn.Type == "array" || len(sn.Children) == 0:
+		return noMember
+	default:
+		return func(k string) bool { return childSchema(sn, k, nil) != nil }
 	}
 }
 
@@ -491,17 +565,45 @@ func checkScalar(v *yaml.Node, sn *schema.Node, path string) *Error {
 	return nil
 }
 
-// siblingsHint names the closest declared member when the unknown key looks
-// like a typo of one.
-func siblingsHint(name string, children []*schema.Node) string {
-	names := make([]string, 0, len(children))
-	for _, c := range children {
+// forProviderHint is the message for a managed kind given an envelope key:
+// its settable tree is spec.forProvider's body, nothing around it.
+const forProviderHint = "paste only the spec.forProvider body — apiVersion, kind and metadata are generated"
+
+// unknownFieldMsg explains a key the schema does not declare. A top-level
+// envelope key gets a dedicated hint: the tree of a native kind is the
+// object's own top level (metadata, spec, data ...) so only apiVersion,
+// kind and status are foreign there; a managed kind's tree is the
+// spec.forProvider body, which has no metadata or spec of its own —
+// the presence of a top-level metadata node is what tells the two apart.
+// Otherwise the closest declared sibling is suggested when one is close.
+func unknownFieldMsg(key string, top bool, siblings []*schema.Node) string {
+	if top {
+		nativeRooted := childSchema(nil, "metadata", siblings) != nil
+		switch key {
+		case "apiVersion", "kind":
+			if nativeRooted {
+				return "omit apiVersion and kind; the generator emits them"
+			}
+			return forProviderHint
+		case "status":
+			if nativeRooted {
+				return "omit status; the server owns it"
+			}
+			return forProviderHint
+		case "metadata", "spec":
+			if !nativeRooted {
+				return forProviderHint
+			}
+		}
+	}
+	names := make([]string, 0, len(siblings))
+	for _, c := range siblings {
 		names = append(names, c.Name)
 	}
-	if best := blueprint.ClosestPath(name, names); best != "" {
-		return fmt.Sprintf(" (did you mean %q?)", best)
+	if best := blueprint.ClosestPath(key, names); best != "" {
+		return fmt.Sprintf("unknown field; did you mean %q?", best)
 	}
-	return ""
+	return "unknown field"
 }
 
 func walkObject(m *yaml.Node, children []*schema.Node, prefix string, out map[string]blueprint.Field) error {
@@ -509,13 +611,16 @@ func walkObject(m *yaml.Node, children []*schema.Node, prefix string, out map[st
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		k, v := m.Content[i], m.Content[i+1]
 		path := join(prefix, k.Value)
+		if isMergeKey(k) {
+			return &Error{Path: path, Line: k.Line, Msg: "YAML merge keys (<<) are not supported here"}
+		}
 		if seen[k.Value] {
 			return &Error{Path: path, Line: k.Line, Msg: "duplicate key"}
 		}
 		seen[k.Value] = true
 		sn := childSchema(nil, k.Value, children)
 		if sn == nil {
-			return &Error{Path: path, Line: k.Line, Msg: "unknown field (not in the schema)" + siblingsHint(k.Value, children)}
+			return &Error{Path: path, Line: k.Line, Msg: unknownFieldMsg(k.Value, prefix == "", children)}
 		}
 		if err := walkValue(v, sn, path, out); err != nil {
 			return err
@@ -525,10 +630,11 @@ func walkObject(m *yaml.Node, children []*schema.Node, prefix string, out map[st
 }
 
 func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]blueprint.Field) error {
+	v = deref(v)
 	if isNull(v) {
 		return nil
 	}
-	if f, ok, werr := wrapper(v); werr != nil {
+	if f, ok, werr := wrapper(v, memberOf(sn)); werr != nil {
 		werr.Path = path
 		return werr
 	} else if ok {
@@ -546,11 +652,12 @@ func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]bluepr
 			return &Error{Path: path, Line: v.Line, Msg: "expected a list; to set the whole list verbatim use {raw: \"...\"}"}
 		}
 		for i, item := range v.Content {
+			item = deref(item)
 			ep := path + "[" + strconv.Itoa(i) + "]"
 			if isNull(item) {
 				continue
 			}
-			if f, ok, werr := wrapper(item); werr != nil {
+			if f, ok, werr := wrapper(item, func(k string) bool { return childSchema(sn, k, nil) != nil }); werr != nil {
 				werr.Path = ep
 				return werr
 			} else if ok {
@@ -569,6 +676,7 @@ func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]bluepr
 		if v.Kind == yaml.SequenceNode {
 			parts := make([]string, 0, len(v.Content))
 			for _, item := range v.Content {
+				item = deref(item)
 				if item.Kind != yaml.ScalarNode || isNull(item) || strings.Contains(item.Value, ",") || strings.TrimSpace(item.Value) == "" {
 					return &Error{Path: path, Line: item.Line, Msg: "list entries must be non-empty scalars without commas; use {raw: \"[...]\"} otherwise"}
 				}
@@ -612,8 +720,11 @@ func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]bluepr
 func walkMap(v *yaml.Node, path string, out map[string]blueprint.Field) error {
 	seen := map[string]bool{}
 	for i := 0; i+1 < len(v.Content); i += 2 {
-		k, ev := v.Content[i], v.Content[i+1]
+		k, ev := v.Content[i], deref(v.Content[i+1])
 		ep := path + "[" + k.Value + "]"
+		if isMergeKey(k) {
+			return &Error{Path: ep, Line: k.Line, Msg: "YAML merge keys (<<) are not supported here"}
+		}
 		if seen[k.Value] {
 			return &Error{Path: ep, Line: k.Line, Msg: "duplicate key"}
 		}
@@ -625,7 +736,7 @@ func walkMap(v *yaml.Node, path string, out map[string]blueprint.Field) error {
 			out[ep] = blueprint.Field{Value: ev.Value}
 			continue
 		}
-		if f, ok, werr := wrapper(ev); werr != nil {
+		if f, ok, werr := wrapper(ev, noMember); werr != nil {
 			werr.Path = ep
 			return werr
 		} else if ok {

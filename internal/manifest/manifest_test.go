@@ -8,6 +8,7 @@ import (
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
 	"github.com/koorikla/compositionfactory/internal/schema/k8s"
+	"github.com/koorikla/compositionfactory/internal/testfixture"
 )
 
 func deploymentNodes(t *testing.T) []*schema.Node {
@@ -123,7 +124,7 @@ func TestParseExplicitRawAtMapNode(t *testing.T) {
 	}
 }
 
-func TestParseWrapperWithTwoKeysIsNotAWrapper(t *testing.T) {
+func TestParseWrapperWithTwoKeysIsAnError(t *testing.T) {
 	_, err := Parse(deploymentNodes(t), "spec:\n  replicas: {from: params.a, value: 2}\n")
 	if err == nil {
 		t.Fatal("want error for a two-key wrapper")
@@ -283,10 +284,19 @@ func TestRenderRefusesAWholeValueBesideItsMembers(t *testing.T) {
 }
 
 func TestParseDuplicateKeyIsAnError(t *testing.T) {
-	_, err := Parse(deploymentNodes(t), "spec:\n  replicas: 1\n  paused: true\n  replicas: 2\n")
-	var me *Error
-	if !asError(err, &me) || me.Path != "spec.replicas" || me.Line != 4 {
-		t.Fatalf("want duplicate error at spec.replicas line 4, got %v", err)
+	for _, tc := range []struct {
+		yaml, path string
+		line       int
+	}{
+		{"spec:\n  replicas: 1\n  paused: true\n  replicas: 2\n", "spec.replicas", 4},
+		{"spec:\n  template:\n    spec:\n      containers:\n        - name: a\n        - name: b\n          image: x\n          name: c\n", "spec.template.spec.containers[1].name", 8},
+		{"metadata:\n  labels:\n    a: 1\n    b: 2\n    a: 3\n", "metadata.labels[a]", 5},
+	} {
+		_, err := Parse(deploymentNodes(t), tc.yaml)
+		var me *Error
+		if !asError(err, &me) || me.Path != tc.path || me.Line != tc.line || !strings.Contains(me.Msg, "duplicate") {
+			t.Errorf("%q: want duplicate error at %s line %d, got %v", tc.yaml, tc.path, tc.line, err)
+		}
 	}
 }
 
@@ -314,7 +324,7 @@ func TestParseScalarTypeMismatchReportsPathAndLine(t *testing.T) {
 
 func TestParseUnknownKeySuggestsTheClosestSibling(t *testing.T) {
 	_, err := Parse(deploymentNodes(t), "spec:\n  replicaz: 3\n")
-	if err == nil || !strings.Contains(err.Error(), `did you mean "replicas"`) {
+	if err == nil || !strings.HasSuffix(err.Error(), `spec.replicaz: unknown field; did you mean "replicas"?`) {
 		t.Fatalf("want a sibling hint, got %v", err)
 	}
 }
@@ -352,5 +362,92 @@ func TestParseWholeDocumentForms(t *testing.T) {
 	}
 	if _, err := Parse(nodes, "- a\n"); err == nil {
 		t.Error("a top-level list must be refused")
+	}
+}
+
+// A second document would be silently dropped by a single decode; it is
+// refused at the line of its --- marker instead.
+func TestParseRefusesMultiDocumentInput(t *testing.T) {
+	_, err := Parse(deploymentNodes(t), "spec:\n  replicas: 1\n---\nspec:\n  replicas: 2\n")
+	var me *Error
+	if !asError(err, &me) || me.Line != 3 || me.Path != "" || !strings.Contains(me.Msg, "one YAML document") {
+		t.Fatalf("want a one-document error at line 3, got %v", err)
+	}
+}
+
+func TestParseAnchorsAndAliasesResolve(t *testing.T) {
+	got, err := Parse(deploymentNodes(t), "metadata:\n  labels:\n    a: &v x\n    b: *v\nspec:\n  replicas: &r 2\n  minReadySeconds: *r\n  template:\n    spec:\n      containers:\n        - &c {name: web}\n        - *c\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for p, want := range map[string]string{
+		"metadata.labels[a]": "x", "metadata.labels[b]": "x",
+		"spec.replicas": "2", "spec.minReadySeconds": "2",
+		"spec.template.spec.containers[0].name": "web", "spec.template.spec.containers[1].name": "web",
+	} {
+		if got[p].Value != want {
+			t.Errorf("%s: got %+v want %q", p, got[p], want)
+		}
+	}
+}
+
+func TestParseMergeKeyIsRefused(t *testing.T) {
+	for _, text := range []string{"spec:\n  <<: {replicas: 1}\n", "metadata:\n  labels:\n    <<: {a: b}\n"} {
+		_, err := Parse(deploymentNodes(t), text)
+		var me *Error
+		if !asError(err, &me) || me.Line != 2+strings.Count(text, "labels") || !strings.Contains(me.Msg, "merge keys") {
+			t.Errorf("%q: want a merge-key error, got %v", text, err)
+		}
+	}
+}
+
+// A mapping that is shaped like a wrapper but malformed gets the wrapper
+// message, not a generic one: a wrapper key with a list or object value, or
+// several wrapper keys with scalar values.
+func TestParseWrapperShapedMistakes(t *testing.T) {
+	for _, tc := range []struct{ yaml, path string }{
+		{"spec:\n  template:\n    spec:\n      containers:\n        - command: {value: [a, b]}\n", "spec.template.spec.containers[0].command"},
+		{"spec:\n  replicas: {value: {x: 1}}\n", "spec.replicas"},
+		{"spec:\n  replicas: {from: a, value: b, raw: c}\n", "spec.replicas"},
+	} {
+		_, err := Parse(deploymentNodes(t), tc.yaml)
+		var me *Error
+		if !asError(err, &me) || me.Path != tc.path || !strings.Contains(me.Msg, "with a scalar value") {
+			t.Errorf("%q: want the wrapper message at %s, got %v", tc.yaml, tc.path, err)
+		}
+	}
+}
+
+// An unknown top-level envelope key points at what the generator owns
+// instead of hunting for a sibling.
+func TestParseEnvelopeKeysGetADedicatedHint(t *testing.T) {
+	_, err := Parse(deploymentNodes(t), "apiVersion: apps/v1\nkind: Deployment\nspec: {}\n")
+	var me *Error
+	if !asError(err, &me) || me.Path != "apiVersion" || me.Line != 1 || !strings.Contains(me.Msg, "omit apiVersion and kind") {
+		t.Fatalf("native: got %v", err)
+	}
+	queue := testfixture.QueueCRDs(t)[0]
+	nodes, ferr := queue.FieldTree()
+	if ferr != nil {
+		t.Fatal(ferr)
+	}
+	_, err = Parse(nodes, "spec:\n  forProvider:\n    region: eu-west-1\n")
+	if !asError(err, &me) || me.Path != "spec" || me.Line != 1 || !strings.Contains(me.Msg, "paste only the spec.forProvider body") {
+		t.Fatalf("managed: got %v", err)
+	}
+	// A plain unknown key on a managed kind still gets the sibling hint.
+	_, err = Parse(nodes, "regionn: x\n")
+	if !asError(err, &me) || !strings.HasSuffix(me.Error(), `unknown field; did you mean "region"?`) {
+		t.Fatalf("managed sibling hint: got %v", err)
+	}
+}
+
+// An all-wrapper-key mapping wraps a list-valued member too: Parse treats
+// {value: [a, b]} as a malformed wrapper, so Render writes {value: "a,b"}.
+func TestRenderAllWrapperKeyedArrayMemberStaysAnEntry(t *testing.T) {
+	nodes := []*schema.Node{{Name: "x", Type: "object", Children: []*schema.Node{{Name: "value", Type: "array"}}}}
+	out := roundTrip(t, nodes, map[string]blueprint.Field{"x.value": {Value: "a,b"}})
+	if !strings.Contains(out, "x:\n  value: {value: ") {
+		t.Errorf("array member not wrapped:\n%s", out)
 	}
 }

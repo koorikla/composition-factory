@@ -232,7 +232,8 @@ func (s *server) register(srv *sdk.Server) {
 	sdk.AddTool(srv, &sdk.Tool{
 		Name: "set_resource_manifest",
 		Description: "Replace a composed resource's fields IN FULL from manifest-shaped YAML. The kind's schema " +
-			"decides map/array/object grammar; unknown keys fail with path and line. Same CRD validation as update_resource.",
+			"decides map/array/object grammar; an unknown key or malformed wrapper fails naming the path and line " +
+			"in the error text. Same CRD validation as update_resource.",
 	}, s.setResourceManifest)
 
 	sdk.AddTool(srv, &sdk.Tool{
