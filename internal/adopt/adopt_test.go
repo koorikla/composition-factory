@@ -10523,3 +10523,136 @@ spec:
 		t.Errorf("digestRef %q missing from adopted bp.Spec.Sources: %+v", digestRef, adoptedBP.Spec.Sources)
 	}
 }
+
+func TestCF403_AdoptFromEnvironmentFieldPath(t *testing.T) {
+	t.Run("classic composition", func(t *testing.T) {
+		compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-env-patch
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XExample
+  environment:
+    environmentConfigs:
+      - type: Reference
+        ref:
+          name: default
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+      patches:
+        - type: FromEnvironmentFieldPath
+          fromFieldPath: clusterRegion
+          toFieldPath: spec.forProvider.region
+        - type: FromEnvironmentFieldPath
+          fromFieldPath: teamTag
+          toFieldPath: metadata.annotations[custom.io/team]
+        - type: FromEnvironmentFieldPath
+          fromFieldPath: deletionPolicy
+          toFieldPath: spec.deletionPolicy
+`
+
+		bp, report, err := Adopt([]byte(compYAML), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		res := bp.Spec.Resources[0]
+		if f, ok := res.Fields["region"]; !ok || f.From != "env.clusterRegion" {
+			t.Errorf("expected res.Fields[\"region\"].From = %q, got %+v", "env.clusterRegion", res.Fields["region"])
+		}
+		if f, ok := res.Annotations["custom.io/team"]; !ok || f.From != "env.teamTag" {
+			t.Errorf("expected res.Annotations[\"custom.io/team\"].From = %q, got %+v", "env.teamTag", res.Annotations["custom.io/team"])
+		}
+		if f, ok := res.Envelope["deletionPolicy"]; !ok || f.From != "env.deletionPolicy" {
+			t.Errorf("expected res.Envelope[\"deletionPolicy\"].From = %q, got %+v", "env.deletionPolicy", res.Envelope["deletionPolicy"])
+		}
+
+		if envKey, ok := bp.Spec.Environment["clusterRegion"]; !ok || envKey.Type != "string" {
+			t.Errorf("expected bp.Spec.Environment[\"clusterRegion\"] to exist with type 'string', got %+v", bp.Spec.Environment)
+		}
+		if envKey, ok := bp.Spec.Environment["teamTag"]; !ok || envKey.Type != "string" {
+			t.Errorf("expected bp.Spec.Environment[\"teamTag\"] to exist with type 'string', got %+v", bp.Spec.Environment)
+		}
+
+		if len(bp.Spec.EnvironmentConfigs) != 1 || bp.Spec.EnvironmentConfigs[0].Name != "default" {
+			t.Errorf("expected bp.Spec.EnvironmentConfigs to contain 'default' reference, got %+v", bp.Spec.EnvironmentConfigs)
+		}
+
+		for _, entry := range report.Drops {
+			if strings.Contains(entry.Reason, "FromEnvironmentFieldPath") {
+				t.Errorf("loss report contains unexpected error for FromEnvironmentFieldPath: %s", entry.Reason)
+			}
+		}
+	})
+
+	t.Run("patch-and-transform pipeline", func(t *testing.T) {
+		compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-env-patch-pnt
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XExample
+  mode: Pipeline
+  pipeline:
+    - step: environment-configs
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: default
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: bucket
+            base:
+              apiVersion: s3.aws.upbound.io/v1beta1
+              kind: Bucket
+            patches:
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: clusterRegion
+                toFieldPath: spec.forProvider.region
+`
+
+		bp, report, err := Adopt([]byte(compYAML), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		res := bp.Spec.Resources[0]
+		if f, ok := res.Fields["region"]; !ok || f.From != "env.clusterRegion" {
+			t.Errorf("expected res.Fields[\"region\"].From = %q, got %+v", "env.clusterRegion", res.Fields["region"])
+		}
+
+		if envKey, ok := bp.Spec.Environment["clusterRegion"]; !ok || envKey.Type != "string" {
+			t.Errorf("expected bp.Spec.Environment[\"clusterRegion\"] to exist with type 'string', got %+v", bp.Spec.Environment)
+		}
+
+		for _, entry := range report.Drops {
+			if strings.Contains(entry.Reason, "FromEnvironmentFieldPath") {
+				t.Errorf("loss report contains unexpected error for FromEnvironmentFieldPath: %s", entry.Reason)
+			}
+		}
+	})
+}

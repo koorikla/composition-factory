@@ -565,6 +565,46 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	// 4. Process EnvironmentConfig documents
 	parseEnvironmentConfigDocs(envConfigDocs, bp, report)
 
+	// 4.5. Process Composition spec.environment
+	if envMap, ok := spec["environment"].(map[string]any); ok {
+		if envConfigs, ok := envMap["environmentConfigs"].([]any); ok && len(bp.Spec.EnvironmentConfigs) == 0 {
+			var extracted []blueprint.EnvironmentConfig
+			for _, item := range envConfigs {
+				itemMap, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				var cfg blueprint.EnvironmentConfig
+				if selMap, ok := itemMap["selector"].(map[string]any); ok {
+					if mlMap, ok := selMap["matchLabels"].(map[string]any); ok {
+						ml := make(map[string]string)
+						for k, v := range mlMap {
+							if s, ok := v.(string); ok {
+								ml[k] = s
+							}
+						}
+						if len(ml) > 0 {
+							cfg.Selector = &blueprint.EnvironmentConfigSelector{
+								MatchLabels: ml,
+							}
+						}
+					}
+				}
+				if refMap, ok := itemMap["ref"].(map[string]any); ok {
+					if name, ok := refMap["name"].(string); ok && name != "" {
+						cfg.Name = name
+					}
+				}
+				if cfg.Name != "" || cfg.Selector != nil {
+					extracted = append(extracted, cfg)
+				}
+			}
+			if len(extracted) > 0 {
+				bp.Spec.EnvironmentConfigs = extracted
+			}
+		}
+	}
+
 	// 5. Parse Pipeline or Classic Resources
 	nameMapping := make(map[string]string)
 	if pipeline, ok := spec["pipeline"].([]any); ok && len(pipeline) > 0 {
@@ -2488,6 +2528,13 @@ func discoverObjectParamsFromPatches(resources []any, patchSetsMap map[string][]
 			return
 		}
 		pType, _ := pMap["type"].(string)
+		if pType == "FromEnvironmentFieldPath" {
+			fromPath, _ := pMap["fromFieldPath"].(string)
+			if fromPath != "" && isValidParamIdentifier(fromPath) {
+				ensureEnvDeclared(bp, fromPath, "string")
+			}
+			return
+		}
 		if pType != "FromCompositeFieldPath" && pType != "" {
 			return
 		}
@@ -2756,6 +2803,84 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 		} else {
 			report.Record(patchPath,
 				fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
+		}
+	} else if pType == "FromEnvironmentFieldPath" {
+		envKey := fromPath
+		if envKey == "" || !isValidParamIdentifier(envKey) {
+			report.Record(patchPath, fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
+			return
+		}
+		ensureEnvDeclared(bp, envKey, "string")
+
+		wireField := blueprint.Field{
+			From: "env." + envKey,
+		}
+
+		if strings.HasPrefix(toPath, "spec.forProvider.") {
+			targetField := strings.TrimPrefix(toPath, "spec.forProvider.")
+			targetField = normalizeMapFieldPath(targetField)
+			if targetField != "" {
+				if res.Fields == nil {
+					res.Fields = make(map[string]blueprint.Field)
+				}
+				res.Fields[targetField] = wireField
+			} else {
+				report.Record(patchPath, fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+			}
+		} else if strings.HasPrefix(toPath, "spec.initProvider.") || toPath == "spec.initProvider" {
+			report.Record(patchPath, fmt.Sprintf("unsupported toFieldPath %q in patch (initProvider is not supported in blueprint)", toPath))
+		} else if strings.HasPrefix(toPath, "spec.") {
+			if res.Provider == blueprint.NativeProvider {
+				targetField := normalizeMapFieldPath(toPath)
+				if targetField != "" {
+					if res.Fields == nil {
+						res.Fields = make(map[string]blueprint.Field)
+					}
+					res.Fields[targetField] = wireField
+				} else {
+					report.Record(patchPath, fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+				}
+			} else {
+				targetField := strings.TrimPrefix(toPath, "spec.")
+				targetField = normalizeMapFieldPath(targetField)
+				if targetField != "" {
+					if res.Envelope == nil {
+						res.Envelope = make(map[string]blueprint.Field)
+					}
+					res.Envelope[targetField] = wireField
+				} else {
+					report.Record(patchPath, fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+				}
+			}
+		} else if strings.HasPrefix(toPath, "metadata.annotations.") || strings.HasPrefix(toPath, "metadata.annotations[") {
+			annKey := strings.TrimPrefix(toPath, "metadata.annotations.")
+			if strings.HasPrefix(toPath, "metadata.annotations[") {
+				annKey = strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.annotations["), "]")
+			}
+			if annKey != "" {
+				if res.Annotations == nil {
+					res.Annotations = make(map[string]blueprint.Field)
+				}
+				res.Annotations[annKey] = wireField
+			} else {
+				report.Record(patchPath, fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+			}
+		} else if strings.HasPrefix(toPath, "metadata.") {
+			if res.Provider != blueprint.NativeProvider {
+				report.Record(patchPath, fmt.Sprintf("managed resource metadata field %q is not supported in blueprint", toPath))
+			} else {
+				targetField := toPath
+				if strings.HasPrefix(toPath, "metadata.labels.") {
+					labelKey := strings.TrimPrefix(toPath, "metadata.labels.")
+					targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
+				}
+				if res.Fields == nil {
+					res.Fields = make(map[string]blueprint.Field)
+				}
+				res.Fields[targetField] = wireField
+			}
+		} else {
+			report.Record(patchPath, fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
 		}
 	} else {
 		report.Record(patchPath,
