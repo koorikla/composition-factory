@@ -662,3 +662,44 @@ spec:
 		t.Errorf("expected type loss to be recorded when store has no schema, drops: %+v", reportNoStore.Drops)
 	}
 }
+
+func TestResolveResourceCRDMismatchedProvider(t *testing.T) {
+	crd1 := schema.CRD{
+		Kind:       "Queue",
+		Group:      "sqs.aws.m.upbound.io",
+		Scope:      "Namespaced",
+		Categories: []string{"crossplane", "managed"},
+	}
+	crd2 := schema.CRD{
+		Kind:       "Queue",
+		Group:      "sqs2.aws.m.upbound.io",
+		Scope:      "Namespaced",
+		Categories: []string{"crossplane", "managed"},
+	}
+
+	res := blueprint.Resource{
+		Name:     "my-queue",
+		Kind:     "Queue",
+		Provider: "xpkg.upbound.io/upbound/provider-azure-storage:v1.0.0",
+	}
+
+	// Single candidate mismatch returns nil
+	if got := resolveResourceCRD([]schema.CRD{crd1}, res, true); got != nil {
+		t.Errorf("expected nil for single candidate mismatched provider, got %v", got)
+	}
+
+	// Multiple candidates mismatch returns nil
+	if got := resolveResourceCRD([]schema.CRD{crd1, crd2}, res, true); got != nil {
+		t.Errorf("expected nil for multiple candidates mismatched provider, got %v", got)
+	}
+
+	// Matching provider returns the matching CRD
+	resAws := blueprint.Resource{
+		Name:     "my-queue",
+		Kind:     "Queue",
+		Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.0.0",
+	}
+	if got := resolveResourceCRD([]schema.CRD{crd1, crd2}, resAws, true); got == nil || got.Group != "sqs.aws.m.upbound.io" {
+		t.Errorf("expected crd1 for matching provider, got %v", got)
+	}
+}
