@@ -1264,7 +1264,7 @@ var (
 	reWhenIfEnvNeRev     = regexp.MustCompile(`\{\{-?\s*if\s+\(?(?:(?:or\s+\(not\s+\(hasKey\s+\$env\s+["'][^"']+["']\)\)\s+)?\(?ne\s+["']?([^"']*?)["']?\s+\$env\.([a-zA-Z0-9_.-]+)\)?|(?:(?:or\s+\(not\s+\(hasKey\s+\$env\s+["'][^"']+["']\)\)\s+)?\(?ne\s+["']?([^"']*?)["']?\s+(?:\(?\s*(?:default\s+(?:["'][^"']*["']|\S+)\s+)?\(?\s*index\s+\$env\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?\s*\)?)\)?))\)*\s*-?\}\}`)
 	reForEachLoop        = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?\)?\s*\)\s*-?\}\}`)
 	reForEachDefault     = regexp.MustCompile(`(?:default\s+(?:["']([^"']*)["']|([^\s)]+))|\|\s*default\s+(?:["']([^"']*)["']|([^\s)]+)))`)
-	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$env\.([a-zA-Z0-9_.-]+)|\(default\s+(?:["'][^"']*["']|\S+)\s+\(index\s+\$env\s+["']([a-zA-Z0-9_.-]+)["']\)\))\)\s*-?\}\}`)
+	reForEachEnvLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(?\s*default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\(?\s*\$env\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*index\s+\(?\s*\$env\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s*(?:\|\s*default\s+(?:["'][^"']*["']|\S+)\s*)?\)?\s*\)\s*-?\}\}`)
 	reForEachStatusLoop  = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s*(?:\(index\s+\$?[.]observed\.resources\s+"([^"]+)"\)\.resource\.status\.([a-zA-Z0-9_.-]+)|\$?[.]observed\.resources\.([a-zA-Z0-9_-]+)\.resource\.status\.([a-zA-Z0-9_.-]+))\)\s*-?\}\}`)
 	reMustacheExpr       = regexp.MustCompile(`\{\{.*?\}\}`)
 	reTemplateInclude    = regexp.MustCompile(`^\{\{-?\s*include\s+["']([^"']+)["'](?:\s+[^}]*)?-?\}\}$`)
@@ -2243,8 +2243,10 @@ func extractForEachGuard(text string, bp *blueprint.Blueprint) string {
 		if key == "" && len(m) >= 3 {
 			key = m[2]
 		}
-		ensureEnvDeclared(bp, key, "integer")
-		return fmt.Sprintf("env.%s", key)
+		if key != "" {
+			ensureEnvDeclared(bp, key, "integer")
+			return fmt.Sprintf("env.%s", key)
+		}
 	} else if m := reForEachStatusLoop.FindStringSubmatch(text); len(m) >= 3 {
 		resName := m[1]
 		statusPath := m[2]

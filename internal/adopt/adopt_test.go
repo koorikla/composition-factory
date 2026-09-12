@@ -11117,3 +11117,83 @@ func TestCF413_EmitAdoptRoundTrip(t *testing.T) {
 		t.Errorf("data[apiKey].From = %q (Raw: %q), want %q", f.From, f.Raw, "env.apiKey")
 	}
 }
+
+func TestAdoptGoTemplate_ForEachEnvIndex(t *testing.T) {
+	tests := []struct {
+		name     string
+		loopExpr string
+		wantEnv  string
+	}{
+		{
+			name:     "env forEach index parens double quotes",
+			loopExpr: `until (int (index $env "replicas"))`,
+			wantEnv:  "replicas",
+		},
+		{
+			name:     "env forEach index parens single quotes",
+			loopExpr: `until (int (index $env 'replicas'))`,
+			wantEnv:  "replicas",
+		},
+		{
+			name:     "env forEach index no-parens double quotes",
+			loopExpr: `until (int index $env "replicas")`,
+			wantEnv:  "replicas",
+		},
+		{
+			name:     "env forEach index no-parens single quotes",
+			loopExpr: `until (int index $env 'replicas')`,
+			wantEnv:  "replicas",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-foreach-env-index
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- range $i := %s }}
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            {{- end }}
+`, tc.loopExpr)
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 1 {
+				t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+			}
+			r := bp.Spec.Resources[0]
+			wantForEach := "env." + tc.wantEnv
+			if r.ForEach != wantForEach {
+				t.Errorf("r.ForEach = %q, want %q", r.ForEach, wantForEach)
+			}
+			if _, ok := bp.Spec.Environment[tc.wantEnv]; !ok {
+				t.Errorf("environment key %q not declared: %+v", tc.wantEnv, bp.Spec.Environment)
+			}
+		})
+	}
+}
