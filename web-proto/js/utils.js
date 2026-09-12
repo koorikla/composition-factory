@@ -234,6 +234,14 @@ export function deleteEnvKeyFromDoc(d, keyName) {
   if (!d.spec.environment || Object.keys(d.spec.environment).length === 0) {
     delete d.spec.environment;
     delete d.spec.environmentConfigs;
+    if (Array.isArray(d.spec.pipeline)) {
+      d.spec.pipeline = d.spec.pipeline.filter(function (s) {
+        return !(s && (s.functionRef === "function-environment-configs" || s.name === "environment-configs"));
+      });
+      if (d.spec.pipeline.length === 0) {
+        delete d.spec.pipeline;
+      }
+    }
   } else if (Array.isArray(d.spec.environmentConfigs)) {
     d.spec.environmentConfigs.forEach(function (cfg) {
       if (cfg && cfg.data && typeof cfg.data === "object") {
