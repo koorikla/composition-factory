@@ -1232,6 +1232,7 @@ export {
   isObjectReferencingResource,
   findDownstreamRefs,
   cleanDownstreamRefs,
+  removeResource,
 };
 
 function removeResource(name) {
@@ -1241,7 +1242,7 @@ function removeResource(name) {
   if (!res) return;
 
   const wired = Object.keys(res.fields || {}).filter(function (k) { return res.fields[k] && res.fields[k].from; });
-  const downstream = findDownstreamRefs(d.spec.resources || [], name);
+  const downstream = findDownstreamRefs(d.spec.resources || [], name, d.spec.templates, d.spec.conventions);
 
   if (wired.length > 0 || downstream.length > 0) {
     let promptMsg = 'Remove "' + name + '"?';
@@ -1262,8 +1263,14 @@ function removeResource(name) {
   }
 
   S.replaceDoc(function (draft) {
-    cleanDownstreamRefs(draft.spec.resources || [], name);
+    cleanDownstreamRefs(draft.spec.resources || [], name, draft.spec.templates, draft);
     draft.spec.resources = (draft.spec.resources || []).filter(function (r) { return r.name !== name; });
+    if (draft.spec.templates && Object.keys(draft.spec.templates).length === 0) {
+      delete draft.spec.templates;
+    }
+    if (draft.spec.conventions && draft.spec.conventions.length === 0) {
+      delete draft.spec.conventions;
+    }
   }).then(function (ok) {
     if (ok) {
       if (selectedWire && (selectedWire.resource === name || selectedWire.srcResource === name)) {

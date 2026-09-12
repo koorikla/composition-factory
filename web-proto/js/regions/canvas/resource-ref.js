@@ -72,12 +72,59 @@ export function isObjectReferencingResource(obj, name) {
 
 /**
  * Finds all downstream references to resource `name` in other resources' fields, envelope,
- * annotations, connectionSecret, when, or forEach.
- * @param {any[]} resources
+ * annotations, connectionSecret, when, or forEach, as well as templates in spec.templates
+ * and spec.conventions.
+ * @param {any[]|Object} resourcesOrDraft
  * @param {string} name
- * @returns {Array<{name: string, fields: Array<string>}>}
+ * @param {Object} [templatesOrDoc]
+ * @param {Array|Object} [conventions]
+ * @returns {Array<{name: string, fields: Array<string>, type?: string, templates?: Array<string>}>}
  */
-export function findDownstreamRefs(resources, name) {
+export function findDownstreamRefs(resourcesOrDraft, name, templatesOrDoc, conventions) {
+  if (!name) return [];
+
+  let resources;
+  let templates = null;
+  let convs = null;
+
+  if (resourcesOrDraft && !Array.isArray(resourcesOrDraft) && resourcesOrDraft.spec) {
+    resources = resourcesOrDraft.spec.resources || [];
+    templates = templatesOrDoc || resourcesOrDraft.spec.templates || null;
+    convs = conventions || resourcesOrDraft.spec.conventions || null;
+  } else {
+    resources = resourcesOrDraft || [];
+    if (templatesOrDoc && !Array.isArray(templatesOrDoc) && templatesOrDoc.spec) {
+      templates = templatesOrDoc.spec.templates || null;
+      convs = conventions || templatesOrDoc.spec.conventions || null;
+    } else if (templatesOrDoc && typeof templatesOrDoc === "object") {
+      if (templatesOrDoc.templates || templatesOrDoc.conventions) {
+        templates = templatesOrDoc.templates || null;
+        convs = conventions || templatesOrDoc.conventions || null;
+      } else {
+        templates = templatesOrDoc;
+      }
+    }
+    if (conventions) {
+      if (Array.isArray(conventions)) {
+        convs = conventions;
+      } else if (conventions.spec && conventions.spec.conventions) {
+        convs = conventions.spec.conventions;
+      } else if (conventions.conventions) {
+        convs = conventions.conventions;
+      }
+    }
+  }
+
+  const depTemplates = [];
+  if (templates && typeof templates === "object") {
+    Object.keys(templates).forEach(function (tName) {
+      const body = templates[tName];
+      if (typeof body === "string" && isResourceRef(body, name)) {
+        depTemplates.push(tName);
+      }
+    });
+  }
+
   const downstream = [];
   (resources || []).forEach(function (r) {
     if (r.name === name) return;
@@ -85,24 +132,36 @@ export function findDownstreamRefs(resources, name) {
     if (r.fields) {
       Object.keys(r.fields).forEach(function (k) {
         const f = r.fields[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          depFields.push(k);
+        if (f) {
+          if ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name))) {
+            depFields.push(k);
+          } else if (f.template && depTemplates.indexOf(f.template) !== -1) {
+            depFields.push(k);
+          }
         }
       });
     }
     if (r.envelope) {
       Object.keys(r.envelope).forEach(function (k) {
         const f = r.envelope[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          depFields.push("envelope." + k);
+        if (f) {
+          if ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name))) {
+            depFields.push("envelope." + k);
+          } else if (f.template && depTemplates.indexOf(f.template) !== -1) {
+            depFields.push("envelope." + k);
+          }
         }
       });
     }
     if (r.annotations) {
       Object.keys(r.annotations).forEach(function (k) {
         const f = r.annotations[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          depFields.push("annotations." + k);
+        if (f) {
+          if ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name))) {
+            depFields.push("annotations." + k);
+          } else if (f.template && depTemplates.indexOf(f.template) !== -1) {
+            depFields.push("annotations." + k);
+          }
         }
       });
     }
@@ -123,31 +182,133 @@ export function findDownstreamRefs(resources, name) {
       downstream.push({ name: r.name, fields: depFields });
     }
   });
+
+  depTemplates.forEach(function (tName) {
+    downstream.push({
+      name: "template:" + tName,
+      fields: [tName],
+      type: "template",
+      templates: [tName],
+    });
+  });
+
+  if (Array.isArray(convs)) {
+    convs.forEach(function (c) {
+      if (c && c.template && depTemplates.indexOf(c.template) !== -1) {
+        downstream.push({
+          name: "convention:" + c.template,
+          fields: [c.match ? "match:" + c.match : c.template],
+          type: "convention",
+          templates: [c.template],
+        });
+      }
+    });
+  }
+
   return downstream;
 }
 
 /**
  * Cleans all downstream references to resource `name` in other resources' fields, envelope,
- * annotations, connectionSecret, when, or forEach.
- * @param {any[]} resources
+ * annotations, connectionSecret, when, or forEach, as well as referencing templates in spec.templates,
+ * and conventions or fields referencing those deleted templates.
+ * @param {any[]|Object} resourcesOrDraft
  * @param {string} name
+ * @param {Object} [templatesOrDoc]
+ * @param {Object|Array} [draftOrConventions]
+ * @param {Object} [draftArg]
  */
-export function cleanDownstreamRefs(resources, name) {
+export function cleanDownstreamRefs(resourcesOrDraft, name, templatesOrDoc, draftOrConventions, draftArg) {
+  if (!name) return;
+
+  let resources;
+  let templates = null;
+  let draft = null;
+  let convs = null;
+
+  if (resourcesOrDraft && !Array.isArray(resourcesOrDraft) && resourcesOrDraft.spec) {
+    draft = resourcesOrDraft;
+    resources = draft.spec.resources || [];
+    templates = templatesOrDoc || draft.spec.templates || null;
+    convs = draft.spec.conventions || null;
+  } else {
+    resources = resourcesOrDraft || [];
+    if (templatesOrDoc && !Array.isArray(templatesOrDoc) && templatesOrDoc.spec) {
+      draft = templatesOrDoc;
+      templates = draft.spec.templates || null;
+      convs = draft.spec.conventions || null;
+    } else if (templatesOrDoc && typeof templatesOrDoc === "object") {
+      templates = templatesOrDoc;
+    }
+
+    if (draftOrConventions) {
+      if (draftOrConventions.spec) {
+        draft = draftOrConventions;
+        if (!convs) convs = draft.spec.conventions || null;
+      } else if (Array.isArray(draftOrConventions)) {
+        convs = draftOrConventions;
+      }
+    }
+    if (draftArg && draftArg.spec) {
+      draft = draftArg;
+      if (!convs) convs = draft.spec.conventions || null;
+    }
+  }
+
+  const deletedTemplates = [];
+  if (templates && typeof templates === "object") {
+    Object.keys(templates).forEach(function (tName) {
+      const body = templates[tName];
+      if (typeof body === "string" && isResourceRef(body, name)) {
+        delete templates[tName];
+        deletedTemplates.push(tName);
+      }
+    });
+    if (Object.keys(templates).length === 0 && draft && draft.spec && draft.spec.templates) {
+      delete draft.spec.templates;
+    }
+  }
+
+  if (deletedTemplates.length > 0) {
+    if (draft && draft.spec && Array.isArray(draft.spec.conventions)) {
+      draft.spec.conventions = draft.spec.conventions.filter(function (c) {
+        return c && deletedTemplates.indexOf(c.template) === -1;
+      });
+      if (draft.spec.conventions.length === 0) {
+        delete draft.spec.conventions;
+      }
+    } else if (Array.isArray(convs)) {
+      const remaining = convs.filter(function (c) {
+        return c && deletedTemplates.indexOf(c.template) === -1;
+      });
+      convs.length = 0;
+      remaining.forEach(function (c) { convs.push(c); });
+    }
+  }
+
   (resources || []).forEach(function (r) {
     if (r.name === name) return;
     if (r.fields) {
       Object.keys(r.fields).forEach(function (k) {
         const f = r.fields[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          delete r.fields[k];
+        if (f) {
+          if ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name))) {
+            delete r.fields[k];
+          } else if (deletedTemplates.length > 0 && f.template && deletedTemplates.indexOf(f.template) !== -1) {
+            delete r.fields[k];
+          }
         }
       });
     }
     if (r.envelope) {
       Object.keys(r.envelope).forEach(function (k) {
         const f = r.envelope[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          delete r.envelope[k];
+        if (f) {
+          if ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name))) {
+            delete r.envelope[k];
+          } else if (deletedTemplates.length > 0 && f.template && deletedTemplates.indexOf(f.template) !== -1) {
+            delete r.envelope[k];
+          }
         }
       });
       if (Object.keys(r.envelope).length === 0) delete r.envelope;
@@ -155,8 +316,12 @@ export function cleanDownstreamRefs(resources, name) {
     if (r.annotations) {
       Object.keys(r.annotations).forEach(function (k) {
         const f = r.annotations[k];
-        if (f && ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name)))) {
-          delete r.annotations[k];
+        if (f) {
+          if ((f.from && isResourceRef(f.from, name)) || (f.raw && isResourceRef(f.raw, name))) {
+            delete r.annotations[k];
+          } else if (deletedTemplates.length > 0 && f.template && deletedTemplates.indexOf(f.template) !== -1) {
+            delete r.annotations[k];
+          }
         }
       });
       if (Object.keys(r.annotations).length === 0) delete r.annotations;
