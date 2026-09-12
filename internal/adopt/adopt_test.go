@@ -10236,3 +10236,68 @@ func TestCleanDependencyVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeOnlyRoundTripDoesNotInjectProviderName(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "native-app"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "NativeApp",
+				Plural:  "nativeapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"isImmutable": {
+						Type:     "boolean",
+						Required: true,
+					},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "config",
+					Kind:     "ConfigMap",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"immutable": {
+							From: "params.isImmutable",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate failed: %v", err)
+	}
+
+	crds, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds failed: %v", err)
+	}
+
+	xrdYAML, err := emit.XRD(bp)
+	if err != nil {
+		t.Fatalf("emit.XRD failed: %v", err)
+	}
+
+	compYAML, err := emit.Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("emit.Composition failed: %v", err)
+	}
+
+	manifest := string(xrdYAML) + "\n---\n" + string(compYAML)
+
+	adoptedBP, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("adopt.Adopt failed: %v", err)
+	}
+
+	if _, hasProviderName := adoptedBP.Spec.XRD.Parameters["providerName"]; hasProviderName {
+		t.Errorf("adopt.Adopt injected providerName into native-only blueprint: %+v", adoptedBP.Spec.XRD.Parameters)
+	}
+}

@@ -558,16 +558,6 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		bp.Spec.XRD.Scope = "Namespaced"
 	}
 	synthesized := map[string]bool{}
-	if bp.Spec.XRD.Scope == "Namespaced" {
-		if _, ok := bp.Spec.XRD.Parameters["providerName"]; !ok {
-			bp.Spec.XRD.Parameters["providerName"] = blueprint.Parameter{
-				Type:        "string",
-				Required:    true,
-				Description: "Crossplane ProviderConfig name to use for managed resources",
-			}
-			synthesized["providerName"] = true
-		}
-	}
 
 	// 4. Process EnvironmentConfig documents
 	parseEnvironmentConfigDocs(envConfigDocs, bp, report)
@@ -589,6 +579,31 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 
 	// Rewrite status references with normalized names
 	rewriteStatusReferences(bp, nameMapping)
+
+	hasManaged := false
+	for _, r := range bp.Spec.Resources {
+		if r.Provider != blueprint.NativeProvider {
+			hasManaged = true
+			break
+		}
+	}
+	if bp.Spec.XRD.Scope == "Namespaced" && hasManaged {
+		if xrdDoc == nil {
+			bp.Spec.XRD.Parameters["providerName"] = blueprint.Parameter{
+				Type:        "string",
+				Required:    true,
+				Description: "Crossplane ProviderConfig name to use for managed resources",
+			}
+			synthesized["providerName"] = true
+		} else if _, ok := bp.Spec.XRD.Parameters["providerName"]; !ok {
+			bp.Spec.XRD.Parameters["providerName"] = blueprint.Parameter{
+				Type:        "string",
+				Required:    true,
+				Description: "Crossplane ProviderConfig name to use for managed resources",
+			}
+			synthesized["providerName"] = true
+		}
+	}
 
 	// 6. Deduplicate and collect provider sources
 	collectSources(bp, opts.DefaultProviderRef)
@@ -693,15 +708,6 @@ func adoptXRDComplement(xrdDoc map[string]any, opts Options, report *LossReport)
 	resolveXRDPlural(&bp)
 	if bp.Spec.XRD.Scope == "" {
 		bp.Spec.XRD.Scope = "Namespaced"
-	}
-	if bp.Spec.XRD.Scope == "Namespaced" {
-		if _, ok := bp.Spec.XRD.Parameters["providerName"]; !ok {
-			bp.Spec.XRD.Parameters["providerName"] = blueprint.Parameter{
-				Type:        "string",
-				Required:    true,
-				Description: "Crossplane ProviderConfig name to use for managed resources",
-			}
-		}
 	}
 
 	if err := bp.Validate(); err != nil {

@@ -1893,3 +1893,78 @@ spec:
 		t.Errorf("bp.Validate() failed: %v", err)
 	}
 }
+
+func TestAdoptTreeNativeOnlyDoesNotInjectProviderName(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	xrdYaml := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xnativeapps.example.org
+spec:
+  group: example.org
+  names:
+    kind: XNativeApp
+    plural: xnativeapps
+  claimNames:
+    kind: NativeApp
+    plural: nativeapps
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              immutable:
+                type: boolean
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "definition.yaml"), []byte(xrdYaml), 0644); err != nil {
+		t.Fatalf("write definition.yaml: %v", err)
+	}
+
+	compYaml := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: native-app
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XNativeApp
+  mode: Pipeline
+  pipeline:
+  - step: patch-and-transform
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+      - name: config
+        base:
+          apiVersion: v1
+          kind: ConfigMap
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.immutable
+          toFieldPath: immutable
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "composition.yaml"), []byte(compYaml), 0644); err != nil {
+		t.Fatalf("write composition.yaml: %v", err)
+	}
+
+	bp, _, err := AdoptTree(tmpDir, Options{})
+	if err != nil {
+		t.Fatalf("AdoptTree failed: %v", err)
+	}
+
+	if _, hasProviderName := bp.Spec.XRD.Parameters["providerName"]; hasProviderName {
+		t.Errorf("AdoptTree injected providerName into native-only blueprint: %+v", bp.Spec.XRD.Parameters)
+	}
+}

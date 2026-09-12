@@ -399,8 +399,22 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 		bp.Spec.XRD.Scope = "Namespaced"
 	}
 	synthesized := map[string]bool{}
-	if bp.Spec.XRD.Scope == "Namespaced" {
-		if _, ok := bp.Spec.XRD.Parameters["providerName"]; !ok {
+	hasManaged := false
+	for _, r := range bp.Spec.Resources {
+		if r.Provider != blueprint.NativeProvider {
+			hasManaged = true
+			break
+		}
+	}
+	if bp.Spec.XRD.Scope == "Namespaced" && hasManaged {
+		if len(xrdDocs) == 0 {
+			bp.Spec.XRD.Parameters["providerName"] = blueprint.Parameter{
+				Type:        "string",
+				Required:    true,
+				Description: "Crossplane ProviderConfig name to use for managed resources",
+			}
+			synthesized["providerName"] = true
+		} else if _, ok := bp.Spec.XRD.Parameters["providerName"]; !ok {
 			bp.Spec.XRD.Parameters["providerName"] = blueprint.Parameter{
 				Type:        "string",
 				Required:    true,
