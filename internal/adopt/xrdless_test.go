@@ -1092,3 +1092,140 @@ func TestApplyXRDlessEvidence_ForEachVariants(t *testing.T) {
 		})
 	}
 }
+
+func TestAdoptXRDless_NestedHasKeyGuard(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.apps.sparky.ee
+spec:
+  compositeTypeRef:
+    apiVersion: apps.sparky.ee/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        options: ["missingkey=error"]
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: app
+            spec:
+              template:
+                spec:
+                  containers:
+                  - name: app
+                    {{- if hasKey $spec.cluster "desc" }}
+                    image: {{ $spec.cluster.desc }}
+                    {{- end }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.11.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	cluster, ok := bp.Spec.XRD.Parameters["cluster"]
+	if !ok {
+		t.Fatalf("cluster parameter missing from adopted blueprint")
+	}
+	desc, ok := cluster.Properties["desc"]
+	if !ok {
+		t.Fatalf("cluster.desc parameter missing from adopted blueprint")
+	}
+	if desc.Required {
+		t.Errorf("cluster.desc parameter must be optional (guarded with hasKey $spec.cluster \"desc\"), got Required: true")
+	}
+}
+
+func TestAdoptXRDless_NestedHasKeyGuard_Variants(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.apps.sparky.ee
+spec:
+  compositeTypeRef:
+    apiVersion: apps.sparky.ee/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        options: ["missingkey=error"]
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec -}}
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: app
+            spec:
+              template:
+                spec:
+                  containers:
+                  - name: app
+                    {{- if hasKey ($spec.cluster) "desc" }}
+                    image: {{ $spec.cluster.desc }}
+                    {{- end }}
+                    {{- if hasKey (index $spec "network") "cidr" }}
+                    network: {{ $spec.network.cidr }}
+                    {{- end }}
+                    {{- if hasKey (index $spec "meta" "tags") "env" }}
+                    tag: {{ $spec.meta.tags.env }}
+                    {{- end }}
+                    {{- if hasKey (index $spec.config "db") "host" }}
+                    dbHost: {{ $spec.config.db.host }}
+                    {{- end }}
+                    port: {{ $spec.cluster.port }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.11.0",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	// cluster.desc should be optional
+	cluster := bp.Spec.XRD.Parameters["cluster"]
+	if desc, ok := cluster.Properties["desc"]; !ok || desc.Required {
+		t.Errorf("cluster.desc should be optional, got ok=%v, required=%v", ok, desc.Required)
+	}
+	// cluster.port is unguarded, so it should be required
+	if port, ok := cluster.Properties["port"]; !ok || !port.Required {
+		t.Errorf("cluster.port should be required, got ok=%v, required=%v", ok, port.Required)
+	}
+
+	// network.cidr should be optional
+	network := bp.Spec.XRD.Parameters["network"]
+	if cidr, ok := network.Properties["cidr"]; !ok || cidr.Required {
+		t.Errorf("network.cidr should be optional, got ok=%v, required=%v", ok, cidr.Required)
+	}
+
+	// meta.tags.env should be optional
+	meta := bp.Spec.XRD.Parameters["meta"]
+	tags := meta.Properties["tags"]
+	if env, ok := tags.Properties["env"]; !ok || env.Required {
+		t.Errorf("meta.tags.env should be optional, got ok=%v, required=%v", ok, env.Required)
+	}
+
+	// config.db.host should be optional
+	config := bp.Spec.XRD.Parameters["config"]
+	db := config.Properties["db"]
+	if host, ok := db.Properties["host"]; !ok || host.Required {
+		t.Errorf("config.db.host should be optional, got ok=%v, required=%v", ok, host.Required)
+	}
+}

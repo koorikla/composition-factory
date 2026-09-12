@@ -41,6 +41,11 @@ var (
 	reEvidenceGuard             = regexp.MustCompile(`hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']`)
 	reEvidenceGuardDefault      = regexp.MustCompile(`default\s+(?:\([^)]+\)|["'][^"']*["']|\S+)\s+(?:\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)|\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)`)
 	reEvidenceGuardPipedDefault = regexp.MustCompile(`(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\|\s*default\b`)
+	reSpecRoot                  = regexp.MustCompile(`(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)(?:$|[^a-zA-Z0-9_])`)
+	reSpecDotted                = regexp.MustCompile(`(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)`)
+	reTrailingDotted            = regexp.MustCompile(`\)\.([a-zA-Z0-9_.-]+)`)
+	reQuotedKey                 = regexp.MustCompile(`["'` + "`" + `]([a-zA-Z0-9_.-]+)["'` + "`" + `]`)
+	reHasKeyWord                = regexp.MustCompile(`\bhasKey\b`)
 	reEvidenceIfSimple          = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
 	reEvidenceIfEq              = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*"[^"]*"\s*-?\}\}`)
 	reEvidenceIfEqRev           = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+"[^"]*"\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
@@ -126,6 +131,9 @@ func collectTemplateEvidence(tmpl string, ev map[string]*paramEvidence) {
 	for _, m := range reEvidenceGuard.FindAllStringSubmatch(tmpl, -1) {
 		get(m[1]).guarded = true
 	}
+	scanHasKeyGuards(tmpl, func(pName string) {
+		get(pName).guarded = true
+	})
 	for _, m := range reEvidenceGuardDefault.FindAllStringSubmatch(tmpl, -1) {
 		pName := m[1]
 		if pName == "" && len(m) >= 3 {
@@ -137,6 +145,129 @@ func collectTemplateEvidence(tmpl string, ev map[string]*paramEvidence) {
 	}
 	for _, m := range reEvidenceGuardPipedDefault.FindAllStringSubmatch(tmpl, -1) {
 		get(m[1]).guarded = true
+	}
+}
+
+// scanHasKeyGuards finds all hasKey guards targeting $spec or its nested properties,
+// including top-level (hasKey $spec "key"), dotted (hasKey $spec.cluster "desc"),
+// and indexed (hasKey (index $spec "cluster") "desc") expressions, and records the
+// qualified parameter path (e.g. "key" or "cluster.desc").
+func scanHasKeyGuards(tmpl string, record func(param string)) {
+	matches := reHasKeyWord.FindAllStringIndex(tmpl, -1)
+	for _, m := range matches {
+		idx := m[1]
+		// Skip whitespace after hasKey
+		for idx < len(tmpl) && (tmpl[idx] == ' ' || tmpl[idx] == '\t' || tmpl[idx] == '\r' || tmpl[idx] == '\n') {
+			idx++
+		}
+		if idx >= len(tmpl) {
+			continue
+		}
+
+		// Extract target argument (arg1)
+		var arg1 string
+		if tmpl[idx] == '(' {
+			start := idx
+			depth := 0
+			inQuote := byte(0)
+			for idx < len(tmpl) {
+				ch := tmpl[idx]
+				if inQuote != 0 {
+					if ch == inQuote && (idx == 0 || tmpl[idx-1] != '\\') {
+						inQuote = 0
+					}
+				} else if ch == '"' || ch == '\'' || ch == '`' {
+					inQuote = ch
+				} else if ch == '(' {
+					depth++
+				} else if ch == ')' {
+					depth--
+					if depth == 0 {
+						idx++
+						// Also consume any chained dot accessors after the closing paren, e.g. (index $spec "a").b
+						for idx < len(tmpl) && (tmpl[idx] == '.' || (tmpl[idx] >= 'a' && tmpl[idx] <= 'z') || (tmpl[idx] >= 'A' && tmpl[idx] <= 'Z') || (tmpl[idx] >= '0' && tmpl[idx] <= '9') || tmpl[idx] == '_' || tmpl[idx] == '-') {
+							idx++
+						}
+						break
+					}
+				}
+				idx++
+			}
+			arg1 = tmpl[start:idx]
+		} else {
+			start := idx
+			for idx < len(tmpl) && !(tmpl[idx] == ' ' || tmpl[idx] == '\t' || tmpl[idx] == '\r' || tmpl[idx] == '\n' || tmpl[idx] == ')' || tmpl[idx] == '}' || tmpl[idx] == '|') {
+				idx++
+			}
+			arg1 = tmpl[start:idx]
+		}
+
+		// Skip whitespace between arg1 and arg2
+		for idx < len(tmpl) && (tmpl[idx] == ' ' || tmpl[idx] == '\t' || tmpl[idx] == '\r' || tmpl[idx] == '\n') {
+			idx++
+		}
+		if idx >= len(tmpl) {
+			continue
+		}
+
+		// Extract key argument (arg2) - must be a quoted string
+		if tmpl[idx] != '"' && tmpl[idx] != '\'' && tmpl[idx] != '`' {
+			continue
+		}
+		quoteCh := tmpl[idx]
+		idx++
+		startKey := idx
+		for idx < len(tmpl) && tmpl[idx] != quoteCh {
+			if tmpl[idx] == '\\' && idx+1 < len(tmpl) {
+				idx++
+			}
+			idx++
+		}
+		if idx >= len(tmpl) {
+			continue
+		}
+		key := tmpl[startKey:idx]
+
+		// Check if arg1 references the composite resource spec
+		if !reSpecRoot.MatchString(arg1) {
+			continue
+		}
+
+		var segments []string
+
+		// Check for dotted path directly following spec root
+		if dm := reSpecDotted.FindStringSubmatch(arg1); len(dm) >= 2 && dm[1] != "" {
+			parts := strings.Split(dm[1], ".")
+			for _, p := range parts {
+				if p != "" {
+					segments = append(segments, p)
+				}
+			}
+		}
+
+		// Extract any index string literals in arg1
+		for _, qm := range reQuotedKey.FindAllStringSubmatch(arg1, -1) {
+			if len(qm) >= 2 && qm[1] != "" {
+				segments = append(segments, qm[1])
+			}
+		}
+
+		// Check for chained dotted path after closing paren, e.g. ).b
+		if tm := reTrailingDotted.FindStringSubmatch(arg1); len(tm) >= 2 && tm[1] != "" {
+			parts := strings.Split(tm[1], ".")
+			for _, p := range parts {
+				if p != "" {
+					segments = append(segments, p)
+				}
+			}
+		}
+
+		// Append the guarded key
+		segments = append(segments, key)
+
+		if len(segments) > 0 {
+			record(strings.Join(segments, "."))
+		}
 	}
 }
 
