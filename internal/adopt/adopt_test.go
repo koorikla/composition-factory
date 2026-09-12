@@ -11197,3 +11197,268 @@ spec:
 		})
 	}
 }
+
+func TestCF434_AdoptGoTemplatingNames(t *testing.T) {
+	t.Run("functionRef name go-templating", func(t *testing.T) {
+		manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+`
+		bp, _, err := Adopt([]byte(manifest), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		if bp.Spec.Resources[0].Kind != "Queue" {
+			t.Errorf("Resource kind = %q, want Queue", bp.Spec.Resources[0].Kind)
+		}
+		if len(bp.Spec.Pipeline) != 0 {
+			t.Errorf("expected 0 pipeline steps (engine step adopted as resources), got %d", len(bp.Spec.Pipeline))
+		}
+	})
+
+	t.Run("functionRef name fn-go-templating", func(t *testing.T) {
+		manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: fn-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+`
+		bp, _, err := Adopt([]byte(manifest), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		if bp.Spec.Resources[0].Kind != "Queue" {
+			t.Errorf("Resource kind = %q, want Queue", bp.Spec.Resources[0].Kind)
+		}
+	})
+
+	t.Run("resolved via opts.FunctionPackages", func(t *testing.T) {
+		manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: custom-template-fn
+      input:
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+`
+		opts := Options{
+			FunctionPackages: map[string]string{
+				"custom-template-fn": "xpkg.upbound.io/crossplane-contrib/function-go-templating:v0.4.0",
+			},
+		}
+		bp, _, err := Adopt([]byte(manifest), opts)
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		if bp.Spec.Resources[0].Kind != "Queue" {
+			t.Errorf("Resource kind = %q, want Queue", bp.Spec.Resources[0].Kind)
+		}
+	})
+
+	t.Run("resolved via companion Function manifest", func(t *testing.T) {
+		manifest := `
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: aliased-template
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/function-go-templating:v0.4.0
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: aliased-template
+      input:
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+`
+		bp, _, err := Adopt([]byte(manifest), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		if bp.Spec.Resources[0].Kind != "Queue" {
+			t.Errorf("Resource kind = %q, want Queue", bp.Spec.Resources[0].Kind)
+		}
+	})
+
+	t.Run("input kind GoTemplate fallback with arbitrary functionRef name", func(t *testing.T) {
+		manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: unknown-render-function
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+`
+		bp, _, err := Adopt([]byte(manifest), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		if bp.Spec.Resources[0].Kind != "Queue" {
+			t.Errorf("Resource kind = %q, want Queue", bp.Spec.Resources[0].Kind)
+		}
+	})
+
+	t.Run("pipeline with hyphenated go-templating and other step", func(t *testing.T) {
+		manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueues.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XQueue
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: main-queue
+            spec:
+              forProvider:
+                region: us-east-1
+    - step: custom-filter
+      functionRef:
+        name: function-cel-filter
+      input:
+        apiVersion: cel.fn.crossplane.io/v1alpha1
+        kind: Filter
+`
+		bp, _, err := Adopt([]byte(manifest), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(bp.Spec.Resources) != 1 {
+			t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+		}
+		if len(bp.Spec.Pipeline) != 1 {
+			t.Fatalf("expected 1 pipeline step, got %d", len(bp.Spec.Pipeline))
+		}
+		if bp.Spec.Pipeline[0].FunctionRef != "function-cel-filter" {
+			t.Errorf("pipeline[0].FunctionRef = %q, want function-cel-filter", bp.Spec.Pipeline[0].FunctionRef)
+		}
+		if bp.Spec.Pipeline[0].Position != "after" {
+			t.Errorf("pipeline[0].Position = %q, want after", bp.Spec.Pipeline[0].Position)
+		}
+	})
+}

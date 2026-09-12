@@ -1785,6 +1785,40 @@ func loadFileSystemTemplates(fsDir string, opts Options) (string, error) {
 	return "", os.ErrNotExist
 }
 
+func isGoTemplatingStep(fnName, stepName string, step map[string]any, opts Options) bool {
+	lowerFn := strings.ToLower(fnName)
+	if lowerFn == "function-go-templating" || strings.Contains(lowerFn, "go-templating") || strings.Contains(lowerFn, "gotemplating") {
+		return true
+	}
+	if opts.FunctionPackages != nil {
+		if pkg, ok := opts.FunctionPackages[fnName]; ok {
+			lowerPkg := strings.ToLower(pkg)
+			if strings.Contains(lowerPkg, "function-go-templating") || strings.Contains(lowerPkg, "go-templating") || strings.Contains(lowerPkg, "gotemplating") {
+				return true
+			}
+		}
+		if stepName != "" {
+			if pkg, ok := opts.FunctionPackages[stepName]; ok {
+				lowerPkg := strings.ToLower(pkg)
+				if strings.Contains(lowerPkg, "function-go-templating") || strings.Contains(lowerPkg, "go-templating") || strings.Contains(lowerPkg, "gotemplating") {
+					return true
+				}
+			}
+		}
+	}
+	if input, ok := step["input"].(map[string]any); ok && input != nil {
+		kind, _ := input["kind"].(string)
+		if strings.EqualFold(kind, "GoTemplate") {
+			return true
+		}
+		apiVer, _ := input["apiVersion"].(string)
+		if strings.HasPrefix(strings.ToLower(apiVer), "gotemplating.fn.crossplane.io") {
+			return true
+		}
+	}
+	return false
+}
+
 func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string, hasXRD bool) error {
 	type parsedStep struct {
 		step       blueprint.PipelineStep
@@ -1808,7 +1842,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 			stepName, _ = step["name"].(string)
 		}
 
-		if fnName == "function-go-templating" || strings.Contains(fnName, "gotemplating") {
+		if isGoTemplatingStep(fnName, stepName, step, opts) {
 			seenEngineStep = true
 			input, _ := step["input"].(map[string]any)
 			inline, _ := input["inline"].(map[string]any)
