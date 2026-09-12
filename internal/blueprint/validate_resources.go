@@ -179,6 +179,12 @@ func (b *Blueprint) validateFields(r Resource) error {
 	}
 	sort.Strings(paths)
 	for _, p := range paths {
+		if strings.TrimSpace(p) == "" {
+			return fmt.Errorf("resource %q: empty field path", r.Name)
+		}
+		if err := checkScalar(fmt.Sprintf("resource %q field %q", r.Name, p), p); err != nil {
+			return err
+		}
 		basePath, mapKey, isMap := ParseFieldPath(p)
 		if isMap {
 			if mapKey == "" {

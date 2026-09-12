@@ -33,3 +33,62 @@ func TestValidateRejectsControlCharacterInResourceName(t *testing.T) {
 		t.Errorf("err = %v, want it to name spec.resources[0].name", err)
 	}
 }
+
+func TestValidateResourceFieldPaths(t *testing.T) {
+	tests := []struct {
+		name      string
+		fieldPath string
+		wantErr   string
+	}{
+		{
+			name:      "empty field path",
+			fieldPath: "",
+			wantErr:   "empty field path",
+		},
+		{
+			name:      "control character newline in field path",
+			fieldPath: "spec.forProvider.name\n  injected: true",
+			wantErr:   "contains the control character",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bp := &Blueprint{
+				APIVersion: "factory.crossplane.io/v1alpha1",
+				Kind:       "Blueprint",
+				Metadata:   Metadata{Name: "test-bp"},
+				Spec: Spec{
+					XRD: XRD{
+						Group:   "example.org",
+						Kind:    "XTest",
+						Plural:  "xtests",
+						Version: "v1alpha1",
+						Scope:   "Namespaced",
+						Parameters: map[string]Parameter{
+							"region":       {Type: "string"},
+							"providerName": {Type: "string", Required: true},
+						},
+					},
+					Resources: []Resource{
+						{
+							Name: "test-res",
+							Kind: "Subnet",
+							Fields: map[string]Field{
+								tc.fieldPath: {Value: "test"},
+							},
+						},
+					},
+				},
+			}
+
+			err := bp.Validate()
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
