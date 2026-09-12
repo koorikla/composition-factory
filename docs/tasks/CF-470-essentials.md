@@ -1,4 +1,4 @@
-# CF-467 — Inspector needs a per-kind essentials form with expose-as-parameter and an env-variable repeater; a second env entry cannot be added from the GUI
+# CF-470 — Inspector needs a per-kind essentials form with expose-as-parameter and an env-variable repeater; a second env entry cannot be added from the GUI
 
 > **Read `docs/task-execution-contract.md` before you start.** It governs where you
 > work, which ports you may bind, what "done" means, and how you hand back. This
@@ -7,10 +7,10 @@
 | | |
 |---|---|
 | **Severity** | P2 |
-| **Closes** | `#367` — `CF-467 — Inspector needs a per-kind essentials form with expose-as-parameter and an env-variable repeater; a second env entry cannot be added from the GUI` |
+| **Closes** | `#367` — `CF-470 — Inspector needs a per-kind essentials form with expose-as-parameter and an env-variable repeater; a second env entry cannot be added from the GUI` |
 | **Worktree** | `.worktrees/prefill` on branch `prefill-fields` (slice 2 of `docs/superpowers/specs/2026-09-12-prefilled-fields-design.md`) |
-| **May write** | `web-proto/js/profiles.js`, `web-proto/js/regions/inspector.js`, `web-proto/js/regions/inspector/events.js`, `tests/cf467-essentials-form.spec.js` (new) |
-| **Merges after** | CF-466 |
+| **May write** | `web-proto/js/profiles.js`, `web-proto/js/regions/inspector.js`, `web-proto/js/regions/inspector/events.js`, `tests/cf470-essentials-form.spec.js` (new) |
+| **Merges after** | CF-469 |
 
 ## Symptom
 
@@ -37,10 +37,10 @@ flow the expose action reuses (`addParameter` then `setField`).
 
 ## Acceptance test
 
-`tests/cf467-essentials-form.spec.js` exactly as given in
+`tests/cf470-essentials-form.spec.js` exactly as given in
 `docs/superpowers/plans/2026-09-12-prefilled-fields.md` Task 4.
 
-**Fails today with** (f41d124, `npx playwright test tests/cf467-essentials-form.spec.js`):
+**Fails today with** (f41d124, `npx playwright test tests/cf470-essentials-form.spec.js`):
 
 ```
 [WebServer] cf serve: serving the canvas from ./web-proto (live source; the embedded snapshot is bypassed)
@@ -48,8 +48,8 @@ flow the expose action reuses (`addParameter` then `setField`).
 
 Running 4 tests using 1 worker
 
-[1/4] tests/cf467-essentials-form.spec.js:17:3 › CF-467 — essentials form › Deployment opens with typed essentials rows and editing image commits a value
-  1) tests/cf467-essentials-form.spec.js:17:3 › CF-467 — essentials form › Deployment opens with typed essentials rows and editing image commits a value 
+[1/4] tests/cf470-essentials-form.spec.js:17:3 › CF-470 — essentials form › Deployment opens with typed essentials rows and editing image commits a value
+  1) tests/cf470-essentials-form.spec.js:17:3 › CF-470 — essentials form › Deployment opens with typed essentials rows and editing image commits a value 
 
     Error: expect(locator).toBeVisible() failed
 
@@ -88,13 +88,13 @@ Running 4 tests using 1 worker
 ## Verification
 
 ```sh
-npx playwright test tests/cf467-essentials-form.spec.js tests/cf466-starter-deployment.spec.js tests/cf439-auto-scaffold-drop.spec.js tests/slice63-selectors-functions.spec.js tests/slice65-authoring-ux-enhancements.spec.js
+npx playwright test tests/cf470-essentials-form.spec.js tests/cf469-starter-deployment.spec.js tests/cf439-auto-scaffold-drop.spec.js tests/slice63-selectors-functions.spec.js tests/slice65-authoring-ux-enhancements.spec.js
 make lint
 ```
 
 ## Out of scope
 
-Field search and the manifest editor (CF-468); array repeaters beyond env.
+Field search and the manifest editor (CF-471); array repeaters beyond env.
 
 ## Handover
 

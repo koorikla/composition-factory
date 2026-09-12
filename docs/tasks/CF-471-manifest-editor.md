@@ -1,4 +1,4 @@
-# CF-468 — Inspector bottom becomes a schema-validated manifest editor with field search; the 848-row list is demoted behind a Manifest/Fields toggle
+# CF-471 — Inspector bottom becomes a schema-validated manifest editor with field search; the 848-row list is demoted behind a Manifest/Fields toggle
 
 > **Read `docs/task-execution-contract.md` before you start.** It governs where you
 > work, which ports you may bind, what "done" means, and how you hand back. This
@@ -7,10 +7,10 @@
 | | |
 |---|---|
 | **Severity** | P2 |
-| **Closes** | `#368` — `CF-468 — Inspector bottom becomes a schema-validated manifest editor with field search; 848-row list demoted behind a Manifest/Fields toggle` |
+| **Closes** | `#368` — `CF-471 — Inspector bottom becomes a schema-validated manifest editor with field search; 848-row list demoted behind a Manifest/Fields toggle` |
 | **Worktree** | `.worktrees/prefill` on branch `prefill-fields` (slice 3 of `docs/superpowers/specs/2026-09-12-prefilled-fields-design.md`) |
-| **May write** | `internal/manifest/` (new), `internal/api/manifest.go` (new), `internal/api/manifest_test.go` (new), `internal/api/server.go`, `internal/api/blueprint.go`, `internal/api/contract_fixtures_test.go`, `internal/api/testdata/contract/manifest.json` (new), `internal/emit/composition.go` (exported wrapper only), `internal/mcp/tools.go`, `internal/mcp/server_test.go`, `docs/mcp.md`, `docs/dsl.md`, `docs/guide.md`, `web-proto/README.md`, `web-proto/index.html`, `web-proto/js/api.js`, `web-proto/js/store.js`, `web-proto/js/types.js`, `web-proto/js/utils.js`, `web-proto/js/regions/output.js`, `web-proto/js/regions/inspector.js`, `web-proto/js/regions/inspector/state.js`, `web-proto/js/regions/inspector/events.js`, `web-proto/js/regions/inspector/manifest.js` (new), `web-proto/js/tour.js`, `playwright.config.js`, `tests/cf468-manifest-editor.spec.js` (new) |
-| **Merges after** | CF-467 |
+| **May write** | `internal/manifest/` (new), `internal/api/manifest.go` (new), `internal/api/manifest_test.go` (new), `internal/api/server.go`, `internal/api/blueprint.go`, `internal/api/contract_fixtures_test.go`, `internal/api/testdata/contract/manifest.json` (new), `internal/emit/composition.go` (exported wrapper only), `internal/mcp/tools.go`, `internal/mcp/server_test.go`, `docs/mcp.md`, `docs/dsl.md`, `docs/guide.md`, `web-proto/README.md`, `web-proto/index.html`, `web-proto/js/api.js`, `web-proto/js/store.js`, `web-proto/js/types.js`, `web-proto/js/utils.js`, `web-proto/js/regions/output.js`, `web-proto/js/regions/inspector.js`, `web-proto/js/regions/inspector/state.js`, `web-proto/js/regions/inspector/events.js`, `web-proto/js/regions/inspector/manifest.js` (new), `web-proto/js/tour.js`, `playwright.config.js`, `tests/cf471-manifest-editor.spec.js` (new) |
+| **Merges after** | CF-470 |
 
 ## Symptom
 
@@ -36,7 +36,7 @@ search input in `#region-inspector`; `renderResource` prints "expand via All / s
 
 Go: `internal/manifest/manifest_test.go` and `internal/api/manifest_test.go` exactly as in
 `docs/superpowers/plans/2026-09-12-prefilled-fields.md` Tasks 6 and 8; MCP additions as in
-Task 10. Playwright: `tests/cf468-manifest-editor.spec.js` as in Task 11.
+Task 10. Playwright: `tests/cf471-manifest-editor.spec.js` as in Task 11.
 
 **Fails today with:** not run by the brief author; the implementer pastes the first failing
 runs into the handover.
@@ -59,7 +59,7 @@ schema hits in Manifest view. The Playwright config seeds `cf-insp-view=fields` 
 
 ```sh
 go test ./internal/manifest/ ./internal/api/ ./internal/mcp/ -count=1
-npx playwright test tests/cf468-manifest-editor.spec.js
+npx playwright test tests/cf471-manifest-editor.spec.js
 make lint && make test-race && make test-e2e
 ```
 

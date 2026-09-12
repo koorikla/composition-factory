@@ -1,4 +1,4 @@
-# CF-466 — Dropping a Deployment scaffolds no container and writes labels as raw JSON; Generate emits an invalid Deployment and exits 0
+# CF-469 — Dropping a Deployment scaffolds no container and writes labels as raw JSON; Generate emits an invalid Deployment and exits 0
 
 > **Read `docs/task-execution-contract.md` before you start.** It governs where you
 > work, which ports you may bind, what "done" means, and how you hand back. This
@@ -7,9 +7,9 @@
 | | |
 |---|---|
 | **Severity** | P1 |
-| **Closes** | `#366` — `CF-466 — Dropping a Deployment scaffolds no container and writes labels as raw JSON; starters should be valid, good-practice minimums in map-entry grammar` |
+| **Closes** | `#366` — `CF-469 — Dropping a Deployment scaffolds no container and writes labels as raw JSON; starters should be valid, good-practice minimums in map-entry grammar` |
 | **Worktree** | `.worktrees/prefill` on branch `prefill-fields` (slice 1 of the design in `docs/superpowers/specs/2026-09-12-prefilled-fields-design.md`) |
-| **May write** | `web-proto/js/profiles.js` (new), `web-proto/js/regions/canvas.js`, `web-proto/js/regions/inspector.js`, `web-proto/js/regions/inspector/events.js`, `internal/examples/k8s-app.cf.yaml`, `tests/cf466-starter-deployment.spec.js` (new), `tests/cf439-auto-scaffold-drop.spec.js` |
+| **May write** | `web-proto/js/profiles.js` (new), `web-proto/js/regions/canvas.js`, `web-proto/js/regions/inspector.js`, `web-proto/js/regions/inspector/events.js`, `internal/examples/k8s-app.cf.yaml`, `tests/cf469-starter-deployment.spec.js` (new), `tests/cf439-auto-scaffold-drop.spec.js` |
 | **Merges after** | nothing |
 
 ## Symptom
@@ -63,7 +63,7 @@ flag. Labels are written as `{ raw: JSON.stringify({app: name}) }`.
 ## Acceptance test
 
 Write this test **first**, verbatim, and watch it fail before you change any production
-code: `tests/cf466-starter-deployment.spec.js` exactly as given in
+code: `tests/cf469-starter-deployment.spec.js` exactly as given in
 `docs/superpowers/plans/2026-09-12-prefilled-fields.md` Task 1.
 
 **Fails today with** (first run on `prefill-fields`, 2026-09-12, before any production change):
@@ -71,10 +71,10 @@ code: `tests/cf466-starter-deployment.spec.js` exactly as given in
 ```
 Running 4 tests using 1 worker
 
-  ✘  1 tests/cf466-starter-deployment.spec.js:14:3 › … › dropping a Deployment writes the full starter with no raw JSON (5.5s)
-  ✘  2 tests/cf466-starter-deployment.spec.js:43:3 › … › the starter generates a container and passes render validation (416ms)
-  ✘  3 tests/cf466-starter-deployment.spec.js:59:3 › … › Service starter targets app label with bracket grammar and ClusterIP (5.3s)
-  ✘  4 tests/cf466-starter-deployment.spec.js:77:3 › … › Sync on the workload card writes bracket entries, not raw JSON (5.6s)
+  ✘  1 tests/cf469-starter-deployment.spec.js:14:3 › … › dropping a Deployment writes the full starter with no raw JSON (5.5s)
+  ✘  2 tests/cf469-starter-deployment.spec.js:43:3 › … › the starter generates a container and passes render validation (416ms)
+  ✘  3 tests/cf469-starter-deployment.spec.js:59:3 › … › Service starter targets app label with bracket grammar and ClusterIP (5.3s)
+  ✘  4 tests/cf469-starter-deployment.spec.js:77:3 › … › Sync on the workload card writes bracket entries, not raw JSON (5.6s)
 
   1) … › dropping a Deployment writes the full starter with no raw JSON
 
@@ -126,14 +126,14 @@ Running 4 tests using 1 worker
 ## Verification
 
 ```sh
-npx playwright test tests/cf466-starter-deployment.spec.js tests/cf439-auto-scaffold-drop.spec.js tests/slice63-selectors-functions.spec.js tests/slice65-authoring-ux-enhancements.spec.js
+npx playwright test tests/cf469-starter-deployment.spec.js tests/cf439-auto-scaffold-drop.spec.js tests/slice63-selectors-functions.spec.js tests/slice65-authoring-ux-enhancements.spec.js
 go test ./internal/examples/ ./internal/emit/ -count=1
 make lint
 ```
 
 ## Out of scope
 
-Essentials form (CF-467), manifest editor (CF-468), probes/securityContext tier.
+Essentials form (CF-470), manifest editor (CF-471), probes/securityContext tier.
 
 ## Handover
 

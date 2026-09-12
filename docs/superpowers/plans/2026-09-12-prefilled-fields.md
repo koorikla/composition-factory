@@ -22,26 +22,26 @@ The backlog is GitHub Issues, one per landable slice, `CF-NNN — <sentence>`. N
 
 ```bash
 cd /Users/kaurkallas/compositionfactory/.worktrees/prefill
-gh issue create --title "CF-466 — Dropping a Deployment scaffolds no container and writes labels as raw JSON; starters should be valid, good-practice minimums in map-entry grammar" --label "severity:P2,scale:ux,verified" --body-file docs/tasks/CF-466-starters.md
-gh issue create --title "CF-467 — Inspector needs a per-kind essentials form with expose-as-parameter and an env-variable repeater; a second env entry cannot be added from the GUI" --label "severity:P2,scale:ux,verified" --body-file docs/tasks/CF-467-essentials.md
-gh issue create --title "CF-468 — Inspector bottom becomes a schema-validated manifest editor with field search; 848-row list demoted behind a Manifest/Fields toggle" --label "severity:P2,scale:ux,verified" --body-file docs/tasks/CF-468-manifest-editor.md
+gh issue create --title "CF-469 — Dropping a Deployment scaffolds no container and writes labels as raw JSON; starters should be valid, good-practice minimums in map-entry grammar" --label "severity:P2,scale:ux,verified" --body-file docs/tasks/CF-469-starters.md
+gh issue create --title "CF-470 — Inspector needs a per-kind essentials form with expose-as-parameter and an env-variable repeater; a second env entry cannot be added from the GUI" --label "severity:P2,scale:ux,verified" --body-file docs/tasks/CF-470-essentials.md
+gh issue create --title "CF-471 — Inspector bottom becomes a schema-validated manifest editor with field search; 848-row list demoted behind a Manifest/Fields toggle" --label "severity:P2,scale:ux,verified" --body-file docs/tasks/CF-471-manifest-editor.md
 ```
 
 Write each `docs/tasks/CF-NNN-*.md` brief first (repro from the design doc's Problem section, acceptance test = the spec file the slice adds, contract = the matching design section). Commit the briefs:
 
 ```bash
-git add docs/tasks/CF-466-starters.md docs/tasks/CF-467-essentials.md docs/tasks/CF-468-manifest-editor.md
-git commit -m "docs: briefs for CF-466, CF-467, CF-468 (starters, essentials, manifest editor)"
+git add docs/tasks/CF-469-starters.md docs/tasks/CF-470-essentials.md docs/tasks/CF-471-manifest-editor.md
+git commit -m "docs: briefs for CF-469, CF-470, CF-471 (starters, essentials, manifest editor)"
 ```
 
 ---
 
-## Slice 1: starters and the raw-to-bracket migration (CF-466)
+## Slice 1: starters and the raw-to-bracket migration (CF-469)
 
 ### Task 1: Failing spec for the Deployment starter
 
 **Files:**
-- Create: `tests/cf466-starter-deployment.spec.js`
+- Create: `tests/cf469-starter-deployment.spec.js`
 
 **Step 1: Write the failing test**
 
@@ -58,7 +58,7 @@ async function resourceNamed(request, name) {
   return (doc.spec.resources || []).find(r => r.name === name) || null;
 }
 
-test.describe('CF-466 — starters are valid good-practice minimums in map-entry grammar', () => {
+test.describe('CF-469 — starters are valid good-practice minimums in map-entry grammar', () => {
   test('dropping a Deployment writes the full starter with no raw JSON', async ({ page, request }) => {
     await page.goto('/');
     await dropKind(page, 'Deployment', 'apps/v1', 400, 300);
@@ -144,7 +144,7 @@ Note: `generate` output entries carry `path` and `body` (verified against the li
 **Step 2: Run it to verify it fails**
 
 ```bash
-npx playwright test tests/cf466-starter-deployment.spec.js
+npx playwright test tests/cf469-starter-deployment.spec.js
 ```
 
 Expected: FAIL on the first test (`image` undefined, `oldRawSelector` true).
@@ -331,7 +331,7 @@ Keep the signature `scaffoldResourceFields(res, flds, _doc, isExplicit)`; rename
 **Step 3: Run the first three tests**
 
 ```bash
-npx playwright test tests/cf466-starter-deployment.spec.js
+npx playwright test tests/cf469-starter-deployment.spec.js
 ```
 
 Expected: tests 1–3 PASS, test 4 (Sync) FAILS (Sync still writes raw JSON).
@@ -392,7 +392,7 @@ Prove the change is emit-neutral: before editing, `go run ./cmd/cf gen --bluepri
 **Step 6: Run**
 
 ```bash
-npx playwright test tests/cf466-starter-deployment.spec.js tests/cf439-auto-scaffold-drop.spec.js tests/slice63-selectors-functions.spec.js tests/slice65-authoring-ux-enhancements.spec.js
+npx playwright test tests/cf469-starter-deployment.spec.js tests/cf439-auto-scaffold-drop.spec.js tests/slice63-selectors-functions.spec.js tests/slice65-authoring-ux-enhancements.spec.js
 go test ./internal/examples/ ./internal/emit/ -count=1
 npm run lint:js && npm run typecheck
 ```
@@ -402,8 +402,8 @@ Expected: all PASS.
 **Step 7: Commit**
 
 ```bash
-git add web-proto/js/profiles.js web-proto/js/regions/canvas.js web-proto/js/regions/inspector.js web-proto/js/regions/inspector/events.js internal/examples/k8s-app.cf.yaml tests/cf466-starter-deployment.spec.js tests/cf439-auto-scaffold-drop.spec.js
-git commit -m "feat(canvas): starters are good-practice minimums in map-entry grammar (CF-466)
+git add web-proto/js/profiles.js web-proto/js/regions/canvas.js web-proto/js/regions/inspector.js web-proto/js/regions/inspector/events.js internal/examples/k8s-app.cf.yaml tests/cf469-starter-deployment.spec.js tests/cf439-auto-scaffold-drop.spec.js
+git commit -m "feat(canvas): starters are good-practice minimums in map-entry grammar (CF-469)
 
 Drop and Scaffold read one kind profile. Deployment lands with a pinned
 image, port, requests and a memory limit; labels use [app] entries so
@@ -413,12 +413,12 @@ generated output unchanged (diff recorded above)."
 
 ---
 
-## Slice 2: essentials form (CF-467)
+## Slice 2: essentials form (CF-470)
 
 ### Task 4: Failing spec for the essentials form
 
 **Files:**
-- Create: `tests/cf467-essentials-form.spec.js`
+- Create: `tests/cf470-essentials-form.spec.js`
 
 **Step 1: Write the failing test**
 
@@ -438,7 +438,7 @@ async function resourceNamed(request, name) {
 const IMG = 'spec.template.spec.containers[0].image';
 const ENV = 'spec.template.spec.containers[0].env';
 
-test.describe('CF-467 — essentials form', () => {
+test.describe('CF-470 — essentials form', () => {
   test('Deployment opens with typed essentials rows and editing image commits a value', async ({ page, request }) => {
     await page.goto('/');
     await dropKind(page, 'Deployment', 'apps/v1', 400, 300);
@@ -515,7 +515,7 @@ Check the XRD card selector before relying on it: `grep -n 'data-id="xrd"' web-p
 **Step 2: Run it to verify it fails**
 
 ```bash
-npx playwright test tests/cf467-essentials-form.spec.js
+npx playwright test tests/cf470-essentials-form.spec.js
 ```
 
 Expected: FAIL (`#insp .essentials` not found).
@@ -725,7 +725,7 @@ Check `addParameter`'s server validation accepts `default: "2"` for `type: integ
 **Step 4: Run**
 
 ```bash
-npx playwright test tests/cf467-essentials-form.spec.js tests/cf466-starter-deployment.spec.js tests/slice63-selectors-functions.spec.js tests/slice65-authoring-ux-enhancements.spec.js tests/cf439-auto-scaffold-drop.spec.js
+npx playwright test tests/cf470-essentials-form.spec.js tests/cf469-starter-deployment.spec.js tests/slice63-selectors-functions.spec.js tests/slice65-authoring-ux-enhancements.spec.js tests/cf439-auto-scaffold-drop.spec.js
 npm run lint:js && npm run typecheck
 ```
 
@@ -734,13 +734,13 @@ Expected: all PASS.
 **Step 5: Commit**
 
 ```bash
-git add web-proto/js/profiles.js web-proto/js/regions/inspector.js web-proto/js/regions/inspector/events.js tests/cf467-essentials-form.spec.js
-git commit -m "feat(inspector): essentials form per kind with expose-as-parameter and env repeater (CF-467)"
+git add web-proto/js/profiles.js web-proto/js/regions/inspector.js web-proto/js/regions/inspector/events.js tests/cf470-essentials-form.spec.js
+git commit -m "feat(inspector): essentials form per kind with expose-as-parameter and env repeater (CF-470)"
 ```
 
 ---
 
-## Slice 3a: manifest round trip in Go (CF-468)
+## Slice 3a: manifest round trip in Go (CF-471)
 
 ### Task 6: `internal/manifest` package — failing tests
 
@@ -1377,7 +1377,7 @@ Expected: PASS.
 
 ```bash
 git add internal/manifest/
-git commit -m "feat(manifest): schema-driven round trip between flat fields and manifest YAML (CF-468)"
+git commit -m "feat(manifest): schema-driven round trip between flat fields and manifest YAML (CF-471)"
 ```
 
 ### Task 8: API routes — failing tests
@@ -1689,7 +1689,7 @@ func TestContractFixtureManifestRoundTripsKeySet(t *testing.T) {
 
 ```bash
 git add internal/api/manifest.go internal/api/manifest_test.go internal/api/server.go internal/api/blueprint.go internal/api/contract_fixtures_test.go internal/api/testdata/contract/manifest.json internal/emit/composition.go
-git commit -m "feat(api): GET/PUT resource manifest with schema-validated flatten (CF-468)"
+git commit -m "feat(api): GET/PUT resource manifest with schema-validated flatten (CF-471)"
 ```
 
 ### Task 10: MCP tools
@@ -1784,17 +1784,17 @@ func (s *server) setResourceManifest(_ context.Context, _ *sdk.CallToolRequest, 
 ```bash
 go test ./internal/mcp/ -count=1
 git add internal/mcp/tools.go internal/mcp/server_test.go docs/mcp.md
-git commit -m "feat(mcp): get_resource_manifest and set_resource_manifest bridge the manifest routes (CF-468)"
+git commit -m "feat(mcp): get_resource_manifest and set_resource_manifest bridge the manifest routes (CF-471)"
 ```
 
 ---
 
-## Slice 3b: manifest editor, view toggle and search in the canvas (CF-468)
+## Slice 3b: manifest editor, view toggle and search in the canvas (CF-471)
 
 ### Task 11: Failing spec
 
 **Files:**
-- Create: `tests/cf468-manifest-editor.spec.js`
+- Create: `tests/cf471-manifest-editor.spec.js`
 - Modify: `playwright.config.js:25` (`use`)
 
 **Step 1: Seed the Fields view for the existing suite.** In `playwright.config.js` change `use: { baseURL },` to:
@@ -1804,7 +1804,7 @@ git commit -m "feat(mcp): get_resource_manifest and set_resource_manifest bridge
     baseURL,
     // The inspector defaults to the Manifest view; the 28 specs that drive the
     // Required/Set/All field list get that view seeded here instead of each
-    // clicking the toggle. cf468 opts out with an empty storageState.
+    // clicking the toggle. cf471 opts out with an empty storageState.
     storageState: { cookies: [], origins: [{ origin: baseURL, localStorage: [{ name: 'cf-insp-view', value: 'fields' }] }] },
   },
 ```
@@ -1826,7 +1826,7 @@ async function resourceNamed(request, name) {
   return (doc.spec.resources || []).find(r => r.name === name) || null;
 }
 
-test.describe('CF-468 — manifest editor, view toggle and search', () => {
+test.describe('CF-471 — manifest editor, view toggle and search', () => {
   test('Manifest view is the default and nests the starter', async ({ page }) => {
     await page.goto('/');
     await dropKind(page, 'Deployment', 'apps/v1', 400, 300);
@@ -1902,7 +1902,7 @@ test.describe('CF-468 — manifest editor, view toggle and search', () => {
 **Step 3: Run to verify failure**
 
 ```bash
-npx playwright test tests/cf468-manifest-editor.spec.js
+npx playwright test tests/cf471-manifest-editor.spec.js
 ```
 
 Expected: FAIL (`#vseg` missing).
@@ -1981,7 +1981,7 @@ and expose them through the `Object.defineProperties(state, …)` block like the
 **Step 2: `manifest.js`**
 
 ```js
-/** Manifest-style editor for the selected resource's fields (CF-468). */
+/** Manifest-style editor for the selected resource's fields (CF-471). */
 import { esc } from "../../dom.js";
 import { highlight } from "../../utils.js";
 import { state } from "./state.js";
@@ -2131,7 +2131,7 @@ function searchHitsHtml(fields, q) {
 **Step 5: Run**
 
 ```bash
-npx playwright test tests/cf468-manifest-editor.spec.js
+npx playwright test tests/cf471-manifest-editor.spec.js
 npm run lint:js && npm run typecheck
 ```
 
@@ -2146,8 +2146,8 @@ Expected: PASS (they start in Fields view via storageState).
 **Step 6: Commit**
 
 ```bash
-git add web-proto/index.html web-proto/js/api.js web-proto/js/store.js web-proto/js/types.js web-proto/js/utils.js web-proto/js/regions/output.js web-proto/js/regions/inspector.js web-proto/js/regions/inspector/state.js web-proto/js/regions/inspector/events.js web-proto/js/regions/inspector/manifest.js web-proto/js/tour.js playwright.config.js tests/cf468-manifest-editor.spec.js
-git commit -m "feat(inspector): manifest editor, Manifest/Fields toggle and field search (CF-468)"
+git add web-proto/index.html web-proto/js/api.js web-proto/js/store.js web-proto/js/types.js web-proto/js/utils.js web-proto/js/regions/output.js web-proto/js/regions/inspector.js web-proto/js/regions/inspector/state.js web-proto/js/regions/inspector/events.js web-proto/js/regions/inspector/manifest.js web-proto/js/tour.js playwright.config.js tests/cf471-manifest-editor.spec.js
+git commit -m "feat(inspector): manifest editor, Manifest/Fields toggle and field search (CF-471)"
 ```
 
 ### Task 15: Docs
@@ -2176,7 +2176,7 @@ map that happens to be exactly `{from: x}` is written `{from: {value: x}}`.
 
 ```bash
 git add docs/dsl.md docs/guide.md web-proto/README.md docs/superpowers/specs/2026-09-12-prefilled-fields-design.md
-git commit -m "docs: manifest view grammar, essentials form and inspector views (CF-468)"
+git commit -m "docs: manifest view grammar, essentials form and inspector views (CF-471)"
 ```
 
 ### Task 16: Full gates

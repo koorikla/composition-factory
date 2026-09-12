@@ -10,7 +10,7 @@ async function resourceNamed(request, name) {
   return (doc.spec.resources || []).find(r => r.name === name) || null;
 }
 
-test.describe('CF-466 — starters are valid good-practice minimums in map-entry grammar', () => {
+test.describe('CF-469 — starters are valid good-practice minimums in map-entry grammar', () => {
   test('dropping a Deployment writes the full starter with no raw JSON', async ({ page, request }) => {
     await page.goto('/');
     await dropKind(page, 'Deployment', 'apps/v1', 400, 300);

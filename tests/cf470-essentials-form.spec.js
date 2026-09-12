@@ -13,7 +13,7 @@ async function resourceNamed(request, name) {
 const IMG = 'spec.template.spec.containers[0].image';
 const ENV = 'spec.template.spec.containers[0].env';
 
-test.describe('CF-467 — essentials form', () => {
+test.describe('CF-470 — essentials form', () => {
   test('Deployment opens with typed essentials rows and editing image commits a value', async ({ page, request }) => {
     await page.goto('/');
     await dropKind(page, 'Deployment', 'apps/v1', 400, 300);
