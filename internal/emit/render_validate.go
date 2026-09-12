@@ -445,18 +445,6 @@ func validateSchemaNode(valNode *yaml.Node, propSchema map[string]any, path stri
 			return nil
 		}
 
-		if addProps, ok := propSchema["additionalProperties"]; ok && addProps != false && addProps != nil {
-			if addPropsMap, isMap := addProps.(map[string]any); isMap {
-				for i := 0; i < len(valNode.Content); i += 2 {
-					kNode := valNode.Content[i]
-					vNode := valNode.Content[i+1]
-					childPath := fmt.Sprintf("%s[%s]", path, kNode.Value)
-					errs = append(errs, validateSchemaNode(vNode, addPropsMap, childPath, resourceName, kind, where, b)...)
-				}
-			}
-			return errs
-		}
-
 		properties, _ := propSchema["properties"].(map[string]any)
 		knownKeys := make([]string, 0, len(properties))
 		for k := range properties {
@@ -489,6 +477,10 @@ func validateSchemaNode(valNode *yaml.Node, propSchema map[string]any, path stri
 			}
 		}
 
+		addProps := propSchema["additionalProperties"]
+		addPropsMap, hasAddPropsMap := addProps.(map[string]any)
+		addPropsBool, hasAddPropsBool := addProps.(bool)
+
 		for i := 0; i < len(valNode.Content); i += 2 {
 			kNode := valNode.Content[i]
 			vNode := valNode.Content[i+1]
@@ -500,7 +492,17 @@ func validateSchemaNode(valNode *yaml.Node, propSchema map[string]any, path stri
 
 			if childSchema, ok := properties[kName].(map[string]any); ok {
 				errs = append(errs, validateSchemaNode(vNode, childSchema, childPath, resourceName, kind, where, b)...)
-			} else if properties != nil {
+			} else if _, declared := properties[kName]; declared {
+				// Declared in properties but not a map schema; do not fall through to additionalProperties.
+			} else if hasAddPropsMap {
+				mapChildPath := childPath
+				if len(properties) == 0 && path != "" {
+					mapChildPath = fmt.Sprintf("%s[%s]", path, kName)
+				}
+				errs = append(errs, validateSchemaNode(vNode, addPropsMap, mapChildPath, resourceName, kind, where, b)...)
+			} else if hasAddPropsBool && addPropsBool {
+				continue
+			} else if properties != nil || (hasAddPropsBool && !addPropsBool) {
 				s := closestPath(kName, knownKeys)
 				if s != "" {
 					errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): field %q is not in %s; did you mean %q?",
