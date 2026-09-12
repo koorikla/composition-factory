@@ -3278,6 +3278,9 @@ func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]str
 	}
 	for i := range bp.Spec.Resources {
 		r := &bp.Spec.Resources[i]
+		if r.ForEach != "" {
+			r.ForEach = rewriteFromWire(r.ForEach, nameMapping)
+		}
 		for fName, f := range r.Fields {
 			if f.From != "" {
 				f.From = rewriteFromWire(f.From, nameMapping)

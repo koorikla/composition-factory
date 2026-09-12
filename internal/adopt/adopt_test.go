@@ -8821,3 +8821,133 @@ spec:
 		})
 	}
 }
+
+func TestCF299_AdoptForEachNormalizedStatusReference(t *testing.T) {
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XCluster
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          ---
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: VPC
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: my_vpc
+            name: my-vpc
+          spec:
+            forProvider:
+              cidrBlock: 10.0.0.0/16
+          ---
+          {{- range $i := until (int (index $.observed.resources "my_vpc").resource.status.atProvider.nodeCount) }}
+          ---
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: my-subnet
+            name: my-subnet
+          spec:
+            forProvider:
+              vpcId: test
+          {{- end }}
+`
+
+	bp, _, err := Adopt([]byte(compYAML), Options{})
+	if err != nil {
+		t.Fatalf("Adopt error: %v", err)
+	}
+
+	var subnetForEach string
+	for _, r := range bp.Spec.Resources {
+		if r.Name == "my-subnet" {
+			subnetForEach = r.ForEach
+		}
+	}
+	want := "resources.my-vpc.status.atProvider.nodeCount"
+	if subnetForEach != want {
+		t.Errorf("expected subnet ForEach to be %q, got %q", want, subnetForEach)
+	}
+	if err := bp.Validate(); err != nil {
+		t.Errorf("bp.Validate() failed: %v", err)
+	}
+}
+
+func TestCF299_AdoptForEachNormalizedStatusReference_Uppercase(t *testing.T) {
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp-uppercase
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XCluster
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          ---
+          apiVersion: sqs.aws.upbound.io/v1beta1
+          kind: Queue
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: Main_Queue
+            name: main-queue
+          spec:
+            forProvider:
+              delaySeconds: 0
+          ---
+          {{- range $i := until (int (index $.observed.resources "Main_Queue").resource.status.atProvider.maxMessageSize) }}
+          ---
+          apiVersion: sqs.aws.upbound.io/v1beta1
+          kind: Queue
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: Replica_Queue
+            name: replica-queue
+          spec:
+            forProvider:
+              delaySeconds: 0
+          {{- end }}
+`
+
+	bp, _, err := Adopt([]byte(compYAML), Options{})
+	if err != nil {
+		t.Fatalf("Adopt error: %v", err)
+	}
+
+	var replicaForEach string
+	for _, r := range bp.Spec.Resources {
+		if r.Name == "replica-queue" {
+			replicaForEach = r.ForEach
+		}
+	}
+	want := "resources.main-queue.status.atProvider.maxMessageSize"
+	if replicaForEach != want {
+		t.Errorf("expected replica ForEach to be %q, got %q", want, replicaForEach)
+	}
+	if err := bp.Validate(); err != nil {
+		t.Errorf("bp.Validate() failed: %v", err)
+	}
+}
