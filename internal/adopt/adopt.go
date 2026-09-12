@@ -3802,9 +3802,30 @@ func unmaskString(s string, placeholders []string) string {
 }
 
 func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]string) {
-	if len(nameMapping) == 0 {
+	if bp == nil || len(nameMapping) == 0 {
 		return
 	}
+
+	type renamePair struct {
+		from string
+		to   string
+	}
+	var renames []renamePair
+	for from, to := range nameMapping {
+		if from != "" && to != "" && from != to {
+			renames = append(renames, renamePair{from: from, to: to})
+		}
+	}
+	if len(renames) == 0 {
+		return
+	}
+	sort.Slice(renames, func(i, j int) bool {
+		if len(renames[i].from) != len(renames[j].from) {
+			return len(renames[i].from) > len(renames[j].from)
+		}
+		return renames[i].from < renames[j].from
+	})
+
 	for i := range bp.Spec.Resources {
 		r := &bp.Spec.Resources[i]
 		if r.ForEach != "" {
@@ -3815,10 +3836,26 @@ func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]str
 				f.From = rewriteFromWire(f.From, nameMapping)
 				r.Fields[fName] = f
 			}
+			if f.Raw != "" {
+				for _, rn := range renames {
+					if rawReferencesResource(f.Raw, rn.from) {
+						f.Raw = rewriteRawResource(f.Raw, rn.from, rn.to)
+					}
+				}
+				r.Fields[fName] = f
+			}
 		}
 		for aName, a := range r.Annotations {
 			if a.From != "" {
 				a.From = rewriteFromWire(a.From, nameMapping)
+				r.Annotations[aName] = a
+			}
+			if a.Raw != "" {
+				for _, rn := range renames {
+					if rawReferencesResource(a.Raw, rn.from) {
+						a.Raw = rewriteRawResource(a.Raw, rn.from, rn.to)
+					}
+				}
 				r.Annotations[aName] = a
 			}
 		}
@@ -3827,8 +3864,81 @@ func rewriteStatusReferences(bp *blueprint.Blueprint, nameMapping map[string]str
 				e.From = rewriteFromWire(e.From, nameMapping)
 				r.Envelope[eName] = e
 			}
+			if e.Raw != "" {
+				for _, rn := range renames {
+					if rawReferencesResource(e.Raw, rn.from) {
+						e.Raw = rewriteRawResource(e.Raw, rn.from, rn.to)
+					}
+				}
+				r.Envelope[eName] = e
+			}
 		}
 	}
+	for tName, body := range bp.Spec.Templates {
+		for _, rn := range renames {
+			if rawReferencesResource(body, rn.from) {
+				body = rewriteRawResource(body, rn.from, rn.to)
+			}
+		}
+		bp.Spec.Templates[tName] = body
+	}
+}
+
+// rawReferencesResource checks whether a raw template/expression string contains
+// references to the given resource name.
+func rawReferencesResource(raw, name string) bool {
+	if raw == "" || name == "" {
+		return false
+	}
+	q := regexp.QuoteMeta(name)
+	reDotted := regexp.MustCompile(`(?:(?:\$|\$\.|\.)?observed\.resources|resources)\.` + q + `($|[^a-zA-Z0-9_-])`)
+	if reDotted.MatchString(raw) {
+		return true
+	}
+	for _, quote := range []string{`\"`, `\'`, `"`, `'`, "`"} {
+		reIndex := regexp.MustCompile(`\bindex\s+(?:(?:\$|\$\.|\.)?(?:observed\.)?resources)\s+` + regexp.QuoteMeta(quote) + q + regexp.QuoteMeta(quote) + `($|[^a-zA-Z0-9_-])`)
+		if reIndex.MatchString(raw) {
+			return true
+		}
+		reHasKey := regexp.MustCompile(`\bhasKey\s+(?:(?:\$|\$\.|\.)?(?:observed\.)?resources)\s+` + regexp.QuoteMeta(quote) + q + regexp.QuoteMeta(quote) + `($|[^a-zA-Z0-9_-])`)
+		if reHasKey.MatchString(raw) {
+			return true
+		}
+		reGetComposed := regexp.MustCompile(`\bgetComposedResource\s+[^\s"'` + "`" + `\\]+\s+` + regexp.QuoteMeta(quote) + q + regexp.QuoteMeta(quote) + `($|[^a-zA-Z0-9_-])`)
+		if reGetComposed.MatchString(raw) {
+			return true
+		}
+		reDig := regexp.MustCompile(`\bdig\s+(?:"resources"|'resources'|` + "`resources`" + `|\\"resources\\"|\\'resources\\')\s+` + regexp.QuoteMeta(quote) + q + regexp.QuoteMeta(quote) + `($|[^a-zA-Z0-9_-])`)
+		if reDig.MatchString(raw) {
+			return true
+		}
+	}
+	return false
+}
+
+// rewriteRawResource replaces references to from with to in a raw template/expression.
+func rewriteRawResource(raw, from, to string) string {
+	if raw == "" || from == "" || to == "" || from == to {
+		return raw
+	}
+	r := raw
+	reDotted := regexp.MustCompile(`((?:(?:\$|\$\.|\.)?observed\.resources|resources)\.)` + regexp.QuoteMeta(from) + `($|[^a-zA-Z0-9_-])`)
+	r = reDotted.ReplaceAllString(r, "${1}"+to+"${2}")
+
+	for _, quote := range []string{`\"`, `\'`, `"`, `'`, "`"} {
+		reIndex := regexp.MustCompile(`(\bindex\s+(?:(?:\$|\$\.|\.)?(?:observed\.)?resources)\s+` + regexp.QuoteMeta(quote) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(quote) + `)`)
+		r = reIndex.ReplaceAllString(r, "${1}"+to+"${2}")
+
+		reHasKey := regexp.MustCompile(`(\bhasKey\s+(?:(?:\$|\$\.|\.)?(?:observed\.)?resources)\s+` + regexp.QuoteMeta(quote) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(quote) + `)`)
+		r = reHasKey.ReplaceAllString(r, "${1}"+to+"${2}")
+
+		reGetComposed := regexp.MustCompile(`(\bgetComposedResource\s+[^\s"'` + "`" + `\\]+\s+` + regexp.QuoteMeta(quote) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(quote) + `)`)
+		r = reGetComposed.ReplaceAllString(r, "${1}"+to+"${2}")
+
+		reDig := regexp.MustCompile(`(\bdig\s+(?:"resources"|'resources'|` + "`resources`" + `|\\"resources\\"|\\'resources\\')\s+` + regexp.QuoteMeta(quote) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(quote) + `)`)
+		r = reDig.ReplaceAllString(r, "${1}"+to+"${2}")
+	}
+	return r
 }
 
 func rewriteFromWire(wire string, nameMapping map[string]string) string {

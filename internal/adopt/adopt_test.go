@@ -12392,3 +12392,384 @@ spec:
 		t.Errorf("rt.ForEach = %q, want %q", rt.ForEach, wantForEach)
 	}
 }
+
+func TestAdopt_NormalizeResourceNames_Repro(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xpostgres-app
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XPostgres
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          apiVersion: database.example.org/v1alpha1
+          kind: DatabaseInstance
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: my_db
+          spec:
+            forProvider:
+              allocatedStorage: 20
+          ---
+          apiVersion: database.example.org/v1alpha1
+          kind: DatabaseUser
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: my-user
+          spec:
+            forProvider:
+              endpoint: "https://{{ (index $.observed.resources \"my_db\").resource.status.atProvider.endpoint }}/api"
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(bp.Spec.Resources))
+	}
+	userRes := bp.Spec.Resources[1]
+	wantEndpoint := `https://{{ (index $.observed.resources \"my-db\").resource.status.atProvider.endpoint }}/api`
+	if got := userRes.Fields["endpoint"].Raw; got != wantEndpoint {
+		t.Errorf("endpoint.Raw = %q, want %q", got, wantEndpoint)
+	}
+}
+
+func TestAdopt_NormalizeResourceNames_RewritesRawAndTemplates(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xpostgres-app
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XPostgres
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- define "db-helper" }}
+          helper: {{ (index $.observed.resources "my_db").resource.status.atProvider.endpoint }}
+          {{- end }}
+          ---
+          apiVersion: database.example.org/v1alpha1
+          kind: DatabaseInstance
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: my_db
+          spec:
+            forProvider:
+              allocatedStorage: 20
+          ---
+          apiVersion: database.example.org/v1alpha1
+          kind: DatabaseUser
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: my-user
+              custom-anno: "https://{{ (index $.observed.resources \"my_db\").resource.status.atProvider.endpoint }}/anno"
+          spec:
+            customConfig: "https://{{ (index $.observed.resources \"my_db\").resource.status.atProvider.endpoint }}/env"
+            forProvider:
+              endpoint: "https://{{ (index $.observed.resources \"my_db\").resource.status.atProvider.endpoint }}/api"
+              singleQuoteField: 'prefix-{{ (index $.observed.resources "my_db").resource.status.atProvider.endpoint }}'
+              dottedField: 'https://{{ $.observed.resources.my_db.resource.status.atProvider.endpoint }}'
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(bp.Spec.Resources))
+	}
+	dbRes := bp.Spec.Resources[0]
+	if dbRes.Name != "my-db" {
+		t.Fatalf("expected db resource name %q, got %q", "my-db", dbRes.Name)
+	}
+	userRes := bp.Spec.Resources[1]
+	if userRes.Name != "my-user" {
+		t.Fatalf("expected user resource name %q, got %q", "my-user", userRes.Name)
+	}
+
+	// Field Raw rewrite check (escaped quotes inside double-quoted YAML scalar)
+	endpointField, ok := userRes.Fields["endpoint"]
+	if !ok {
+		t.Fatalf("expected endpoint field in userRes.Fields")
+	}
+	wantEndpointRaw := `https://{{ (index $.observed.resources \"my-db\").resource.status.atProvider.endpoint }}/api`
+	if endpointField.Raw != wantEndpointRaw {
+		t.Errorf("endpoint.Raw = %q, want %q", endpointField.Raw, wantEndpointRaw)
+	}
+
+	// Field Raw rewrite check (unescaped quotes inside single-quoted YAML scalar)
+	sqField, ok := userRes.Fields["singleQuoteField"]
+	if !ok {
+		t.Fatalf("expected singleQuoteField in userRes.Fields")
+	}
+	wantSQRaw := `prefix-{{ (index $.observed.resources "my-db").resource.status.atProvider.endpoint }}`
+	if sqField.Raw != wantSQRaw {
+		t.Errorf("singleQuoteField.Raw = %q, want %q", sqField.Raw, wantSQRaw)
+	}
+
+	// Field Raw rewrite check (dotted notation)
+	dotField, ok := userRes.Fields["dottedField"]
+	if !ok {
+		t.Fatalf("expected dottedField in userRes.Fields")
+	}
+	wantDotRaw := `https://{{ $.observed.resources.my-db.resource.status.atProvider.endpoint }}`
+	if dotField.Raw != wantDotRaw {
+		t.Errorf("dottedField.Raw = %q, want %q", dotField.Raw, wantDotRaw)
+	}
+
+	// Annotation Raw rewrite check
+	annoField, ok := userRes.Annotations["custom-anno"]
+	if !ok {
+		t.Fatalf("expected custom-anno annotation in userRes.Annotations")
+	}
+	wantAnnoRaw := `https://{{ (index $.observed.resources \"my-db\").resource.status.atProvider.endpoint }}/anno`
+	if annoField.Raw != wantAnnoRaw {
+		t.Errorf("annotations[custom-anno].Raw = %q, want %q", annoField.Raw, wantAnnoRaw)
+	}
+
+	// Envelope Raw rewrite check
+	envField, ok := userRes.Envelope["customConfig"]
+	if !ok {
+		t.Fatalf("expected customConfig envelope field in userRes.Envelope")
+	}
+	wantEnvRaw := `https://{{ (index $.observed.resources \"my-db\").resource.status.atProvider.endpoint }}/env`
+	if envField.Raw != wantEnvRaw {
+		t.Errorf("envelope[customConfig].Raw = %q, want %q", envField.Raw, wantEnvRaw)
+	}
+
+	// Template body rewrite check
+	tmplBody, ok := bp.Spec.Templates["db-helper"]
+	if !ok {
+		t.Fatalf("expected db-helper template in bp.Spec.Templates")
+	}
+	if strings.Contains(tmplBody, `"my_db"`) {
+		t.Errorf("template db-helper still contains old resource name %q: %s", "my_db", tmplBody)
+	}
+	if !strings.Contains(tmplBody, `"my-db"`) {
+		t.Errorf("template db-helper does not contain normalized name %q: %s", "my-db", tmplBody)
+	}
+}
+
+func TestAdopt_RewriteRawResourceBoundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		from     string
+		to       string
+		expected string
+	}{
+		{
+			name:     "quoted exact",
+			raw:      `{{ index $.observed.resources "main" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ index $.observed.resources "primary" }}`,
+		},
+		{
+			name:     "escaped quoted exact",
+			raw:      `{{ index $.observed.resources \"main\" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ index $.observed.resources \"primary\" }}`,
+		},
+		{
+			name:     "quoted prefix-sharing left alone",
+			raw:      `{{ index $.observed.resources "main-queue" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ index $.observed.resources "main-queue" }}`,
+		},
+		{
+			name:     "escaped quoted prefix-sharing left alone",
+			raw:      `{{ index $.observed.resources \"main-queue\" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ index $.observed.resources \"main-queue\" }}`,
+		},
+		{
+			name:     "single quoted index exact",
+			raw:      `{{ index $.observed.resources 'main' }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ index $.observed.resources 'primary' }}`,
+		},
+		{
+			name:     "escaped single quoted index exact",
+			raw:      `{{ index $.observed.resources \'main\' }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ index $.observed.resources \'primary\' }}`,
+		},
+		{
+			name:     "backtick index exact",
+			raw:      "{{ index $.observed.resources `main` }}",
+			from:     "main",
+			to:       "primary",
+			expected: "{{ index $.observed.resources `primary` }}",
+		},
+		{
+			name:     "index resources exact",
+			raw:      `{{ index resources "main" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ index resources "primary" }}`,
+		},
+		{
+			name:     "unanchored quoted string left alone",
+			raw:      `{{ if eq $spec.tier "main" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ if eq $spec.tier "main" }}`,
+		},
+		{
+			name:     "dot observed rewrites exact",
+			raw:      `{{ .observed.resources.main.resource.status.url }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ .observed.resources.primary.resource.status.url }}`,
+		},
+		{
+			name:     "dot observed leaves prefix-sharing alone",
+			raw:      `{{ .observed.resources.main-queue.resource.status.url }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ .observed.resources.main-queue.resource.status.url }}`,
+		},
+		{
+			name:     "dollar dot observed rewrites exact",
+			raw:      `{{ $.observed.resources.main.resource.status.url }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ $.observed.resources.primary.resource.status.url }}`,
+		},
+		{
+			name:     "dollar dot observed leaves prefix-sharing alone",
+			raw:      `{{ $.observed.resources.main-queue.resource.status.url }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ $.observed.resources.main-queue.resource.status.url }}`,
+		},
+		{
+			name:     "dollar observed rewrites exact",
+			raw:      `$observed.resources.main.resource.status.url`,
+			from:     "main",
+			to:       "primary",
+			expected: `$observed.resources.primary.resource.status.url`,
+		},
+		{
+			name:     "dollar observed leaves prefix-sharing alone",
+			raw:      `$observed.resources.main-queue.resource.status.url`,
+			from:     "main",
+			to:       "primary",
+			expected: `$observed.resources.main-queue.resource.status.url`,
+		},
+		{
+			name:     "resources dot rewrites exact",
+			raw:      `resources.main.status.url`,
+			from:     "main",
+			to:       "primary",
+			expected: `resources.primary.status.url`,
+		},
+		{
+			name:     "resources dot leaves prefix-sharing alone",
+			raw:      `resources.main-queue.status.url`,
+			from:     "main",
+			to:       "primary",
+			expected: `resources.main-queue.status.url`,
+		},
+		{
+			name:     "resources with space and brace",
+			raw:      `{{ resources.main }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ resources.primary }}`,
+		},
+		{
+			name:     "multiple occurrences in same string",
+			raw:      `{{ .observed.resources.main.url }} and {{ .observed.resources.main-queue.url }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ .observed.resources.primary.url }} and {{ .observed.resources.main-queue.url }}`,
+		},
+		{
+			name:     "hasKey exact",
+			raw:      `{{ hasKey $.observed.resources "main" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ hasKey $.observed.resources "primary" }}`,
+		},
+		{
+			name:     "getComposedResource exact",
+			raw:      `{{ getComposedResource . "main" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ getComposedResource . "primary" }}`,
+		},
+		{
+			name:     "dig resources double quoted exact",
+			raw:      `hasKey (dig "resources" "main" "resource" "status" dict $.observed) "url"`,
+			from:     "main",
+			to:       "primary",
+			expected: `hasKey (dig "resources" "primary" "resource" "status" dict $.observed) "url"`,
+		},
+		{
+			name:     "dig resources double quoted prefix-sharing left alone",
+			raw:      `hasKey (dig "resources" "main-queue" "resource" "status" dict $.observed) "url"`,
+			from:     "main",
+			to:       "primary",
+			expected: `hasKey (dig "resources" "main-queue" "resource" "status" dict $.observed) "url"`,
+		},
+		{
+			name:     "dig resources single quoted exact",
+			raw:      `hasKey (dig 'resources' 'main' 'resource' 'status' dict $.observed) 'url'`,
+			from:     "main",
+			to:       "primary",
+			expected: `hasKey (dig 'resources' 'primary' 'resource' 'status' dict $.observed) 'url'`,
+		},
+		{
+			name:     "dig resources backtick exact",
+			raw:      "hasKey (dig `resources` `main` `resource` `status` dict $.observed) `url`",
+			from:     "main",
+			to:       "primary",
+			expected: "hasKey (dig `resources` `primary` `resource` `status` dict $.observed) `url`",
+		},
+		{
+			name:     "dig non-resources left alone",
+			raw:      `dig "params" "main" "status"`,
+			from:     "main",
+			to:       "primary",
+			expected: `dig "params" "main" "status"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rewriteRawResource(tt.raw, tt.from, tt.to)
+			if got != tt.expected {
+				t.Errorf("rewriteRawResource(%q, %q, %q) = %q, want %q", tt.raw, tt.from, tt.to, got, tt.expected)
+			}
+		})
+	}
+}
