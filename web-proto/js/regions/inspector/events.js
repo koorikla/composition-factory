@@ -948,6 +948,33 @@ export function onBoxChange(e) {
     mProps = cloneProps((paramsOf(doc)[mParam] || {}).properties);
     mLoc = memberParent(mProps, mPath);
     if (!mLoc) return;
+    if (mAttr === "data-mtype") {
+      var curMemberType = (mLoc.parent[mLoc.key] && mLoc.parent[mLoc.key].type) || "string";
+      var newMemberType = t.value;
+      if (curMemberType === newMemberType) return;
+      var isMemberMismatch = (curMemberType === "object" && newMemberType !== "object") || (curMemberType !== "object" && newMemberType === "object");
+      var mFo = isMemberMismatch ? fanOut(doc, mParam + "." + mPath) : 0;
+      if (mFo > 0) {
+        if (!confirm('Member "' + mParam + '.' + mPath + '" is wired to ' + mFo + " field" + (mFo === 1 ? "" : "s") + ". Changing type to " + newMemberType + " will remove its properties and unwire those fields. Proceed?")) {
+          state.render();
+          return;
+        }
+        mLoc.parent[mLoc.key].type = newMemberType;
+        if (newMemberType !== "object") delete mLoc.parent[mLoc.key].properties;
+        if (newMemberType === "object") {
+          delete mLoc.parent[mLoc.key].default;
+          delete mLoc.parent[mLoc.key].enum;
+        }
+        var mDraft = JSON.parse(JSON.stringify(doc));
+        cleanMemberRefs(mDraft, mParam, mPath);
+        if (mDraft.spec && mDraft.spec.xrd && mDraft.spec.xrd.parameters && mDraft.spec.xrd.parameters[mParam]) {
+          mDraft.spec.xrd.parameters[mParam].properties = cloneProps(mProps);
+        }
+        state.op(function () { return state.store.replaceDoc(mDraft); })
+          .then(function (r) { if (r === null) state.render(); });
+        return;
+      }
+    }
     var memberHandler = {
       "data-mtype": function () {
         mLoc.parent[mLoc.key].type = t.value;
@@ -982,6 +1009,31 @@ export function onBoxChange(e) {
         return;
       }
       var patch = paramFieldUpdaters[pAttr](t);
+      if (pAttr === "data-pt") {
+        var curParam = params[paramName];
+        var curType = (curParam && curParam.type) || "string";
+        var newType = t.value;
+        if (curType === newType) return;
+        var isTypeMismatch = (curType === "object" && newType !== "object") || (curType !== "object" && newType === "object");
+        var pFo = isTypeMismatch ? fanOut(doc, paramName) : 0;
+        if (pFo > 0) {
+          if (!confirm('Parameter "' + paramName + '" is wired to ' + pFo + " field" + (pFo === 1 ? "" : "s") + ". Changing type to " + newType + " will remove its properties and unwire those fields. Proceed?")) {
+            state.render();
+            return;
+          }
+          var pDraft = JSON.parse(JSON.stringify(doc));
+          cleanParamRefs(pDraft, paramName);
+          pDraft.spec = pDraft.spec || {};
+          pDraft.spec.xrd = pDraft.spec.xrd || {};
+          pDraft.spec.xrd.parameters = pDraft.spec.xrd.parameters || {};
+          var p = paramFrom(params[paramName], patch);
+          if (p.type !== "object") delete p.properties;
+          pDraft.spec.xrd.parameters[paramName] = p;
+          state.op(function () { return state.store.replaceDoc(pDraft); })
+            .then(function (r) { if (r === null) state.render(); });
+          return;
+        }
+      }
       (function (pn, pPatch) {
         state.op(function () { return state.store.updateParameter(pn, paramFrom(params[pn], pPatch)); })
           .then(function (r) { if (r === null) state.render(); });
