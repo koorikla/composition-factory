@@ -1159,3 +1159,80 @@ func TestCF301_KCLLoopedCustomMetadataNameLiteralValue(t *testing.T) {
 		t.Fatalf("expected KCL literal name to incorporate loop index _i, got:\n%s", s)
 	}
 }
+
+var fakeQueueCRD = []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.m.upbound.io}
+spec:
+  group: sqs.aws.m.upbound.io
+  scope: Namespaced
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            required: [forProvider]
+            properties:
+              forProvider:
+                properties: {region: {type: string}}
+              providerConfigRef:
+                type: object
+                required: [kind, name]
+                properties: {kind: {type: string}, name: {type: string}}
+`)
+
+func TestKCLRefusesSpecTemplates(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue-tmpl
+spec:
+  emit:
+    engine: kcl
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XQueue
+    plural: xqueues
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+      region:
+        type: string
+        required: true
+  templates:
+    cf.tags: "{{ .xr }}-tags"
+  resources:
+    - name: work-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      fields:
+        region:
+          from: params.region
+`
+	b, err := blueprint.Parse([]byte(bpYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	crds, err := schema.ParseCRDs([][]byte{fakeQueueCRD})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Composition(b, crds)
+	if err == nil {
+		t.Fatal("expected error on KCL with spec.templates, got nil")
+	}
+	if !strings.Contains(err.Error(), "spec.templates") {
+		t.Errorf("expected error to mention spec.templates, got: %v", err)
+	}
+}
