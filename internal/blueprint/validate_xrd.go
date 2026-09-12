@@ -38,6 +38,12 @@ func validateXRD(x XRD) error {
 		return fmt.Errorf("spec.xrd.version: %q is not a valid API version (e.g. v1, v1beta1, v1alpha1)", x.Version)
 	}
 
+	if name := x.Plural + "." + x.Group; len(name) > 63 {
+		return fmt.Errorf("spec.xrd: name %q is %d characters (must be at most 63 characters; "+
+			"Crossplane labels CompositionRevisions with this name and Kubernetes label values cap at 63 characters)",
+			name, len(name))
+	}
+
 	switch x.Scope {
 	case "Namespaced":
 	case "Cluster":
