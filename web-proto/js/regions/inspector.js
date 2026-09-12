@@ -1198,9 +1198,13 @@ function renameEnvKey(oldKey, newKey, inputEl) {
   var doc = store.state.doc;
   var env = (doc && doc.spec && doc.spec.environment) || {};
 
-  var validNameRE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
-  if (!validNameRE.test(newKey)) {
-    var msg = 'Invalid environment key name "' + newKey + '": must start with a letter and contain only alphanumeric characters, underscores, or hyphens';
+  var validNameRE = /^[a-zA-Z][a-zA-Z0-9]*$/;
+  var yamlKeywords = {
+    "true": true, "false": true, "yes": true, "no": true,
+    "on": true, "off": true, "null": true, "y": true, "n": true
+  };
+  if (!validNameRE.test(newKey) || yamlKeywords[newKey.toLowerCase()]) {
+    var msg = 'Invalid environment key name "' + newKey + '": must be camelCase (e.g. vpcId) and not a YAML keyword like yes/no/true/false';
     warnMsg = msg;
     store.emit("error", { status: 400, message: msg, source: "inspector" });
     if (inputEl) inputEl.value = oldKey;

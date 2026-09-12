@@ -124,7 +124,9 @@ function isRawEnvRef(raw, keyName) {
   if (typeof raw !== "string" || !raw || !keyName) return false;
   var escaped = keyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   var re = new RegExp("(?:\\$env|\\.env|env)\\." + escaped + "(?:$|[^a-zA-Z0-9_])");
-  return re.test(raw);
+  if (re.test(raw)) return true;
+  var reIndex = new RegExp("\\bindex\\s+(?:(?:\\$|\\$\\.|\\.)?env)\\s+(?:\"" + escaped + "\"|'" + escaped + "'|`" + escaped + "`)(?:$|[^a-zA-Z0-9_])");
+  return reIndex.test(raw);
 }
 
 function isObjectReferencingEnv(obj, keyName) {
@@ -154,12 +156,32 @@ function isWhenReferencingEnv(whenStr, keyName) {
  */
 export function cleanEnvRefs(draft, keyName) {
   if (!draft || !draft.spec) return;
+  var deletedTemplates = [];
+  if (draft.spec.templates && typeof draft.spec.templates === "object") {
+    Object.keys(draft.spec.templates).forEach(function (tName) {
+      if (typeof draft.spec.templates[tName] === "string" && isRawEnvRef(draft.spec.templates[tName], keyName)) {
+        delete draft.spec.templates[tName];
+        deletedTemplates.push(tName);
+      }
+    });
+    if (Object.keys(draft.spec.templates).length === 0) {
+      delete draft.spec.templates;
+    }
+    if (deletedTemplates.length > 0 && Array.isArray(draft.spec.conventions)) {
+      draft.spec.conventions = draft.spec.conventions.filter(function (c) {
+        return c && deletedTemplates.indexOf(c.template) === -1;
+      });
+      if (draft.spec.conventions.length === 0) {
+        delete draft.spec.conventions;
+      }
+    }
+  }
   var resources = draft.spec.resources || [];
   resources.forEach(function (r) {
     if (r.fields) {
       Object.keys(r.fields).forEach(function (k) {
         var f = r.fields[k];
-        if (f && (isEnvRef(f.from, keyName) || isRawEnvRef(f.raw, keyName))) {
+        if (f && (isEnvRef(f.from, keyName) || isRawEnvRef(f.raw, keyName) || (f.template && deletedTemplates.indexOf(f.template) !== -1))) {
           delete r.fields[k];
         }
       });
@@ -167,7 +189,7 @@ export function cleanEnvRefs(draft, keyName) {
     if (r.envelope) {
       Object.keys(r.envelope).forEach(function (k) {
         var f = r.envelope[k];
-        if (f && (isEnvRef(f.from, keyName) || isRawEnvRef(f.raw, keyName))) {
+        if (f && (isEnvRef(f.from, keyName) || isRawEnvRef(f.raw, keyName) || (f.template && deletedTemplates.indexOf(f.template) !== -1))) {
           delete r.envelope[k];
         }
       });
@@ -176,7 +198,7 @@ export function cleanEnvRefs(draft, keyName) {
     if (r.annotations) {
       Object.keys(r.annotations).forEach(function (k) {
         var f = r.annotations[k];
-        if (f && (isEnvRef(f.from, keyName) || isRawEnvRef(f.raw, keyName))) {
+        if (f && (isEnvRef(f.from, keyName) || isRawEnvRef(f.raw, keyName) || (f.template && deletedTemplates.indexOf(f.template) !== -1))) {
           delete r.annotations[k];
         }
       });
@@ -313,7 +335,9 @@ export function renameEnvKeyInDoc(d, oldKey, newKey) {
     if (typeof raw !== "string" || !raw) return raw;
     var escaped = oldKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     var re = new RegExp("((?:\\$env|\\.env|env)\\.)" + escaped + "((?:$|[^a-zA-Z0-9_]))", "g");
-    return raw.replace(re, "$1" + newKey + "$2");
+    var res = raw.replace(re, "$1" + newKey + "$2");
+    var reIndex = new RegExp("(\\bindex\\s+(?:(?:\\$|\\$\\.|\\.)?env)\\s+(?:\"|'|`))" + escaped + "((?:\"|'|`)(?:$|[^a-zA-Z0-9_]))", "g");
+    return res.replace(reIndex, "$1" + newKey + "$2");
   }
 
   function replaceInObject(obj) {
@@ -391,6 +415,15 @@ export function renameEnvKeyInDoc(d, oldKey, newKey) {
       }
     }
   });
+
+  // 5. Update references in templates
+  if (d.spec && d.spec.templates && typeof d.spec.templates === "object") {
+    Object.keys(d.spec.templates).forEach(function (tName) {
+      if (typeof d.spec.templates[tName] === "string") {
+        d.spec.templates[tName] = replaceRawEnv(d.spec.templates[tName]);
+      }
+    });
+  }
 }
 
 /**
