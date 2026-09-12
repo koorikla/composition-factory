@@ -22,18 +22,12 @@ spec:
           command:
             - sh
             - -c
-            - |
-              cp /workspace/blueprints-config/* /workspace/blueprints/
-              cf provider add ghcr.io/crossplane-contrib/provider-aws-iam:v2.7.0 --cache-dir /home/cf/.cache/compositionfactory
-              cf provider add ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0 --cache-dir /home/cf/.cache/compositionfactory
-              cf provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0 --cache-dir /home/cf/.cache/compositionfactory
+            - cp /workspace/blueprints-config/* /workspace/blueprints/
           volumeMounts:
             - name: blueprints-config
               mountPath: /workspace/blueprints-config
             - name: blueprints-data
               mountPath: /workspace/blueprints
-            - name: cache
-              mountPath: /home/cf/.cache/compositionfactory
       containers:
         - name: compositionfactory
           image: compositionfactory
@@ -76,8 +70,6 @@ spec:
           volumeMounts:
             - name: blueprints-data
               mountPath: /workspace/blueprints
-            - name: cache
-              mountPath: /home/cf/.cache/compositionfactory
             - name: out
               mountPath: /workspace/out
       volumes:
@@ -86,8 +78,7 @@ spec:
             name: cf-blueprints
         - name: blueprints-data
           emptyDir: {}
-        - name: cache
-          emptyDir: {}
         - name: out
           emptyDir: {}
+
 

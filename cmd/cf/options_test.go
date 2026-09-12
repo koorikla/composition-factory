@@ -264,3 +264,70 @@ func TestAssembleProvidersFallsBackToStoreListWhenSourcesEmpty(t *testing.T) {
 		}
 	})
 }
+
+func TestAssembleProvidersIncludesCachedProvidersAlongsideBlueprintSources(t *testing.T) {
+	dir := t.TempDir()
+	store := cache.New(filepath.Join(dir, "cache"))
+	refDeclared := "example.org/provider-declared:v1"
+	refCached := "example.org/provider-cached-extra:v1"
+	saveTestProvider(t, store, refDeclared)
+	saveTestProvider(t, store, refCached)
+
+	bp := &blueprint.Blueprint{
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{
+				{Provider: refDeclared},
+			},
+		},
+	}
+
+	got := AssembleProviders(store, bp, nil, false)
+	want := []string{refDeclared, refCached}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("AssembleProviders() = %v, want %v", got, want)
+	}
+}
+
+func TestBuildAPIOptionsPopulatesCachedProvidersWithUndeclaredCache(t *testing.T) {
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, "cache")
+	store := cache.New(cacheDir)
+	refDeclared := "example.org/provider-declared:v1"
+	refCached := "example.org/provider-cached-extra:v1"
+	saveTestProvider(t, store, refDeclared)
+	saveTestProvider(t, store, refCached)
+
+	bpPath := filepath.Join(dir, "blueprint.cf.yaml")
+	bpYAML := fmt.Sprintf(`apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test-bp
+spec:
+  sources:
+    - provider: %s
+  xrd:
+    group: example.org
+    kind: XTest
+    plural: xtests
+    version: v1alpha1
+    scope: Namespaced
+`, refDeclared)
+	if err := os.WriteFile(bpPath, []byte(bpYAML), 0o644); err != nil {
+		t.Fatalf("write blueprint: %v", err)
+	}
+
+	opts, err := buildAPIOptions(bpPath, cacheDir, filepath.Join(dir, "out"), filepath.Join(dir, ".cf.lock"), nil, false)
+	if err != nil {
+		t.Fatalf("buildAPIOptions: %v", err)
+	}
+
+	wantProviders := []string{refDeclared, refCached}
+	if !reflect.DeepEqual(opts.Providers, wantProviders) {
+		t.Errorf("opts.Providers = %v, want %v", opts.Providers, wantProviders)
+	}
+
+	wantCached := []string{refCached}
+	if !reflect.DeepEqual(opts.CachedProviders, wantCached) {
+		t.Errorf("opts.CachedProviders = %v, want %v", opts.CachedProviders, wantCached)
+	}
+}

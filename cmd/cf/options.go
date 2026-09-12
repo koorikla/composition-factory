@@ -32,9 +32,19 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string, cl *clust
 	}
 
 	var cachedRefs []string
-	if b == nil || len(b.Spec.Sources) == 0 {
-		cached, _ := store.List()
-		cachedRefs = cached
+	cached, _ := store.List()
+	declared := make(map[string]bool)
+	if b != nil {
+		for _, s := range b.Spec.Sources {
+			if s.Provider != "" {
+				declared[s.Provider] = true
+			}
+		}
+	}
+	for _, p := range cached {
+		if !declared[p] {
+			cachedRefs = append(cachedRefs, p)
+		}
 	}
 
 	return api.Options{
@@ -53,7 +63,7 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string, cl *clust
 // AssembleProviders collects the provider set to index and serve:
 // 1. inspects declared blueprint sources in document order, deduplicating references
 // 2. checks store cache presence, warning on os.Stderr for missing providers so startup continues with a partial index
-// 3. if no blueprint sources are declared (or b is nil), falls back to all cached providers in store.List()
+// 3. discovers all cached providers in store.List(), appending any not already declared so pre-cached schemas are available
 // 4. if a cluster client is provided, syncs or loads live cluster CRDs under cluster.ProviderLabel
 func AssembleProviders(store *cache.Store, b *blueprint.Blueprint, cl *cluster.Client, syncClusterNow bool) []string {
 	if store == nil {
@@ -79,14 +89,12 @@ func AssembleProviders(store *cache.Store, b *blueprint.Blueprint, cl *cluster.C
 		}
 	}
 
-	// If no blueprint sources found, discover all cached providers
-	if b == nil || len(b.Spec.Sources) == 0 {
-		cached, _ := store.List()
-		for _, p := range cached {
-			if !seen[p] {
-				seen[p] = true
-				refs = append(refs, p)
-			}
+	// Discover all cached providers in store so pre-cached schemas are available
+	cached, _ := store.List()
+	for _, p := range cached {
+		if !seen[p] {
+			seen[p] = true
+			refs = append(refs, p)
 		}
 	}
 
