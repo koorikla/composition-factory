@@ -35,8 +35,16 @@ export function isParamLocked(doc, n) {
   var scope = xrd.scope || "Namespaced";
   if (scope !== "Namespaced") return false;
   var resources = doc.spec.resources || [];
+  var crdSources = {};
+  var sources = doc.spec.sources || [];
+  for (var i = 0; i < sources.length; i++) {
+    if (sources[i] && sources[i].crds) crdSources[sources[i].crds] = true;
+  }
   return resources.length === 0 || resources.some(function (r) {
-    return r && r.provider !== "k8s";
+    if (!r || !r.provider) return false;
+    if (r.provider === "k8s" || r.provider.endsWith(".yaml") || r.provider.endsWith(".yml")) return false;
+    if (crdSources[r.provider]) return false;
+    return true;
   });
 }
 

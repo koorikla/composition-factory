@@ -59,3 +59,40 @@ func TestValidateObjectParameterMembersReservedKeywordsRejected(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateParametersCRDManifestNamespaced(t *testing.T) {
+	bp := &Blueprint{
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata:   Metadata{Name: "app"},
+		Spec: Spec{
+			XRD: XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "App",
+				Plural:  "apps",
+				Scope:   "Namespaced",
+				Parameters: map[string]Parameter{
+					"appName": {
+						Type:     "string",
+						Required: true,
+					},
+				},
+			},
+			Sources: []Source{
+				{CRDs: "crds/custom.yaml"},
+			},
+			Resources: []Resource{
+				{
+					Name:     "custom-res",
+					Kind:     "CustomResource",
+					Provider: "crds/custom.yaml",
+				},
+			},
+		},
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("expected valid blueprint when all resources are object-rooted CRD manifests, got: %v", err)
+	}
+}

@@ -199,6 +199,31 @@ func (b *Blueprint) ResourceNamed(name string) *Resource {
 	return nil
 }
 
+// HasManagedResources returns true if the blueprint contains any Crossplane
+// managed resources (i.e. resources that are not object-rooted native Kubernetes
+// kinds or local CRD manifests).
+func (b *Blueprint) HasManagedResources() bool {
+	if b == nil {
+		return false
+	}
+	for _, r := range b.Spec.Resources {
+		if r.Provider == NativeProvider || strings.HasSuffix(r.Provider, ".yaml") || strings.HasSuffix(r.Provider, ".yml") {
+			continue
+		}
+		isCRDSource := false
+		for _, s := range b.Spec.Sources {
+			if s.CRDs != "" && s.CRDs == r.Provider {
+				isCRDSource = true
+				break
+			}
+		}
+		if !isCRDSource {
+			return true
+		}
+	}
+	return false
+}
+
 // Convention binds a template to every top-level forProvider leaf whose name
 // ends with Match, on every resource that does not set that field itself.
 type Convention struct {

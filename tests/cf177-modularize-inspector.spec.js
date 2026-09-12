@@ -48,6 +48,34 @@ test.describe('CF-177 — Modularize inspector.js into xrd.js, preview.js, event
     expect(moduleExports.xrd.hasIsParamLocked).toBe(true);
     expect(moduleExports.xrd.hasCleanParamRefs).toBe(true);
 
+    const paramLockedResults = await page.evaluate(async () => {
+      const xrd = await import('./js/regions/inspector/xrd.js');
+      return {
+        crdManifest: xrd.isParamLocked({
+          spec: {
+            xrd: { scope: 'Namespaced' },
+            sources: [{ crds: 'crds/custom.yaml' }],
+            resources: [{ provider: 'crds/custom.yaml' }],
+          },
+        }, 'providerName'),
+        yamlSuffix: xrd.isParamLocked({
+          spec: {
+            xrd: { scope: 'Namespaced' },
+            resources: [{ provider: 'custom.yaml' }],
+          },
+        }, 'providerName'),
+        managed: xrd.isParamLocked({
+          spec: {
+            xrd: { scope: 'Namespaced' },
+            resources: [{ provider: 'xpkg.upbound.io/upbound/provider-aws-rds:v1.14.0' }],
+          },
+        }, 'providerName'),
+      };
+    });
+    expect(paramLockedResults.crdManifest).toBe(false);
+    expect(paramLockedResults.yamlSuffix).toBe(false);
+    expect(paramLockedResults.managed).toBe(true);
+
     expect(moduleExports.preview.hasRawEditorHtml).toBe(true);
     expect(moduleExports.preview.hasBuildSnippets).toBe(true);
     expect(moduleExports.preview.hasTriggerPreview).toBe(true);

@@ -50,15 +50,7 @@ func (b *Blueprint) validateParameters() error {
 		}
 	}
 
-	hasManaged := false
-	for _, r := range b.Spec.Resources {
-		if r.Provider != NativeProvider {
-			hasManaged = true
-			break
-		}
-	}
-
-	if x.Scope == "Namespaced" && hasManaged {
+	if x.Scope == "Namespaced" && b.HasManagedResources() {
 		p, ok := x.Parameters["providerName"]
 		switch {
 		case !ok:

@@ -580,14 +580,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 	// Rewrite status references with normalized names
 	rewriteStatusReferences(bp, nameMapping)
 
-	hasManaged := false
-	for _, r := range bp.Spec.Resources {
-		if r.Provider != blueprint.NativeProvider {
-			hasManaged = true
-			break
-		}
-	}
-	if bp.Spec.XRD.Scope == "Namespaced" && hasManaged {
+	if bp.Spec.XRD.Scope == "Namespaced" && bp.HasManagedResources() {
 		if xrdDoc == nil {
 			bp.Spec.XRD.Parameters["providerName"] = blueprint.Parameter{
 				Type:        "string",
