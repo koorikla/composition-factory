@@ -19,7 +19,11 @@ func LoadSources(store *Store, b *blueprint.Blueprint, blueprintDir string) ([]s
 	var crds []schema.CRD
 	var lock *Lock
 	if blueprintDir != "" {
-		lock, _ = ReadLock(filepath.Join(blueprintDir, ".cf.lock"))
+		var err error
+		lock, err = ReadLock(filepath.Join(blueprintDir, ".cf.lock"))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	for _, s := range b.Spec.Sources {

@@ -3,6 +3,7 @@ package cache
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
@@ -359,5 +360,36 @@ func TestLoadSourcesErrors(t *testing.T) {
 	}
 	if _, err := LoadSources(store, bpMissingProvider, bpDir); err == nil {
 		t.Error("expected error when locked provider is missing from cache, got nil")
+	}
+}
+
+func TestLoadSources_CorruptLockfile(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".cf.lock")
+	if err := os.WriteFile(lockPath, []byte("<<<<<<< HEAD\ncorrupt json\n=======\n>>>>>>> branch\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test"},
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{
+				{Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.0.0"},
+			},
+		},
+	}
+
+	store := New(t.TempDir())
+	if err := store.SaveCRDs("xpkg.upbound.io/upbound/provider-aws-sqs:v1.0.0", "sha256:sqs", nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadSources(store, bp, dir)
+	if err == nil {
+		t.Fatal("LoadSources = nil, want error on corrupt .cf.lock")
+	}
+	if !strings.Contains(err.Error(), "parse") || !strings.Contains(err.Error(), ".cf.lock") {
+		t.Fatalf("LoadSources err = %q, want lockfile parse error naming .cf.lock", err)
 	}
 }
