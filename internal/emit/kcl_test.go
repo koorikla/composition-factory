@@ -2,6 +2,7 @@ package emit
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1335,5 +1336,137 @@ func TestMetadataRefCustomNameTargetParamKCL(t *testing.T) {
 	}
 	if !strings.Contains(s, `"app.kubernetes.io/sa-ref" = _spec?.saName`) {
 		t.Fatalf("expected KCL to contain annotation ref, got:\n%s", s)
+	}
+}
+
+func TestCF430_KCLArrayEmissionSuppressesEmptyElements(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-array"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EngineKCL},
+			XRD: blueprint.XRD{
+				Group:   "test.org",
+				Version: "v1alpha1",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"extraEnvName": {Type: "string"},
+					"extraEnvVal":  {Type: "string"},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "app",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"spec.template.spec.containers[0].name":         {Value: "my-app"},
+						"spec.template.spec.containers[0].image":        {Value: "nginx"},
+						"spec.template.spec.containers[0].env[0].name":  {From: "params.extraEnvName"},
+						"spec.template.spec.containers[0].env[0].value": {From: "params.extraEnvVal"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	crds := nativeTestCRDs(t)
+	comp, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(comp)
+	if strings.Contains(s, "env = [\n") && !strings.Contains(s, "if _spec?.extraEnvName != None") {
+		t.Fatalf("expected KCL to guard conditional array env, got:\n%s", s)
+	}
+	if !strings.Contains(s, "if _spec?.extraEnvName != None or _spec?.extraEnvVal != None:") {
+		t.Fatalf("expected KCL to guard env with disjunction of optional child fields, got:\n%s", s)
+	}
+
+	// Also verify multi-element array: element 0 static, element 1 optional
+	bMulti := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-multi-array"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EngineKCL},
+			XRD: blueprint.XRD{
+				Group:   "test.org",
+				Version: "v1alpha1",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"extraEnvName": {Type: "string"},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "app",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"spec.template.spec.containers[0].name":         {Value: "my-app"},
+						"spec.template.spec.containers[0].image":        {Value: "nginx"},
+						"spec.template.spec.containers[0].env[0].name":  {Value: "PORT"},
+						"spec.template.spec.containers[0].env[0].value": {Value: "8080"},
+						"spec.template.spec.containers[0].env[1].name":  {From: "params.extraEnvName"},
+					},
+				},
+			},
+		},
+	}
+	if err := bMulti.Validate(); err != nil {
+		t.Fatalf("Validate bMulti: %v", err)
+	}
+	compMulti, err := Composition(bMulti, crds)
+	if err != nil {
+		t.Fatalf("Composition bMulti: %v", err)
+	}
+	sMulti := string(compMulti)
+	if !strings.Contains(sMulti, "if _spec?.extraEnvName != None:") {
+		t.Fatalf("expected KCL to guard individual optional element 1 in multi-element array, got:\n%s", sMulti)
+	}
+
+	// Runtime verification using Docker if available
+	dockerBin, err := exec.LookPath("docker")
+	if err != nil {
+		return
+	}
+
+	kclBody, err := kclTemplateBody(b, crds)
+	if err != nil {
+		t.Fatalf("kclTemplateBody: %v", err)
+	}
+
+	// Test case 1: parameters omitted -> output must not have env or [{}]
+	cmd1 := exec.Command(dockerBin, "run", "-i", "--rm", "kcllang/kcl:v0.11.0", "kcl", "run",
+		"-D", `params={"oxr": {"metadata": {"name": "test-app"}, "spec": {}}}`, "-")
+	cmd1.Stdin = strings.NewReader(kclBody)
+	out1, err := cmd1.CombinedOutput()
+	if err != nil {
+		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out1)
+	}
+	out1Str := string(out1)
+	if strings.Contains(out1Str, "env:") {
+		t.Fatalf("expected env to be omitted in KCL output when optional params omitted, got:\n%s", out1Str)
+	}
+
+	// Test case 2: parameters populated -> output has env
+	cmd2 := exec.Command(dockerBin, "run", "-i", "--rm", "kcllang/kcl:v0.11.0", "kcl", "run",
+		"-D", `params={"oxr": {"metadata": {"name": "test-app"}, "spec": {"extraEnvName": "MY_VAR", "extraEnvVal": "val"}}}`, "-")
+	cmd2.Stdin = strings.NewReader(kclBody)
+	out2, err := cmd2.CombinedOutput()
+	if err != nil {
+		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out2)
+	}
+	out2Str := string(out2)
+	if !strings.Contains(out2Str, "name: MY_VAR") || !strings.Contains(out2Str, "value: val") {
+		t.Fatalf("expected env to be populated in KCL output, got:\n%s", out2Str)
 	}
 }

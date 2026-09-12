@@ -28,6 +28,7 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 	// reads as None; dropping it keeps the key out of the desired object,
 	// the way the go-templating engine's hasKey guard does.
 	sb.WriteString("_present = lambda d: {k: v for k, v in d.items() if v is not None}\n")
+	sb.WriteString("_clean_list = lambda l: [x for x in l if x is not None and (not isinstance(x, (dict, list)) or len(x) > 0)] or None\n")
 	sb.WriteString("_str = lambda v: str(int(v)) if not isinstance(v, bool) and isinstance(v, (int, float)) and (isinstance(v, int) or v.is_integer()) else (str(v) if v is not None else None)\n")
 	sb.WriteString("_b64 = lambda v: base64.b64encode(v if isinstance(v, bytes) else str(v).encode(\"utf-8\")).decode(\"utf-8\") if v is not None else None\n")
 	sb.WriteString("_get = lambda d, *keys, default=None: default if d is None else (d if not keys else (_get(d.get(keys[0]), *keys[1:], default=default) if isinstance(d, dict) else default))\n\n\n")
@@ -185,11 +186,28 @@ func writePythonNodes(sb *strings.Builder, indent string, nodes []*nativeNode, i
 		run := nodes[i:j]
 		i = j
 
-		sb.WriteString(fmt.Sprintf("%s%q: [\n", indent, c.seg))
+		allUncond := true
+		for _, e := range run {
+			u, _ := e.analyze()
+			if !u {
+				allUncond = false
+				break
+			}
+		}
+
+		if allUncond {
+			sb.WriteString(fmt.Sprintf("%s%q: [\n", indent, c.seg))
+		} else {
+			sb.WriteString(fmt.Sprintf("%s%q: _clean_list([\n", indent, c.seg))
+		}
 		for _, elem := range run {
 			writePythonElement(sb, indent+"    ", elem)
 		}
-		sb.WriteString(fmt.Sprintf("%s],\n", indent))
+		if allUncond {
+			sb.WriteString(fmt.Sprintf("%s],\n", indent))
+		} else {
+			sb.WriteString(fmt.Sprintf("%s]),\n", indent))
+		}
 	}
 }
 

@@ -212,11 +212,50 @@ func writeKCLNodes(sb *strings.Builder, indent string, nodes []*nativeNode, inhe
 		run := nodes[i:j]
 		i = j
 
-		sb.WriteString(fmt.Sprintf("%s%s = [\n", indent, quoteKCLKey(c.seg)))
+		allOptional := true
 		for _, elem := range run {
-			writeKCLElement(sb, indent+"    ", elem)
+			if !nativeNodeAllOptional(elem) {
+				allOptional = false
+				break
+			}
 		}
-		sb.WriteString(fmt.Sprintf("%s]\n", indent))
+
+		guard := ""
+		if allOptional {
+			var guards []string
+			seen := make(map[string]bool)
+			for _, elem := range run {
+				collectKCLNativeSubtreeGuards(elem, &guards, seen)
+			}
+			guard = strings.Join(guards, " or ")
+		}
+
+		wrap := guard != "" && guard != inheritedGuard
+		curIndent := indent
+		childInheritedGuard := inheritedGuard
+		if wrap {
+			sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, guard))
+			curIndent = indent + "    "
+			childInheritedGuard = guard
+		}
+
+		sb.WriteString(fmt.Sprintf("%s%s = [\n", curIndent, quoteKCLKey(c.seg)))
+		for _, elem := range run {
+			elemGuard := ""
+			if len(run) > 1 && nativeNodeAllOptional(elem) {
+				var elemGuards []string
+				seen := make(map[string]bool)
+				collectKCLNativeSubtreeGuards(elem, &elemGuards, seen)
+				elemGuard = strings.Join(elemGuards, " or ")
+			}
+			if elemGuard != "" {
+				sb.WriteString(fmt.Sprintf("%sif %s:\n", curIndent+"    ", elemGuard))
+				writeKCLElement(sb, curIndent+"        ", elem, elemGuard)
+			} else {
+				writeKCLElement(sb, curIndent+"    ", elem, childInheritedGuard)
+			}
+		}
+		sb.WriteString(fmt.Sprintf("%s]\n", curIndent))
 	}
 }
 
@@ -352,14 +391,14 @@ func writeKCLNode(sb *strings.Builder, indent string, n *nativeNode, inheritedGu
 	sb.WriteString(fmt.Sprintf("%s}\n", curIndent))
 }
 
-func writeKCLElement(sb *strings.Builder, indent string, elem *nativeNode) {
+func writeKCLElement(sb *strings.Builder, indent string, elem *nativeNode, inheritedGuard string) {
 	if elem.leaf != nil {
 		rhs := kclStructuredRHS(elem.leaf.structured, elem.leaf.rhs)
 		sb.WriteString(fmt.Sprintf("%s%s\n", indent, rhs))
 		return
 	}
 	sb.WriteString(fmt.Sprintf("%s{\n", indent))
-	writeKCLNodes(sb, indent+"    ", elem.children, "")
+	writeKCLNodes(sb, indent+"    ", elem.children, inheritedGuard)
 	sb.WriteString(fmt.Sprintf("%s}\n", indent))
 }
 

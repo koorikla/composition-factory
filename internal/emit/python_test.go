@@ -1587,3 +1587,132 @@ print("OK")
 		t.Fatalf("python execution failed: %v\nOutput:\n%s", err, out)
 	}
 }
+
+func TestCF430_PythonArrayEmissionSuppressesEmptyElements(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-array"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EnginePython},
+			XRD: blueprint.XRD{
+				Group:   "test.org",
+				Version: "v1alpha1",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"extraEnvName": {Type: "string"},
+					"extraEnvVal":  {Type: "string"},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "app",
+					Kind:     "Deployment",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"spec.template.spec.containers[0].name":         {Value: "my-app"},
+						"spec.template.spec.containers[0].image":        {Value: "nginx"},
+						"spec.template.spec.containers[0].env[0].name":  {From: "params.extraEnvName"},
+						"spec.template.spec.containers[0].env[0].value": {From: "params.extraEnvVal"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	crds := nativeTestCRDs(t)
+	comp, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(comp)
+	if !strings.Contains(s, `_clean_list([`) {
+		t.Errorf("expected Python script to use _clean_list for conditional array, got:\n%s", s)
+	}
+
+	pyBin, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+
+	pyBody, err := pythonTemplateBody(b, crds)
+	if err != nil {
+		t.Fatalf("pythonTemplateBody: %v", err)
+	}
+
+	pyRunner := `
+import sys, types
+
+m = types.ModuleType("google.protobuf.json_format")
+m.MessageToDict = lambda x: x
+sys.modules["google.protobuf.json_format"] = m
+m2 = types.ModuleType("crossplane.function.proto.v1")
+m2.run_function_pb2 = types.ModuleType("run_function_pb2")
+m2.run_function_pb2.RunFunctionRequest = object
+m2.run_function_pb2.RunFunctionResponse = object
+sys.modules["crossplane.function.proto.v1"] = m2
+sys.modules["crossplane.function.proto.v1.run_function_pb2"] = m2.run_function_pb2
+` + pyBody + `
+class MockDict(dict):
+    def __missing__(self, key):
+        self[key] = types.SimpleNamespace(resource={})
+        return self[key]
+
+class MockRsp:
+    def __init__(self):
+        self.desired = types.SimpleNamespace(resources=MockDict())
+
+# Test 1: optional parameters omitted -> env must not be present, or must not contain empty dicts
+req1 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={"metadata": {"name": "test"}, "spec": {}}),
+        resources={},
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={},
+)
+rsp1 = MockRsp()
+compose(req1, rsp1)
+dep1 = rsp1.desired.resources["app"].resource
+containers1 = dep1.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+if not containers1:
+    print(f"FAIL: containers missing in app: {dep1}")
+    sys.exit(1)
+c1 = containers1[0]
+if "env" in c1:
+    print(f"FAIL: env must be omitted when all child fields are omitted, got env={c1['env']}")
+    sys.exit(1)
+
+# Test 2: optional parameters populated -> env must contain populated element
+req2 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={
+            "metadata": {"name": "test"},
+            "spec": {"extraEnvName": "MY_VAR", "extraEnvVal": "hello"},
+        }),
+        resources={},
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={},
+)
+rsp2 = MockRsp()
+compose(req2, rsp2)
+dep2 = rsp2.desired.resources["app"].resource
+containers2 = dep2.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+c2 = containers2[0]
+if c2.get("env") != [{"name": "MY_VAR", "value": "hello"}]:
+    print(f"FAIL: env not populated correctly: {c2.get('env')}")
+    sys.exit(2)
+
+print("OK")
+`
+	cmd := exec.Command(pyBin, "-c", pyRunner)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("python execution failed: %v\nOutput:\n%s", err, out)
+	}
+}
