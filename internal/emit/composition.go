@@ -914,6 +914,26 @@ type forProviderField struct {
 // write anything: writeMapField needs the full plan up front to decide
 // whether the parent key can ever render with zero children.
 func planFields(r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) ([]forProviderField, error) {
+	normalizedFields := make(map[string]blueprint.Field, len(r.Fields))
+	for p, f := range r.Fields {
+		basePath, mapKey, isMap := blueprint.ParseFieldPath(p)
+		normPath := p
+		if isMap {
+			normPath = fmt.Sprintf("%s[%s]", basePath, mapKey)
+		}
+		if existing, exists := normalizedFields[normPath]; exists {
+			if existing.From == "" && existing.Template == "" && (f.From != "" || f.Template != "") {
+				normalizedFields[normPath] = f
+				continue
+			}
+			if (existing.From != "" || existing.Template != "") && f.From == "" && f.Template == "" {
+				continue
+			}
+		}
+		normalizedFields[normPath] = f
+	}
+	r.Fields = normalizedFields
+
 	paths := make([]string, 0, len(r.Fields))
 	for p := range r.Fields {
 		paths = append(paths, p)

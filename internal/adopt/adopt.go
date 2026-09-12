@@ -1280,6 +1280,7 @@ var (
 	paramNameRE          = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
 	pluralRE             = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 	dnsInvalidRE         = regexp.MustCompile(`[^a-z0-9-]+`)
+	reBracketQuoted      = regexp.MustCompile(`\[\s*['"](.*?)['"]\s*\]`)
 	yamlKeywords         = map[string]bool{
 		"true": true, "false": true, "null": true,
 	}
@@ -2724,6 +2725,23 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 				report.Record(patchPath,
 					fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
 			}
+		} else if res.Provider != blueprint.NativeProvider && (strings.HasPrefix(toPath, "tags.") || strings.HasPrefix(toPath, "tags[")) {
+			targetField := normalizeMapFieldPath(toPath)
+			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+				report.Record(patchPath,
+					fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
+			} else if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
+				if res.Fields == nil {
+					res.Fields = make(map[string]blueprint.Field)
+				}
+				res.Fields[targetField] = blueprint.Field{
+					From: "params." + paramName,
+				}
+				ensureParamDeclared(bp, paramName)
+			} else {
+				report.Record(patchPath,
+					fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+			}
 		} else if strings.HasPrefix(toPath, "spec.initProvider.") || toPath == "spec.initProvider" {
 			report.Record(patchPath,
 				fmt.Sprintf("unsupported toFieldPath %q in patch (initProvider is not supported in blueprint)", toPath))
@@ -2790,15 +2808,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 				report.Record(patchPath,
 					fmt.Sprintf("managed resource metadata field %q is not supported in blueprint", toPath))
 			} else {
-				targetField := toPath
-				if strings.HasPrefix(toPath, "metadata.labels.") {
-					labelKey := strings.TrimPrefix(toPath, "metadata.labels.")
-					targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
-				} else if strings.HasPrefix(toPath, "metadata.labels[") {
-					labelKey := strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.labels["), "]")
-					labelKey = strings.Trim(labelKey, `"'`)
-					targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
-				}
+				targetField := normalizeMapFieldPath(toPath)
 				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
 					report.Record(patchPath,
 						fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
@@ -2815,9 +2825,26 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 						fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
 				}
 			}
+		} else if res.Provider == blueprint.NativeProvider {
+			targetField := normalizeMapFieldPath(toPath)
+			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+				report.Record(patchPath,
+					fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
+			} else if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
+				if res.Fields == nil {
+					res.Fields = make(map[string]blueprint.Field)
+				}
+				res.Fields[targetField] = blueprint.Field{
+					From: "params." + paramName,
+				}
+				ensureParamDeclared(bp, paramName)
+			} else {
+				report.Record(patchPath,
+					fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+			}
 		} else {
 			report.Record(patchPath,
-				fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
+				fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
 		}
 	} else if pType == "FromEnvironmentFieldPath" {
 		envKey := fromPath
@@ -2834,6 +2861,16 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 		if strings.HasPrefix(toPath, "spec.forProvider.") {
 			targetField := strings.TrimPrefix(toPath, "spec.forProvider.")
 			targetField = normalizeMapFieldPath(targetField)
+			if targetField != "" {
+				if res.Fields == nil {
+					res.Fields = make(map[string]blueprint.Field)
+				}
+				res.Fields[targetField] = wireField
+			} else {
+				report.Record(patchPath, fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+			}
+		} else if res.Provider != blueprint.NativeProvider && (strings.HasPrefix(toPath, "tags.") || strings.HasPrefix(toPath, "tags[")) {
+			targetField := normalizeMapFieldPath(toPath)
 			if targetField != "" {
 				if res.Fields == nil {
 					res.Fields = make(map[string]blueprint.Field)
@@ -2885,19 +2922,21 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			if res.Provider != blueprint.NativeProvider {
 				report.Record(patchPath, fmt.Sprintf("managed resource metadata field %q is not supported in blueprint", toPath))
 			} else {
-				targetField := toPath
-				if strings.HasPrefix(toPath, "metadata.labels.") {
-					labelKey := strings.TrimPrefix(toPath, "metadata.labels.")
-					targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
-				} else if strings.HasPrefix(toPath, "metadata.labels[") {
-					labelKey := strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.labels["), "]")
-					labelKey = strings.Trim(labelKey, `"'`)
-					targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
-				}
+				targetField := normalizeMapFieldPath(toPath)
 				if res.Fields == nil {
 					res.Fields = make(map[string]blueprint.Field)
 				}
 				res.Fields[targetField] = wireField
+			}
+		} else if res.Provider == blueprint.NativeProvider {
+			targetField := normalizeMapFieldPath(toPath)
+			if targetField != "" {
+				if res.Fields == nil {
+					res.Fields = make(map[string]blueprint.Field)
+				}
+				res.Fields[targetField] = wireField
+			} else {
+				report.Record(patchPath, fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
 			}
 		} else {
 			report.Record(patchPath, fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
@@ -3424,13 +3463,8 @@ func isMapFieldPrefix(prefix, nextKey string) bool {
 }
 
 func normalizeMapFieldPath(fieldPath string) string {
-	if strings.Contains(fieldPath, "[") {
-		if idx := strings.Index(fieldPath, "["); idx != -1 && strings.HasSuffix(fieldPath, "]") {
-			prefix := fieldPath[:idx]
-			key := fieldPath[idx+1 : len(fieldPath)-1]
-			key = strings.Trim(key, `"'`)
-			return fmt.Sprintf("%s[%s]", prefix, key)
-		}
+	fieldPath = reBracketQuoted.ReplaceAllString(fieldPath, "[$1]")
+	if strings.HasSuffix(fieldPath, "]") {
 		return fieldPath
 	}
 	idx := strings.LastIndex(fieldPath, ".")
