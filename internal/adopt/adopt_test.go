@@ -7907,6 +7907,159 @@ spec:
 	}
 }
 
+func TestAdoptGoTemplate_DirectXRRef(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-direct-xr-ref
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResource
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: dep
+              annotations:
+                crossplane.io/composition-resource-name: dep
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+              annotations:
+                crossplane.io/composition-resource-name: test-cm
+            data:
+              directXRRef: '{{ .observed.composite.resource.metadata.name }}-dep'
+              dollarXRRef: '{{ $.observed.composite.resource.metadata.name }}-dep'
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	cm := bp.ResourceNamed("test-cm")
+	if f := cm.Fields["data[directXRRef]"]; f.From != "resources.dep.metadata.name" {
+		t.Errorf("directXRRef From = %q, want resources.dep.metadata.name", f.From)
+	}
+	if f := cm.Fields["data[dollarXRRef]"]; f.From != "resources.dep.metadata.name" {
+		t.Errorf("dollarXRRef From = %q, want resources.dep.metadata.name", f.From)
+	}
+}
+
+func TestAdoptGoTemplate_DirectXRRef_AnnotationsAndSlices(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-direct-xr-ref-ann-slice
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResource
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: dep
+              annotations:
+                crossplane.io/composition-resource-name: dep
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: '{{ $.observed.composite.resource.metadata.name }}-inferred-dollar'
+              annotations:
+                directAnn: '{{ .observed.composite.resource.metadata.name }}-dep'
+                dollarAnn: '{{ $.observed.composite.resource.metadata.name }}-dep'
+            data:
+              sliceRefs:
+                - '{{ .observed.composite.resource.metadata.name }}-dep'
+                - '{{ $.observed.composite.resource.metadata.name }}-dep'
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	res := bp.ResourceNamed("inferred-dollar")
+	if res == nil {
+		t.Fatalf("inferred-dollar resource not found in %+v", bp.Spec.Resources)
+	}
+	if a := res.Annotations["directAnn"]; a.From != "resources.dep.metadata.name" {
+		t.Errorf("directAnn From = %q, want resources.dep.metadata.name", a.From)
+	}
+	if a := res.Annotations["dollarAnn"]; a.From != "resources.dep.metadata.name" {
+		t.Errorf("dollarAnn From = %q, want resources.dep.metadata.name", a.From)
+	}
+	if f := res.Fields["data[sliceRefs][0]"]; f.From != "resources.dep.metadata.name" {
+		t.Errorf("sliceRefs[0] From = %q, want resources.dep.metadata.name", f.From)
+	}
+	if f := res.Fields["data[sliceRefs][1]"]; f.From != "resources.dep.metadata.name" {
+		t.Errorf("sliceRefs[1] From = %q, want resources.dep.metadata.name", f.From)
+	}
+}
+
+func TestReXRResourceRef_DirectComposite(t *testing.T) {
+	cases := []struct {
+		input   string
+		wantRes string
+	}{
+		{"{{ $xr }}-dep", "dep"},
+		{"{{- $xr -}}-dep", "dep"},
+		{"{{ .observed.composite.resource.metadata.name }}-dep", "dep"},
+		{"{{- .observed.composite.resource.metadata.name -}}-dep", "dep"},
+		{"{{ $.observed.composite.resource.metadata.name }}-dep", "dep"},
+		{"{{- $.observed.composite.resource.metadata.name -}}-dep", "dep"},
+	}
+	for _, tc := range cases {
+		m := reXRResourceRef.FindStringSubmatch(tc.input)
+		if len(m) < 2 || m[1] != tc.wantRes {
+			t.Errorf("reXRResourceRef.FindStringSubmatch(%q) = %v, want resource %q", tc.input, m, tc.wantRes)
+		}
+	}
+}
+
+func TestReXRNameSuffix_DirectComposite(t *testing.T) {
+	cases := []struct {
+		input   string
+		wantRes string
+	}{
+		{"{{ $xr }}-my-res", "my-res"},
+		{"{{- $xr -}}-my-res", "my-res"},
+		{"{{ .observed.composite.resource.metadata.name }}-my-res", "my-res"},
+		{"{{- .observed.composite.resource.metadata.name -}}-my-res", "my-res"},
+		{"{{ $.observed.composite.resource.metadata.name }}-my-res", "my-res"},
+		{"{{- $.observed.composite.resource.metadata.name -}}-my-res", "my-res"},
+	}
+	for _, tc := range cases {
+		m := reXRNameSuffix.FindStringSubmatch(tc.input)
+		if len(m) < 2 || m[1] != tc.wantRes {
+			t.Errorf("reXRNameSuffix.FindStringSubmatch(%q) = %v, want resource %q", tc.input, m, tc.wantRes)
+		}
+	}
+}
+
 func TestAdoptGoTemplate_InterpolatedSliceElements(t *testing.T) {
 	manifest := `apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
