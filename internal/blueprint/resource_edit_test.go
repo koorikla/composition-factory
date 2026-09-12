@@ -471,3 +471,155 @@ func TestRenameResource_CorruptsUnrelatedQuotedStringInRaw(t *testing.T) {
 		t.Errorf("app raw field corrupted by renaming db: got %q, want %q", gotRaw, wantRaw)
 	}
 }
+
+func TestRawReferencesResource_GetComposedResource(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		resName  string
+		expected bool
+	}{
+		{"getComposedResource dot double quotes", `{{ (getComposedResource . "main").status.id }}`, "main", true},
+		{"getComposedResource dollar double quotes", `{{ (getComposedResource $ "main").status.id }}`, "main", true},
+		{"getComposedResource dot single quotes", `{{ (getComposedResource . 'main').status.id }}`, "main", true},
+		{"getResourceCondition getComposedResource", `{{ (getResourceCondition "Ready" (getComposedResource . "main")).Status }}`, "main", true},
+		{"getComposedResource prefix sharing", `{{ (getComposedResource . "main-queue").status.id }}`, "main", false},
+		{"getComposedResource dollar dot double quotes", `{{ (getComposedResource $. "main").status.id }}`, "main", true},
+		{"getComposedResource variable context", `{{ (getComposedResource $item "main").status.id }}`, "main", true},
+		{"getComposedResource backtick quotes", "{{ (getComposedResource . `main`).status.id }}", "main", true},
+		{"getComposedResource backtick prefix sharing", "{{ (getComposedResource . `main-queue`).status.id }}", "main", false},
+		{"getComposedResource single quote prefix sharing", `{{ (getComposedResource . 'main-queue').status.id }}`, "main", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rawReferencesResource(tt.raw, tt.resName)
+			if got != tt.expected {
+				t.Errorf("rawReferencesResource(%q, %q) = %v, want %v", tt.raw, tt.resName, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDeleteResource_RefusesWhenGetComposedResourceExists(t *testing.T) {
+	b := wiredBlueprint(func(b *Blueprint) {
+		b.Spec.Resources = append(b.Spec.Resources, Resource{
+			Name: "main", Kind: "Queue", Fields: map[string]Field{},
+		})
+		b.Spec.Resources[1].Fields["rawField"] = Field{
+			Raw: `{{ (getComposedResource . "main").status.id }}`,
+		}
+	})
+
+	err := b.DeleteResource("main")
+	if err == nil {
+		t.Fatal("DeleteResource = nil, want error when raw getComposedResource reference exists")
+	}
+}
+
+func TestDeleteResource_RefusesWhenGetComposedResourceInTemplate(t *testing.T) {
+	b := wiredBlueprint(func(b *Blueprint) {
+		b.Spec.Resources = append(b.Spec.Resources, Resource{
+			Name: "main", Kind: "Queue", Fields: map[string]Field{},
+		})
+		b.Spec.Templates = map[string]string{
+			"helper": `{{ (getComposedResource . "main").status.id }}`,
+		}
+	})
+
+	err := b.DeleteResource("main")
+	if err == nil {
+		t.Fatal("DeleteResource = nil, want error when template getComposedResource reference exists")
+	}
+}
+
+func TestRenameResource_RewritesGetComposedResource(t *testing.T) {
+	b := wiredBlueprint(func(b *Blueprint) {
+		b.Spec.Resources = append(b.Spec.Resources, Resource{
+			Name: "main", Kind: "Queue", Fields: map[string]Field{},
+		})
+		b.Spec.Resources[1].Fields["rawField"] = Field{
+			Raw: `{{ (getComposedResource . "main").status.id }}`,
+		}
+	})
+
+	if err := b.RenameResource("main", "primary"); err != nil {
+		t.Fatalf("RenameResource: %v", err)
+	}
+
+	got := b.Spec.Resources[1].Fields["rawField"].Raw
+	want := `{{ (getComposedResource . "primary").status.id }}`
+	if got != want {
+		t.Errorf("raw field = %q, want %q", got, want)
+	}
+}
+
+func TestRenameResource_RewritesGetComposedResource_Variants(t *testing.T) {
+	b := wiredBlueprint(func(b *Blueprint) {
+		b.Spec.Resources = append(b.Spec.Resources, Resource{
+			Name: "main", Kind: "Queue", Fields: map[string]Field{},
+		})
+		b.Spec.Resources[1].Fields["singleQuoted"] = Field{
+			Raw: `{{ (getComposedResource . 'main').status.id }}`,
+		}
+		b.Spec.Resources[1].Fields["backtickQuoted"] = Field{
+			Raw: "{{ (getComposedResource . `main`).status.id }}",
+		}
+		b.Spec.Resources[1].Fields["prefixSharing"] = Field{
+			Raw: `{{ (getComposedResource . "main-queue").status.id }}`,
+		}
+		b.Spec.Resources[1].Envelope = map[string]Field{
+			"envField": {
+				Raw: `{{ (getComposedResource $ "main").status.id }}`,
+			},
+		}
+		b.Spec.Resources[1].Annotations = map[string]Field{
+			"annField": {
+				Raw: `{{ (getComposedResource $. "main").status.id }}`,
+			},
+		}
+		b.Spec.Templates = map[string]string{
+			"tmpl": `{{ $item := . }}{{ (getComposedResource $item "main").status.id }}`,
+		}
+	})
+
+	if err := b.RenameResource("main", "primary"); err != nil {
+		t.Fatalf("RenameResource: %v", err)
+	}
+
+	gotSingle := b.Spec.Resources[1].Fields["singleQuoted"].Raw
+	wantSingle := `{{ (getComposedResource . 'primary').status.id }}`
+	if gotSingle != wantSingle {
+		t.Errorf("single quoted field = %q, want %q", gotSingle, wantSingle)
+	}
+
+	gotBacktick := b.Spec.Resources[1].Fields["backtickQuoted"].Raw
+	wantBacktick := "{{ (getComposedResource . `primary`).status.id }}"
+	if gotBacktick != wantBacktick {
+		t.Errorf("backtick quoted field = %q, want %q", gotBacktick, wantBacktick)
+	}
+
+	gotPrefix := b.Spec.Resources[1].Fields["prefixSharing"].Raw
+	wantPrefix := `{{ (getComposedResource . "main-queue").status.id }}`
+	if gotPrefix != wantPrefix {
+		t.Errorf("prefix sharing field = %q, want %q", gotPrefix, wantPrefix)
+	}
+
+	gotEnv := b.Spec.Resources[1].Envelope["envField"].Raw
+	wantEnv := `{{ (getComposedResource $ "primary").status.id }}`
+	if gotEnv != wantEnv {
+		t.Errorf("envelope field = %q, want %q", gotEnv, wantEnv)
+	}
+
+	gotAnn := b.Spec.Resources[1].Annotations["annField"].Raw
+	wantAnn := `{{ (getComposedResource $. "primary").status.id }}`
+	if gotAnn != wantAnn {
+		t.Errorf("annotation field = %q, want %q", gotAnn, wantAnn)
+	}
+
+	gotTmpl := b.Spec.Templates["tmpl"]
+	wantTmpl := `{{ $item := . }}{{ (getComposedResource $item "primary").status.id }}`
+	if gotTmpl != wantTmpl {
+		t.Errorf("template = %q, want %q", gotTmpl, wantTmpl)
+	}
+}
