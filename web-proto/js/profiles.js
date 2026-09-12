@@ -131,6 +131,17 @@ export function setAppLabel(fields, value) {
 }
 
 /**
+ * Set the app a Service routes to as a `spec.selector[app]` entry; the
+ * legacy spellings of the same selector (whole map as raw, or dotted
+ * `.app`) are removed so emit sees one form.
+ */
+export function setServiceSelector(fields, value) {
+  delete fields["spec.selector"];
+  delete fields["spec.selector.app"];
+  fields["spec.selector[app]"] = { value: value };
+}
+
+/**
  * Only the index's native kinds ("k8s") get a Kubernetes starter: a provider
  * CRD that happens to be called Service or Job must keep its schema scaffold.
  * @returns {{starter:(name:string)=>Object, essentials:Array}|null}

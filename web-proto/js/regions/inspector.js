@@ -14,6 +14,7 @@ import { mapResourceCoordinates, deleteEnvKeyFromDoc, renameEnvKeyInDoc, parseEn
 
 import { state, PARAM_TYPES } from "./inspector/state.js";
 import { scaffoldResourceFields } from "./canvas.js";
+import { profileFor } from "../profiles.js";
 import {
   renderXRD, paramsOf, isParamLocked, cleanParamRefs, paramFrom, cloneProps, memberParent,
   memberContainer, commitMembers, inferFnMeta, parseInputYAML, serializeInputYAML, getPathVal,
@@ -421,9 +422,6 @@ function fieldRow(res, f, params, otherResources, otherStatusMap, env) {
   if (filter === "req" && !(isReq || f.branch || entry || mapEntries.length)) return "";
   if (filter === "set" && !entry && !mapEntries.length) return "";
 
-  var wired = m === "w" && dm === "w" && !uiMode[f.path] && entry;
-  var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
-  var isEnvWire = wired && entry.from && entry.from.indexOf("env.") === 0;
   var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
     '<div class="fld-h"><span class="n" title="' + esc(f.path) + '">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
     (isReq ? '<span class="rq">req</span>' : "") +
@@ -433,14 +431,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap, env) {
   if (isMap) {
     if (m === "w") {
       if (dm === "w" && !uiMode[f.path] && entry) {
-        const wireCol = isStatusWire ? "var(--wire-status)" : (isEnvWire ? "var(--shared)" : "var(--wire-xrd)");
-        const bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : (isEnvWire ? ' style="background:var(--shared-soft)"' : "");
-        const fullBinding = formatWireBinding(entry.from, res.name, f.path);
-        h += '<div class="bound' + (isEnvWire ? ' shared' : '') + '"' + bgStyle + (fullBinding ? ' title="' + esc(fullBinding) + '" data-wire-binding="' + esc(fullBinding) + '" tabindex="0" role="button"' : '') + '><span style="color:' + wireCol + '">&#8592;</span>' +
-          '<span class="src' + (isEnvWire ? ' sh' : '') + '" style="color:' + wireCol + '"' + (fullBinding ? ' title="' + esc(fullBinding) + '"' : '') + '>' + esc(entry.from || "") + "</span>" +
-          '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span>' +
-          (fullBinding ? '<div class="bound-binding-detail" style="color:' + wireCol + '">' + esc(fullBinding) + '</div>' : '') +
-          '</div>';
+        h += boundChipHtml(res, f.path, entry);
         if (isReq && isOptParamWire(entry.from, params)) {
           h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
         }
@@ -465,8 +456,6 @@ function fieldRow(res, f, params, otherResources, otherStatusMap, env) {
         var meDm = docMode(meEntry);
         var meM = uiMode[me.fullPath] || meDm;
         var meWired = meM === "w" && meDm === "w" && !uiMode[me.fullPath] && meEntry;
-        var isMeStatus = meWired && meEntry.from && meEntry.from.indexOf("resources.") === 0;
-        var isMeEnv = meWired && meEntry.from && meEntry.from.indexOf("env.") === 0;
 
         h += '<div class="map-entry-card" style="padding:6px 8px;background:var(--surface-2);border-radius:4px;border:1px solid var(--rule)">' +
           '<div class="frow" style="margin-bottom:3px;align-items:center">' +
@@ -477,14 +466,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap, env) {
 
         if (meM === "w") {
           if (meWired) {
-            var wireCol = isMeStatus ? "var(--wire-status)" : (isMeEnv ? "var(--shared)" : "var(--wire-xrd)");
-            var bgStyle = isMeStatus ? ' style="background:var(--wire-status-soft)"' : (isMeEnv ? ' style="background:var(--shared-soft)"' : "");
-            var meFullBinding = formatWireBinding(meEntry.from, res.name, me.fullPath);
-            h += '<div class="bound' + (isMeEnv ? ' shared' : '') + '"' + bgStyle + (meFullBinding ? ' title="' + esc(meFullBinding) + '" data-wire-binding="' + esc(meFullBinding) + '" tabindex="0" role="button"' : '') + '><span style="color:' + wireCol + '">&#8592;</span>' +
-              '<span class="src' + (isMeEnv ? ' sh' : '') + '" style="color:' + wireCol + '"' + (meFullBinding ? ' title="' + esc(meFullBinding) + '"' : '') + '>' + esc(meEntry.from || "") + "</span>" +
-              '<span class="x" role="button" tabindex="0" data-unwire="' + esc(me.fullPath) + '" title="Remove wire">&#215;</span>' +
-              (meFullBinding ? '<div class="bound-binding-detail" style="color:' + wireCol + '">' + esc(meFullBinding) + '</div>' : '') +
-              '</div>';
+            h += boundChipHtml(res, me.fullPath, meEntry);
           } else {
             h += wireSelectHtml(me.fullPath, "string", params, otherResources, otherStatusMap, false, false, meEntry && meEntry.from, env);
           }
@@ -509,14 +491,7 @@ function fieldRow(res, f, params, otherResources, otherStatusMap, env) {
   } else {
     if (m === "w") {
       if (dm === "w" && !uiMode[f.path] && entry) {
-        const wireCol = isStatusWire ? "var(--wire-status)" : (isEnvWire ? "var(--shared)" : "var(--wire-xrd)");
-        const bgStyle = isStatusWire ? ' style="background:var(--wire-status-soft)"' : (isEnvWire ? ' style="background:var(--shared-soft)"' : "");
-        const fullBinding = formatWireBinding(entry.from, res.name, f.path);
-        h += '<div class="bound' + (isEnvWire ? ' shared' : '') + '"' + bgStyle + (fullBinding ? ' title="' + esc(fullBinding) + '" data-wire-binding="' + esc(fullBinding) + '" tabindex="0" role="button"' : '') + '><span style="color:' + wireCol + '">&#8592;</span>' +
-          '<span class="src' + (isEnvWire ? ' sh' : '') + '" style="color:' + wireCol + '"' + (fullBinding ? ' title="' + esc(fullBinding) + '"' : '') + '>' + esc(entry.from || "") + "</span>" +
-          '<span class="x" role="button" tabindex="0" data-unwire="' + esc(f.path) + '" title="Remove wire">&#215;</span>' +
-          (fullBinding ? '<div class="bound-binding-detail" style="color:' + wireCol + '">' + esc(fullBinding) + '</div>' : '') +
-          '</div>';
+        h += boundChipHtml(res, f.path, entry);
         if (isReq && isOptParamWire(entry.from, params)) {
           h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
         }
@@ -599,155 +574,210 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap, env) {
   return h + "</div>";
 }
 
-function workloadPresetHtml(res, doc, _allParams, _otherResources) {
-  if (!res || res.provider !== "k8s") return "";
-  var kind = res.kind;
-  if (kind !== "Deployment" && kind !== "StatefulSet" && kind !== "DaemonSet" && kind !== "Job" && kind !== "Service") {
-    return "";
-  }
-  var fields = res.fields || {};
+/* ---------------- essentials form ---------------- */
 
-  if (kind === "Deployment" || kind === "StatefulSet" || kind === "DaemonSet") {
-    var replicasF = fields["spec.replicas"];
-    var replicasVal = replicasF ? (replicasF.value || (replicasF.raw || "")) : "1";
-    var imgF = fields["spec.template.spec.containers[0].image"];
-    var imgVal = imgF ? (imgF.value || (imgF.from ? "← " + imgF.from : (imgF.raw || ""))) : "";
-    var nameF = fields["spec.template.spec.containers[0].name"];
-    var nameVal = nameF ? (nameF.value || nameF.raw || "") : res.name;
-    var portF = fields["spec.template.spec.containers[0].ports[0].containerPort"];
-    var portVal = portF ? (portF.value || portF.raw || "") : "";
+/** The wired-field chip: source, colour by wire kind, unwire control, and the
+ *  full binding on hover. Shared by the field list and the essentials rows. */
+function boundChipHtml(res, path, entry) {
+  var isStatus = entry.from.indexOf("resources.") === 0;
+  var isEnv = entry.from.indexOf("env.") === 0;
+  var col = isStatus ? "var(--wire-status)" : (isEnv ? "var(--shared)" : "var(--wire-xrd)");
+  var bg = isStatus ? ' style="background:var(--wire-status-soft)"' : (isEnv ? ' style="background:var(--shared-soft)"' : "");
+  var binding = formatWireBinding(entry.from, res.name, path);
+  return '<div class="bound' + (isEnv ? ' shared' : '') + '"' + bg + (binding ? ' title="' + esc(binding) + '" data-wire-binding="' + esc(binding) + '" tabindex="0" role="button"' : '') + '><span style="color:' + col + '">&#8592;</span>' +
+    '<span class="src' + (isEnv ? ' sh' : '') + '" style="color:' + col + '"' + (binding ? ' title="' + esc(binding) + '"' : '') + '>' + esc(entry.from || "") + "</span>" +
+    '<span class="x" role="button" tabindex="0" data-unwire="' + esc(path) + '" title="Remove wire">&#215;</span>' +
+    (binding ? '<div class="bound-binding-detail" style="color:' + col + '">' + esc(binding) + '</div>' : '') +
+    '</div>';
+}
 
-    function extractApp(f) {
-      if (!f) return "";
-      if (f.value) return f.value;
-      if (f.raw) {
-        try {
-          var parsed = JSON.parse(f.raw);
-          if (parsed && typeof parsed === "object" && parsed.app) return parsed.app;
-        } catch (_) {}
-        var m = /app[:=]\s*["']?([a-zA-Z0-9_-]+)["']?/.exec(f.raw);
-        if (m) return m[1];
-        return f.raw;
-      }
-      return "";
-    }
-
-    const selAppF = fields["spec.selector.matchLabels[app]"] || fields["spec.selector.matchLabels"] || fields["spec.selector.matchLabels.app"];
-    const tmplAppF = fields["spec.template.metadata.labels[app]"] || fields["spec.template.metadata.labels"] || fields["spec.template.metadata.labels.app"];
-    const selAppVal = extractApp(selAppF);
-    const tmplAppVal = extractApp(tmplAppF);
-    const appLabel = selAppVal || tmplAppVal || res.name;
-    const isSynced = selAppVal && tmplAppVal && selAppVal === tmplAppVal;
-
-    const h = '<div class="insp-sec workload-card" style="margin:10px 0;padding:10px 12px;border:1px solid var(--wire-xrd);background:var(--surface-2);border-radius:6px">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
-      '<span style="font-size:11px;font-weight:600;color:var(--wire-xrd);text-transform:uppercase;letter-spacing:0.5px">Workload Selectors &amp; Pod Spec</span>' +
-      (isSynced ? '<span class="chip-ok" style="font-size:10px">Selectors Aligned</span>' : '<span style="color:var(--warn);font-size:10px;font-weight:600">Sync Required</span>') +
-      '</div>' +
-      '<div style="font-size:11px;color:var(--faint);margin-bottom:8px">Ensures <code>spec.selector.matchLabels</code> matches <code>spec.template.metadata.labels</code>:</div>' +
-      '<div class="frow" style="margin-bottom:6px;align-items:center">' +
-      '<span class="lbl" style="width:75px;font-size:10px">App Selector</span>' +
-      '<input class="tin" data-wl-app="' + esc(res.name) + '" value="' + esc(appLabel) + '" placeholder="e.g. ' + esc(res.name) + '" style="flex:1" title="Sets both spec.selector.matchLabels and spec.template.metadata.labels">' +
-      '<button class="btn sm pri" data-wl-sync-app="' + esc(res.name) + '" title="Sync App Label across Selector and Template">Sync</button>' +
-      '</div>' +
-      (kind === "DaemonSet" ? "" :
-      '<div class="frow" style="margin-bottom:6px;align-items:center">' +
-      '<span class="lbl" style="width:75px;font-size:10px">Replicas</span>' +
-      '<input class="tin" type="number" min="1" max="100" data-wl-replicas="' + esc(res.name) + '" value="' + esc(replicasVal) + '" placeholder="1" style="width:60px">' +
-      '<span class="dg" style="margin-left:8px;font-size:10.5px">spec.replicas</span>' +
-      '</div>') +
-      '<div class="frow" style="margin-bottom:6px;align-items:center">' +
-      '<span class="lbl" style="width:75px;font-size:10px">Image</span>' +
-      '<input class="tin" data-wl-image="' + esc(res.name) + '" value="' + esc(imgVal) + '" placeholder="nginx:alpine or repo/image:tag" style="flex:1">' +
-      '</div>' +
-      '<div class="frow" style="margin-bottom:2px;gap:6px">' +
-      '<div style="flex:1"><span class="lbl" style="display:block;font-size:9.5px;margin-bottom:2px">Container Name</span>' +
-      '<input class="tin" data-wl-cname="' + esc(res.name) + '" value="' + esc(nameVal) + '" placeholder="' + esc(res.name) + '" style="width:100%"></div>' +
-      '<div style="width:75px"><span class="lbl" style="display:block;font-size:9.5px;margin-bottom:2px">Port</span>' +
-      '<input class="tin" type="number" data-wl-cport="' + esc(res.name) + '" value="' + esc(portVal) + '" placeholder="8080" style="width:100%"></div>' +
-      '</div></div>';
-    return h;
-  }
-
-  if (kind === "Service") {
-    const selAppF = fields["spec.selector[app]"] || fields["spec.selector"] || fields["spec.selector.app"];
-    let selAppVal = "";
-    if (selAppF) {
-      if (selAppF.value) selAppVal = selAppF.value;
-      else if (selAppF.raw) {
-        try {
-          var parsed = JSON.parse(selAppF.raw);
-          if (parsed && typeof parsed === "object" && parsed.app) selAppVal = parsed.app;
-        } catch (_) {}
-        if (!selAppVal) {
-          var sm = /app[:=]\s*["']?([a-zA-Z0-9_-]+)["']?/.exec(selAppF.raw);
-          selAppVal = sm ? sm[1] : selAppF.raw;
-        }
-      }
-    }
-    const portF = fields["spec.ports[0].port"];
-    const portVal = portF ? (portF.value || portF.raw || "") : "80";
-    const tgtPortF = fields["spec.ports[0].targetPort"];
-    const tgtPortVal = tgtPortF ? (tgtPortF.value || tgtPortF.raw || "") : "80";
-    const svcTypeF = fields["spec.type"];
-    const svcTypeVal = svcTypeF ? (svcTypeF.value || "") : "ClusterIP";
-
-    const candidateWorkloads = (doc.spec && doc.spec.resources || []).filter(function (r) {
-      return r.name !== res.name && (r.kind === "Deployment" || r.kind === "StatefulSet" || r.kind === "DaemonSet");
-    });
-
-    let h = '<div class="insp-sec service-card" style="margin:10px 0;padding:10px 12px;border:1px solid var(--wire-status);background:var(--surface-2);border-radius:6px">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
-      '<span style="font-size:11px;font-weight:600;color:var(--wire-status);text-transform:uppercase;letter-spacing:0.5px">Service Selectors &amp; Ports</span>' +
-      (selAppVal ? '<span class="chip-ok" style="font-size:10px">Target: ' + esc(selAppVal) + '</span>' : '<span style="color:var(--warn);font-size:10px;font-weight:600">Unset Selector</span>') +
-      '</div>' +
-      '<div style="font-size:11px;color:var(--faint);margin-bottom:8px">Routes traffic to pods matching <code>spec.selector</code>:</div>' +
-      '<div class="frow" style="margin-bottom:6px;align-items:center">' +
-      '<span class="lbl" style="width:75px;font-size:10px">Target Pod App</span>' +
-      '<input class="tin" data-svc-app="' + esc(res.name) + '" value="' + esc(selAppVal) + '" placeholder="app label" style="flex:1">' +
-      '</div>';
-
-    if (candidateWorkloads.length > 0) {
-      h += '<div style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">' +
-        '<span class="dg" style="font-size:10px">Quick match:</span>';
-      candidateWorkloads.forEach(function (cw) {
-        var cwFields = cw.fields || {};
-        var cwMatchF = cwFields["spec.selector.matchLabels[app]"] || cwFields["spec.selector.matchLabels"] || cwFields["spec.template.metadata.labels"];
-        var cwApp = "";
-        if (cwMatchF && cwMatchF.value) {
-          cwApp = cwMatchF.value;
-        } else if (cwMatchF && cwMatchF.raw) {
-          try {
-            var parsed = JSON.parse(cwMatchF.raw);
-            if (parsed && typeof parsed === "object" && parsed.app) cwApp = parsed.app;
-          } catch (_) {}
-          if (!cwApp) {
-            var cwm = /app[:=]\s*["']?([a-zA-Z0-9_-]+)["']?/.exec(cwMatchF.raw);
-            cwApp = cwm ? cwm[1] : cw.name;
-          }
-        } else {
-          cwApp = (cwFields["spec.selector.matchLabels.app"] && cwFields["spec.selector.matchLabels.app"].value) || cw.name;
-        }
-        h += '<button class="btn sm" data-svc-match-wl="' + esc(res.name) + '" data-match-app="' + esc(cwApp) + '" style="font-size:10px;padding:1px 6px">' + esc(cw.name) + ' (' + esc(cwApp) + ')</button>';
-      });
-      h += '</div>';
-    }
-
-    h += '<div class="frow" style="margin-bottom:2px;gap:6px">' +
-      '<div style="width:70px"><span class="lbl" style="display:block;font-size:9.5px;margin-bottom:2px">Port</span>' +
-      '<input class="tin" type="number" data-svc-port="' + esc(res.name) + '" value="' + esc(portVal) + '" placeholder="80" style="width:100%"></div>' +
-      '<div style="width:75px"><span class="lbl" style="display:block;font-size:9.5px;margin-bottom:2px">Target Port</span>' +
-      '<input class="tin" type="number" data-svc-tgtport="' + esc(res.name) + '" value="' + esc(tgtPortVal) + '" placeholder="80" style="width:100%"></div>' +
-      '<div style="flex:1"><span class="lbl" style="display:block;font-size:9.5px;margin-bottom:2px">Type</span>' +
-      '<select class="tsel" data-svc-type="' + esc(res.name) + '" style="width:100%">' +
-      ['ClusterIP', 'NodePort', 'LoadBalancer'].map(function (st) {
-        return '<option value="' + st + '"' + (svcTypeVal === st ? ' selected' : '') + '>' + st + '</option>';
-      }).join('') +
-      '</select></div>' +
-      '</div></div>';
-    return h;
+/** The app label held by a selector or labels entry: a bracket entry's
+ *  literal, else what a legacy whole-map raw (JSON or `app: x`) spells. */
+function extractApp(f) {
+  if (!f) return "";
+  if (f.value) return f.value;
+  if (f.raw) {
+    try {
+      var parsed = JSON.parse(f.raw);
+      if (parsed && typeof parsed === "object" && parsed.app) return parsed.app;
+    } catch (_) {}
+    var m = /app[:=]\s*["']?([a-zA-Z0-9_-]+)["']?/.exec(f.raw);
+    if (m) return m[1];
+    return f.raw;
   }
   return "";
+}
+
+function appLabelState(res) {
+  var fields = res.fields || {};
+  var sel = extractApp(fields["spec.selector.matchLabels[app]"] || fields["spec.selector.matchLabels"] || fields["spec.selector.matchLabels.app"]);
+  var tmpl = extractApp(fields["spec.template.metadata.labels[app]"] || fields["spec.template.metadata.labels"] || fields["spec.template.metadata.labels.app"]);
+  return { label: sel || tmpl || res.name, synced: !!(sel && tmpl && sel === tmpl) };
+}
+
+function appLabelBadge(res) {
+  return appLabelState(res).synced
+    ? '<span class="chip-ok" style="font-size:10px">Selectors Aligned</span>'
+    : '<span style="color:var(--warn);font-size:10px;font-weight:600">Sync Required</span>';
+}
+
+function appLabelRowHtml(res) {
+  return '<div class="ess-row" style="margin-bottom:6px">' +
+    '<div class="fld-h"><span class="lbl" style="flex:0 0 auto">App label</span></div>' +
+    essPathHtml("spec.selector.matchLabels[app]", "spec.selector.matchLabels[app] and spec.template.metadata.labels[app]") +
+    '<div class="frow" style="margin-bottom:0">' +
+    '<input class="tin" data-wl-app="' + esc(res.name) + '" value="' + esc(appLabelState(res).label) + '" placeholder="e.g. ' + esc(res.name) + '" title="Sets both spec.selector.matchLabels and spec.template.metadata.labels">' +
+    '<button class="btn sm pri" data-wl-sync-app="' + esc(res.name) + '" title="Sync App Label across Selector and Template">Sync</button>' +
+    '</div></div>';
+}
+
+function serviceTargetOf(res) {
+  var fields = res.fields || {};
+  return extractApp(fields["spec.selector[app]"] || fields["spec.selector"] || fields["spec.selector.app"]);
+}
+
+function serviceTargetBadge(res) {
+  var app = serviceTargetOf(res);
+  return app
+    ? '<span class="chip-ok" style="font-size:10px">Target: ' + esc(app) + '</span>'
+    : '<span style="color:var(--warn);font-size:10px;font-weight:600">Unset Selector</span>';
+}
+
+function serviceSelectorRowHtml(res, doc) {
+  var candidates = (doc && doc.spec && doc.spec.resources || []).filter(function (r) {
+    return r.name !== res.name && (r.kind === "Deployment" || r.kind === "StatefulSet" || r.kind === "DaemonSet");
+  });
+  var h = '<div class="ess-row" style="margin-bottom:6px">' +
+    '<div class="fld-h"><span class="lbl" style="flex:0 0 auto">Target app</span></div>' +
+    essPathHtml("spec.selector[app]") +
+    '<div class="frow" style="margin-bottom:0">' +
+    '<input class="tin" data-svc-app="' + esc(res.name) + '" value="' + esc(serviceTargetOf(res)) + '" placeholder="app label" title="Routes traffic to pods whose app label matches"></div>';
+  if (candidates.length) {
+    h += '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">' +
+      '<span class="dg" style="font-size:10px">Quick match:</span>' +
+      candidates.map(function (cw) {
+        var f = cw.fields || {};
+        var app = extractApp(f["spec.selector.matchLabels[app]"] || f["spec.selector.matchLabels"] || f["spec.template.metadata.labels"] || f["spec.selector.matchLabels.app"]) || cw.name;
+        return '<button class="btn sm" data-svc-match-wl="' + esc(res.name) + '" data-match-app="' + esc(app) + '" style="font-size:10px;padding:1px 6px">' + esc(cw.name) + ' (' + esc(app) + ')</button>';
+      }).join("") + '</div>';
+  }
+  return h + '</div>';
+}
+
+/** The path under a row's label on its own line: it wraps rather than
+ *  truncating to "spec…" the way the field list's header does. */
+function essPathHtml(path, title) {
+  return '<div class="ess-path" style="font-family:var(--mono);font-size:9.5px;color:var(--faint);overflow-wrap:anywhere;margin:-2px 0 3px" title="' + esc(title || path) + '">' + esc(path) + '</div>';
+}
+
+function essRowHead(label, path, type, m, extra) {
+  return '<div class="fld-h"><span class="lbl" style="flex:0 0 auto">' + esc(label) + '</span>' +
+    (type ? '<span class="t">' + esc(type) + '</span>' : '') +
+    modeButtons(path, m, false) + (extra || '') + '</div>' + essPathHtml(path);
+}
+
+/** The typed control for one path in its current mode: the wired chip or
+ *  wire select, the raw editor, or a literal input shaped by the row's type. */
+function essValueControl(res, path, type, row, params, otherResources, otherStatusMap, env) {
+  var entry = entryOf(res, path);
+  var dm = docMode(entry);
+  var m = uiMode[path] || dm;
+  if (m === "w") {
+    if (dm === "w" && !uiMode[path] && entry) return boundChipHtml(res, path, entry);
+    return wireSelectHtml(path, type, params, otherResources, otherStatusMap, false, false, entry && entry.from, env);
+  }
+  if (m === "r") return rawEditorHtml(path, (dm === "r" && entry) ? entry.raw : "", false, res, params, otherResources, otherStatusMap);
+  var val = (dm === "v" && entry) ? entry.value : "";
+  if (row.enum) {
+    var opts = val && row.enum.indexOf(val) === -1 ? [val].concat(row.enum) : row.enum;
+    return '<select class="val tsel" data-v="' + esc(path) + '">' +
+      '<option value=""' + (val === "" ? " selected" : "") + '>unset &#8212; omitted from output</option>' +
+      opts.map(function (o) {
+        return '<option value="' + esc(o) + '"' + (val === o ? ' selected' : '') + '>' + esc(o) + '</option>';
+      }).join('') + '</select>';
+  }
+  if (type === "boolean") {
+    var bVal = val.toLowerCase();
+    return '<select class="val tsel" data-v="' + esc(path) + '">' +
+      '<option value=""' + (bVal === "" ? " selected" : "") + '>unset &#8212; omitted from output</option>' +
+      '<option value="true"' + (bVal === "true" ? " selected" : "") + '>true</option>' +
+      '<option value="false"' + (bVal === "false" ? " selected" : "") + '>false</option></select>';
+  }
+  var inputType = (type === "integer" || type === "number") ? 'type="number" ' : '';
+  return '<input class="val" ' + inputType + 'data-v="' + esc(path) + '" value="' + esc(val) + '" placeholder="' + esc(row.placeholder || "") + '">';
+}
+
+/** Expose-as-parameter: only for rows that name a parameter and hold a
+ *  literal (or nothing); a wire or raw template has no literal to carry. */
+function exposeButton(res, path, row) {
+  if (!row.param) return '';
+  var entry = entryOf(res, path);
+  if (entry && (entry.from || entry.raw)) return '';
+  return '<button class="btn sm" data-expose="' + esc(path) + '" data-expose-name="' + esc(row.param) + '" data-expose-type="' + esc(row.type || "string") + '" title="Expose as XRD parameter (default = current value) and wire this field to it">&#8599; param</button>';
+}
+
+/** One row per <prefix>[i]: NAME plus a value control that takes a literal or
+ *  a wire. Add appends index n; delete removes index i and renumbers. */
+function envRepeaterHtml(res, prefix, params, otherResources, otherStatusMap, env) {
+  var idx = {};
+  Object.keys(res.fields || {}).forEach(function (k) {
+    var mm = k.indexOf(prefix + "[") === 0 && /^\[(\d+)\]\.(name|value)$/.exec(k.slice(prefix.length));
+    if (mm) idx[mm[1]] = true;
+  });
+  var rows = Object.keys(idx).map(Number).sort(function (a, b) { return a - b; });
+  var h = '<div class="ess-env" data-env-repeater="' + esc(prefix) + '">' +
+    '<div class="fld-h"><span class="lbl">Environment variables</span><span class="sp"></span>' +
+    '<button class="btn sm" data-env-row-add="' + esc(prefix) + '">+ add variable</button></div>';
+  rows.forEach(function (i) {
+    var np = prefix + "[" + i + "].name", vp = prefix + "[" + i + "].value";
+    var nEntry = entryOf(res, np);
+    h += '<div class="frow ess-env-row" data-env-row="' + i + '" style="align-items:flex-start">' +
+      '<input class="val" data-v="' + esc(np) + '" value="' + esc(nEntry ? nEntry.value : "") + '" placeholder="NAME" style="flex:0 0 38%">' +
+      '<div style="flex:1;min-width:0">' + essValueControl(res, vp, "string", {}, params, otherResources, otherStatusMap, env) + '</div>' +
+      modeButtons(vp, uiMode[vp] || docMode(entryOf(res, vp)), false) +
+      '<button class="del" data-env-row-del="' + esc(prefix) + '|' + i + '" title="Remove variable">&#215;</button></div>';
+  });
+  if (!rows.length) h += '<div class="g" style="padding:2px 0 4px">none &#8212; values can be wired from another resource\'s status</div>';
+  return h + '</div>';
+}
+
+/** Rows for a kind without a profile (every provider resource): what the
+ *  Required view would flag, `region`, and whatever is already set. */
+function schemaEssentials(res, flds) {
+  var seen = {}, rows = [];
+  ((flds && flds.fields) || []).forEach(function (f) {
+    if (isFieldEffectivelyRequired(f, res) || f.path === "region" || entryOf(res, f.path)) {
+      seen[f.path] = true;
+      rows.push({ kind: "field", path: f.path, label: f.path.split(".").pop(), type: f.type, enum: f.enum || null });
+    }
+  });
+  Object.keys(res.fields || {}).forEach(function (p) {
+    if (!seen[p] && entryOf(res, p)) rows.push({ kind: "field", path: p, label: p.split(".").pop(), type: "string" });
+  });
+  return rows;
+}
+
+function essentialsHtml(res, flds, doc, params, otherResources, otherStatusMap, env) {
+  var profile = profileFor(res.kind, res.provider);
+  var rows = profile && profile.essentials.length ? profile.essentials : schemaEssentials(res, flds);
+  if (!rows.length) return "";
+  var isWl = res.provider === "k8s" && (res.kind === "Deployment" || res.kind === "StatefulSet" || res.kind === "DaemonSet");
+  var isSvc = res.provider === "k8s" && res.kind === "Service";
+  var cls = "insp-sec essentials" + (isWl ? " workload-card" : "") + (isSvc ? " service-card" : "");
+  var h = '<div class="' + cls + '" style="margin:10px 0;padding:10px 12px;border:1px solid var(--wire-xrd);background:var(--surface-2);border-radius:6px">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
+    '<span style="font-size:11px;font-weight:600;color:var(--wire-xrd);text-transform:uppercase;letter-spacing:0.5px">Essentials</span>' +
+    (isWl ? appLabelBadge(res) : (isSvc ? serviceTargetBadge(res) : '')) + '</div>';
+  rows.forEach(function (row) {
+    if (row.kind === "app-label") { h += appLabelRowHtml(res); return; }
+    if (row.kind === "service-selector") { h += serviceSelectorRowHtml(res, doc); return; }
+    if (row.kind === "env") { h += envRepeaterHtml(res, row.prefix, params, otherResources, otherStatusMap, env); return; }
+    var m = uiMode[row.path] || docMode(entryOf(res, row.path));
+    h += '<div class="ess-row" data-ess-row="' + esc(row.path) + '" style="margin-bottom:6px">' +
+      essRowHead(row.label, row.path, row.type, m, exposeButton(res, row.path, row)) +
+      essValueControl(res, row.path, row.type, row, params, otherResources, otherStatusMap, env) + '</div>';
+  });
+  return h + '</div>';
 }
 
 function metadataConventionsHtml(res) {
@@ -1038,8 +1068,7 @@ async function renderResource(res) {
             '<div class="fld-d">required object \u2014 set its member fields (expand via All / search)</div></div>';
         }).join("")
       : "";
-    var wlHtml = workloadPresetHtml(res, doc, params, otherResources);
-    h += wlHtml;
+    h += essentialsHtml(res, flds, doc, params, otherResources, otherStatusMap, env);
 
     var body = branchRows +
       fields.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap, env); }).join("");

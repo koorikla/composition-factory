@@ -40,8 +40,34 @@ flow the expose action reuses (`addParameter` then `setField`).
 `tests/cf467-essentials-form.spec.js` exactly as given in
 `docs/superpowers/plans/2026-09-12-prefilled-fields.md` Task 4.
 
-**Fails today with:** not run by the brief author; the implementer pastes the first failing
-run into the handover.
+**Fails today with** (f41d124, `npx playwright test tests/cf467-essentials-form.spec.js`):
+
+```
+[WebServer] cf serve: serving the canvas from ./web-proto (live source; the embedded snapshot is bypassed)
+
+
+Running 4 tests using 1 worker
+
+[1/4] tests/cf467-essentials-form.spec.js:17:3 › CF-467 — essentials form › Deployment opens with typed essentials rows and editing image commits a value
+  1) tests/cf467-essentials-form.spec.js:17:3 › CF-467 — essentials form › Deployment opens with typed essentials rows and editing image commits a value 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('#insp .essentials')
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" locator('#insp .essentials') with timeout 5000ms
+      - waiting for locator('#insp .essentials')
+
+
+      20 |     await page.click('.node[data-id="deployment"] .node-h');
+      21 |     const ess = page.locator('#insp .essentials');
+  ...
+  4 failed
+```
 
 ## Contract
 
