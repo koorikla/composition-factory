@@ -2719,7 +2719,23 @@ func discoverObjectParamsFromPatches(resources []any, patchSetsMap map[string][]
 	}
 }
 
-func isWholeObjectParam(bp *blueprint.Blueprint, paramName string) bool {
+func isWholeObjectParam(bp *blueprint.Blueprint, paramName string, targetField ...string) bool {
+	tf := ""
+	if len(targetField) > 0 {
+		tf = targetField[0]
+	}
+	return isWholeObjectParamForFields(bp, paramName, tf, nil)
+}
+
+func isWholeObjectParamForResource(bp *blueprint.Blueprint, paramName string, targetField string, res *blueprint.Resource) bool {
+	var fields map[string]blueprint.Field
+	if res != nil {
+		fields = res.Fields
+	}
+	return isWholeObjectParamForFields(bp, paramName, targetField, fields)
+}
+
+func isWholeObjectParamForFields(bp *blueprint.Blueprint, paramName string, targetField string, fields map[string]blueprint.Field) bool {
 	if bp == nil || bp.Spec.XRD.Parameters == nil || paramName == "" {
 		return false
 	}
@@ -2735,7 +2751,54 @@ func isWholeObjectParam(bp *blueprint.Blueprint, paramName string) bool {
 		}
 		p = next
 	}
-	return p.Type == "object" || len(p.Properties) > 0
+	if len(p.Properties) > 0 {
+		return true
+	}
+	if p.Type == "object" {
+		if targetField != "" && isAdoptMapTargetWithFields(targetField, fields, bp) {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+func isAdoptMapTargetWithFields(targetField string, fields map[string]blueprint.Field, bp *blueprint.Blueprint) bool {
+	if isAdoptMapField(targetField) {
+		return true
+	}
+	if strings.Contains(targetField, "[") {
+		return false
+	}
+	prefix := targetField + "["
+	for f := range fields {
+		if strings.HasPrefix(f, prefix) {
+			return true
+		}
+	}
+	if bp != nil {
+		for _, r := range bp.Spec.Resources {
+			for f := range r.Fields {
+				if strings.HasPrefix(f, prefix) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func isAdoptMapField(fieldPath string) bool {
+	if strings.Contains(fieldPath, "[") {
+		return false
+	}
+	lower := strings.ToLower(fieldPath)
+	return lower == "tags" || lower == "labels" || lower == "annotations" ||
+		lower == "data" || lower == "stringdata" || lower == "binarydata" ||
+		lower == "matchlabels" || lower == "nodeselector" ||
+		strings.HasSuffix(lower, ".tags") || strings.HasSuffix(lower, ".labels") || strings.HasSuffix(lower, ".annotations") ||
+		strings.HasSuffix(lower, ".data") || strings.HasSuffix(lower, ".stringdata") || strings.HasSuffix(lower, ".binarydata") ||
+		strings.HasSuffix(lower, ".matchlabels") || strings.HasSuffix(lower, ".nodeselector")
 }
 
 func parseClassicComposition(resources []any, patchSets []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
@@ -2849,7 +2912,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 		if strings.HasPrefix(toPath, "spec.forProvider.") {
 			targetField := strings.TrimPrefix(toPath, "spec.forProvider.")
 			targetField = normalizeMapFieldPath(targetField)
-			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParamForResource(bp, paramName, targetField, res) {
 				report.Record(patchPath,
 					fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
 			} else if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
@@ -2859,14 +2922,18 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 				res.Fields[targetField] = blueprint.Field{
 					From: "params." + paramName,
 				}
-				ensureParamDeclared(bp, paramName)
+				if isAdoptMapField(targetField) {
+					ensureParamDeclaredTyped(bp, paramName, "object")
+				} else {
+					ensureParamDeclared(bp, paramName)
+				}
 			} else {
 				report.Record(patchPath,
 					fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
 			}
-		} else if res.Provider != blueprint.NativeProvider && (strings.HasPrefix(toPath, "tags.") || strings.HasPrefix(toPath, "tags[")) {
+		} else if res.Provider != blueprint.NativeProvider && (toPath == "tags" || strings.HasPrefix(toPath, "tags.") || strings.HasPrefix(toPath, "tags[")) {
 			targetField := normalizeMapFieldPath(toPath)
-			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParamForResource(bp, paramName, targetField, res) {
 				report.Record(patchPath,
 					fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
 			} else if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
@@ -2876,7 +2943,11 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 				res.Fields[targetField] = blueprint.Field{
 					From: "params." + paramName,
 				}
-				ensureParamDeclared(bp, paramName)
+				if isAdoptMapField(targetField) {
+					ensureParamDeclaredTyped(bp, paramName, "object")
+				} else {
+					ensureParamDeclared(bp, paramName)
+				}
 			} else {
 				report.Record(patchPath,
 					fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
@@ -2887,7 +2958,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 		} else if strings.HasPrefix(toPath, "spec.") {
 			if res.Provider == blueprint.NativeProvider {
 				targetField := normalizeMapFieldPath(toPath)
-				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParamForResource(bp, paramName, targetField, res) {
 					report.Record(patchPath,
 						fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
 				} else if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
@@ -2897,7 +2968,11 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 					res.Fields[targetField] = blueprint.Field{
 						From: "params." + paramName,
 					}
-					ensureParamDeclared(bp, paramName)
+					if isAdoptMapField(targetField) {
+						ensureParamDeclaredTyped(bp, paramName, "object")
+					} else {
+						ensureParamDeclared(bp, paramName)
+					}
 				} else {
 					report.Record(patchPath,
 						fmt.Sprintf("unsupported fromFieldPath %q in patch", fromPath))
@@ -2905,7 +2980,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			} else {
 				targetField := strings.TrimPrefix(toPath, "spec.")
 				targetField = normalizeMapFieldPath(targetField)
-				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParamForResource(bp, paramName, targetField, res) {
 					report.Record(patchPath,
 						fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
 				} else if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) {
@@ -2927,7 +3002,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 				annKey = strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.annotations["), "]")
 				annKey = strings.Trim(annKey, `"'`)
 			}
-			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParamForResource(bp, paramName, annKey, res) {
 				report.Record(patchPath,
 					fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
 			} else if isParamPatch && paramName != "" && annKey != "" && isValidParamIdentifier(paramName) {
@@ -2948,7 +3023,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 					fmt.Sprintf("managed resource metadata field %q is not supported in blueprint", toPath))
 			} else {
 				targetField := normalizeMapFieldPath(toPath)
-				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParamForResource(bp, paramName, targetField, res) {
 					report.Record(patchPath,
 						fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
 				} else if isParamPatch && paramName != "" && isValidParamIdentifier(paramName) {
@@ -2958,7 +3033,11 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 					res.Fields[targetField] = blueprint.Field{
 						From: "params." + paramName,
 					}
-					ensureParamDeclared(bp, paramName)
+					if isAdoptMapField(targetField) {
+						ensureParamDeclaredTyped(bp, paramName, "object")
+					} else {
+						ensureParamDeclared(bp, paramName)
+					}
 				} else {
 					report.Record(patchPath,
 						fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
@@ -2966,7 +3045,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			}
 		} else if res.Provider == blueprint.NativeProvider {
 			targetField := normalizeMapFieldPath(toPath)
-			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
+			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParamForResource(bp, paramName, targetField, res) {
 				report.Record(patchPath,
 					fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
 			} else if isParamPatch && paramName != "" && targetField != "" && !isReservedCompositeField(paramName) && isValidParamIdentifier(paramName) {
@@ -2976,7 +3055,11 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 				res.Fields[targetField] = blueprint.Field{
 					From: "params." + paramName,
 				}
-				ensureParamDeclared(bp, paramName)
+				if isAdoptMapField(targetField) {
+					ensureParamDeclaredTyped(bp, paramName, "object")
+				} else {
+					ensureParamDeclared(bp, paramName)
+				}
 			} else {
 				report.Record(patchPath,
 					fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
@@ -3012,7 +3095,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			} else {
 				report.Record(patchPath, fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
 			}
-		} else if res.Provider != blueprint.NativeProvider && (strings.HasPrefix(toPath, "tags.") || strings.HasPrefix(toPath, "tags[")) {
+		} else if res.Provider != blueprint.NativeProvider && (toPath == "tags" || strings.HasPrefix(toPath, "tags.") || strings.HasPrefix(toPath, "tags[")) {
 			targetField := normalizeMapFieldPath(toPath)
 			if targetField != "" {
 				if res.Fields == nil {
@@ -3550,7 +3633,7 @@ func extractEnvelopeFields(prefix string, obj map[string]any, out map[string]blu
 				continue
 			}
 			if pName := matchParamVar(rawStr); pName != "" {
-				if isWholeObjectParam(bp, pName) {
+				if isWholeObjectParamForFields(bp, pName, path, out) {
 					if report != nil {
 						report.Record("resource."+resName+".spec."+path, fmt.Sprintf("unsupported whole-object parameter wire from %q; wire individual object members instead", pName))
 					}
@@ -3677,12 +3760,15 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 			}
 			trimmed := strings.TrimSpace(rawStr)
 			if pName := matchParamVar(rawStr); pName != "" {
-				if isWholeObjectParam(bp, pName) {
+				if isWholeObjectParamForFields(bp, pName, path, out) {
 					if report != nil {
 						report.Record("resource."+resName+".spec."+path, fmt.Sprintf("unsupported whole-object parameter wire from %q; wire individual object members instead", pName))
 					}
 				} else if isValidParamIdentifier(pName) {
 					out[path] = blueprint.Field{From: "params." + pName}
+					if isAdoptMapField(path) {
+						ensureParamDeclaredTyped(bp, pName, "object")
+					}
 				} else {
 					report.Record(fmt.Sprintf("resource.%s.fields.%s", resName, path), "invalid parameter reference")
 				}
@@ -3748,7 +3834,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 					}
 					trimmed := strings.TrimSpace(rawStr)
 					if pName := matchParamVar(rawStr); pName != "" {
-						if isWholeObjectParam(bp, pName) {
+						if isWholeObjectParamForFields(bp, pName, elemPath, out) {
 							if report != nil {
 								report.Record("resource."+resName+".spec."+elemPath, fmt.Sprintf("unsupported whole-object parameter wire from %q; wire individual object members instead", pName))
 							}

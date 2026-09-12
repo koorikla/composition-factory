@@ -12979,3 +12979,300 @@ spec:
 		t.Errorf("expected LossReport to record drop for nested environment path \"cluster.region\"")
 	}
 }
+
+func TestCF450_AdoptUntypedObjectParamToMapField(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.example.org
+spec:
+  group: example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    customTags:
+                      type: object
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-tags-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.customTags
+          toFieldPath: spec.forProvider.tags
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	for _, d := range report.Drops {
+		if strings.Contains(d.Reason, "unsupported whole-object parameter wire") {
+			t.Fatalf("unexpected whole-object drop in report: %+v", d)
+		}
+	}
+
+	res := bp.ResourceNamed("bucket")
+	if res == nil {
+		t.Fatalf("bucket resource not found in adopted blueprint")
+	}
+
+	f, ok := res.Fields["tags"]
+	if !ok {
+		t.Fatalf("expected res.Fields[\"tags\"] to be set, but it was missing")
+	}
+
+	if f.From != "params.customTags" {
+		t.Fatalf("expected f.From == %q, got %q", "params.customTags", f.From)
+	}
+}
+
+func TestCF450_AdoptUntypedObjectParam_GoTemplateAndNonMapField(t *testing.T) {
+	// Test 1: Go template with untyped object parameter wired to tags (map field)
+	goTemplateManifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.example.org
+spec:
+  group: example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    customTags:
+                      type: object
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-tags-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: go-templating
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              name: test-bucket
+            spec:
+              forProvider:
+                tags: "{{ .observed.composite.resource.spec.customTags }}"
+`
+	bp, report, err := Adopt([]byte(goTemplateManifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	for _, d := range report.Drops {
+		if strings.Contains(d.Reason, "unsupported whole-object parameter wire") {
+			t.Fatalf("unexpected whole-object drop in Go template report: %+v", d)
+		}
+	}
+	res := bp.ResourceNamed("test-bucket")
+	if res == nil {
+		t.Fatalf("test-bucket not found")
+	}
+	if f, ok := res.Fields["tags"]; !ok || f.From != "params.customTags" {
+		t.Fatalf("expected tags from params.customTags, got: %+v", f)
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate failed: %v", err)
+	}
+
+	// Test 2: Untyped object parameter wired to a NON-map field (e.g. region) must be dropped
+	nonMapManifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.example.org
+spec:
+  group: example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    customTags:
+                      type: object
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-tags-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.customTags
+          toFieldPath: spec.forProvider.region
+`
+	bp2, report2, err := Adopt([]byte(nonMapManifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	foundDrop := false
+	for _, d := range report2.Drops {
+		if strings.Contains(d.Reason, "unsupported whole-object parameter wire") {
+			foundDrop = true
+			break
+		}
+	}
+	if !foundDrop {
+		t.Fatalf("expected drop for non-map wire from untyped object, got drops: %+v", report2.Drops)
+	}
+	res2 := bp2.ResourceNamed("bucket")
+	if f, ok := res2.Fields["region"]; ok && f.From == "params.customTags" {
+		t.Fatalf("expected region NOT to be wired to params.customTags, got: %+v", f)
+	}
+	if err := bp2.Validate(); err != nil {
+		t.Fatalf("bp2.Validate failed: %v", err)
+	}
+
+	// Test 3: Typed object struct wired to map field must still be dropped
+	typedObjectManifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.example.org
+spec:
+  group: example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    config:
+                      type: object
+                      properties:
+                        region:
+                          type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-tags-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+        spec:
+          forProvider:
+            region: us-east-1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.config
+          toFieldPath: spec.forProvider.tags
+`
+	bp3, report3, err := Adopt([]byte(typedObjectManifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	foundDrop3 := false
+	for _, d := range report3.Drops {
+		if strings.Contains(d.Reason, "unsupported whole-object parameter wire") {
+			foundDrop3 = true
+			break
+		}
+	}
+	if !foundDrop3 {
+		t.Fatalf("expected drop for typed object parameter wire to tags, got drops: %+v", report3.Drops)
+	}
+	res3 := bp3.ResourceNamed("bucket")
+	if f, ok := res3.Fields["tags"]; ok && f.From == "params.config" {
+		t.Fatalf("expected tags NOT to be wired to params.config, got: %+v", f)
+	}
+	if err := bp3.Validate(); err != nil {
+		t.Fatalf("bp3.Validate failed: %v", err)
+	}
+}
