@@ -112,7 +112,10 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 		}
 		for _, ann := range annPlan {
 			rhs := kclStructuredRHS(ann.structured, ann.rhs)
-			if ann.structured.kind == rhsStatus {
+			if g := kclNodeFieldGuard(&ann); g != "" {
+				sb.WriteString(fmt.Sprintf("%sif %s:\n", annInner, g))
+				sb.WriteString(fmt.Sprintf("%s    %q = %s\n", annInner, ann.path, rhs))
+			} else if ann.structured.kind == rhsStatus {
 				raw := kclRawStatusAccess(ann.structured)
 				sb.WriteString(fmt.Sprintf("%sif %s != None:\n", annInner, raw))
 				sb.WriteString(fmt.Sprintf("%s    %q = %s\n", annInner, ann.path, rhs))

@@ -1470,3 +1470,179 @@ func TestCF430_KCLArrayEmissionSuppressesEmptyElements(t *testing.T) {
 		t.Fatalf("expected env to be populated in KCL output, got:\n%s", out2Str)
 	}
 }
+
+func TestCF433_KCLAnnotationsOptionalGuard(t *testing.T) {
+	// 1. Verify kclNodeFieldGuard returns expected guards for optional params, env keys, and status fields
+	optParamField := &forProviderField{
+		path: "example.com/size",
+		structured: structuredRHS{
+			kind:      rhsParam,
+			param:     "maxMessageSize",
+			paramSegs: []string{"maxMessageSize"},
+			optional:  true,
+		},
+	}
+	if g := kclNodeFieldGuard(optParamField); g != "_spec?.maxMessageSize != None" {
+		t.Fatalf("kclNodeFieldGuard(optParamField) = %q, want %q", g, "_spec?.maxMessageSize != None")
+	}
+
+	optEnvField := &forProviderField{
+		path: "example.com/region",
+		structured: structuredRHS{
+			kind:      rhsEnv,
+			param:     "CLUSTER_REGION",
+			paramSegs: []string{"CLUSTER_REGION"},
+			optional:  true,
+		},
+	}
+	if g := kclNodeFieldGuard(optEnvField); g != "_env?.CLUSTER_REGION != None" {
+		t.Fatalf("kclNodeFieldGuard(optEnvField) = %q, want %q", g, "_env?.CLUSTER_REGION != None")
+	}
+
+	reqField := &forProviderField{
+		path: "example.com/app",
+		structured: structuredRHS{
+			kind:      rhsParam,
+			param:     "appName",
+			paramSegs: []string{"appName"},
+			optional:  false,
+		},
+	}
+	if g := kclNodeFieldGuard(reqField); g != "" {
+		t.Fatalf("kclNodeFieldGuard(reqField) = %q, want empty string", g)
+	}
+
+	// 2. Blueprint emission verification
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-annotations-guard"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EngineKCL},
+			XRD: blueprint.XRD{
+				Group:   "test.org",
+				Version: "v1alpha1",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName":   {Type: "string", Required: true},
+					"maxMessageSize": {Type: "integer"}, // optional integer
+					"team":           {Type: "string"},  // optional string
+					"appName":        {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "main-queue",
+					Kind: "Queue",
+					Annotations: map[string]blueprint.Field{
+						"example.com/size": {From: "params.maxMessageSize"},
+						"example.com/team": {From: "params.team"},
+						"example.com/app":  {From: "params.appName"},
+					},
+					Fields: map[string]blueprint.Field{
+						"region": {Value: "eu-west-1"},
+					},
+				},
+				{
+					Name: "consumer",
+					Kind: "Queue",
+					Annotations: map[string]blueprint.Field{
+						"example.com/queue-arn": {From: "resources.main-queue.status.atProvider.arn"},
+					},
+					Fields: map[string]blueprint.Field{
+						"region": {Value: "eu-west-1"},
+					},
+				},
+			},
+		},
+	}
+
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	crds := nativeTestCRDs(t)
+	comp, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(comp)
+
+	kclBody, err := kclTemplateBody(b, crds)
+	if err != nil {
+		t.Fatalf("kclTemplateBody: %v", err)
+	}
+
+	// Verify guards are present in KCL annotations
+	expectedSizeGuard := "                if _spec?.maxMessageSize != None:\n                    \"example.com/size\" = str(_spec?.maxMessageSize)"
+	if !strings.Contains(kclBody, expectedSizeGuard) {
+		t.Fatalf("expected kclBody to contain guarded optional integer annotation, got:\n%s", kclBody)
+	}
+
+	expectedTeamGuard := "                if _spec?.team != None:\n                    \"example.com/team\" = _spec?.team"
+	if !strings.Contains(kclBody, expectedTeamGuard) {
+		t.Fatalf("expected kclBody to contain guarded optional string annotation, got:\n%s", kclBody)
+	}
+
+	expectedStatusGuard := "                if ocds?[\"main-queue\"]?.Resource?.status?.atProvider?.arn != None:\n                    \"example.com/queue-arn\" = str(ocds?[\"main-queue\"]?.Resource?.status?.atProvider?.arn)"
+	if !strings.Contains(kclBody, expectedStatusGuard) {
+		t.Fatalf("expected kclBody to contain guarded status annotation, got:\n%s", kclBody)
+	}
+
+	// Required field must NOT have an if guard
+	if strings.Contains(s, "if _spec?.appName != None:") {
+		t.Fatalf("expected KCL to NOT guard required parameter appName, got:\n%s", s)
+	}
+	if !strings.Contains(s, "\"example.com/app\" = _spec?.appName") {
+		t.Fatalf("expected KCL to contain required annotation, got:\n%s", s)
+	}
+
+	// 3. Runtime verification via Docker
+	dockerBin, err := exec.LookPath("docker")
+	if err != nil {
+		return
+	}
+
+	// Case A: optional parameters omitted -> annotations for optional params and unobserved status MUST be omitted cleanly
+	cmdA := exec.Command(dockerBin, "run", "-i", "--rm", "kcllang/kcl:v0.11.0", "kcl", "run",
+		"-D", `params={"oxr": {"metadata": {"name": "test-app"}, "spec": {}}}`, "-")
+	cmdA.Stdin = strings.NewReader(kclBody)
+	outA, err := cmdA.CombinedOutput()
+	if err != nil {
+		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, outA)
+	}
+	outAStr := string(outA)
+	if strings.Contains(outAStr, "example.com/size") {
+		t.Fatalf("expected example.com/size to be omitted when optional param is absent, got:\n%s", outAStr)
+	}
+	if strings.Contains(outAStr, "example.com/team") {
+		t.Fatalf("expected example.com/team to be omitted when optional param is absent, got:\n%s", outAStr)
+	}
+	if strings.Contains(outAStr, "example.com/queue-arn") {
+		t.Fatalf("expected example.com/queue-arn to be omitted when status is unobserved, got:\n%s", outAStr)
+	}
+
+	// Case B: optional parameters and status populated -> annotations must be present
+	cmdB := exec.Command(dockerBin, "run", "-i", "--rm", "kcllang/kcl:v0.11.0", "kcl", "run",
+		"-D", `params={"oxr": {"metadata": {"name": "test-app"}, "spec": {"providerName": "default", "appName": "my-app", "maxMessageSize": 2048, "team": "devops"}}, "ocds": {"main-queue": {"Resource": {"status": {"atProvider": {"arn": "arn:aws:sqs:eu-west-1:123456:queue"}}}}}}`, "-")
+	cmdB.Stdin = strings.NewReader(kclBody)
+	outB, err := cmdB.CombinedOutput()
+	if err != nil {
+		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, outB)
+	}
+	outBStr := string(outB)
+	if !strings.Contains(outBStr, `example.com/size: "2048"`) && !strings.Contains(outBStr, `example.com/size: '2048'`) && !strings.Contains(outBStr, `example.com/size: 2048`) {
+		t.Fatalf("expected example.com/size to be populated in output, got:\n%s", outBStr)
+	}
+	if !strings.Contains(outBStr, "example.com/team: devops") {
+		t.Fatalf("expected example.com/team to be devops, got:\n%s", outBStr)
+	}
+	if !strings.Contains(outBStr, "example.com/queue-arn: arn:aws:sqs:eu-west-1:123456:queue") {
+		t.Fatalf("expected example.com/queue-arn to be populated, got:\n%s", outBStr)
+	}
+	if !strings.Contains(outBStr, "example.com/app: my-app") {
+		t.Fatalf("expected example.com/app to be my-app, got:\n%s", outBStr)
+	}
+}
