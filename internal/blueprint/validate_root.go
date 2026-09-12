@@ -56,6 +56,8 @@ func (b *Blueprint) validateRoot() error {
 
 // validateSources validates spec.sources entries.
 func validateSources(sources []Source) error {
+	seenProviders := make(map[string]int)
+	seenCRDs := make(map[string]int)
 	for i, s := range sources {
 		if s.CRDs != "" {
 			if s.Provider != "" {
@@ -68,6 +70,10 @@ func validateSources(sources []Source) error {
 			if !strings.HasSuffix(s.CRDs, ".yaml") && !strings.HasSuffix(s.CRDs, ".yml") {
 				return fmt.Errorf("spec.sources[%d].crds: %q must be a .yaml/.yml file path", i, s.CRDs)
 			}
+			if prev, ok := seenCRDs[s.CRDs]; ok {
+				return fmt.Errorf("spec.sources[%d]: duplicate crds source %q (already declared at spec.sources[%d])", i, s.CRDs, prev)
+			}
+			seenCRDs[s.CRDs] = i
 			continue
 		}
 		if s.Provider == "" {
@@ -90,6 +96,10 @@ func validateSources(sources []Source) error {
 			return fmt.Errorf("spec.sources[%d].provider: %q is not a valid provider reference "+
 				"(e.g. ghcr.io/org/provider-name:v1.2.3, or ...@sha256:<digest>)", i, s.Provider)
 		}
+		if prev, ok := seenProviders[s.Provider]; ok {
+			return fmt.Errorf("spec.sources[%d]: duplicate provider source %q (already declared at spec.sources[%d])", i, s.Provider, prev)
+		}
+		seenProviders[s.Provider] = i
 	}
 	return nil
 }

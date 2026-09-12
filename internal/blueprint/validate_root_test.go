@@ -129,3 +129,55 @@ func TestValidateSourcesRejectsClusterPseudoProvider(t *testing.T) {
 		t.Fatalf("expected error mentioning cluster not a package source, got: %v", err)
 	}
 }
+
+func TestValidateRejectsDuplicateSources(t *testing.T) {
+	tests := []struct {
+		name       string
+		sources    []Source
+		wantSubstr string
+	}{
+		{
+			name: "duplicate provider source",
+			sources: []Source{
+				{Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.2.0"},
+				{Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v1.2.0"},
+			},
+			wantSubstr: "duplicate provider source",
+		},
+		{
+			name: "duplicate crds source",
+			sources: []Source{
+				{CRDs: "crds/queue.yaml"},
+				{CRDs: "crds/queue.yaml"},
+			},
+			wantSubstr: "duplicate crds source",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &Blueprint{
+				APIVersion: APIVersion,
+				Kind:       Kind,
+				Metadata:   Metadata{Name: "test-app"},
+				Spec: Spec{
+					XRD: XRD{
+						Group:   "example.org",
+						Version: "v1alpha1",
+						Kind:    "App",
+						Plural:  "apps",
+						Scope:   "Namespaced",
+					},
+					Sources: tt.sources,
+				},
+			}
+			err := b.Validate()
+			if err == nil {
+				t.Fatalf("Validate() accepted duplicate sources: %+v, want error containing %q", tt.sources, tt.wantSubstr)
+			}
+			if !strings.Contains(err.Error(), tt.wantSubstr) {
+				t.Fatalf("Validate() err = %v, want substring %q", err, tt.wantSubstr)
+			}
+		})
+	}
+}
