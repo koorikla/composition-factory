@@ -1213,6 +1213,11 @@ function removeResource(name) {
         selectedWire = null;
       }
       S.select(null);
+      if (typeof S.deletePosition === "function") {
+        S.deletePosition(name);
+      }
+      autoPlaced.delete(name);
+      delete cardSizes[name];
     }
   });
 }
