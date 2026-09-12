@@ -1285,6 +1285,10 @@ var (
 	yamlKeywords         = map[string]bool{
 		"true": true, "false": true, "null": true,
 	}
+	yamlEnvelopeKeywords = map[string]bool{
+		"true": true, "false": true, "yes": true, "no": true,
+		"on": true, "off": true, "null": true, "y": true, "n": true,
+	}
 )
 
 func isValidMetadataName(name string) bool {
@@ -1374,6 +1378,19 @@ func isValidParamIdentifier(name string) bool {
 	parts := strings.Split(name, ".")
 	for _, p := range parts {
 		if !paramNameRE.MatchString(p) || yamlKeywords[strings.ToLower(p)] {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidEnvelopeKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	parts := strings.Split(key, ".")
+	for _, p := range parts {
+		if !paramNameRE.MatchString(p) || yamlEnvelopeKeywords[strings.ToLower(p)] {
 			return false
 		}
 	}
@@ -3070,10 +3087,13 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			} else {
 				targetField := strings.TrimPrefix(toPath, "spec.")
 				targetField = normalizeMapFieldPath(targetField)
-				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParamForResource(bp, paramName, targetField, res) {
+				if !isValidEnvelopeKey(targetField) {
+					report.Record(patchPath,
+						fmt.Sprintf("unsupported toFieldPath %q in patch", toPath))
+				} else if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParamForResource(bp, paramName, targetField, res) {
 					report.Record(patchPath,
 						fmt.Sprintf("unsupported whole-object parameter wire from %q to %q; wire individual object members instead", fromPath, toPath))
-				} else if isParamPatch && paramName != "" && targetField != "" && isValidParamIdentifier(paramName) {
+				} else if isParamPatch && paramName != "" && isValidParamIdentifier(paramName) {
 					if res.Envelope == nil {
 						res.Envelope = make(map[string]blueprint.Field)
 					}
@@ -3211,7 +3231,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			} else {
 				targetField := strings.TrimPrefix(toPath, "spec.")
 				targetField = normalizeMapFieldPath(targetField)
-				if targetField != "" {
+				if targetField != "" && isValidEnvelopeKey(targetField) {
 					if res.Envelope == nil {
 						res.Envelope = make(map[string]blueprint.Field)
 					}
