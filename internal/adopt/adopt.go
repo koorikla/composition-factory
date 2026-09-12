@@ -2477,6 +2477,9 @@ func extractForEachGuard(text string, bp *blueprint.Blueprint, report *LossRepor
 				return ""
 			}
 			ensureEnvDeclared(bp, key, "integer")
+			if defVal := extractForEachDefault(m[0]); defVal != "" {
+				ensureEnvDefault(bp, key, defVal)
+			}
 			return fmt.Sprintf("env.%s", key)
 		}
 	} else if m := reForEachStatusLoop.FindStringSubmatch(text); len(m) >= 3 {
@@ -2597,6 +2600,18 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 				ensureParamDeclaredTyped(bp, pName, "integer")
 				if defVal := extractForEachDefault(m[0]); defVal != "" {
 					ensureParamDefault(bp, pName, defVal)
+				}
+			}
+		}
+		if m := reForEachEnvLoop.FindStringSubmatch(action[0]); len(m) >= 2 {
+			key := m[1]
+			if key == "" && len(m) >= 3 {
+				key = m[2]
+			}
+			if key != "" && isFlatParamIdentifier(key) {
+				ensureEnvDeclared(bp, key, "integer")
+				if defVal := extractForEachDefault(m[0]); defVal != "" {
+					ensureEnvDefault(bp, key, defVal)
 				}
 			}
 		}
@@ -3398,6 +3413,30 @@ func insertParamDefaultIntoMap(props map[string]blueprint.Parameter, parts []str
 	p, exists := props[head]
 	if exists && p.Properties != nil {
 		insertParamDefaultIntoMap(p.Properties, parts[1:], defVal)
+	}
+}
+
+func ensureEnvDefault(bp *blueprint.Blueprint, envKey string, defVal string) {
+	if bp == nil || defVal == "" || !isFlatParamIdentifier(envKey) {
+		return
+	}
+	if bp.Spec.Environment == nil {
+		bp.Spec.Environment = make(map[string]blueprint.EnvironmentKey)
+	}
+	existing, exists := bp.Spec.Environment[envKey]
+	if !exists {
+		bp.Spec.Environment[envKey] = blueprint.EnvironmentKey{
+			Type:    "integer",
+			Default: defVal,
+		}
+		return
+	}
+	if existing.Type == "" {
+		existing.Type = "integer"
+	}
+	if existing.Default == "" {
+		existing.Default = defVal
+		bp.Spec.Environment[envKey] = existing
 	}
 }
 
