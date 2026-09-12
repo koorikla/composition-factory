@@ -223,6 +223,16 @@ func (srv *server) handleImportBlueprint(w http.ResponseWriter, r *http.Request)
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
+	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && srv.Blueprint != "" {
+		if cur, err := blueprint.Load(srv.Blueprint); err == nil {
+			curBytes, _ := json.Marshal(cur)
+			if !etagMatches(ifMatch, etagFor(curBytes)) {
+				writeJSONError(w, http.StatusPreconditionFailed, "precondition failed: If-Match header does not match current blueprint revision")
+				return
+			}
+		}
+	}
+
 	ctx := r.Context()
 	origProviders := append([]string(nil), srv.Providers...)
 	if err := srv.syncBlueprintSourcesLocked(ctx, b); err != nil {

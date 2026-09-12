@@ -2169,3 +2169,119 @@ func TestCF219ImportBlueprintValidatesCRDSchema(t *testing.T) {
 		t.Error("blueprint file changed on disk despite rejected import with unknown field")
 	}
 }
+
+func newTestServer(t *testing.T, bpPath string) *server {
+	t.Helper()
+	return &server{
+		Options: Options{
+			Blueprint: bpPath,
+		},
+		failedSources: make(map[string]error),
+	}
+}
+
+func TestCF304_ImportBlueprint_IfMatchStaleRejected(t *testing.T) {
+	dir := t.TempDir()
+	bpPath := filepath.Join(dir, "blueprint.yaml")
+	initial := []byte("apiVersion: factory.crossplane.io/v1alpha1\nkind: Blueprint\nmetadata:\n  name: initial\nspec:\n  xrd:\n    group: platform.example.org\n    kind: XTest\n    plural: xtests\n    version: v1alpha1\n    scope: Namespaced\n  resources: []\n")
+	if err := os.WriteFile(bpPath, initial, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := newTestServer(t, bpPath)
+	importedYAML := []byte("apiVersion: factory.crossplane.io/v1alpha1\nkind: Blueprint\nmetadata:\n  name: imported\nspec:\n  xrd:\n    group: platform.example.org\n    kind: XTest\n    plural: xtests\n    version: v1alpha1\n    scope: Namespaced\n  resources: []\n")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/blueprint/import", bytes.NewReader(importedYAML))
+	req.Header.Set("If-Match", "\"stale-or-mismatched-etag\"")
+	w := httptest.NewRecorder()
+
+	srv.handleImportBlueprint(w, req)
+
+	if w.Code != http.StatusPreconditionFailed {
+		t.Fatalf("expected status 412 Precondition Failed, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var errBody errorBody
+	if err := json.Unmarshal(w.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("error response not JSON: %v (%s)", err, w.Body)
+	}
+	expectedErr := "precondition failed: If-Match header does not match current blueprint revision"
+	if errBody.Error != expectedErr {
+		t.Fatalf("error message = %q, want %q", errBody.Error, expectedErr)
+	}
+
+	// Verify disk contents unchanged
+	cur, _ := os.ReadFile(bpPath)
+	if !bytes.Equal(cur, initial) {
+		t.Fatalf("expected blueprint file to remain unchanged on precondition failure")
+	}
+
+	// Verify matching etag succeeds
+	curBP, err := blueprint.Load(bpPath)
+	if err != nil {
+		t.Fatalf("load current blueprint: %v", err)
+	}
+	curBytes, err := json.Marshal(curBP)
+	if err != nil {
+		t.Fatalf("marshal current blueprint: %v", err)
+	}
+	matchingETag := etagFor(curBytes)
+
+	reqMatching := httptest.NewRequest(http.MethodPost, "/api/blueprint/import", bytes.NewReader(importedYAML))
+	reqMatching.Header.Set("If-Match", matchingETag)
+	wMatching := httptest.NewRecorder()
+
+	srv.handleImportBlueprint(wMatching, reqMatching)
+
+	if wMatching.Code != http.StatusOK {
+		t.Fatalf("expected status 200 OK with matching If-Match, got %d: %s", wMatching.Code, wMatching.Body.String())
+	}
+
+	afterImport, err := os.ReadFile(bpPath)
+	if err != nil {
+		t.Fatalf("read blueprint after import: %v", err)
+	}
+	if bytes.Equal(afterImport, initial) {
+		t.Fatalf("expected blueprint file to be updated on matching If-Match")
+	}
+	importedBP, err := blueprint.Load(bpPath)
+	if err != nil {
+		t.Fatalf("load imported blueprint: %v", err)
+	}
+	if importedBP.Metadata.Name != "imported" {
+		t.Fatalf("expected imported blueprint name %q, got %q", "imported", importedBP.Metadata.Name)
+	}
+
+	// Verify omitted If-Match succeeds (backwards compatibility)
+	omittedYAML := []byte("apiVersion: factory.crossplane.io/v1alpha1\nkind: Blueprint\nmetadata:\n  name: omitted-if-match\nspec:\n  xrd:\n    group: platform.example.org\n    kind: XTest\n    plural: xtests\n    version: v1alpha1\n    scope: Namespaced\n  resources: []\n")
+	reqOmitted := httptest.NewRequest(http.MethodPost, "/api/blueprint/import", bytes.NewReader(omittedYAML))
+	wOmitted := httptest.NewRecorder()
+	srv.handleImportBlueprint(wOmitted, reqOmitted)
+	if wOmitted.Code != http.StatusOK {
+		t.Fatalf("expected status 200 OK with omitted If-Match, got %d: %s", wOmitted.Code, wOmitted.Body.String())
+	}
+	omittedBP, err := blueprint.Load(bpPath)
+	if err != nil {
+		t.Fatalf("load blueprint after omitted If-Match import: %v", err)
+	}
+	if omittedBP.Metadata.Name != "omitted-if-match" {
+		t.Fatalf("expected blueprint name %q, got %q", "omitted-if-match", omittedBP.Metadata.Name)
+	}
+
+	// Verify wildcard If-Match: "*" succeeds
+	starYAML := []byte("apiVersion: factory.crossplane.io/v1alpha1\nkind: Blueprint\nmetadata:\n  name: star-if-match\nspec:\n  xrd:\n    group: platform.example.org\n    kind: XTest\n    plural: xtests\n    version: v1alpha1\n    scope: Namespaced\n  resources: []\n")
+	reqStar := httptest.NewRequest(http.MethodPost, "/api/blueprint/import", bytes.NewReader(starYAML))
+	reqStar.Header.Set("If-Match", "*")
+	wStar := httptest.NewRecorder()
+	srv.handleImportBlueprint(wStar, reqStar)
+	if wStar.Code != http.StatusOK {
+		t.Fatalf("expected status 200 OK with If-Match: *, got %d: %s", wStar.Code, wStar.Body.String())
+	}
+	starBP, err := blueprint.Load(bpPath)
+	if err != nil {
+		t.Fatalf("load blueprint after star If-Match import: %v", err)
+	}
+	if starBP.Metadata.Name != "star-if-match" {
+		t.Fatalf("expected blueprint name %q, got %q", "star-if-match", starBP.Metadata.Name)
+	}
+}
