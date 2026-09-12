@@ -153,11 +153,21 @@ func validateRenderedDoc(root *yaml.Node, crds []schema.CRD, b *blueprint.Bluepr
 			default:
 				propSchema, ok := ver.Properties[kName].(map[string]any)
 				if !ok {
-					candidates := make([]string, 0, len(ver.Properties))
+					candidates := make([]string, 0, len(ver.Properties)+1)
 					for k := range ver.Properties {
 						if k != "apiVersion" && k != "kind" && k != "status" {
 							candidates = append(candidates, k)
 						}
+					}
+					hasMeta := false
+					for _, c := range candidates {
+						if c == "metadata" {
+							hasMeta = true
+							break
+						}
+					}
+					if !hasMeta {
+						candidates = append(candidates, "metadata")
 					}
 					sort.Strings(candidates)
 					s := closestPath(kName, candidates)
@@ -175,49 +185,134 @@ func validateRenderedDoc(root *yaml.Node, crds []schema.CRD, b *blueprint.Bluepr
 		}
 	} else {
 		// Managed Resource
-		where := kind + " spec.forProvider"
-		specProp, _ := ver.Properties["spec"].(map[string]any)
+		where := "the " + kind + " schema"
+		specProp, specDeclared := ver.Properties["spec"].(map[string]any)
 		specInner, _ := specProp["properties"].(map[string]any)
 
-		if specNode != nil {
-			if specNode.Kind != yaml.MappingNode {
-				errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): spec must be an object, got %s",
-					specNode.Line, resourceName, kind, nodeTypeDescription(specNode)))
-			} else {
-				for i := 0; i < len(specNode.Content); i += 2 {
-					kNode := specNode.Content[i]
-					vNode := specNode.Content[i+1]
-					kName := kNode.Value
+		for i := 0; i < len(root.Content); i += 2 {
+			kNode := root.Content[i]
+			vNode := root.Content[i+1]
+			kName := kNode.Value
 
-					if kName == "forProvider" {
-						fpSchema, _ := specInner["forProvider"].(map[string]any)
-						if fpSchema == nil {
-							errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): kind %q has no spec.forProvider properties in its CRD",
-								kNode.Line, resourceName, kind, kind))
-							continue
-						}
-						errs = append(errs, validateSchemaNode(vNode, fpSchema, "spec.forProvider", resourceName, kind, where, b)...)
-						continue
-					}
-
-					// Validate other spec envelope fields (providerConfigRef, deletionPolicy, initProvider, etc.)
-					if childSchema, ok := specInner[kName].(map[string]any); ok {
-						envWhere := kind + " spec." + kName
-						errs = append(errs, validateSchemaNode(vNode, childSchema, "spec."+kName, resourceName, kind, envWhere, b)...)
-					} else if specInner != nil {
-						candidates := make([]string, 0, len(specInner))
-						for k := range specInner {
+			switch kName {
+			case "apiVersion", "kind", "status":
+				continue
+			case "metadata":
+				errs = append(errs, validateObjectMeta(vNode, resourceName, kind)...)
+			case "spec":
+				// validated below
+			default:
+				propSchema, ok := ver.Properties[kName].(map[string]any)
+				if !ok {
+					candidates := make([]string, 0, len(ver.Properties)+1)
+					for k := range ver.Properties {
+						if k != "apiVersion" && k != "kind" && k != "status" {
 							candidates = append(candidates, k)
 						}
-						sort.Strings(candidates)
-						s := closestPath(kName, candidates)
-						if s != "" {
-							errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): field %q is not in %s spec; did you mean %q?",
-								kNode.Line, resourceName, kind, "spec."+kName, kind, s))
-						} else {
-							errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): field %q is not in %s spec",
-								kNode.Line, resourceName, kind, "spec."+kName, kind))
+					}
+					hasMeta := false
+					for _, c := range candidates {
+						if c == "metadata" {
+							hasMeta = true
+							break
 						}
+					}
+					if !hasMeta {
+						candidates = append(candidates, "metadata")
+					}
+					sort.Strings(candidates)
+					s := closestPath(kName, candidates)
+					if s != "" {
+						errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): field %q is not in %s; did you mean %q?",
+							kNode.Line, resourceName, kind, kName, where, s))
+					} else {
+						errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): field %q is not in %s",
+							kNode.Line, resourceName, kind, kName, where))
+					}
+					continue
+				}
+				errs = append(errs, validateSchemaNode(vNode, propSchema, kName, resourceName, kind, where, b)...)
+			}
+		}
+
+		if specNode == nil {
+			if specDeclared {
+				hint := optionalParamHint(b, resourceName, "spec")
+				errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): missing required field %q in %s%s",
+					kindNode.Line, resourceName, kind, "spec", where, hint))
+				if reqRaw, ok := specProp["required"].([]any); ok {
+					for _, rItem := range reqRaw {
+						reqName, _ := rItem.(string)
+						if reqName == "" {
+							continue
+						}
+						reqPath := "spec." + reqName
+						reqHint := optionalParamHint(b, resourceName, reqPath)
+						errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): missing required field %q in %s%s",
+							kindNode.Line, resourceName, kind, reqPath, kind+" spec", reqHint))
+					}
+				}
+			}
+		} else if specNode.Kind != yaml.MappingNode {
+			errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): spec must be an object, got %s",
+				specNode.Line, resourceName, kind, nodeTypeDescription(specNode)))
+		} else {
+			if reqRaw, ok := specProp["required"].([]any); ok {
+				for _, rItem := range reqRaw {
+					reqName, _ := rItem.(string)
+					if reqName == "" {
+						continue
+					}
+					found := false
+					for i := 0; i < len(specNode.Content); i += 2 {
+						if specNode.Content[i].Value == reqName {
+							found = true
+							break
+						}
+					}
+					if !found {
+						reqPath := "spec." + reqName
+						hint := optionalParamHint(b, resourceName, reqPath)
+						errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): missing required field %q in %s%s",
+							specNode.Line, resourceName, kind, reqPath, kind+" spec", hint))
+					}
+				}
+			}
+
+			fpWhere := kind + " spec.forProvider"
+			for i := 0; i < len(specNode.Content); i += 2 {
+				kNode := specNode.Content[i]
+				vNode := specNode.Content[i+1]
+				kName := kNode.Value
+
+				if kName == "forProvider" {
+					fpSchema, _ := specInner["forProvider"].(map[string]any)
+					if fpSchema == nil {
+						errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): kind %q has no spec.forProvider properties in its CRD",
+							kNode.Line, resourceName, kind, kind))
+						continue
+					}
+					errs = append(errs, validateSchemaNode(vNode, fpSchema, "spec.forProvider", resourceName, kind, fpWhere, b)...)
+					continue
+				}
+
+				// Validate other spec envelope fields (providerConfigRef, deletionPolicy, initProvider, etc.)
+				if childSchema, ok := specInner[kName].(map[string]any); ok {
+					envWhere := kind + " spec." + kName
+					errs = append(errs, validateSchemaNode(vNode, childSchema, "spec."+kName, resourceName, kind, envWhere, b)...)
+				} else if specInner != nil {
+					candidates := make([]string, 0, len(specInner))
+					for k := range specInner {
+						candidates = append(candidates, k)
+					}
+					sort.Strings(candidates)
+					s := closestPath(kName, candidates)
+					if s != "" {
+						errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): field %q is not in %s spec; did you mean %q?",
+							kNode.Line, resourceName, kind, "spec."+kName, kind, s))
+					} else {
+						errs = append(errs, fmt.Sprintf("line %d: resource %q (%s): field %q is not in %s spec",
+							kNode.Line, resourceName, kind, "spec."+kName, kind))
 					}
 				}
 			}

@@ -686,3 +686,92 @@ spec:
 		t.Fatal("expected error for any field when properties is empty and additionalProperties: false, got nil")
 	}
 }
+
+func TestValidateRenderedManagedMissingSpec(t *testing.T) {
+	crds := testCRDsWithNative(t)
+	stream := `---
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: main-queue
+`
+	err := ValidateRendered([]byte(stream), crds)
+	if err == nil {
+		t.Fatal("expected error for missing spec on managed Queue, got nil")
+	}
+	if !strings.Contains(err.Error(), `missing required field "spec" in the Queue schema`) {
+		t.Errorf("error %q should mention missing required field spec in the Queue schema", err.Error())
+	}
+}
+
+func TestValidateRenderedManagedMetadataTypoSuggestion(t *testing.T) {
+	crds := testCRDsWithNative(t)
+	stream := `---
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metdata:
+  annotations:
+    crossplane.io/composition-resource-name: main-queue
+spec:
+  forProvider:
+    region: eu-north-1
+`
+	err := ValidateRendered([]byte(stream), crds)
+	if err == nil {
+		t.Fatal("expected error for typo metdata, got nil")
+	}
+	if !strings.Contains(err.Error(), `field "metdata" is not in the Queue schema; did you mean "metadata"?`) {
+		t.Errorf("error %q should suggest metadata", err.Error())
+	}
+}
+
+func TestValidateRenderedManagedMissingSpecWithRequiredProperties(t *testing.T) {
+	crds := []schema.CRD{
+		{
+			Group:      "sqs.aws.m.upbound.io",
+			Kind:       "StrictQueue",
+			Plural:     "strictqueues",
+			Scope:      "Namespaced",
+			Categories: []string{"crossplane", "managed"},
+			Versions: []schema.Version{
+				{
+					Name:    "v1beta1",
+					Served:  true,
+					Storage: true,
+					Properties: map[string]any{
+						"spec": map[string]any{
+							"type":     "object",
+							"required": []any{"forProvider"},
+							"properties": map[string]any{
+								"forProvider": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"region": map[string]any{"type": "string"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	stream := `---
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: StrictQueue
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: strict-queue
+`
+	err := ValidateRendered([]byte(stream), crds)
+	if err == nil {
+		t.Fatal("expected error for missing spec on StrictQueue, got nil")
+	}
+	if !strings.Contains(err.Error(), `missing required field "spec"`) {
+		t.Errorf("error %q should mention missing required field spec", err.Error())
+	}
+	if !strings.Contains(err.Error(), `missing required field "spec.forProvider"`) {
+		t.Errorf("error %q should mention missing required field spec.forProvider", err.Error())
+	}
+}
