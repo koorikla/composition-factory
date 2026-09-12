@@ -10019,3 +10019,61 @@ spec:
 		t.Errorf("annoField.Raw is empty, want raw template preserved")
 	}
 }
+
+func TestAdoptGoTemplate_SingleQuotedSetResourceNameAnnotation(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              annotations:
+                {{ setResourceNameAnnotation 'custom-queue' }}
+            spec:
+              forProvider:
+                region: us-east-1
+`
+	t.Run("bare single quotes", func(t *testing.T) {
+		bp, _, err := Adopt([]byte(manifest), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(bp.Spec.Resources) == 0 {
+			t.Fatalf("expected resources, got none")
+		}
+		if bp.Spec.Resources[0].Name != "custom-queue" {
+			t.Fatalf("expected resource name custom-queue, got %q", bp.Spec.Resources[0].Name)
+		}
+	})
+
+	t.Run("printf with single quotes", func(t *testing.T) {
+		printfManifest := strings.Replace(manifest, "{{ setResourceNameAnnotation 'custom-queue' }}", "{{ setResourceNameAnnotation (printf '%s-custom-queue' $xr) }}", 1)
+		bp, _, err := Adopt([]byte(printfManifest), Options{})
+		if err != nil {
+			t.Fatalf("Adopt failed: %v", err)
+		}
+		if len(bp.Spec.Resources) == 0 {
+			t.Fatalf("expected resources, got none")
+		}
+		if bp.Spec.Resources[0].Name != "custom-queue" {
+			t.Fatalf("expected resource name custom-queue, got %q", bp.Spec.Resources[0].Name)
+		}
+	})
+}
