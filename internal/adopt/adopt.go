@@ -3471,24 +3471,32 @@ func rewriteFromWire(wire string, nameMapping map[string]string) string {
 }
 
 func collectSources(bp *blueprint.Blueprint, defaultRef string) {
-	seen := make(map[string]bool)
+	seenProviders := make(map[string]bool)
+	seenCRDs := make(map[string]bool)
 	var newSources []blueprint.Source
 	for _, s := range bp.Spec.Sources {
 		if s.Provider != "" {
-			if !seen[s.Provider] {
-				seen[s.Provider] = true
+			if !seenProviders[s.Provider] {
+				seenProviders[s.Provider] = true
 				newSources = append(newSources, s)
 			}
 		} else if s.CRDs != "" {
-			newSources = append(newSources, s)
+			if !seenCRDs[s.CRDs] {
+				seenCRDs[s.CRDs] = true
+				newSources = append(newSources, s)
+			}
 		}
 	}
 	for _, r := range bp.Spec.Resources {
-		if r.Provider == "" || r.Provider == blueprint.NativeProvider {
+		if r.Provider == "" || r.Provider == blueprint.NativeProvider || r.Provider == "cluster" {
 			continue
 		}
-		if !seen[r.Provider] {
-			seen[r.Provider] = true
+		lower := strings.ToLower(r.Provider)
+		if strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") || seenCRDs[r.Provider] {
+			continue
+		}
+		if !seenProviders[r.Provider] {
+			seenProviders[r.Provider] = true
 			newSources = append(newSources, blueprint.Source{
 				Provider: r.Provider,
 			})

@@ -9758,3 +9758,89 @@ spec:
 		})
 	}
 }
+
+func TestCollectSourcesWithClusterAndCRDManifestResource(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "app"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "App",
+				Plural:  "apps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {
+						Type:     "string",
+						Required: true,
+					},
+				},
+			},
+			Sources: []blueprint.Source{
+				{CRDs: "crds/custom.yaml"},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "custom-res",
+					Kind:     "CustomResource",
+					Provider: "crds/custom.yaml",
+				},
+				{
+					Name:     "cluster-res",
+					Kind:     "ClusterResource",
+					Provider: "cluster",
+				},
+			},
+		},
+	}
+
+	collectSources(bp, "")
+
+	for _, s := range bp.Spec.Sources {
+		if s.Provider == "cluster" {
+			t.Errorf("collectSources incorrectly appended pseudo-provider \"cluster\" to spec.sources: %+v", bp.Spec.Sources)
+		}
+		if s.Provider == "crds/custom.yaml" {
+			t.Errorf("collectSources incorrectly appended CRD manifest path %q as a provider source: %+v", s.Provider, bp.Spec.Sources)
+		}
+	}
+
+	meta, err := emit.ConfigurationMeta(bp, nil)
+	if err != nil {
+		t.Fatalf("emit.ConfigurationMeta failed: %v", err)
+	}
+	if strings.Contains(string(meta), "crds/custom.yaml") {
+		t.Errorf("emit.ConfigurationMeta emitted CRD manifest path as package dependency in crossplane.yaml:\n%s", string(meta))
+	}
+	if strings.Contains(string(meta), "cluster") {
+		t.Errorf("emit.ConfigurationMeta emitted pseudo-provider cluster as package dependency in crossplane.yaml:\n%s", string(meta))
+	}
+}
+
+func TestCollectSourcesDeduplicatesCRDs(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{
+				{CRDs: "crds/custom.yaml"},
+				{CRDs: "crds/custom.yaml"},
+				{Provider: "xpkg.upbound.io/upbound/provider-aws-s3:v1.0.0"},
+				{Provider: "xpkg.upbound.io/upbound/provider-aws-s3:v1.0.0"},
+			},
+		},
+	}
+	collectSources(bp, "")
+	if len(bp.Spec.Sources) != 2 {
+		t.Fatalf("expected 2 sources after deduplication, got %d: %+v", len(bp.Spec.Sources), bp.Spec.Sources)
+	}
+	expected := []blueprint.Source{
+		{CRDs: "crds/custom.yaml"},
+		{Provider: "xpkg.upbound.io/upbound/provider-aws-s3:v1.0.0"},
+	}
+	for i, want := range expected {
+		if bp.Spec.Sources[i] != want {
+			t.Errorf("sources[%d] = %+v, want %+v", i, bp.Spec.Sources[i], want)
+		}
+	}
+}
