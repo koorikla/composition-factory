@@ -9845,7 +9845,6 @@ func TestCollectSourcesDeduplicatesCRDs(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 func TestAdoptGoTemplate_ForEachParamIndexSpec_Variants(t *testing.T) {
 	tests := []struct {
 		name      string
