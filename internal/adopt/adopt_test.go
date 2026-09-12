@@ -10897,3 +10897,223 @@ spec:
 		})
 	}
 }
+
+func TestCF413_AdoptB64encWires(t *testing.T) {
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xsec.platform.sparky.ee
+spec:
+  compositeTypeRef:
+    apiVersion: platform.sparky.ee/v1alpha1
+    kind: XSec
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: db
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: db
+            ---
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: app-secret
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: app-secret
+            data:
+              token: {{ $spec.password | b64enc | quote }}
+              tokenIndex: {{ (index $spec "password") | b64enc | quote }}
+              apiKey: {{ $env.apiKey | b64enc | quote }}
+              apiKeyIndex: {{ (index $env "apiKey") | b64enc | quote }}
+              statusSecret: {{ (index $.observed.resources "db").resource.status.atProvider.secret | b64enc | quote }}
+              statusSecretDotted: {{ $observed.resources.db.resource.status.atProvider.secret | b64enc | quote }}
+`
+
+	bp, report, err := Adopt([]byte(compYAML), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if _, ok := bp.Spec.XRD.Parameters["password"]; !ok {
+		t.Errorf("expected parameter 'password' in bp.Spec.XRD.Parameters, got %v", bp.Spec.XRD.Parameters)
+	}
+	if _, ok := bp.Spec.Environment["apiKey"]; !ok {
+		t.Errorf("expected environment 'apiKey' in bp.Spec.Environment, got %v", bp.Spec.Environment)
+	}
+
+	res := bp.ResourceNamed("app-secret")
+	if res == nil {
+		t.Fatalf("expected resource 'app-secret', got nil")
+	}
+
+	if f := res.Fields["data[token]"]; f.From != "params.password" {
+		t.Errorf("data[token].From = %q (Raw: %q), want %q", f.From, f.Raw, "params.password")
+	}
+	if f := res.Fields["data[tokenIndex]"]; f.From != "params.password" {
+		t.Errorf("data[tokenIndex].From = %q (Raw: %q), want %q", f.From, f.Raw, "params.password")
+	}
+	if f := res.Fields["data[apiKey]"]; f.From != "env.apiKey" {
+		t.Errorf("data[apiKey].From = %q (Raw: %q), want %q", f.From, f.Raw, "env.apiKey")
+	}
+	if f := res.Fields["data[apiKeyIndex]"]; f.From != "env.apiKey" {
+		t.Errorf("data[apiKeyIndex].From = %q (Raw: %q), want %q", f.From, f.Raw, "env.apiKey")
+	}
+	if f := res.Fields["data[statusSecret]"]; f.From != "resources.db.status.atProvider.secret" {
+		t.Errorf("data[statusSecret].From = %q (Raw: %q), want %q", f.From, f.Raw, "resources.db.status.atProvider.secret")
+	}
+	if f := res.Fields["data[statusSecretDotted]"]; f.From != "resources.db.status.atProvider.secret" {
+		t.Errorf("data[statusSecretDotted].From = %q (Raw: %q), want %q", f.From, f.Raw, "resources.db.status.atProvider.secret")
+	}
+
+	// Also verify variations with bare | b64enc (without | quote)
+	compYAMLBareB64 := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xsec-bare.platform.sparky.ee
+spec:
+  compositeTypeRef:
+    apiVersion: platform.sparky.ee/v1alpha1
+    kind: XSec
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: db
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: db
+            ---
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: app-secret
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: app-secret
+            data:
+              token: {{ $spec.password | b64enc }}
+              tokenIndex: {{ (index $spec "password") | b64enc }}
+              apiKey: {{ $env.apiKey | b64enc }}
+              apiKeyIndex: {{ (index $env "apiKey") | b64enc }}
+              statusSecret: {{ (index $.observed.resources "db").resource.status.atProvider.secret | b64enc }}
+              statusSecretDotted: {{ $observed.resources.db.resource.status.atProvider.secret | b64enc }}
+`
+
+	bpBare, _, err := Adopt([]byte(compYAMLBareB64), Options{})
+	if err != nil {
+		t.Fatalf("Adopt with bare b64enc failed: %v", err)
+	}
+	if _, ok := bpBare.Spec.XRD.Parameters["password"]; !ok {
+		t.Errorf("expected parameter 'password' in bpBare.Spec.XRD.Parameters, got %v", bpBare.Spec.XRD.Parameters)
+	}
+	if _, ok := bpBare.Spec.Environment["apiKey"]; !ok {
+		t.Errorf("expected environment 'apiKey' in bpBare.Spec.Environment, got %v", bpBare.Spec.Environment)
+	}
+	resBare := bpBare.ResourceNamed("app-secret")
+	if resBare == nil {
+		t.Fatalf("expected resource 'app-secret', got nil")
+	}
+	if f := resBare.Fields["data[token]"]; f.From != "params.password" {
+		t.Errorf("bare b64enc data[token].From = %q (Raw: %q), want %q", f.From, f.Raw, "params.password")
+	}
+	if f := resBare.Fields["data[tokenIndex]"]; f.From != "params.password" {
+		t.Errorf("bare b64enc data[tokenIndex].From = %q (Raw: %q), want %q", f.From, f.Raw, "params.password")
+	}
+	if f := resBare.Fields["data[apiKey]"]; f.From != "env.apiKey" {
+		t.Errorf("bare b64enc data[apiKey].From = %q (Raw: %q), want %q", f.From, f.Raw, "env.apiKey")
+	}
+	if f := resBare.Fields["data[apiKeyIndex]"]; f.From != "env.apiKey" {
+		t.Errorf("bare b64enc data[apiKeyIndex].From = %q (Raw: %q), want %q", f.From, f.Raw, "env.apiKey")
+	}
+	if f := resBare.Fields["data[statusSecret]"]; f.From != "resources.db.status.atProvider.secret" {
+		t.Errorf("bare b64enc data[statusSecret].From = %q (Raw: %q), want %q", f.From, f.Raw, "resources.db.status.atProvider.secret")
+	}
+	if f := resBare.Fields["data[statusSecretDotted]"]; f.From != "resources.db.status.atProvider.secret" {
+		t.Errorf("bare b64enc data[statusSecretDotted].From = %q (Raw: %q), want %q", f.From, f.Raw, "resources.db.status.atProvider.secret")
+	}
+	_ = report
+}
+
+func TestCF413_EmitAdoptRoundTrip(t *testing.T) {
+	crds, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds failed: %v", err)
+	}
+
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xsec-roundtrip.example.org"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "example.org", Version: "v1alpha1", Kind: "XSec", Plural: "xsecs",
+				Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"password": {Type: "string"},
+				},
+			},
+			Environment: map[string]blueprint.EnvironmentKey{
+				"apiKey": {Type: "string"},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "app-secret",
+					Kind:     "Secret",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"data[token]":  {From: "params.password"},
+						"data[apiKey]": {From: "env.apiKey"},
+					},
+				},
+			},
+		},
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("Validate failed: %v", err)
+	}
+
+	compBytes, err := emit.Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("emit.Composition failed: %v", err)
+	}
+
+	adoptedBP, _, err := Adopt(compBytes, Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if _, ok := adoptedBP.Spec.XRD.Parameters["password"]; !ok {
+		t.Errorf("expected parameter 'password' in adoptedBP.Spec.XRD.Parameters")
+	}
+	if _, ok := adoptedBP.Spec.Environment["apiKey"]; !ok {
+		t.Errorf("expected environment 'apiKey' in adoptedBP.Spec.Environment")
+	}
+
+	res := adoptedBP.ResourceNamed("app-secret")
+	if res == nil {
+		t.Fatalf("expected resource 'app-secret' in adoptedBP")
+	}
+	if f := res.Fields["data[token]"]; f.From != "params.password" {
+		t.Errorf("data[token].From = %q (Raw: %q), want %q", f.From, f.Raw, "params.password")
+	}
+	if f := res.Fields["data[apiKey]"]; f.From != "env.apiKey" {
+		t.Errorf("data[apiKey].From = %q (Raw: %q), want %q", f.From, f.Raw, "env.apiKey")
+	}
+}
