@@ -1130,3 +1130,38 @@ func TestCF301_LoopedCustomMetadataNameLiteralValue(t *testing.T) {
 		t.Fatalf("expected literal value to be formatted with printf and loop index $i, got:\n%s", compStr)
 	}
 }
+
+func TestResolveKindMismatchedProviderSingleCandidate(t *testing.T) {
+	bp := testBlueprint()
+	bp.Spec.Sources = []blueprint.Source{
+		{Provider: "xpkg.upbound.io/upbound/provider-azure-storage:v1.0.0"},
+	}
+	bp.Spec.Resources[0].Provider = "xpkg.upbound.io/upbound/provider-azure-storage:v1.0.0"
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("bp.Validate: %v", err)
+	}
+
+	crds := testCRDs(t)
+	_, err := Composition(bp, crds)
+	if err == nil {
+		t.Fatal("Composition: expected error when resource provider does not match resolved CRD, got nil")
+	}
+}
+
+func TestResolveKindMismatchedProviderMultipleCandidates(t *testing.T) {
+	bp := testBlueprint()
+	bp.Spec.Sources = []blueprint.Source{
+		{Provider: "xpkg.upbound.io/upbound/provider-azure-storage:v1.0.0"},
+	}
+	bp.Spec.Resources[0].Provider = "xpkg.upbound.io/upbound/provider-azure-storage:v1.0.0"
+
+	crd1 := testCRDs(t)[0]
+	crd2 := crd1
+	crd2.Group = "sqs2.aws.m.upbound.io"
+
+	_, err := Composition(bp, []schema.CRD{crd1, crd2})
+	if err == nil {
+		t.Fatal("Composition: expected error when resource provider does not match any candidate CRD, got nil")
+	}
+}
