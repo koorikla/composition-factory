@@ -10656,3 +10656,52 @@ spec:
 		}
 	})
 }
+
+func TestCF406_AdoptBracketQuotedAnnotations(t *testing.T) {
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-bracket-quoted-annotations
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XExample
+  resources:
+    - name: bucket
+      base:
+        apiVersion: s3.aws.upbound.io/v1beta1
+        kind: Bucket
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.team
+          toFieldPath: metadata.annotations['custom.io/team']
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.externalName
+          toFieldPath: metadata.annotations["crossplane.io/external-name"]
+`
+
+	bp, report, err := Adopt([]byte(compYAML), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("Adopted blueprint failed validation: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	res := bp.Spec.Resources[0]
+	if f, ok := res.Annotations["custom.io/team"]; !ok || f.From != "params.team" {
+		t.Errorf("expected res.Annotations[\"custom.io/team\"].From = params.team, got %+v", res.Annotations)
+	}
+	if f, ok := res.Annotations["crossplane.io/external-name"]; !ok || f.From != "params.externalName" {
+		t.Errorf("expected res.Annotations[\"crossplane.io/external-name\"].From = params.externalName, got %+v", res.Annotations)
+	}
+	for _, d := range report.Drops {
+		if strings.Contains(d.Path, "annotation") || strings.Contains(d.Reason, "annotation") {
+			t.Errorf("unexpected annotation drop in report: %+v", d)
+		}
+	}
+}

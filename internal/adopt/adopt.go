@@ -2758,6 +2758,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			annKey := strings.TrimPrefix(toPath, "metadata.annotations.")
 			if strings.HasPrefix(toPath, "metadata.annotations[") {
 				annKey = strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.annotations["), "]")
+				annKey = strings.Trim(annKey, `"'`)
 			}
 			if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
 				report.Record(patchPath,
@@ -2782,6 +2783,10 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 				targetField := toPath
 				if strings.HasPrefix(toPath, "metadata.labels.") {
 					labelKey := strings.TrimPrefix(toPath, "metadata.labels.")
+					targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
+				} else if strings.HasPrefix(toPath, "metadata.labels[") {
+					labelKey := strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.labels["), "]")
+					labelKey = strings.Trim(labelKey, `"'`)
 					targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
 				}
 				if isParamPatch && !isReservedCompositeField(paramName) && isWholeObjectParam(bp, paramName) {
@@ -2856,6 +2861,7 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 			annKey := strings.TrimPrefix(toPath, "metadata.annotations.")
 			if strings.HasPrefix(toPath, "metadata.annotations[") {
 				annKey = strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.annotations["), "]")
+				annKey = strings.Trim(annKey, `"'`)
 			}
 			if annKey != "" {
 				if res.Annotations == nil {
@@ -2872,6 +2878,10 @@ func applyPatch(pRaw any, patchPath string, res *blueprint.Resource, bp *bluepri
 				targetField := toPath
 				if strings.HasPrefix(toPath, "metadata.labels.") {
 					labelKey := strings.TrimPrefix(toPath, "metadata.labels.")
+					targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
+				} else if strings.HasPrefix(toPath, "metadata.labels[") {
+					labelKey := strings.TrimSuffix(strings.TrimPrefix(toPath, "metadata.labels["), "]")
+					labelKey = strings.Trim(labelKey, `"'`)
 					targetField = fmt.Sprintf("metadata.labels[%s]", labelKey)
 				}
 				if res.Fields == nil {
@@ -3405,6 +3415,12 @@ func isMapFieldPrefix(prefix, nextKey string) bool {
 
 func normalizeMapFieldPath(fieldPath string) string {
 	if strings.Contains(fieldPath, "[") {
+		if idx := strings.Index(fieldPath, "["); idx != -1 && strings.HasSuffix(fieldPath, "]") {
+			prefix := fieldPath[:idx]
+			key := fieldPath[idx+1 : len(fieldPath)-1]
+			key = strings.Trim(key, `"'`)
+			return fmt.Sprintf("%s[%s]", prefix, key)
+		}
 		return fieldPath
 	}
 	idx := strings.LastIndex(fieldPath, ".")
