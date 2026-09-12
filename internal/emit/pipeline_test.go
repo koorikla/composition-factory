@@ -639,3 +639,60 @@ func TestEffectivePipeline_CollisionWithEnvironmentConfigsFn(t *testing.T) {
 		t.Errorf("expected 3 steps in effective pipeline, got %d", len(eff))
 	}
 }
+
+func TestEffectivePipeline_OmittedPositionOnEnvironmentConfigsDefaultsBefore(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "app"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "App",
+				Plural:  "apps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"region": {Type: "string"},
+				},
+			},
+			Pipeline: []blueprint.PipelineStep{
+				{
+					Name:        "fetch-env",
+					FunctionRef: blueprint.EnvironmentConfigsFunctionName,
+					Package:     blueprint.EnvironmentConfigsFunctionPackage,
+				},
+			},
+		},
+	}
+	if err := bp.Validate(); err != nil {
+		t.Fatalf("Validate failed: %v", err)
+	}
+	out, err := Composition(bp, nil)
+	if err != nil {
+		t.Fatalf("emit failed: %v", err)
+	}
+
+	var doc struct {
+		Spec struct {
+			Pipeline []struct {
+				Step        string `json:"step"`
+				FunctionRef struct {
+					Name string `json:"name"`
+				} `json:"functionRef"`
+			} `json:"pipeline"`
+		} `json:"spec"`
+	}
+	if err := yaml.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(doc.Spec.Pipeline) != 2 {
+		t.Fatalf("expected 2 pipeline steps, got %d", len(doc.Spec.Pipeline))
+	}
+	if doc.Spec.Pipeline[0].Step != "fetch-env" {
+		t.Errorf("expected step 0 to be 'fetch-env', got %q", doc.Spec.Pipeline[0].Step)
+	}
+	if doc.Spec.Pipeline[1].Step != "render-resources" {
+		t.Errorf("expected step 1 to be 'render-resources', got %q", doc.Spec.Pipeline[1].Step)
+	}
+}

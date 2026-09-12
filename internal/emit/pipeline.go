@@ -43,6 +43,11 @@ func effectivePipeline(b *blueprint.Blueprint) []blueprint.PipelineStep {
 	if len(steps) == 0 {
 		steps = append([]blueprint.PipelineStep(nil), defaultPipeline...)
 	}
+	for i, s := range steps {
+		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName && steps[i].Position == "" {
+			steps[i].Position = blueprint.PositionBefore
+		}
+	}
 	if b.HasEnvironment() {
 		hasEnvStep := false
 		for i, s := range steps {
