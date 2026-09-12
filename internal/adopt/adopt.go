@@ -1241,6 +1241,7 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 }
 
 var (
+	reGoTemplateComment  = regexp.MustCompile(`(?s)\{\{-?\s*/\*.*?\*/\s*-?\}\}`)
 	reDefine             = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
 	reParamVar           = regexp.MustCompile(`\{\{-?\s*\(?\s*(?:default\s+(?:\([^)]+\)|["'][^"']*["']|\S+)\s+)?\(?\s*(?:(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)|index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+?)["'])\s*\)?(?:\s*\|\s*default\s+(?:\([^)]+\)|["'][^"']*["']|\S+))?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reEvidenceIndexSpec  = regexp.MustCompile(`\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']`)
@@ -1868,6 +1869,10 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 			input, _ := step["input"].(map[string]any)
 			inline, _ := input["inline"].(map[string]any)
 			tmpl, _ := inline["template"].(string)
+			if inline != nil && tmpl != "" {
+				tmpl = stripGoTemplateComments(tmpl)
+				inline["template"] = tmpl
+			}
 			source, _ := input["source"].(string)
 			isFileSystem := strings.EqualFold(source, "FileSystem") || input["fileSystem"] != nil
 
@@ -2154,6 +2159,83 @@ func identifyChunkTarget(chunk string) string {
 	return "template.chunk"
 }
 
+// stripGoTemplateComments removes Go template comments ({{/* ... */}}, {{- /* ... */}},
+// {{/* ... */ -}}, {{- /* ... */ -}}) from tmpl.
+// Comments occupying their own line leave no trace in the resulting template;
+// comments sharing a line with YAML leave the rest of that line intact.
+func stripGoTemplateComments(tmpl string) string {
+	if !strings.Contains(tmpl, "/*") {
+		return tmpl
+	}
+
+	matches := reGoTemplateComment.FindAllStringIndex(tmpl, -1)
+	if len(matches) == 0 {
+		return tmpl
+	}
+
+	// Process matches from right to left so earlier match indices remain valid.
+	for i := len(matches) - 1; i >= 0; i-- {
+		start := matches[i][0]
+		end := matches[i][1]
+
+		// Find the start of the line containing start.
+		lineStart := strings.LastIndex(tmpl[:start], "\n")
+		if lineStart == -1 {
+			lineStart = 0
+		} else {
+			lineStart++ // move past \n
+		}
+
+		// Find the end of the line containing end.
+		lineEndRel := strings.Index(tmpl[end:], "\n")
+		var lineEnd int
+		var hasNewlineAfter bool
+		if lineEndRel == -1 {
+			lineEnd = len(tmpl)
+			hasNewlineAfter = false
+		} else {
+			lineEnd = end + lineEndRel
+			hasNewlineAfter = true
+		}
+
+		before := tmpl[lineStart:start]
+		after := tmpl[end:lineEnd]
+
+		isBeforeBlank := strings.Trim(before, " \t") == ""
+		isAfterBlank := strings.Trim(after, " \t\r") == ""
+
+		if isBeforeBlank && isAfterBlank {
+			// Comment occupies its own line(s). Remove the entire line(s) including newline.
+			cutStart := lineStart
+			cutEnd := lineEnd
+			if hasNewlineAfter {
+				cutEnd++ // include \n
+			} else if cutStart > 0 && tmpl[cutStart-1] == '\n' {
+				cutStart-- // remove preceding \n
+				if cutStart > 0 && tmpl[cutStart-1] == '\r' {
+					cutStart-- // remove preceding \r if \r\n
+				}
+			}
+			tmpl = tmpl[:cutStart] + tmpl[cutEnd:]
+		} else {
+			// Comment shares a line with YAML or other content.
+			// If the comment was at the end of the line, also trim any trailing whitespace left before the comment.
+			cutStart := start
+			cutEnd := end
+			if isAfterBlank {
+				trimmedBefore := strings.TrimRight(before, " \t")
+				cutStart = lineStart + len(trimmedBefore)
+			}
+			tmpl = tmpl[:cutStart] + tmpl[cutEnd:]
+		}
+	}
+
+	if strings.TrimSpace(tmpl) == "" {
+		return ""
+	}
+	return tmpl
+}
+
 func validateGoTemplate(tmpl string) error {
 	idx := 0
 	for {
@@ -2409,6 +2491,8 @@ func extractForEachGuard(text string, bp *blueprint.Blueprint, report *LossRepor
 }
 
 func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string) error {
+	tmpl = stripGoTemplateComments(tmpl)
+
 	// 0. Validate Go template syntax (actions must be balanced and well-formed)
 	if err := validateGoTemplate(tmpl); err != nil {
 		return fmt.Errorf("malformed go template: %w", err)
@@ -2543,6 +2627,9 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 				if strings.HasPrefix(inner, "$") && strings.Contains(inner, ":=") {
 					continue
 				}
+				if strings.HasPrefix(inner, "/*") {
+					continue
+				}
 				if strings.HasPrefix(inner, "if ") || strings.HasPrefix(inner, "else") ||
 					strings.HasPrefix(inner, "end") || strings.HasPrefix(inner, "range ") {
 					if strings.HasPrefix(inner, "else") {
@@ -2606,6 +2693,9 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 
 		var placeholderTable []string
 		maskedYAML := reMustacheExpr.ReplaceAllStringFunc(cleanYAML, func(match string) string {
+			if reGoTemplateComment.MatchString(match) {
+				return ""
+			}
 			idx := len(placeholderTable)
 			placeholderTable = append(placeholderTable, match)
 			return fmt.Sprintf(`__CF_EXPR_%d__`, idx)
