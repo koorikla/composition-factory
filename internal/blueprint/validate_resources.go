@@ -301,7 +301,8 @@ func (b *Blueprint) validateFields(r Resource) error {
 						break
 					}
 				}
-				isMapLeaf := hasChildMapKeys || p == "tags" || p == "labels" || p == "annotations"
+				isMapLeaf := hasChildMapKeys || p == "tags" || p == "labels" || p == "annotations" ||
+					strings.HasSuffix(p, ".tags") || strings.HasSuffix(p, ".labels") || strings.HasSuffix(p, ".annotations")
 				if len(decl.Properties) > 0 && !isMapLeaf {
 					return fmt.Errorf("resource %q field %q: parameter %q is a typed object — a from: "+
 						"mapping cannot render the whole object; wire one of its declared members "+
