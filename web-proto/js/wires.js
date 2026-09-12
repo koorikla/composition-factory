@@ -352,25 +352,42 @@ export function findEnvWires(doc, key) {
       });
     }
     if (r.connectionSecret) {
+      let csMatched = false;
       if (typeof r.connectionSecret === "string") {
         if (r.connectionSecret === ref || r.connectionSecret === refDollar) {
-          wires.push(r.name + ".connectionSecret");
+          csMatched = true;
         }
-      } else if (typeof r.connectionSecret === "object" && Array.isArray(r.connectionSecret.keys)) {
-        r.connectionSecret.keys.forEach(function (item) {
-          if (typeof item === "string" && (item === ref || item === refDollar)) {
-            wires.push(r.name + ".connectionSecret");
-          } else if (item && typeof item === "object" && (item.from === ref || item.from === refDollar)) {
-            wires.push(r.name + ".connectionSecret");
-          }
-        });
+      } else if (typeof r.connectionSecret === "object") {
+        if (r.connectionSecret.name === ref || r.connectionSecret.name === refDollar ||
+            r.connectionSecret.namespace === ref || r.connectionSecret.namespace === refDollar) {
+          csMatched = true;
+        } else if (Array.isArray(r.connectionSecret.keys)) {
+          r.connectionSecret.keys.forEach(function (item) {
+            if (typeof item === "string" && (item === ref || item === refDollar)) {
+              csMatched = true;
+            } else if (item && typeof item === "object" && (item.from === ref || item.from === refDollar)) {
+              csMatched = true;
+            }
+          });
+        }
+      }
+      if (csMatched) {
+        wires.push(r.name + ".connectionSecret");
       }
     }
-    if (r.when && (r.when === ref || r.when === refDollar || r.when.startsWith(ref + " ") || r.when.startsWith(refDollar + " ") || r.when.startsWith(ref + "==") || r.when.startsWith(refDollar + "==") || r.when.startsWith(ref + "!=") || r.when.startsWith(refDollar + "!="))) {
-      wires.push(r.name + ".when");
+    if (r.when) {
+      const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp("(?:\\$env|\\.env|env)\\." + escaped + "(?:$|[^a-zA-Z0-9_])");
+      if (re.test(r.when)) {
+        wires.push(r.name + ".when");
+      }
     }
-    if (r.forEach && (r.forEach === ref || r.forEach === refDollar)) {
-      wires.push(r.name + ".forEach");
+    if (r.forEach) {
+      if (r.forEach === ref || r.forEach === refDollar) {
+        wires.push(r.name + ".forEach");
+      } else if (typeof r.forEach === "object" && (r.forEach.over === ref || r.forEach.over === refDollar)) {
+        wires.push(r.name + ".forEach");
+      }
     }
   });
   return wires;

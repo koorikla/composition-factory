@@ -9,7 +9,7 @@
 import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
-import { parseFrom, findEnvWires, listWires } from "../wires.js";
+import { parseFrom, findEnvWires } from "../wires.js";
 import { mapResourceCoordinates, deleteEnvKeyFromDoc, renameEnvKeyInDoc, parseEnvSelection } from "../utils.js";
 
 import { state, PARAM_TYPES } from "./inspector/state.js";
@@ -1244,6 +1244,12 @@ function removeWire(resName, wirePath, isEnv, isAnn) {
           delete res.envelope[envPath];
           if (!Object.keys(res.envelope).length) delete res.envelope;
         }
+      } else if (wirePath === "when") {
+        delete res.when;
+      } else if (wirePath === "forEach") {
+        delete res.forEach;
+      } else if (wirePath === "connectionSecret") {
+        delete res.connectionSecret;
       } else {
         if (res.fields && res.fields[wirePath]) {
           delete res.fields[wirePath];
@@ -1352,7 +1358,6 @@ async function renderEnvironment() {
 
   // Keys section
   h += '<div style="padding:10px 12px 4px"><span class="lbl">Keys (' + envKeys.length + ')</span></div>';
-  var allWires = listWires(doc);
   var ENV_TYPES = ["string", "integer", "number", "boolean"];
 
   if (envKeys.length === 0) {
@@ -1363,7 +1368,20 @@ async function renderEnvironment() {
       var ty = item.type || "string";
       var req = !!item.required;
       var val = item.value !== undefined && item.value !== "" ? item.value : (item.default !== undefined ? item.default : "");
-      var wires = allWires.filter(function (w) { return w.kind === "env" && w.envKey === k; });
+      var wires = findEnvWires(doc, k).map(function (wireTarget) {
+        var dotIdx = wireTarget.indexOf(".");
+        var resName = dotIdx !== -1 ? wireTarget.slice(0, dotIdx) : wireTarget;
+        var p = dotIdx !== -1 ? wireTarget.slice(dotIdx + 1) : "";
+        var isEnv = p.indexOf("envelope.") === 0;
+        var isAnn = p.indexOf("annotations.") === 0;
+        return {
+          resource: resName,
+          path: p,
+          target: wireTarget,
+          isEnvelope: isEnv,
+          isAnnotation: isAnn
+        };
+      });
 
       h += '<div class="fld" data-env-key="' + esc(k) + '" style="padding:8px 12px;border-bottom:1px solid var(--rule)">' +
         '<div class="frow" style="margin-bottom:4px;gap:4px">' +
@@ -1386,7 +1404,7 @@ async function renderEnvironment() {
       } else {
         h += '<div class="g" style="margin-bottom:2px;font-weight:600">Used by:</div>';
         wires.forEach(function (w) {
-          var wireTarget = w.resource + "." + w.path;
+          var wireTarget = w.target;
           h += '<div class="env-wire-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 0">' +
             '<span class="mono" style="color:var(--shared)">' + esc(wireTarget) + '</span>' +
             '<button class="del" data-env-wire-del="1" data-wire-res="' + esc(w.resource) + '" data-wire-path="' + esc(w.path) + '"' +
