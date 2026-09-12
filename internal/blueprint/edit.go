@@ -244,7 +244,7 @@ func rawReferencesParam(raw, name string) bool {
 	if reDotted.MatchString(raw) {
 		return true
 	}
-	reIndex := regexp.MustCompile(`\bindex\s+(?:\$spec|\.spec|\$params|\.params|params)\s+(?:"` + q + `"|'` + q + `'|` + "`" + q + "`)" + `($|[^a-zA-Z0-9_])`)
+	reIndex := regexp.MustCompile(`\bindex\s+(?:(?:\$|\$\.|\.)?observed\.composite\.resource\.spec|(?:\$|\$\.|\.)spec|(?:\$|\$\.|\.)?params)\s+(?:"` + q + `"|'` + q + `'|` + "`" + q + "`)" + `($|[^a-zA-Z0-9_])`)
 	return reIndex.MatchString(raw)
 }
 
@@ -277,7 +277,7 @@ func rewriteRawParam(raw, from, to string) string {
 	r = reDotted.ReplaceAllString(r, "${1}"+to+"${3}")
 
 	for _, q := range []string{`"`, `'`, "`"} {
-		reIndex := regexp.MustCompile(`(\bindex\s+(?:\$spec|\.spec|\$params|\.params|params)\s+` + regexp.QuoteMeta(q) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(q) + `)`)
+		reIndex := regexp.MustCompile(`(\bindex\s+(?:(?:\$|\$\.|\.)?observed\.composite\.resource\.spec|(?:\$|\$\.|\.)spec|(?:\$|\$\.|\.)?params)\s+` + regexp.QuoteMeta(q) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(q) + `)`)
 		r = reIndex.ReplaceAllString(r, "${1}"+to+"${2}")
 	}
 	return r
