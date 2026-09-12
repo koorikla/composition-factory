@@ -186,6 +186,9 @@ func anyFrom(fields map[string]Field, want string) bool {
 func (b *Blueprint) StatusReferencingResources(name string) []string {
 	var refs []string
 	for _, r := range b.Spec.Resources {
+		if r.Name == name {
+			continue
+		}
 		// An observed-count loop bound references the target's status as
 		// surely as a field wire does: deleting the target would leave a
 		// forEach whose guard chain stays false forever — a resource that
