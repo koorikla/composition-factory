@@ -35,6 +35,14 @@ type ClusterInfo struct {
 	Error     string `json:"error,omitempty"`
 }
 
+// InstalledProvider describes a Crossplane provider package installed in the cluster.
+type InstalledProvider struct {
+	Name            string `json:"name"`
+	Package         string `json:"package"`
+	CurrentRevision string `json:"currentRevision"`
+	Healthy         bool   `json:"healthy"`
+}
+
 // Client connects to a Kubernetes API server to fetch CRDs.
 type Client struct {
 	server  string
@@ -258,8 +266,35 @@ type crdList struct {
 	Items []json.RawMessage `json:"items"`
 }
 
-// FetchCRDs queries the Kubernetes API server for all CustomResourceDefinitions.
-func (c *Client) FetchCRDs(ctx context.Context) ([]schema.CRD, error) {
+// ensureCRDMeta ensures the raw CRD document has apiVersion and kind set.
+// The Kubernetes API server's CustomResourceDefinitionList endpoint returns items
+// where apiVersion and kind are omitted. schema.ParseCRDs requires kind to be
+// "CustomResourceDefinition", so we inject them if missing.
+func ensureCRDMeta(raw []byte) []byte {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	modified := false
+	if _, ok := m["kind"]; !ok {
+		m["kind"] = json.RawMessage(`"CustomResourceDefinition"`)
+		modified = true
+	}
+	if _, ok := m["apiVersion"]; !ok {
+		m["apiVersion"] = json.RawMessage(`"apiextensions.k8s.io/v1"`)
+		modified = true
+	}
+	if !modified {
+		return raw
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+func (c *Client) fetchRawCRDList(ctx context.Context) (*crdList, error) {
 	reqURL := c.server + "/apis/apiextensions.k8s.io/v1/customresourcedefinitions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -286,10 +321,13 @@ func (c *Client) FetchCRDs(ctx context.Context) ([]schema.CRD, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
 		return nil, fmt.Errorf("decode crd list: %w", err)
 	}
+	return &list, nil
+}
 
-	rawDocs := make([][]byte, len(list.Items))
-	for i, it := range list.Items {
-		rawDocs[i] = []byte(it)
+func parseCRDItems(items []json.RawMessage) ([]schema.CRD, error) {
+	rawDocs := make([][]byte, len(items))
+	for i, it := range items {
+		rawDocs[i] = ensureCRDMeta(it)
 	}
 
 	crds, err := schema.ParseCRDs(rawDocs)
@@ -318,19 +356,241 @@ func (c *Client) FetchCRDs(ctx context.Context) ([]schema.CRD, error) {
 	return crds, nil
 }
 
+// FetchCRDs queries the Kubernetes API server for CustomResourceDefinitions.
+// When Crossplane providers are installed in the cluster, provider-owned CRDs
+// are managed under their respective provider package references (see FetchCRDsByProvider),
+// so FetchCRDs filters them out to return only cluster-level / non-provider CRDs under
+// the synthetic "cluster" provider label. If no Crossplane providers are installed,
+// all cluster CRDs are returned.
+func (c *Client) FetchCRDs(ctx context.Context) ([]schema.CRD, error) {
+	list, err := c.fetchRawCRDList(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	crds, err := parseCRDItems(list.Items)
+	if err != nil {
+		return nil, err
+	}
+
+	providers, err := c.FetchInstalledProviders(ctx)
+	if err != nil || len(providers) == 0 {
+		return crds, nil
+	}
+
+	// Filter out CRDs owned by any installed provider
+	var nonProviderCRDs []schema.CRD
+	for i, it := range list.Items {
+		if i >= len(crds) {
+			break
+		}
+		var meta crdItemMeta
+		if err := json.Unmarshal(it, &meta); err != nil {
+			nonProviderCRDs = append(nonProviderCRDs, crds[i])
+			continue
+		}
+
+		isProviderOwned := false
+		for _, p := range providers {
+			for _, o := range meta.Metadata.OwnerReferences {
+				if o.Kind == "ProviderRevision" {
+					if (p.CurrentRevision != "" && o.Name == p.CurrentRevision) ||
+						(p.Name != "" && strings.HasPrefix(o.Name, p.Name+"-")) {
+						isProviderOwned = true
+						break
+					}
+				}
+				if o.Kind == "Provider" && p.Name != "" && o.Name == p.Name {
+					isProviderOwned = true
+					break
+				}
+			}
+			if isProviderOwned {
+				break
+			}
+		}
+
+		if !isProviderOwned {
+			nonProviderCRDs = append(nonProviderCRDs, crds[i])
+		}
+	}
+
+	return nonProviderCRDs, nil
+}
+
+// FetchAllCRDs queries the Kubernetes API server for all CustomResourceDefinitions without filtering.
+func (c *Client) FetchAllCRDs(ctx context.Context) ([]schema.CRD, error) {
+	list, err := c.fetchRawCRDList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return parseCRDItems(list.Items)
+}
+
+type providerList struct {
+	Items []struct {
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Spec struct {
+			Package string `json:"package"`
+		} `json:"spec"`
+		Status struct {
+			CurrentRevision string `json:"currentRevision"`
+			Conditions      []struct {
+				Type   string `json:"type"`
+				Status string `json:"status"`
+			} `json:"conditions"`
+		} `json:"status"`
+	} `json:"items"`
+}
+
+// FetchInstalledProviders queries the cluster for Crossplane Provider resources.
+// Returns an empty slice (not an error) if the Provider CRD is not present (e.g. non-Crossplane cluster).
+func (c *Client) FetchInstalledProviders(ctx context.Context) ([]InstalledProvider, error) {
+	reqURL := c.server + "/apis/pkg.crossplane.io/v1/providers"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create provider request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connect to cluster at %s: %w", c.server, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("cluster returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var list providerList
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return nil, fmt.Errorf("decode provider list: %w", err)
+	}
+
+	var providers []InstalledProvider
+	for _, it := range list.Items {
+		healthy := false
+		for _, cond := range it.Status.Conditions {
+			if cond.Type == "Healthy" && cond.Status == "True" {
+				healthy = true
+				break
+			}
+		}
+		providers = append(providers, InstalledProvider{
+			Name:            it.Metadata.Name,
+			Package:         it.Spec.Package,
+			CurrentRevision: it.Status.CurrentRevision,
+			Healthy:         healthy,
+		})
+	}
+	return providers, nil
+}
+
+type crdItemMeta struct {
+	Metadata struct {
+		Name            string `json:"name"`
+		OwnerReferences []struct {
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+		} `json:"ownerReferences"`
+	} `json:"metadata"`
+}
+
+// FetchCRDsByProvider queries the cluster for all CRDs and partitions them by
+// installed Crossplane provider. The returned map is keyed by each provider's
+// package reference (e.g. "xpkg.upbound.io/crossplane-contrib/provider-aws-sqs:v2.7.0")
+// and, when different, also by the provider's metadata name (e.g. "provider-aws-sqs").
+func (c *Client) FetchCRDsByProvider(ctx context.Context) (map[string][]schema.CRD, error) {
+	providers, err := c.FetchInstalledProviders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(providers) == 0 {
+		return make(map[string][]schema.CRD), nil
+	}
+
+	list, err := c.fetchRawCRDList(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	crds, err := parseCRDItems(list.Items)
+	if err != nil {
+		return nil, err
+	}
+
+	byProvider := make(map[string][]schema.CRD)
+	for i, it := range list.Items {
+		if i >= len(crds) {
+			break
+		}
+		var meta crdItemMeta
+		if err := json.Unmarshal(it, &meta); err != nil {
+			continue
+		}
+
+		crd := crds[i]
+		for _, p := range providers {
+			matches := false
+			for _, o := range meta.Metadata.OwnerReferences {
+				if o.Kind == "ProviderRevision" {
+					if (p.CurrentRevision != "" && o.Name == p.CurrentRevision) ||
+						(p.Name != "" && strings.HasPrefix(o.Name, p.Name+"-")) {
+						matches = true
+						break
+					}
+				}
+				if o.Kind == "Provider" && p.Name != "" && o.Name == p.Name {
+					matches = true
+					break
+				}
+			}
+			if matches {
+				if p.Package != "" {
+					byProvider[p.Package] = append(byProvider[p.Package], crd)
+				}
+				if p.Name != "" && p.Name != p.Package {
+					byProvider[p.Name] = append(byProvider[p.Name], crd)
+				}
+			}
+		}
+	}
+	return byProvider, nil
+}
+
+// FetchCRDsForProvider returns all CRDs owned by a specific provider (by name or package ref).
+func (c *Client) FetchCRDsForProvider(ctx context.Context, providerNameOrPackage string) ([]schema.CRD, error) {
+	byProv, err := c.FetchCRDsByProvider(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return byProv[providerNameOrPackage], nil
+}
+
 // Info returns the current cluster connection status and metadata.
 func (c *Client) Info(ctx context.Context) ClusterInfo {
 	info := ClusterInfo{
 		Context: c.context,
 		Server:  c.server,
 	}
-	crds, err := c.FetchCRDs(ctx)
+	list, err := c.fetchRawCRDList(ctx)
 	if err != nil {
 		info.Connected = false
 		info.Error = err.Error()
 		return info
 	}
 	info.Connected = true
-	info.CRDCount = len(crds)
+	info.CRDCount = len(list.Items)
 	return info
 }

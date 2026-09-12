@@ -322,3 +322,234 @@ users:
 		t.Errorf("Context() = %q, want tls-ctx", c.Context())
 	}
 }
+
+func TestFetchCRDsOmittedKindAndAPIVersion(t *testing.T) {
+	// Real Kubernetes /apis/apiextensions.k8s.io/v1/customresourcedefinitions endpoint
+	// omits kind and apiVersion from items in the list.
+	rawItemWithoutKind := `{
+		"metadata": {"name": "queues.sqs.aws.m.upbound.io"},
+		"spec": {
+			"group": "sqs.aws.m.upbound.io",
+			"scope": "Namespaced",
+			"names": {
+				"kind": "Queue",
+				"plural": "queues",
+				"categories": ["crossplane", "managed", "aws"]
+			},
+			"versions": [{
+				"name": "v1beta1",
+				"served": true,
+				"storage": true,
+				"schema": {
+					"openAPIV3Schema": {
+						"type": "object",
+						"properties": {
+							"spec": {
+								"type": "object",
+								"properties": {
+									"forProvider": {
+										"type": "object",
+										"properties": {
+											"region": {"type": "string"}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}]
+		}
+	}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/apis/apiextensions.k8s.io/v1/customresourcedefinitions" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"items": [` + rawItemWithoutKind + `]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	cfg := `
+current-context: test
+contexts:
+- name: test
+  context:
+    cluster: c
+clusters:
+- name: c
+  cluster:
+    server: ` + srv.URL + `
+`
+	client, err := FromKubeconfig([]byte(cfg), "test")
+	if err != nil {
+		t.Fatalf("FromKubeconfig: %v", err)
+	}
+
+	crds, err := client.FetchCRDs(context.Background())
+	if err != nil {
+		t.Fatalf("FetchCRDs: %v", err)
+	}
+	if len(crds) != 1 {
+		t.Fatalf("got %d crds, want 1", len(crds))
+	}
+	if crds[0].Kind != "Queue" || crds[0].Group != "sqs.aws.m.upbound.io" {
+		t.Errorf("got %s.%s, want Queue.sqs.aws.m.upbound.io", crds[0].Kind, crds[0].Group)
+	}
+	if !crds[0].IsManaged() {
+		t.Errorf("expected IsManaged to be true")
+	}
+}
+
+func TestFetchInstalledProvidersAndCRDsByProvider(t *testing.T) {
+	providersJSON := `{
+		"items": [
+			{
+				"metadata": {"name": "provider-aws-sqs"},
+				"spec": {"package": "xpkg.upbound.io/crossplane-contrib/provider-aws-sqs:v2.7.0"},
+				"status": {
+					"currentRevision": "provider-aws-sqs-rev123",
+					"conditions": [
+						{"type": "Healthy", "status": "True"},
+						{"type": "Installed", "status": "True"}
+					]
+				}
+			}
+		]
+	}`
+
+	crdsJSON := `{
+		"items": [
+			{
+				"metadata": {
+					"name": "queues.sqs.aws.m.upbound.io",
+					"ownerReferences": [
+						{
+							"kind": "ProviderRevision",
+							"name": "provider-aws-sqs-rev123"
+						}
+					]
+				},
+				"spec": {
+					"group": "sqs.aws.m.upbound.io",
+					"scope": "Namespaced",
+					"names": {
+						"kind": "Queue",
+						"plural": "queues",
+						"categories": ["crossplane", "managed"]
+					},
+					"versions": [{
+						"name": "v1beta1",
+						"served": true,
+						"storage": true,
+						"schema": {
+							"openAPIV3Schema": {
+								"type": "object",
+								"properties": {
+									"spec": {
+										"type": "object",
+										"properties": {
+											"forProvider": {
+												"type": "object",
+												"properties": {"region": {"type": "string"}}
+											}
+										}
+									}
+								}
+							}
+						}
+					}]
+				}
+			},
+			{
+				"metadata": {
+					"name": "unowned.example.org",
+					"ownerReferences": []
+				},
+				"spec": {
+					"group": "example.org",
+					"scope": "Namespaced",
+					"names": {
+						"kind": "Unowned",
+						"plural": "unowneds"
+					},
+					"versions": [{
+						"name": "v1",
+						"served": true,
+						"storage": true,
+						"schema": {
+							"openAPIV3Schema": {"type": "object"}
+						}
+					}]
+				}
+			}
+		]
+	}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/apis/pkg.crossplane.io/v1/providers":
+			w.Write([]byte(providersJSON))
+		case "/apis/apiextensions.k8s.io/v1/customresourcedefinitions":
+			w.Write([]byte(crdsJSON))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := `
+current-context: test
+contexts:
+- name: test
+  context:
+    cluster: c
+clusters:
+- name: c
+  cluster:
+    server: ` + srv.URL + `
+`
+	client, err := FromKubeconfig([]byte(cfg), "test")
+	if err != nil {
+		t.Fatalf("FromKubeconfig: %v", err)
+	}
+
+	// Test FetchInstalledProviders
+	providers, err := client.FetchInstalledProviders(context.Background())
+	if err != nil {
+		t.Fatalf("FetchInstalledProviders: %v", err)
+	}
+	if len(providers) != 1 {
+		t.Fatalf("got %d providers, want 1", len(providers))
+	}
+	p := providers[0]
+	if p.Name != "provider-aws-sqs" || p.Package != "xpkg.upbound.io/crossplane-contrib/provider-aws-sqs:v2.7.0" || !p.Healthy {
+		t.Errorf("unexpected provider: %+v", p)
+	}
+
+	// Test FetchCRDsByProvider
+	byProv, err := client.FetchCRDsByProvider(context.Background())
+	if err != nil {
+		t.Fatalf("FetchCRDsByProvider: %v", err)
+	}
+
+	pkgKey := "xpkg.upbound.io/crossplane-contrib/provider-aws-sqs:v2.7.0"
+	if len(byProv[pkgKey]) != 1 {
+		t.Fatalf("byProv[%s] = %d CRDs, want 1", pkgKey, len(byProv[pkgKey]))
+	}
+	if byProv[pkgKey][0].Kind != "Queue" {
+		t.Errorf("CRD kind = %s, want Queue", byProv[pkgKey][0].Kind)
+	}
+
+	// Test FetchCRDsForProvider
+	forProv, err := client.FetchCRDsForProvider(context.Background(), pkgKey)
+	if err != nil {
+		t.Fatalf("FetchCRDsForProvider: %v", err)
+	}
+	if len(forProv) != 1 || forProv[0].Kind != "Queue" {
+		t.Errorf("FetchCRDsForProvider = %v, want 1 Queue CRD", forProv)
+	}
+}

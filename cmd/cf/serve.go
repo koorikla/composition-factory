@@ -136,7 +136,11 @@ func (c *ServeCmd) run(ctx context.Context, out io.Writer) error {
 	// call against whatever the user's current kubectl context points at.
 	var cl *cluster.Client
 	if c.Kubeconfig != "" || c.KubeContext != "" || c.Cluster {
-		cl, _ = cluster.NewClient(c.Kubeconfig, c.KubeContext)
+		var err error
+		cl, err = cluster.NewClient(c.Kubeconfig, c.KubeContext)
+		if err != nil {
+			return fmt.Errorf("connect to cluster: %w", err)
+		}
 	}
 	if created, err := ensureBlueprint(c.Blueprint); err != nil {
 		return err

@@ -10,6 +10,7 @@ import (
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/cluster"
+	"github.com/koorikla/compositionfactory/internal/schema"
 )
 
 // buildAPIOptions loads the blueprint and every provider schema it names,
@@ -61,10 +62,11 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string, cl *clust
 }
 
 // AssembleProviders collects the provider set to index and serve:
-// 1. inspects declared blueprint sources in document order, deduplicating references
-// 2. checks store cache presence, warning on os.Stderr for missing providers so startup continues with a partial index
-// 3. discovers all cached providers in store.List(), appending any not already declared so pre-cached schemas are available
-// 4. if a cluster client is provided, syncs or loads live cluster CRDs under cluster.ProviderLabel
+// 1. if a cluster client is provided and syncClusterNow is true, syncs live cluster CRDs and installed Crossplane providers into the store
+// 2. inspects declared blueprint sources in document order, deduplicating references
+// 3. checks store cache presence, warning on os.Stderr for missing providers so startup continues with a partial index
+// 4. discovers all cached providers in store.List(), appending any not already declared so pre-cached schemas are available
+// 5. if a cluster client is provided, ensures cluster.ProviderLabel is included in refs
 func AssembleProviders(store *cache.Store, b *blueprint.Blueprint, cl *cluster.Client, syncClusterNow bool) []string {
 	if store == nil {
 		return nil
@@ -73,10 +75,48 @@ func AssembleProviders(store *cache.Store, b *blueprint.Blueprint, cl *cluster.C
 	var refs []string
 	seen := make(map[string]bool)
 
+	// If cluster client is provided and syncClusterNow is true, sync live cluster CRDs and installed providers first
+	if cl != nil && syncClusterNow {
+		provCRDs, _ := cl.FetchCRDsByProvider(context.Background())
+		installed, _ := cl.FetchInstalledProviders(context.Background())
+		installedCRDNames := make(map[string]bool)
+
+		for _, inst := range installed {
+			crds := provCRDs[inst.Package]
+			if len(crds) == 0 && inst.Name != "" {
+				crds = provCRDs[inst.Name]
+			}
+			if len(crds) > 0 {
+				for _, c := range crds {
+					installedCRDNames[c.Plural+"."+c.Group] = true
+				}
+				if inst.Package != "" {
+					_ = store.SaveCRDs(inst.Package, cl.Context(), crds)
+				}
+				if inst.Name != "" && inst.Name != inst.Package {
+					_ = store.SaveCRDs(inst.Name, cl.Context(), crds)
+				}
+			}
+		}
+
+		if clusterCRDs, err := cl.FetchCRDs(context.Background()); err == nil && len(clusterCRDs) > 0 {
+			var nonProviderCRDs []schema.CRD
+			for _, c := range clusterCRDs {
+				if !installedCRDNames[c.Plural+"."+c.Group] {
+					nonProviderCRDs = append(nonProviderCRDs, c)
+				}
+			}
+			if len(nonProviderCRDs) > 0 {
+				_ = store.SaveCRDs(cluster.ProviderLabel, cl.Context(), nonProviderCRDs)
+			} else {
+				_ = store.SaveCRDs(cluster.ProviderLabel, cl.Context(), nil)
+			}
+		}
+	}
+
 	if b != nil {
 		for _, s := range b.Spec.Sources {
 			if s.Provider != "" && !seen[s.Provider] {
-				seen[s.Provider] = true
 				if _, err := store.Load(s.Provider); err != nil {
 					// A source missing from the cache no longer kills startup: the
 					// server comes up with a partial index and the runtime auto-sync
@@ -84,6 +124,7 @@ func AssembleProviders(store *cache.Store, b *blueprint.Blueprint, cl *cluster.C
 					fmt.Fprintf(os.Stderr, "cf: warning: provider %q is not in the cache — continuing without it; schemas load on demand\n", s.Provider)
 					continue
 				}
+				seen[s.Provider] = true
 				refs = append(refs, s.Provider)
 			}
 		}
@@ -98,12 +139,11 @@ func AssembleProviders(store *cache.Store, b *blueprint.Blueprint, cl *cluster.C
 		}
 	}
 
-	// If cluster client is provided, load or sync live cluster CRDs
+	// If cluster client is provided, ensure cluster.ProviderLabel is included
 	if cl != nil {
 		if syncClusterNow {
-			if clusterCRDs, err := cl.FetchCRDs(context.Background()); err == nil && len(clusterCRDs) > 0 {
-				_ = store.SaveCRDs(cluster.ProviderLabel, cl.Context(), clusterCRDs)
-				if !seen[cluster.ProviderLabel] {
+			if !seen[cluster.ProviderLabel] {
+				if _, err := store.Load(cluster.ProviderLabel); err == nil {
 					seen[cluster.ProviderLabel] = true
 					refs = append(refs, cluster.ProviderLabel)
 				}
