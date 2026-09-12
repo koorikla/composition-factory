@@ -125,7 +125,7 @@ func TestStatusWireIntoStringFieldQuotingAcrossEngines(t *testing.T) {
 			t.Fatalf("Composition(python): %v", err)
 		}
 		s := string(out)
-		wantCast := `str(ocds.get("main-queue", {}).get("resource", {}).get("status", {}).get("atProvider", {}).get("url"))`
+		wantCast := `str(_get(ocds, "main-queue", "resource", "status", "atProvider", "url"))`
 		if !strings.Contains(s, wantCast) {
 			t.Errorf("Python expected status wire cast with %q, got:\n%s", wantCast, s)
 		}
