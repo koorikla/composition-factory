@@ -114,6 +114,7 @@ xr: {{ .xr | quote }}
 {{- $spec := .observed.composite.resource.spec -}}
 {{- $xr := .observed.composite.resource.metadata.name -}}
 {{- $xrMeta := .observed.composite.resource.metadata -}}
+{{- $env := dict -}}
 ---
 apiVersion: sqs.aws.m.upbound.io/v1beta1
 kind: Queue
@@ -122,9 +123,9 @@ metadata:
     {{ setResourceNameAnnotation "queue-a" }}
 spec:
   forProvider:
-    name: {{ include "cf.name" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-a" "field" "name") | trim | nindent 6 }}
+    name: {{ include "cf.name" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-a" "field" "name" "env" $env) | trim | nindent 6 }}
     region: 'eu-north-1'
-    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-a" "field" "tags") | trim | nindent 6 }}
+    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-a" "field" "tags" "env" $env) | trim | nindent 6 }}
   providerConfigRef:
     kind: ClusterProviderConfig
     name: {{ $spec.providerName }}
@@ -138,7 +139,7 @@ spec:
   forProvider:
     name: 'custom-b'
     region: 'eu-north-1'
-    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-b" "field" "tags") | trim | nindent 6 }}
+    tags: {{ include "cf.tags" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-b" "field" "tags" "env" $env) | trim | nindent 6 }}
   providerConfigRef:
     kind: ClusterProviderConfig
     name: {{ $spec.providerName }}
@@ -656,7 +657,99 @@ func TestCF176ConventionExplicitNestedOverrideOnManagedKindAllowed(t *testing.T)
 		t.Fatalf("Composition: %v, want explicit endpoint.hostname to override the convention", err)
 	}
 	doc := string(comp)
-	if strings.Contains(doc, `include "cf.name" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-a" "field" "endpoint.hostname")`) {
+	if strings.Contains(doc, `include "cf.name" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue-a" "field" "endpoint.hostname" "env" $env)`) {
 		t.Error("convention template call leaked into endpoint.hostname")
+	}
+}
+
+// CF-431: templateCallRHS must pass "env" $env into the include dict so named
+// templates dereferencing .env.<key> execute cleanly under missingkey=error.
+func TestCF431TemplateEnvContextAccess(t *testing.T) {
+	crds := conventionCRDs(t)
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "test-template-env"},
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{
+				{Provider: "sqs.aws.m.upbound.io"},
+			},
+			XRD: blueprint.XRD{
+				Group:   "test.org",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+			Environment: map[string]blueprint.EnvironmentKey{
+				"region": {Type: "string", Default: "us-east-1"},
+			},
+			Templates: map[string]string{
+				"cf.tags": "region: {{ .env.region }}",
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "queue",
+					Kind:     "Queue",
+					Provider: "sqs.aws.m.upbound.io",
+					Fields: map[string]blueprint.Field{
+						"region": {Value: "us-east-1"},
+						"tags":   {Template: "cf.tags"},
+					},
+				},
+			},
+		},
+	}
+
+	got, err := Composition(bp, crds)
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	var parsed map[string]any
+	if err := yaml.Unmarshal(got, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	var tmpl string
+	steps, _ := dig(t, parsed, "spec", "pipeline").([]any)
+	for _, s := range steps {
+		step, _ := s.(map[string]any)
+		if step["step"] == blueprint.TemplatingStepName {
+			tmpl, _ = dig(t, step, "input", "inline", "template").(string)
+		}
+	}
+	if tmpl == "" {
+		t.Fatalf("templating step not found in pipeline")
+	}
+	wantCall := `include "cf.tags" (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" "queue" "field" "tags" "env" $env)`
+	if !strings.Contains(tmpl, wantCall) {
+		t.Errorf("emitted template missing include with env dict %q\n---\n%s", wantCall, tmpl)
+	}
+
+	data := map[string]any{
+		"observed": map[string]any{
+			"composite": map[string]any{
+				"resource": map[string]any{
+					"metadata": map[string]any{"name": "test-xr"},
+					"spec":     map[string]any{"providerName": "default"},
+				},
+			},
+		},
+		"context": map[string]any{
+			"apiextensions.crossplane.io/environment": map[string]any{
+				"region": "us-east-1",
+			},
+		},
+	}
+
+	rendered, err := renderTemplateData(t, tmpl, data)
+	if err != nil {
+		t.Fatalf("renderTemplateData failed: %v\n---\n%s", err, tmpl)
+	}
+
+	if !strings.Contains(rendered, "region: us-east-1") {
+		t.Errorf("rendered output missing region from .env.region:\n%s", rendered)
 	}
 }

@@ -459,3 +459,69 @@ func TestPreviewExpression_OptionalObjectProperties(t *testing.T) {
 		t.Errorf("PreviewExpression got %q, want %q", got4, want4)
 	}
 }
+
+// CF-431: PreviewExpression must make env available to named templates dereferencing .env.<key>
+// under missingkey=error.
+func TestCF431PreviewExpression_TemplateEnvAccess(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "test-template-env"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "test.org",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+			Environment: map[string]blueprint.EnvironmentKey{
+				"region": {Type: "string", Default: "us-west-2"},
+			},
+			Templates: map[string]string{
+				"cf.tags": "region: {{ .env.region }}",
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "queue",
+					Kind:     "Queue",
+					Provider: "aws",
+					Fields: map[string]blueprint.Field{
+						"tags": {Template: "cf.tags"},
+					},
+				},
+			},
+		},
+	}
+
+	// 1. Calling via templateCallRHS expression (as emitted by cf gen)
+	expr := templateCallRHS("cf.tags", "queue", "tags")
+	got, err := PreviewExpression(bp, "queue", expr)
+	if err != nil {
+		t.Fatalf("PreviewExpression with templateCallRHS failed: %v", err)
+	}
+	if !strings.Contains(got, "region: us-west-2") {
+		t.Errorf("PreviewExpression got %q, want containing 'region: us-west-2'", got)
+	}
+
+	// 2. Direct include call with dot context
+	gotDot, err := PreviewExpression(bp, "queue", `{{ include "cf.tags" . }}`)
+	if err != nil {
+		t.Fatalf("PreviewExpression with dot include failed: %v", err)
+	}
+	if !strings.Contains(gotDot, "region: us-west-2") {
+		t.Errorf("PreviewExpression with dot got %q, want containing 'region: us-west-2'", gotDot)
+	}
+
+	// 3. Direct include call with partial dict
+	gotDict, err := PreviewExpression(bp, "queue", `{{ include "cf.tags" (dict "spec" $spec) }}`)
+	if err != nil {
+		t.Fatalf("PreviewExpression with partial dict include failed: %v", err)
+	}
+	if !strings.Contains(gotDict, "region: us-west-2") {
+		t.Errorf("PreviewExpression with partial dict got %q, want containing 'region: us-west-2'", gotDict)
+	}
+}

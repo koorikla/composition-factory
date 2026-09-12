@@ -209,6 +209,8 @@ func writeTemplatePreamble(d *Doc, ti int, b *blueprint.Blueprint) {
 	d.Line(ti, "{{- $xrMeta := .observed.composite.resource.metadata -}}")
 	if len(b.Spec.Environment) > 0 {
 		d.Line(ti, `{{- $env := index .context "apiextensions.crossplane.io/environment" | default dict -}}`)
+	} else if len(b.Spec.Templates) > 0 || len(b.Spec.Conventions) > 0 {
+		d.Line(ti, "{{- $env := dict -}}")
 	}
 }
 
@@ -568,13 +570,14 @@ const templateFieldNindent = 6
 
 // templateCallRHS renders a field's template: <name> as an include call with
 // the documented minimal context — .spec (the composite's spec), .xr (its
-// metadata.name), .resource (the composed resource's name) and .field (the
-// field path being set). trim strips the define block's own leading/trailing
-// newlines so nindent's re-indentation is exact for scalars and blocks
-// alike. resource is a validated DNS label and field a schema-checked path,
-// so the %q interpolations are exact.
+// metadata.name), .resource (the composed resource's name), .field (the
+// field path being set) and .env ($env, from composition context or empty dict).
+// trim strips the define block's own leading/trailing newlines so nindent's
+// re-indentation is exact for scalars and blocks alike. resource is a
+// validated DNS label and field a schema-checked path, so the %q
+// interpolations are exact.
 func templateCallRHS(name, resource, field string) string {
-	return fmt.Sprintf(`{{ include %q (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" %q "field" %q) | trim | nindent %d }}`,
+	return fmt.Sprintf(`{{ include %q (dict "spec" $spec "xr" $xr "xrMeta" $xrMeta "observed" $.observed "resource" %q "field" %q "env" $env) | trim | nindent %d }}`,
 		name, resource, field, templateFieldNindent)
 }
 

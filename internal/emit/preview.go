@@ -144,6 +144,7 @@ func PreviewExpressionContext(ctx context.Context, b *blueprint.Blueprint, resou
 		"context": map[string]any{
 			"apiextensions.crossplane.io/environment": envMap,
 		},
+		"env":      envMap,
 		"spec":     xrSpec,
 		"xr":       xrName,
 		"xrMeta":   xrMeta,
@@ -424,6 +425,13 @@ func PreviewExpressionContext(ctx context.Context, b *blueprint.Blueprint, resou
 		}
 		includeDepth++
 		defer func() { includeDepth-- }()
+		if data == nil {
+			data = map[string]any{"env": envMap}
+		} else if m, ok := data.(map[string]any); ok {
+			if _, hasEnv := m["env"]; !hasEnv {
+				m["env"] = envMap
+			}
+		}
 		var buf boundedWriter
 		buf.max = maxOutputSize
 		err := tmpl.ExecuteTemplate(&buf, name, data)
