@@ -643,6 +643,12 @@ export function paramFrom(existing, patch) {
     properties: (existing && existing.properties) || null,
   };
   Object.keys(patch).forEach(function (k) { p[k] = patch[k]; });
+  if (p.type === "object") {
+    p.enum = null;
+    p.default = "";
+  } else {
+    p.properties = null;
+  }
   return p;
 }
 

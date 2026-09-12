@@ -55,3 +55,27 @@ test('an object parameter persists and offers itself for map fields', async ({ p
   const options = await pick.locator('option').allTextContents()
   expect(options.join(',')).toContain('labels')
 })
+
+test('switching a parameter with enum and default to object clears them and persists without error (CF-394, #285)', async ({ page, request }) => {
+  await page.goto('/')
+  await page.click('.node[data-id="xrd"] .node-h')
+  await page.click('#addParamBtn')
+  const row = page.locator('#insp .fld', { has: page.locator('input[data-pn="newParam"]') })
+  await row.locator('input[data-pdef]').fill('choiceA')
+  await row.locator('input[data-pdef]').press('Tab')
+  await row.locator('input[data-pe]').fill('choiceA,choiceB')
+  await row.locator('input[data-pe]').press('Tab')
+
+  await row.locator('select[data-pt]').selectOption('object')
+
+  await expect(page.locator('.banner.err, #error-banner')).toHaveCount(0)
+
+  await expect.poll(async () => {
+    const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
+    return doc.spec.xrd.parameters.newParam
+  }).toMatchObject({ type: 'object' })
+
+  const doc = await (await request.get(ENGINE + '/api/blueprint')).json()
+  expect(doc.spec.xrd.parameters.newParam.enum).toBeUndefined()
+  expect(doc.spec.xrd.parameters.newParam.default).toBeUndefined()
+})
