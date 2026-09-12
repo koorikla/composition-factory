@@ -309,10 +309,35 @@ export function isRawParamRef(raw, pn) {
   const escaped = pn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const reDotted = new RegExp("(?:\\$spec|\\.spec|\\$params|\\.params|params|parameters)\\." + escaped + "(?:$|[^a-zA-Z0-9_])");
   if (reDotted.test(raw)) return true;
-  const reIndex = new RegExp("\\bindex\\s+(?:(?:\\$|\\$\\.|\\.)?observed\\.composite\\.resource\\.spec|(?:\\$|\\$\\.|\\.)spec|(?:\\$|\\$\\.|\\.)?params)\\s+(?:\"" + escaped + "\"|'" + escaped + "'|`" + escaped + "`)(?:$|[^a-zA-Z0-9_])");
+  const specRoot = "(?:(?:\\$|\\$\\.|\\.)?observed\\.composite\\.resource\\.spec|(?:\\$|\\$\\.|\\.)spec|(?:\\$|\\$\\.|\\.)?params|parameters)";
+  const quote = (s) => "(?:\"" + s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\"|'" + s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "'|`" + s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "`)";
+
+  const reIndex = new RegExp("\\bindex\\s+" + specRoot + "\\s+" + quote(pn) + "(?:$|[^a-zA-Z0-9_])");
   if (reIndex.test(raw)) return true;
-  const reHasKey = new RegExp("\\bhasKey\\s+(?:(?:\\$|\\$\\.|\\.)?observed\\.composite\\.resource\\.spec|(?:\\$|\\$\\.|\\.)spec|(?:\\$|\\$\\.|\\.)?params)\\s+(?:\"" + escaped + "\"|'" + escaped + "'|`" + escaped + "`)(?:$|[^a-zA-Z0-9_])");
-  return reHasKey.test(raw);
+  const reHasKey = new RegExp("\\bhasKey\\s+" + specRoot + "\\s+" + quote(pn) + "(?:$|[^a-zA-Z0-9_])");
+  if (reHasKey.test(raw)) return true;
+
+  if (pn.includes(".")) {
+    const parts = pn.split(".");
+    // Pattern A: .spec "param" "member"...
+    const quotedAll = parts.map(quote).join("\\s+");
+    const reIndexQuotedAll = new RegExp("\\bindex\\s+" + specRoot + "\\s+" + quotedAll + "(?:$|[^a-zA-Z0-9_])");
+    if (reIndexQuotedAll.test(raw)) return true;
+    const reHasKeyQuotedAll = new RegExp("\\bhasKey\\s+" + specRoot + "\\s+" + quotedAll + "(?:$|[^a-zA-Z0-9_])");
+    if (reHasKeyQuotedAll.test(raw)) return true;
+
+    // Pattern B: $spec.param "member"... (for any split point)
+    for (let i = 1; i < parts.length; i++) {
+      const dotted = parts.slice(0, i).join(".").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const quotedRest = parts.slice(i).map(quote).join("\\s+");
+      const reIndexDotted = new RegExp("\\bindex\\s+" + specRoot + "\\." + dotted + "\\s+" + quotedRest + "(?:$|[^a-zA-Z0-9_])");
+      if (reIndexDotted.test(raw)) return true;
+      const reHasKeyDotted = new RegExp("\\bhasKey\\s+" + specRoot + "\\." + dotted + "\\s+" + quotedRest + "(?:$|[^a-zA-Z0-9_])");
+      if (reHasKeyDotted.test(raw)) return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -337,6 +362,41 @@ export function extractRawParams(raw, declaredParams) {
   while ((m = rawParamRegex.exec(raw)) !== null) {
     seen.add(m[1]);
   }
+
+  const specRoot = "(?:(?:\\$|\\$\\.|\\.)?observed\\.composite\\.resource\\.spec|(?:\\$|\\$\\.|\\.)spec|(?:\\$|\\$\\.|\\.)?params|parameters)";
+  // Form 1: index/hasKey $spec.cfg "region" ...
+  const reDottedFn = new RegExp("(?:\\bindex|\\bhasKey)\\s+" + specRoot + "\\.([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)*)\\s*([\"'`][^\"'`]+[\"'`].*)?", "g");
+  while ((m = reDottedFn.exec(raw)) !== null) {
+    const base = m[1];
+    const rest = m[2] || "";
+    const memberRegex = /^\s*["'`]([a-zA-Z0-9_]+)["'`]/;
+    let curRest = rest;
+    let full = base;
+    let mm;
+    while ((mm = memberRegex.exec(curRest)) !== null) {
+      full += "." + mm[1];
+      curRest = curRest.slice(mm[0].length);
+    }
+    seen.add(full);
+  }
+
+  // Form 2: index/hasKey .spec "cfg" "region" ...
+  const reQuotedFn = new RegExp("(?:\\bindex|\\bhasKey)\\s+" + specRoot + "(\\s+[\"'`][^\"'`]+[\"'`].*)", "g");
+  while ((m = reQuotedFn.exec(raw)) !== null) {
+    const rest = m[1];
+    const memberRegex = /^\s*["'`]([a-zA-Z0-9_]+)["'`]/;
+    let curRest = rest;
+    const parts = [];
+    let mm;
+    while ((mm = memberRegex.exec(curRest)) !== null) {
+      parts.push(mm[1]);
+      curRest = curRest.slice(mm[0].length);
+    }
+    if (parts.length > 0) {
+      seen.add(parts.join("."));
+    }
+  }
+
   const result = [];
   for (const p of seen) {
     const hasMoreSpecific = Array.from(seen).some(function (other) {
@@ -384,7 +444,21 @@ export function fanOutMap(doc) {
     }
   }
 
-  const declaredParams = Object.keys((doc.spec && doc.spec.xrd && doc.spec.xrd.parameters) || {});
+  const declaredParams = [];
+  function collectDeclaredParams(params, prefix) {
+    if (!params || typeof params !== "object") return;
+    const keys = Object.keys(params);
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      const full = prefix ? prefix + "." + k : k;
+      declaredParams.push(full);
+      const val = params[k];
+      if (val && typeof val === "object" && val.properties && typeof val.properties === "object") {
+        collectDeclaredParams(val.properties, full);
+      }
+    }
+  }
+  collectDeclaredParams((doc.spec && doc.spec.xrd && doc.spec.xrd.parameters) || {}, "");
 
   const checkRawDict = function (dict) {
     if (!dict || typeof dict !== "object") return;

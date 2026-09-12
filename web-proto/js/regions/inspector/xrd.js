@@ -182,9 +182,7 @@ export function cleanMemberRefs(draft, paramName, memberPath) {
         deletedTemplates.push(tName);
       }
     });
-    if (Object.keys(draft.spec.templates).length === 0) {
-      delete draft.spec.templates;
-    }
+
     if (deletedTemplates.length > 0 && Array.isArray(draft.spec.conventions)) {
       draft.spec.conventions = draft.spec.conventions.filter(function (c) {
         return c && deletedTemplates.indexOf(c.template) === -1;
@@ -257,7 +255,62 @@ export function rewriteRawParam(raw, from, to) {
   if (!raw || typeof raw !== "string" || !from || !to || from === to) return raw;
   var escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   var re = new RegExp("((?:\\$spec|\\.spec|\\$params|\\.params|params|parameters)\\.)" + escaped + "($|[^a-zA-Z0-9_])", "g");
-  return raw.replace(re, "$1" + to + "$2");
+  var out = raw.replace(re, "$1" + to + "$2");
+
+  var specRoot = "(?:(?:\\$|\\$\\.|\\.)?observed\\.composite\\.resource\\.spec|(?:\\$|\\$\\.|\\.)spec|(?:\\$|\\$\\.|\\.)?params|parameters)";
+  var fromParts = from.split(".");
+  var toParts = to.split(".");
+
+  if (fromParts.length === 1 && toParts.length === 1) {
+    var reQuotedSingle = new RegExp("(\\b(?:index|hasKey)\\s+" + specRoot + "\\s+)([\"'`])" + escaped + "[\"'`]", "g");
+    out = out.replace(reQuotedSingle, "$1$2" + to + "$2");
+  } else if (fromParts.length > 1 && toParts.length > 1) {
+    for (var i = 1; i < fromParts.length; i++) {
+      var oldPrefix = fromParts.slice(0, i).join(".");
+      var newPrefix = toParts.slice(0, i).join(".");
+      var oldRest = fromParts.slice(i);
+      var newRest = toParts.slice(i);
+
+      var escPrefix = oldPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      var restPattern = oldRest.map(function (s) {
+        return "(\\s+)([\"'`])" + s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "[\"'`]";
+      }).join("");
+
+      (function (nP, nR, rPat) {
+        var reDottedRest = new RegExp("(\\b(?:index|hasKey)\\s+" + specRoot + "\\.)" + escPrefix + rPat, "g");
+        out = out.replace(reDottedRest, function () {
+          var args = arguments;
+          var res = args[1] + nP;
+          for (var j = 0; j < nR.length; j++) {
+            var ws = args[2 + j * 2];
+            var q = args[3 + j * 2];
+            res += ws + q + nR[j] + q;
+          }
+          return res;
+        });
+      })(newPrefix, newRest, restPattern);
+    }
+
+    var allRestPattern = fromParts.map(function (s) {
+      return "(\\s+)([\"'`])" + s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "[\"'`]";
+    }).join("");
+
+    (function (nR, rPat) {
+      var reAllQuoted = new RegExp("(\\b(?:index|hasKey)\\s+" + specRoot + ")" + rPat, "g");
+      out = out.replace(reAllQuoted, function () {
+        var args = arguments;
+        var res = args[1];
+        for (var j = 0; j < nR.length; j++) {
+          var ws = args[2 + j * 2];
+          var q = args[3 + j * 2];
+          res += ws + q + nR[j] + q;
+        }
+        return res;
+      });
+    })(toParts, allRestPattern);
+  }
+
+  return out;
 }
 
 export function renameMemberRefs(draft, paramName, oldMemberPath, newMemberPath) {
