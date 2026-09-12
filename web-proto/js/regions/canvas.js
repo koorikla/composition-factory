@@ -51,6 +51,7 @@ const schemaCache = new Map();  // "apiVersion|kind" -> {byPath:Object, required
 const schemaLoading = new Set();
 let inited = false;
 let rafWires = 0;
+let needsFit = true;
 
 /* ---------- small helpers ---------- */
 
@@ -707,6 +708,12 @@ function render() {
     const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(n) + '"]');
     if (el) applyCardSize(el, n);
   });
+  if (needsFit && (d.spec && d.spec.resources && d.spec.resources.length > 0)) {
+    fitNodesToView(true);
+    if (schemaLoading.size === 0) {
+      needsFit = false;
+    }
+  }
   drawWires();
   // one extra pass after layout/fonts settle
   scheduleWires();
@@ -870,7 +877,10 @@ function drawWires() {
 
 function scheduleWires() {
   if (rafWires) return;
-  rafWires = requestAnimationFrame(function () { rafWires = 0; drawWires(); });
+  rafWires = requestAnimationFrame(function () {
+    rafWires = 0;
+    drawWires();
+  });
 }
 
 /* ---------- view transform: pan + zoom (slice 6) ---------- */
@@ -907,6 +917,7 @@ function zoomAt(sx, sy, factor) {
 
 function onWheel(e) {
   if (e.target.closest("#region-output")) return;
+  needsFit = false;
   e.preventDefault();
   const rect = cwEl.getBoundingClientRect();
   if (e.shiftKey) {
@@ -927,6 +938,7 @@ function onPanDown(e) {
   // drag on empty canvas ground pans the view
   if (e.button !== 0) return;
   if (e.target.closest(".node") || e.target.closest("button") || e.target.closest("svg path")) return;
+  needsFit = false;
   const sx = e.clientX, sy = e.clientY, ox = view.x, oy = view.y;
   const abortDrag = startDrag(e, function mv(ev) {
     if (!ev.buttons) { abortDrag(); return; } // release happened while unfocused
@@ -939,12 +951,12 @@ function onPanDown(e) {
   gestureBegin(abortDrag);
 }
 
-function fitNodesToView() {
+function fitNodesToView(preserveZoom) {
   const nodes = Array.from(canvasEl ? canvasEl.querySelectorAll(".node") : []);
   if (!nodes.length || !cwEl) {
     view.x = 0; view.y = 0; view.k = 1;
     applyView();
-    return;
+    return false;
   }
   const cwRect = cwEl.getBoundingClientRect();
   const vw = cwRect.width;
@@ -952,7 +964,7 @@ function fitNodesToView() {
   if (vw <= 0 || vh <= 0) {
     view.x = 0; view.y = 0; view.k = 1;
     applyView();
-    return;
+    return false;
   }
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -970,22 +982,29 @@ function fitNodesToView() {
 
   const cardsWidth = maxX - minX;
   const cardsHeight = maxY - minY;
-  const padding = 40;
-  const availW = Math.max(10, vw - padding * 2);
-  const availH = Math.max(10, vh - padding * 2);
-
-  const scaleX = availW / (cardsWidth || 1);
-  const scaleY = availH / (cardsHeight || 1);
-  const minK = Math.min(K_MIN, 0.2);
-  const k = Math.min(1, Math.max(minK, Math.min(scaleX, scaleY)));
-
   const cx = minX + cardsWidth / 2;
   const cy = minY + cardsHeight / 2;
 
-  view.k = k;
-  view.x = (vw / 2) - cx * k;
-  view.y = (vh / 2) - cy * k;
+  if (preserveZoom) {
+    view.k = 1;
+    view.x = Math.max(16, Math.min(50, Math.round((vw / 2) - cx)));
+    view.y = Math.max(16, Math.min(40, Math.round((vh / 2) - cy)));
+  } else {
+    const padding = 40;
+    const availW = Math.max(10, vw - padding * 2);
+    const availH = Math.max(10, vh - padding * 2);
+
+    const scaleX = availW / (cardsWidth || 1);
+    const scaleY = availH / (cardsHeight || 1);
+    const minK = Math.min(K_MIN, 0.2);
+    const k = Math.min(1, Math.max(minK, Math.min(scaleX, scaleY)));
+
+    view.k = k;
+    view.x = (vw / 2) - cx * k;
+    view.y = (vh / 2) - cy * k;
+  }
   applyView();
+  return true;
 }
 
 function buildZoomControls() {
@@ -1002,7 +1021,7 @@ function buildZoomControls() {
   const rect = function () { const r = cwEl.getBoundingClientRect(); return { x: r.width / 2, y: r.height / 2 }; };
   bar.querySelector("#zoom-in").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1.2); });
   bar.querySelector("#zoom-out").addEventListener("click", function () { const c = rect(); zoomAt(c.x, c.y, 1 / 1.2); });
-  bar.querySelector("#zoom-reset").addEventListener("click", fitNodesToView);
+  bar.querySelector("#zoom-reset").addEventListener("click", function () { fitNodesToView(false); });
   bar.querySelector("#layout-btn").addEventListener("click", function () {
     if (typeof S.clearPositions === "function") {
       S.clearPositions();
@@ -1177,7 +1196,8 @@ function onContextMenu(e) {
     return;
   }
 
-  const n = e.target.closest(".node");
+  const h = e.target.closest(".node-h");
+  const n = h ? h.closest(".node") : null;
   if (!n || n.getAttribute("data-id") === XR_ID || n.getAttribute("data-id") === ENV_ID) return; // native browser menu elsewhere
   e.preventDefault();
   const name = n.getAttribute("data-id");
@@ -1233,6 +1253,7 @@ export {
   findDownstreamRefs,
   cleanDownstreamRefs,
   removeResource,
+  fitNodesToView,
 };
 
 function removeResource(name) {
@@ -1522,6 +1543,7 @@ function onPointerDown(e) {
 
   const h = e.target.closest(".node-h");
   if (!h) return;
+  needsFit = false;
   const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(name) + '"]');
   if (!el) return;
   const start = S.getPosition(name) || { x: el.offsetLeft, y: el.offsetTop };
@@ -1541,11 +1563,8 @@ function onPointerDown(e) {
   }
   function mv(ev) {
     if (!ev.buttons) { onUp(); return; } // release happened while unfocused
-    const bounds = getVisibleCanvasBounds();
-    const cardW = el.offsetWidth || 220;
-    const maxX = Math.max(4, bounds.canvasMaxX - cardW - 16);
-    lx = Math.max(4, Math.min(maxX, start.x + (ev.clientX - sx) / view.k));
-    ly = Math.max(4, start.y + (ev.clientY - sy) / view.k);
+    lx = start.x + (ev.clientX - sx) / view.k;
+    ly = start.y + (ev.clientY - sy) / view.k;
     el.style.left = lx + "px";
     el.style.top = ly + "px";
     scheduleWires();
@@ -1830,6 +1849,15 @@ export function init(rootEl, deps) {
   wiresEl = cwEl.querySelector("#wires") || document.getElementById("wires");
   canvasEl = cwEl.querySelector("#canvas") || document.getElementById("canvas");
 
+  needsFit = true;
+  if (S && typeof S._restorePositions === "function") {
+    const origRestore = S._restorePositions.bind(S);
+    S._restorePositions = function (docObj) {
+      needsFit = true;
+      return origRestore(docObj);
+    };
+  }
+
   initDragToWire({
     store: S,
     api: A,
@@ -1949,8 +1977,14 @@ export function init(rootEl, deps) {
   // a cascade of async renders — full DOM rebuilds that ate the user's next
   // clicks once several providers were loaded.
   let lastSourcesSig = "";
+  let lastDocName = null;
   S.subscribe("doc", function () {
     const d = doc();
+    const docName = (d && d.metadata && d.metadata.name) || null;
+    if (lastDocName !== null && docName !== lastDocName) {
+      needsFit = true;
+    }
+    lastDocName = docName;
     if (selectedWire) {
       const ws = listWires(d);
       const exists = ws.some(function (w) { return wireKey(w) === wireKey(selectedWire); });

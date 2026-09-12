@@ -3,7 +3,7 @@
 // status output ports on its card; whatever the canvas offers as a wire source must
 // be a source the engine will accept.
 const { test, expect } = require('@playwright/test');
-const { resetDoc, ENGINE, guardPageErrors, dropKind, canvasSettled, clickWire } = require('./helpers');
+const { resetDoc, ENGINE, guardPageErrors, dropKind, canvasSettled, clickWire, settledBox } = require('./helpers');
 
 test.describe('CF-417 — Native kinds render no status.atProvider.id output port', () => {
   guardPageErrors();
@@ -359,3 +359,58 @@ test.describe('CF-397 — Canvas drops wires for when conditional guards referen
     await expect(page.locator('svg.wires path.wire-path[title*="when"]')).toHaveCount(0);
   });
 });
+
+test.describe('CF-440 — Canvas clamps manual card drags at x>=4 and y>=4 and starts uncentered in top-left corner', () => {
+  guardPageErrors();
+
+  test.beforeEach(async ({ request }) => {
+    await resetDoc(request);
+  });
+
+  test('initial load of blueprint with resources centers the node cluster within the viewport', async ({ page }) => {
+    await page.goto('/');
+    await canvasSettled(page);
+
+    const transform = await page.evaluate(() => {
+      const el = document.getElementById('canvas');
+      const t = el.style.transform || getComputedStyle(el).transform;
+      if (!t || t === 'none') return { x: 0, y: 0, scale: 1 };
+      const m = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+      return { x: m.e, y: m.f, scale: m.a };
+    });
+
+    expect(transform.x).not.toBe(0);
+    expect(transform.y).not.toBe(0);
+  });
+
+  test('card dragged by (-100, -100) updates its position style to negative coordinates and persists in store', async ({ page }) => {
+    await page.goto('/');
+    await canvasSettled(page);
+
+    const card = page.locator('.node[data-id="xrd"]');
+    await expect(card).toBeVisible();
+    const header = card.locator('.node-h');
+    const box = await settledBox(header);
+    expect(box).not.toBeNull();
+
+    const startX = box.x + box.width / 2;
+    const startY = box.y + box.height / 2;
+
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX - 100, startY - 100, { steps: 5 });
+    await page.mouse.up();
+    await canvasSettled(page);
+
+    const left = await card.evaluate(el => parseFloat(el.style.left));
+    const top = await card.evaluate(el => parseFloat(el.style.top));
+    expect(left).toBeLessThan(0);
+    expect(top).toBeLessThan(0);
+
+    const pos = await page.evaluate(() => window.store.getPosition('xrd'));
+    expect(pos).not.toBeNull();
+    expect(pos.x).toBeLessThan(0);
+    expect(pos.y).toBeLessThan(0);
+  });
+});
+
