@@ -62,8 +62,17 @@ func (e *GenerateError) Unwrap() error {
 
 // DefaultRenderRunner is the standard execution of `crossplane composition render`.
 func DefaultRenderRunner(ctx context.Context, xr, comp, fns, xrd string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "crossplane", "composition", "render",
-		xr, comp, fns, "--xrd", xrd, "--timeout", "5m")
+	args := []string{
+		"composition", "render",
+		xr, comp, fns,
+		"--xrd", xrd,
+		"--timeout", "5m",
+	}
+	envDir := filepath.Join(filepath.Dir(xr), "environmentconfigs")
+	if info, err := os.Stat(envDir); err == nil && info.IsDir() {
+		args = append(args, "--required-resources", envDir)
+	}
+	cmd := exec.CommandContext(ctx, "crossplane", args...)
 	return cmd.CombinedOutput()
 }
 

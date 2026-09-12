@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -101,7 +103,7 @@ func testBlueprintAndCRDs(t *testing.T) (*blueprint.Blueprint, []schema.CRD) {
 	}
 
 	const crdJSON = `[{"Group":"sqs.aws.m.upbound.io","Kind":"Queue","Plural":"queues","Scope":"Namespaced","Categories":["managed"],` +
-		`"Versions":[{"Name":"v1beta1","Served":true,"Storage":true,"Properties":{"spec":{"properties":{"forProvider":{` +
+		`"Versions":[{"Name":"v1beta1","Served":true,"Storage":true,"Properties":{"spec":{"properties":{"providerConfigRef":{"type":"object","properties":{"kind":{"type":"string"},"name":{"type":"string"}}},"forProvider":{` +
 		`"required":["region"],"properties":{"region":{"type":"string"},"maxMessageSize":{"type":"integer"}}}}}}}]}]`
 
 	var crds []schema.CRD
@@ -267,5 +269,141 @@ func TestRenderCheckTimeout(t *testing.T) {
 	}
 	if !strings.Contains(res.Error, "context deadline exceeded") {
 		t.Errorf("res.Error = %q, want context deadline exceeded", res.Error)
+	}
+}
+
+func TestDefaultRenderRunnerRequiredResources(t *testing.T) {
+	tempDir := t.TempDir()
+	binDir := filepath.Join(tempDir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create mock crossplane binary that echos its arguments.
+	mockScript := filepath.Join(binDir, "crossplane")
+	scriptContent := "#!/bin/sh\necho \"$@\"\n"
+	if err := os.WriteFile(mockScript, []byte(scriptContent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+origPath)
+
+	workDir := filepath.Join(tempDir, "work")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	xrPath := filepath.Join(workDir, "xr.yaml")
+	compPath := filepath.Join(workDir, "compositions", "comp.yaml")
+	fnsPath := filepath.Join(workDir, "functions.yaml")
+	xrdPath := filepath.Join(workDir, "xrds", "xrd.yaml")
+
+	// Case 1: No environmentconfigs directory.
+	out, err := DefaultRenderRunner(context.Background(), xrPath, compPath, fnsPath, xrdPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(string(out), "--required-resources") {
+		t.Errorf("expected no --required-resources without environmentconfigs, got: %s", string(out))
+	}
+
+	// Case 2: environmentconfigs directory exists with configs.
+	envDir := filepath.Join(workDir, "environmentconfigs")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(envDir, "default.yaml"), []byte("apiVersion: apiextensions.crossplane.io/v1beta1\nkind: EnvironmentConfig\nmetadata:\n  name: default\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err = DefaultRenderRunner(context.Background(), xrPath, compPath, fnsPath, xrdPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantFlag := "--required-resources " + envDir
+	if !strings.Contains(string(out), wantFlag) {
+		t.Errorf("expected %q in runner output, got: %s", wantFlag, string(out))
+	}
+}
+
+func TestAcceptanceRenderCheckEnvironmentConfigs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("acceptance test needs Docker and crossplane CLI; skipped under -short")
+	}
+	if _, err := exec.LookPath("crossplane"); err != nil {
+		t.Skipf("crossplane CLI not found on PATH: %v", err)
+	}
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		t.Skipf("Docker daemon unavailable: %v", err)
+	}
+
+	b, crds := testBlueprintAndCRDs(t)
+	b.Spec.Environment = map[string]blueprint.EnvironmentKey{
+		"clusterRegion": {
+			Type:    "string",
+			Default: "us-west-2",
+		},
+	}
+	b.Spec.Resources[0].Fields["region"] = blueprint.Field{
+		From: "env.clusterRegion",
+	}
+
+	res, err := RenderCheck(context.Background(), b, crds, RenderOptions{})
+	if err != nil {
+		t.Fatalf("unexpected RenderCheck err: %v", err)
+	}
+	if res.Unavailable != "" {
+		t.Fatalf("unexpected RenderCheck unavailable: %s", res.Unavailable)
+	}
+	if !res.OK {
+		t.Fatalf("RenderCheck failed: %s", res.Error)
+	}
+	if res.Resources != 1 {
+		t.Errorf("res.Resources = %d, want 1", res.Resources)
+	}
+}
+
+func TestAcceptanceRenderCheckWithEnvironmentConfigs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("acceptance test needs Docker and crossplane CLI; skipped under -short")
+	}
+	if _, err := exec.LookPath("crossplane"); err != nil {
+		t.Skipf("crossplane CLI not found on PATH: %v", err)
+	}
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		t.Skipf("Docker daemon unavailable: %v", err)
+	}
+
+	b, crds := testBlueprintAndCRDs(t)
+	b.Spec.Environment = map[string]blueprint.EnvironmentKey{
+		"clusterRegion": {
+			Type:    "string",
+			Default: "us-west-2",
+		},
+	}
+	b.Spec.EnvironmentConfigs = []blueprint.EnvironmentConfig{
+		{
+			Name: "custom-env",
+			Values: map[string]string{
+				"clusterRegion": "eu-central-1",
+			},
+		},
+	}
+	b.Spec.Resources[0].Fields["region"] = blueprint.Field{
+		From: "env.clusterRegion",
+	}
+
+	res, err := RenderCheck(context.Background(), b, crds, RenderOptions{})
+	if err != nil {
+		t.Fatalf("unexpected RenderCheck err: %v", err)
+	}
+	if res.Unavailable != "" {
+		t.Fatalf("unexpected RenderCheck unavailable: %s", res.Unavailable)
+	}
+	if !res.OK {
+		t.Fatalf("RenderCheck failed: %s", res.Error)
+	}
+	if res.Resources != 1 {
+		t.Errorf("res.Resources = %d, want 1", res.Resources)
 	}
 }
