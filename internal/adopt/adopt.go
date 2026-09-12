@@ -281,8 +281,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 								if fnPkg == "" {
 									fnPkg = fnName
 								}
-								cleanVer := strings.TrimPrefix(ver, "=")
-								cleanVer = strings.TrimLeft(cleanVer, ">=<~^ ")
+								cleanVer := cleanDependencyVersion(ver)
 								if cleanVer != "" && !strings.Contains(fnPkg, ":") && !strings.Contains(fnPkg, "@") {
 									fnPkg = fnPkg + ":" + cleanVer
 								}
@@ -441,8 +440,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 					if depKind == "Provider" || (depKind == "" && pkg != "" && dep["function"] == nil) {
 						providerRef := pkg
 						if ver != "" && !strings.Contains(providerRef, ":") && !strings.Contains(providerRef, "@") {
-							cleanVer := strings.TrimPrefix(ver, "=")
-							cleanVer = strings.TrimLeft(cleanVer, ">=<~^ ")
+							cleanVer := cleanDependencyVersion(ver)
 							if cleanVer != "" {
 								providerRef = pkg + ":" + cleanVer
 							}
@@ -3964,4 +3962,40 @@ func ancestorPaths(path string) []string {
 		}
 	}
 	return out
+}
+
+// cleanDependencyVersion extracts the first concrete semver tag from a version constraint
+// (e.g. ">=v1.14.0 <v2.0.0" -> "v1.14.0", "=v0.4.0" -> "v0.4.0").
+// If no valid tag can be extracted, it returns empty string so that the package ref is not corrupted.
+func cleanDependencyVersion(ver string) string {
+	ver = strings.TrimSpace(ver)
+	if ver == "" {
+		return ""
+	}
+	fields := strings.FieldsFunc(ver, func(r rune) bool {
+		return r == ' ' || r == ',' || r == ';'
+	})
+	for _, f := range fields {
+		f = strings.TrimPrefix(f, "=")
+		f = strings.TrimLeft(f, ">=<~^ ")
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		valid := true
+		for i, r := range f {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+				continue
+			}
+			if (r == '.' || r == '-') && i > 0 {
+				continue
+			}
+			valid = false
+			break
+		}
+		if valid {
+			return f
+		}
+	}
+	return ""
 }

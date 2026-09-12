@@ -1804,3 +1804,92 @@ spec:
 		t.Errorf("XRD parameters unexpectedly included paramA from unselected XRD")
 	}
 }
+
+func TestAdoptTreeVersionRangeProducesInvalidProviderRef(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	crossplaneYaml := `apiVersion: meta.pkg.crossplane.io/v1
+kind: Configuration
+metadata:
+  name: configuration-aws-app
+spec:
+  dependsOn:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs
+      version: ">=v1.14.0 <v2.0.0"
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "crossplane.yaml"), []byte(crossplaneYaml), 0644); err != nil {
+		t.Fatalf("write crossplane.yaml: %v", err)
+	}
+
+	apisDir := filepath.Join(tmpDir, "apis", "xapp")
+	if err := os.MkdirAll(apisDir, 0755); err != nil {
+		t.Fatalf("mkdir apis: %v", err)
+	}
+
+	xrdYaml := `apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.aws.example.org
+spec:
+  group: aws.example.org
+  names:
+    kind: XApp
+    plural: xapps
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                region:
+                  type: string
+`
+	if err := os.WriteFile(filepath.Join(apisDir, "definition.yaml"), []byte(xrdYaml), 0644); err != nil {
+		t.Fatalf("write definition.yaml: %v", err)
+	}
+
+	compYaml := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.aws.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: aws.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: sqs.aws.upbound.io/v1beta1
+            kind: Queue
+            metadata:
+              name: test-queue
+            spec:
+              forProvider:
+                region: us-east-1
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "composition.yaml"), []byte(compYaml), 0644); err != nil {
+		t.Fatalf("write composition.yaml: %v", err)
+	}
+
+	bp, _, err := AdoptTree(tmpDir, Options{})
+	if err != nil {
+		t.Fatalf("AdoptTree failed: %v", err)
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Errorf("bp.Validate() failed: %v", err)
+	}
+}

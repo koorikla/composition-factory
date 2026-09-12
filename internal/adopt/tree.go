@@ -243,8 +243,7 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 						if fnPkg == "" {
 							fnPkg = fnName
 						}
-						cleanVer := strings.TrimPrefix(ver, "=")
-						cleanVer = strings.TrimLeft(cleanVer, ">=<~^ ")
+						cleanVer := cleanDependencyVersion(ver)
 						if cleanVer != "" && !strings.Contains(fnPkg, ":") && !strings.Contains(fnPkg, "@") {
 							fnPkg = fnPkg + ":" + cleanVer
 						}
@@ -260,8 +259,7 @@ func AdoptTree(dirPath string, opts Options) (*blueprint.Blueprint, *LossReport,
 					if depKind == "Provider" || (depKind == "" && pkg != "" && dep["function"] == nil) {
 						providerRef := pkg
 						if ver != "" && !strings.Contains(providerRef, ":") && !strings.Contains(providerRef, "@") {
-							cleanVer := strings.TrimPrefix(ver, "=")
-							cleanVer = strings.TrimLeft(cleanVer, ">=<~^ ")
+							cleanVer := cleanDependencyVersion(ver)
 							if cleanVer != "" {
 								providerRef = pkg + ":" + cleanVer
 							}

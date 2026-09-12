@@ -10209,3 +10209,30 @@ spec:
 		}
 	}
 }
+
+func TestCleanDependencyVersion(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"   ", ""},
+		{"*", ""},
+		{"=v1.14.0", "v1.14.0"},
+		{"v1.14.0", "v1.14.0"},
+		{">=v1.14.0 <v2.0.0", "v1.14.0"},
+		{">=v1.14.0, <v2.0.0", "v1.14.0"},
+		{">= 1.14.0, < 2.0.0", "1.14.0"},
+		{"^0.4.0", "0.4.0"},
+		{"~1.2.3", "1.2.3"},
+		{"latest", "latest"},
+		{">1.0.0; <2.0.0", "1.0.0"},
+	}
+
+	for _, tc := range cases {
+		got := cleanDependencyVersion(tc.input)
+		if got != tc.want {
+			t.Errorf("cleanDependencyVersion(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
