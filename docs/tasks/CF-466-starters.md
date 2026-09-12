@@ -7,7 +7,7 @@
 | | |
 |---|---|
 | **Severity** | P1 |
-| **Closes** | `#<issue>` — `CF-466 — Dropping a Deployment scaffolds no container and writes labels as raw JSON; starters should be valid, good-practice minimums in map-entry grammar` |
+| **Closes** | `#366` — `CF-466 — Dropping a Deployment scaffolds no container and writes labels as raw JSON; starters should be valid, good-practice minimums in map-entry grammar` |
 | **Worktree** | `.worktrees/prefill` on branch `prefill-fields` (slice 1 of the design in `docs/superpowers/specs/2026-09-12-prefilled-fields-design.md`) |
 | **May write** | `web-proto/js/profiles.js` (new), `web-proto/js/regions/canvas.js`, `web-proto/js/regions/inspector.js`, `web-proto/js/regions/inspector/events.js`, `internal/examples/k8s-app.cf.yaml`, `tests/cf466-starter-deployment.spec.js` (new), `tests/cf439-auto-scaffold-drop.spec.js` |
 | **Merges after** | nothing |
