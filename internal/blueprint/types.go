@@ -509,12 +509,25 @@ func (b *Blueprint) EffectiveEnvironmentConfigs() []EnvironmentConfig {
 			c := cfg
 			if c.Name == "" {
 				if c.Selector != nil && len(c.Selector.MatchLabels) > 0 {
+					keys := make([]string, 0, len(c.Selector.MatchLabels))
+					for k := range c.Selector.MatchLabels {
+						keys = append(keys, k)
+					}
+					sort.Strings(keys)
 					var parts []string
-					for k, v := range c.Selector.MatchLabels {
-						parts = append(parts, fmt.Sprintf("%s-%s", k, v))
+					for _, k := range keys {
+						v := c.Selector.MatchLabels[k]
+						part := sanitizeEnvConfigName(fmt.Sprintf("%s-%s", k, v))
+						if part != "" {
+							parts = append(parts, part)
+						}
 					}
 					sort.Strings(parts)
-					c.Name = strings.Join(parts, "-")
+					if len(parts) > 0 {
+						c.Name = strings.Join(parts, "-")
+					} else {
+						c.Name = ""
+					}
 				} else {
 					c.Name = "default"
 				}
@@ -527,6 +540,26 @@ func (b *Blueprint) EffectiveEnvironmentConfigs() []EnvironmentConfig {
 		return []EnvironmentConfig{{Name: "default"}}
 	}
 	return nil
+}
+
+// sanitizeEnvConfigName converts a raw label key/value string into a valid DNS label segment
+// by lowercasing, replacing non-alphanumeric characters with hyphens, collapsing consecutive
+// hyphens, and trimming leading and trailing hyphens.
+func sanitizeEnvConfigName(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+	s = b.String()
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	return strings.Trim(s, "-")
 }
 
 // EnvironmentConfigsInput returns the Input YAML for function-environment-configs.

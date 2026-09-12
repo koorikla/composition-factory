@@ -383,3 +383,54 @@ spec:
 		t.Errorf("unexpected effective names: %q, %q, %q", eff[0].Name, eff[1].Name, eff[2].Name)
 	}
 }
+
+// CF-398: Synthesized EnvironmentConfig names from matchLabels must sanitize
+// domain slashes, dots, and non-DNS characters so that effective names conform to
+// resourceNameRE (DNS label format) and do not leak slashes into Kubernetes resource
+// names or file paths.
+func TestEffectiveEnvironmentConfigs_SynthesizedName_SanitizesDomainSlashes(t *testing.T) {
+	manifest := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test-env-dns
+spec:
+  xrd:
+    group: platform.example.org
+    kind: XTest
+    plural: xtests
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+  environment:
+    stage:
+      type: string
+  environmentConfigs:
+    - selector:
+        matchLabels:
+          "environment.crossplane.io/stage": "prod"
+      data:
+        stage: "prod"
+`
+	bp, err := Load(write(t, manifest))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	eff := bp.EffectiveEnvironmentConfigs()
+	if len(eff) != 1 {
+		t.Fatalf("expected 1 effective config, got %d", len(eff))
+	}
+	wantName := "environment-crossplane-io-stage-prod"
+	if eff[0].Name != wantName {
+		t.Errorf("effective config name = %q, want %q", eff[0].Name, wantName)
+	}
+	if strings.Contains(eff[0].Name, "/") {
+		t.Errorf("effective config name %q contains slash", eff[0].Name)
+	}
+	if !resourceNameRE.MatchString(eff[0].Name) {
+		t.Errorf("effective config name %q does not match resourceNameRE", eff[0].Name)
+	}
+}

@@ -130,3 +130,59 @@ spec:
 		})
 	}
 }
+
+func TestValidateEnvironmentConfigs_RejectsInvalidEffectiveNames(t *testing.T) {
+	cases := []struct {
+		name     string
+		selector string
+		wantErr  string
+	}{
+		{
+			name: "matchLabels without alphanumeric characters",
+			selector: `selector:
+        matchLabels:
+          "---": "///"`,
+			wantErr: `spec.environmentConfigs[0]: effective config name "" is not a valid config name`,
+		},
+		{
+			name: "matchLabels sanitizing to yaml keyword",
+			selector: `selector:
+        matchLabels:
+          "_": "yes"`,
+			wantErr: `spec.environmentConfigs[0]: effective config name "yes" is not a valid config name`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  sources: []
+  xrd:
+    group: test.org
+    version: v1alpha1
+    kind: Test
+    plural: tests
+    scope: Namespaced
+  environment:
+    region:
+      type: string
+  environmentConfigs:
+    - %s
+      data:
+        region: us-east-1`, tc.selector)
+
+			_, err := Load(write(t, manifest))
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("err = %q, want containing %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}

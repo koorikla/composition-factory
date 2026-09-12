@@ -110,6 +110,9 @@ func (b *Blueprint) validateEnvironmentConfigs() error {
 			}
 		}
 		effName := effConfigs[i].Name
+		if !resourceNameRE.MatchString(effName) || yamlKeywords[strings.ToLower(effName)] {
+			return fmt.Errorf("spec.environmentConfigs[%d]: effective config name %q is not a valid config name (must be a DNS label, e.g. dev-env, and not a YAML keyword like yes/no/on/off)", i, effName)
+		}
 		if prev, ok := seenNames[effName]; ok {
 			return fmt.Errorf("spec.environmentConfigs[%d]: duplicate config name %q (previously defined at index %d)", i, effName, prev)
 		}

@@ -1,6 +1,7 @@
 package emit
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -193,5 +194,82 @@ func TestEnvironmentConfigKeywordDataKeys(t *testing.T) {
 	}
 	if _, ok := doc.Data["false"]; ok {
 		t.Errorf("data contains key 'false', indicating boolean collapse: %v", doc.Data)
+	}
+}
+
+// CF-398: When spec.environmentConfigs[].name is omitted and selector.matchLabels contains
+// domain prefixes (e.g. environment.crossplane.io/stage: prod), emit.Generate must write
+// a flat YAML file at out/environmentconfigs/<sanitized-name>.yaml and metadata.name must
+// be a valid RFC 1123 DNS subdomain without slashes.
+func TestEnvironmentConfigSynthesizedName_EmitsFlatPathAndValidName(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test-env-dns
+spec:
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2
+  xrd:
+    group: platform.example.org
+    kind: XTest
+    plural: xtests
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+  environment:
+    stage:
+      type: string
+  environmentConfigs:
+    - selector:
+        matchLabels:
+          "environment.crossplane.io/stage": "prod"
+      data:
+        stage: "prod"
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2
+      fields:
+        region: {value: "us-east-1"}
+`
+	bp, err := blueprint.Parse([]byte(bpYAML))
+	if err != nil {
+		t.Fatalf("blueprint.Parse failed: %v", err)
+	}
+
+	crds := testCRDs(t)
+	outDir := t.TempDir()
+	outputs, err := Generate(bp, crds, outDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	wantPath := filepath.ToSlash(filepath.Join(outDir, "environmentconfigs", "environment-crossplane-io-stage-prod.yaml"))
+	var envConfigOutput *Output
+	for i := range outputs {
+		p := filepath.ToSlash(outputs[i].Path)
+		if strings.Contains(p, "environment.crossplane.io") {
+			t.Errorf("output path %q leaked unflattened domain slash/subdirectory", p)
+		}
+		if p == wantPath {
+			envConfigOutput = &outputs[i]
+		}
+	}
+
+	if envConfigOutput == nil {
+		t.Fatalf("expected %s in generate outputs, got: %v", wantPath, outputs)
+	}
+
+	body := string(envConfigOutput.Body)
+	if !strings.Contains(body, "name: environment-crossplane-io-stage-prod") {
+		t.Errorf("expected metadata.name: environment-crossplane-io-stage-prod, got:\n%s", body)
+	}
+	if strings.Contains(body, "name: environment.crossplane.io") {
+		t.Errorf("expected metadata.name not to contain domain prefix, got:\n%s", body)
+	}
+	if !strings.Contains(body, "'environment.crossplane.io/stage': prod") && !strings.Contains(body, "environment.crossplane.io/stage: prod") {
+		t.Errorf("expected original label key in labels, got:\n%s", body)
 	}
 }
