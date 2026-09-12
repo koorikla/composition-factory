@@ -1,6 +1,7 @@
 package blueprint
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2079,6 +2080,127 @@ func TestValidateParameterEnumConformance(t *testing.T) {
 		})
 		if err := b.Validate(); err != nil {
 			t.Fatalf("Validate() = %v, want valid conforming enums and defaults accepted", err)
+		}
+	})
+}
+
+func TestValidateParameterNumberNaNInf(t *testing.T) {
+	// Verbatim repro from issue #259
+	b := scalarBlueprint(func(b *Blueprint) {
+		b.Spec.XRD.Parameters["ratio"] = Parameter{
+			Type:     "number",
+			Required: true,
+			Default:  "NaN",
+			Enum:     []string{"NaN", "Inf"},
+		}
+	})
+	if err := b.Validate(); err == nil {
+		t.Fatalf("Validate() succeeded, want error refusing NaN and Inf on number parameter")
+	}
+
+	for _, bad := range []string{"NaN", "Inf", "+Inf", "-Inf"} {
+		t.Run("default/"+bad, func(t *testing.T) {
+			bp := scalarBlueprint(func(b *Blueprint) {
+				b.Spec.XRD.Parameters["ratio"] = Parameter{
+					Type:     "number",
+					Required: true,
+					Default:  bad,
+				}
+			})
+			err := bp.Validate()
+			if err == nil {
+				t.Fatalf("Validate() succeeded for default %q, want error", bad)
+			}
+			wantErr := fmt.Sprintf(`spec.xrd.parameters.ratio: default %q is not a valid number (NaN and Inf are refused)`, bad)
+			if !strings.Contains(err.Error(), wantErr) {
+				t.Errorf("Validate() err = %q, want %q", err.Error(), wantErr)
+			}
+		})
+
+		t.Run("enum/"+bad, func(t *testing.T) {
+			bp := scalarBlueprint(func(b *Blueprint) {
+				b.Spec.XRD.Parameters["ratio"] = Parameter{
+					Type:     "number",
+					Required: true,
+					Enum:     []string{"1.0", bad},
+				}
+			})
+			err := bp.Validate()
+			if err == nil {
+				t.Fatalf("Validate() succeeded for enum entry %q, want error", bad)
+			}
+			wantErr := fmt.Sprintf(`spec.xrd.parameters.ratio: enum entry %q is not a valid number (NaN and Inf are refused)`, bad)
+			if !strings.Contains(err.Error(), wantErr) {
+				t.Errorf("Validate() err = %q, want %q", err.Error(), wantErr)
+			}
+		})
+
+		t.Run("nested_default/"+bad, func(t *testing.T) {
+			bp := scalarBlueprint(func(b *Blueprint) {
+				b.Spec.XRD.Parameters["settings"] = Parameter{
+					Type: "object",
+					Properties: map[string]Parameter{
+						"ratio": {
+							Type:    "number",
+							Default: bad,
+						},
+					},
+				}
+			})
+			err := bp.Validate()
+			if err == nil {
+				t.Fatalf("Validate() succeeded for nested default %q, want error", bad)
+			}
+			wantErr := fmt.Sprintf(`spec.xrd.parameters.settings.properties.ratio: default %q is not a valid number (NaN and Inf are refused)`, bad)
+			if !strings.Contains(err.Error(), wantErr) {
+				t.Errorf("Validate() err = %q, want %q", err.Error(), wantErr)
+			}
+		})
+
+		t.Run("nested_enum/"+bad, func(t *testing.T) {
+			bp := scalarBlueprint(func(b *Blueprint) {
+				b.Spec.XRD.Parameters["settings"] = Parameter{
+					Type: "object",
+					Properties: map[string]Parameter{
+						"ratio": {
+							Type: "number",
+							Enum: []string{bad},
+						},
+					},
+				}
+			})
+			err := bp.Validate()
+			if err == nil {
+				t.Fatalf("Validate() succeeded for nested enum %q, want error", bad)
+			}
+			wantErr := fmt.Sprintf(`spec.xrd.parameters.settings.properties.ratio: enum entry %q is not a valid number (NaN and Inf are refused)`, bad)
+			if !strings.Contains(err.Error(), wantErr) {
+				t.Errorf("Validate() err = %q, want %q", err.Error(), wantErr)
+			}
+		})
+	}
+
+	t.Run("valid number default and enum accepted", func(t *testing.T) {
+		bp := scalarBlueprint(func(b *Blueprint) {
+			b.Spec.XRD.Parameters["ratio"] = Parameter{
+				Type:     "number",
+				Required: true,
+				Default:  "-3.14",
+				Enum:     []string{"-3.14", "0", "42.5"},
+			}
+			b.Spec.XRD.Parameters["settings"] = Parameter{
+				Type: "object",
+				Properties: map[string]Parameter{
+					"threshold": {
+						Type:    "number",
+						Default: "0.001",
+						Enum:    []string{"0.001", "0.999"},
+					},
+				},
+			}
+		})
+		if err := bp.Validate(); err != nil {
+			t.Fatalf("Validate() = %v, want valid numbers accepted", err)
 		}
 	})
 }

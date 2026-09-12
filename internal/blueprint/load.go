@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"reflect"
 	"regexp"
@@ -202,8 +203,9 @@ func validateParameterScalars(fieldPath string, p Parameter) error {
 			}
 		case "number":
 			for _, e := range p.Enum {
-				if _, err := strconv.ParseFloat(e, 64); err != nil {
-					return fmt.Errorf("%s: enum entry %q is not a valid number", fieldPath, e)
+				val, err := strconv.ParseFloat(e, 64)
+				if err != nil || math.IsNaN(val) || math.IsInf(val, 0) {
+					return fmt.Errorf("%s: enum entry %q is not a valid number (NaN and Inf are refused)", fieldPath, e)
 				}
 			}
 		}
@@ -230,8 +232,9 @@ func validateParameterScalars(fieldPath string, p Parameter) error {
 				return fmt.Errorf("%s: default %q is not a valid integer", fieldPath, p.Default)
 			}
 		case "number":
-			if _, err := strconv.ParseFloat(p.Default, 64); err != nil {
-				return fmt.Errorf("%s: default %q is not a valid number", fieldPath, p.Default)
+			val, err := strconv.ParseFloat(p.Default, 64)
+			if err != nil || math.IsNaN(val) || math.IsInf(val, 0) {
+				return fmt.Errorf("%s: default %q is not a valid number (NaN and Inf are refused)", fieldPath, p.Default)
 			}
 		}
 		if len(p.Enum) > 0 && !slices.Contains(p.Enum, p.Default) {
