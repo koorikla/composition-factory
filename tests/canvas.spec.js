@@ -360,6 +360,40 @@ test.describe('CF-397 — Canvas drops wires for when conditional guards referen
   });
 });
 
+async function getClusterOffset(page) {
+  return page.evaluate(() => {
+    const cw = document.getElementById('cw');
+    if (!cw) return null;
+    const cwRect = cw.getBoundingClientRect();
+    const viewportCenter = {
+      x: cwRect.left + cwRect.width / 2,
+      y: cwRect.top + cwRect.height / 2,
+    };
+
+    const nodes = Array.from(document.querySelectorAll('#canvas .node'));
+    if (!nodes.length) return null;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      const r = n.getBoundingClientRect();
+      if (r.left < minX) minX = r.left;
+      if (r.top < minY) minY = r.top;
+      if (r.right > maxX) maxX = r.right;
+      if (r.bottom > maxY) maxY = r.bottom;
+    }
+
+    const clusterCenter = {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+    };
+
+    return {
+      dx: clusterCenter.x - viewportCenter.x,
+      dy: clusterCenter.y - viewportCenter.y,
+    };
+  });
+}
+
 test.describe('CF-440 — Canvas clamps manual card drags at x>=4 and y>=4 and starts uncentered in top-left corner', () => {
   guardPageErrors();
 
@@ -381,6 +415,10 @@ test.describe('CF-440 — Canvas clamps manual card drags at x>=4 and y>=4 and s
 
     expect(transform.x).not.toBe(0);
     expect(transform.y).not.toBe(0);
+
+    const offset = await getClusterOffset(page);
+    expect(offset).not.toBeNull();
+    expect(Math.abs(offset.dx)).toBeLessThanOrEqual(5);
   });
 
   test('card dragged by (-100, -100) updates its position style to negative coordinates and persists in store', async ({ page }) => {
@@ -413,4 +451,112 @@ test.describe('CF-440 — Canvas clamps manual card drags at x>=4 and y>=4 and s
     expect(pos.y).toBeLessThan(0);
   });
 });
+
+test.describe('CF-467 — Canvas initial load centers node cluster on blank blueprint without resources', () => {
+  guardPageErrors();
+
+  const blankDoc = {
+    apiVersion: 'factory.crossplane.io/v1alpha1',
+    kind: 'Blueprint',
+    metadata: { name: 'untitled' },
+    spec: {
+      sources: [],
+      xrd: {
+        group: 'platform.example.org',
+        kind: 'XApp',
+        plural: 'xapps',
+        version: 'v1alpha1',
+        scope: 'Namespaced',
+        parameters: {
+          providerName: {
+            type: 'string',
+            required: true,
+            description: 'ProviderConfig to reconcile the composed resources against.',
+          },
+        },
+      },
+      resources: [],
+    },
+  };
+
+  test('initial load of blank blueprint with no resources centers the lone XRD card within the viewport', async ({ page, request }) => {
+    await resetDoc(request, blankDoc);
+    await page.goto('/');
+    await canvasSettled(page);
+
+    const transform = await page.evaluate(() => {
+      const el = document.getElementById('canvas');
+      const t = el.style.transform || getComputedStyle(el).transform;
+      if (!t || t === 'none') return { x: 0, y: 0, scale: 1 };
+      const m = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+      return { x: m.e, y: m.f, scale: m.a };
+    });
+
+    expect(transform.x).not.toBe(0);
+    expect(transform.y).not.toBe(0);
+
+    const offset = await getClusterOffset(page);
+    expect(offset).not.toBeNull();
+    expect(Math.abs(offset.dx)).toBeLessThanOrEqual(5);
+    expect(Math.abs(offset.dy)).toBeLessThanOrEqual(5);
+  });
+
+  test('initial load of blueprint with resources that fit in viewport centers cluster horizontally and vertically', async ({ page, request }) => {
+    const doc = {
+      apiVersion: 'factory.crossplane.io/v1alpha1',
+      kind: 'Blueprint',
+      metadata: { name: 'xqueue' },
+      spec: {
+        sources: [{ provider: 'ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0' }],
+        xrd: {
+          group: 'platform.example.org',
+          kind: 'XApp',
+          plural: 'xapps',
+          version: 'v1alpha1',
+          scope: 'Namespaced',
+          parameters: {
+            providerName: { type: 'string', required: true, description: 'ProviderConfig' },
+          },
+        },
+        resources: [
+          {
+            name: 'main-queue',
+            kind: 'Queue',
+            provider: 'ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0',
+            fields: { region: { value: 'eu-north-1' } },
+          },
+          {
+            name: 'queue-policy',
+            kind: 'QueuePolicy',
+            provider: 'ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0',
+            fields: {
+              queueUrl: { from: 'resources.main-queue.status.atProvider.url' },
+              region: { value: 'eu-north-1' },
+            },
+          },
+        ],
+      },
+    };
+    await resetDoc(request, doc);
+    await page.goto('/');
+    await canvasSettled(page);
+
+    const transform = await page.evaluate(() => {
+      const el = document.getElementById('canvas');
+      const t = el.style.transform || getComputedStyle(el).transform;
+      if (!t || t === 'none') return { x: 0, y: 0, scale: 1 };
+      const m = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+      return { x: m.e, y: m.f, scale: m.a };
+    });
+
+    expect(transform.x).not.toBe(0);
+    expect(transform.y).not.toBe(0);
+
+    const offset = await getClusterOffset(page);
+    expect(offset).not.toBeNull();
+    expect(Math.abs(offset.dx)).toBeLessThanOrEqual(5);
+    expect(Math.abs(offset.dy)).toBeLessThanOrEqual(5);
+  });
+});
+
 

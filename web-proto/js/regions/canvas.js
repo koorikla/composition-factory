@@ -708,9 +708,8 @@ function render() {
     const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(n) + '"]');
     if (el) applyCardSize(el, n);
   });
-  if (needsFit && (d.spec && d.spec.resources && d.spec.resources.length > 0)) {
-    fitNodesToView(true);
-    if (schemaLoading.size === 0) {
+  if (needsFit) {
+    if (fitNodesToView(true) && schemaLoading.size === 0) {
       needsFit = false;
     }
   }
@@ -987,8 +986,8 @@ function fitNodesToView(preserveZoom) {
 
   if (preserveZoom) {
     view.k = 1;
-    view.x = Math.max(16, Math.min(50, Math.round((vw / 2) - cx)));
-    view.y = Math.max(16, Math.min(40, Math.round((vh / 2) - cy)));
+    view.x = Math.max(16 - minX, Math.round((vw / 2) - cx));
+    view.y = Math.max(16 - minY, Math.round((vh / 2) - cy));
   } else {
     const padding = 40;
     const availW = Math.max(10, vw - padding * 2);
@@ -1000,8 +999,8 @@ function fitNodesToView(preserveZoom) {
     const k = Math.min(1, Math.max(minK, Math.min(scaleX, scaleY)));
 
     view.k = k;
-    view.x = (vw / 2) - cx * k;
-    view.y = (vh / 2) - cy * k;
+    view.x = Math.round((vw / 2) - cx * k);
+    view.y = Math.round((vh / 2) - cy * k);
   }
   applyView();
   return true;
