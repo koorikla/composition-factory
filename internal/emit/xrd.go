@@ -47,7 +47,7 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 	sort.Strings(names)
 	for _, n := range names {
 		p := x.Parameters[n]
-		d.Line(7, "%s:", n)
+		d.Line(7, "%s:", formatYAMLKey(n))
 		d.Line(8, "type: %s", p.Type)
 		if p.Description != "" {
 			// User-authored free text: quote it. Unquoted, a ": " sequence is
@@ -80,7 +80,11 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 		}
 	}
 	if req := requiredParams(x); len(req) > 0 {
-		d.Line(6, "required: [%s]", strings.Join(req, ", "))
+		formatted := make([]string, len(req))
+		for i, r := range req {
+			formatted[i] = formatYAMLKey(r)
+		}
+		d.Line(6, "required: [%s]", strings.Join(formatted, ", "))
 	}
 	d.Comment("required lists only the parameters the blueprint marks Required.")
 	d.Comment("A merely-dereferenced parameter is safe unforced: the Composition")
@@ -177,7 +181,7 @@ func writeObjectMembers(d *Doc, ind int, p blueprint.Parameter) {
 		if mp.Required {
 			requiredMembers = append(requiredMembers, m)
 		}
-		d.Line(ind+1, "%s:", m)
+		d.Line(ind+1, "%s:", formatYAMLKey(m))
 		d.Line(ind+2, "type: %s", mp.Type)
 		if mp.Description != "" {
 			// Same quoting rule as a top-level description: ": " and
@@ -202,6 +206,10 @@ func writeObjectMembers(d *Doc, ind int, p blueprint.Parameter) {
 		}
 	}
 	if len(requiredMembers) > 0 {
-		d.Line(ind, "required: [%s]", strings.Join(requiredMembers, ", "))
+		formatted := make([]string, len(requiredMembers))
+		for i, r := range requiredMembers {
+			formatted[i] = formatYAMLKey(r)
+		}
+		d.Line(ind, "required: [%s]", strings.Join(formatted, ", "))
 	}
 }

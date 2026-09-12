@@ -1538,13 +1538,6 @@ func writeField(d *Doc, indent int, fld forProviderField) {
 	}
 }
 
-func formatKey(k string) string {
-	if strings.ContainsAny(k, "/: \t\n\r\"'#@{}[]") || yamlKeywords[strings.ToLower(k)] {
-		return quoteYAML(k)
-	}
-	return k
-}
-
 // resolveKind finds the CRD for r's kind, matching on (kind, provider): a
 // resource whose provider is "k8s" resolves ONLY against the vendored native
 // kinds, and every other resource resolves only against managed resources,

@@ -140,3 +140,58 @@ func TestEnvironmentConfigOmittedKeysTyping(t *testing.T) {
 		}
 	})
 }
+
+// CF-344: EnvironmentConfig data keys named with YAML 1.1 keywords (on, off, yes, no, etc.)
+// must be emitted quoted so Kubernetes YAML decoders (sigs.k8s.io/yaml) decode them as strings,
+// rather than collapsing them into booleans.
+func TestEnvironmentConfigKeywordDataKeys(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "test-app"},
+		Spec: blueprint.Spec{
+			Environment: map[string]blueprint.EnvironmentKey{
+				"on":           {Type: "string"},
+				"off":          {Type: "string"},
+				"yes":          {Type: "string"},
+				"no":           {Type: "string"},
+				"providerName": {Type: "string"},
+			},
+		},
+	}
+
+	cfg := blueprint.EnvironmentConfig{
+		Name: "dev",
+		Data: map[string]string{
+			"on":           "alpha",
+			"off":          "beta",
+			"yes":          "gamma",
+			"no":           "delta",
+			"providerName": "prod",
+		},
+	}
+
+	out, err := EnvironmentConfig(bp, cfg)
+	if err != nil {
+		t.Fatalf("EnvironmentConfig failed: %v", err)
+	}
+
+	var doc struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := yaml.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal failed: %v\n---\n%s", err, out)
+	}
+
+	for _, wantKey := range []string{"on", "off", "yes", "no", "providerName"} {
+		if _, ok := doc.Data[wantKey]; !ok {
+			t.Errorf("data missing key %q under sigs.k8s.io/yaml decoding: %v", wantKey, doc.Data)
+		}
+	}
+	if _, ok := doc.Data["true"]; ok {
+		t.Errorf("data contains key 'true', indicating boolean collapse: %v", doc.Data)
+	}
+	if _, ok := doc.Data["false"]; ok {
+		t.Errorf("data contains key 'false', indicating boolean collapse: %v", doc.Data)
+	}
+}
