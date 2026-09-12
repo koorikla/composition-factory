@@ -174,8 +174,10 @@ func ValidatePipelineInputs(b *blueprint.Blueprint, crds []schema.CRD) (warnings
 	for _, step := range b.Spec.Pipeline {
 		expectedCRD, ver, found := findFunctionCRD(step, crds)
 		if !found {
-			if step.Name == blueprint.EnvironmentConfigsStepName && step.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
-				continue
+			if step.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
+				if step.Input == "" || isStandardEnvironmentInput(step.Input) {
+					continue
+				}
 			}
 			if step.Input == "" {
 				if step.Package != "" && step.FunctionRef != "function-auto-ready" && step.Name != "auto-ready" && !isFunctionCached(step.Package, crds) {
@@ -455,4 +457,24 @@ func validateInputValue(stepName, kind, path string, val any, propSchema map[str
 		}
 	}
 	return nil
+}
+
+// isStandardEnvironmentInput reports whether input conforms to the standard
+// Crossplane function-environment-configs input contract, which cf knows
+// without requiring an explicit schema cache.
+func isStandardEnvironmentInput(input string) bool {
+	if strings.TrimSpace(input) == "" {
+		return true
+	}
+	v, err := blueprint.ParsePipelineInput(input)
+	if err != nil {
+		return false
+	}
+	apiVersion, _ := v["apiVersion"].(string)
+	kind, _ := v["kind"].(string)
+	if kind != "Input" && kind != "EnvironmentConfigs" {
+		return false
+	}
+	return strings.HasPrefix(apiVersion, "environmentconfigs.fn.crossplane.io") ||
+		strings.HasPrefix(apiVersion, "apiextensions.crossplane.io")
 }

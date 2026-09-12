@@ -696,3 +696,40 @@ func TestEffectivePipeline_OmittedPositionOnEnvironmentConfigsDefaultsBefore(t *
 		t.Errorf("expected step 1 to be 'render-resources', got %q", doc.Spec.Pipeline[1].Step)
 	}
 }
+
+func TestValidatePipelineInputs_CustomEnvironmentConfigsStepName(t *testing.T) {
+	b := &blueprint.Blueprint{
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:  "example.org",
+				Kind:   "MyXR",
+				Plural: "myxrs",
+			},
+			Pipeline: []blueprint.PipelineStep{
+				{
+					Name:        "custom-env-configs",
+					FunctionRef: blueprint.EnvironmentConfigsFunctionName,
+					Package:     blueprint.EnvironmentConfigsFunctionPackage,
+				},
+			},
+		},
+	}
+
+	warnings, err := ValidatePipelineInputs(b, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(warnings) > 0 {
+		t.Fatalf("expected 0 warnings for standard function-environment-configs without input, got %d: %v", len(warnings), warnings)
+	}
+
+	// Also verify that a custom step name with standard environment configs input produces 0 warnings.
+	b.Spec.Pipeline[0].Input = blueprint.DefaultEnvironmentConfigsInput
+	warnings, err = ValidatePipelineInputs(b, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(warnings) > 0 {
+		t.Fatalf("expected 0 warnings for standard function-environment-configs with standard input, got %d: %v", len(warnings), warnings)
+	}
+}
