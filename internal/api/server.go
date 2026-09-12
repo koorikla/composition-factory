@@ -72,6 +72,9 @@ type Options struct {
 	// sourceFetchTimeout overrides defaultSourceFetchTimeout in tests.
 	sourceFetchTimeout time.Duration
 
+	// sourceFetchRetryInterval overrides defaultSourceRetryInterval in tests.
+	sourceFetchRetryInterval time.Duration
+
 	// render and lookPath are swapped in tests so POST /api/render never
 	// execs the real crossplane CLI — the same unexported-seam pattern as
 	// fetch above. render runs `crossplane composition render` over the four
@@ -146,13 +149,19 @@ type server struct {
 	// and handleListProviders.
 	mu              sync.Mutex
 	failedSources   map[string]error
+	failedSourcesAt map[string]time.Time
 	loadingSources  map[string]chan struct{}
 	cachedProviders map[string]bool
 }
 
 // defaultSourceFetchTimeout is the maximum duration an on-demand provider fetch
-// may run before being cancelled.
-const defaultSourceFetchTimeout = 15 * time.Second
+// may run before being cancelled. CF-464 raises this to 120s to accommodate
+// large provider downloads (e.g. AWS RDS/IAM) over OCI in container environments.
+const defaultSourceFetchTimeout = 120 * time.Second
+
+// defaultSourceRetryInterval is the duration after a fetch failure before
+// subsequent requests attempt to retry downloading the provider source.
+const defaultSourceRetryInterval = 30 * time.Second
 
 // index returns the server's current index. It is a snapshot: POST
 // /api/providers or background source loading may swap in a rebuilt index at
@@ -203,6 +212,7 @@ func New(o Options) (http.Handler, error) {
 	srv := &server{
 		Options:         o,
 		failedSources:   make(map[string]error),
+		failedSourcesAt: make(map[string]time.Time),
 		loadingSources:  make(map[string]chan struct{}),
 		cachedProviders: cachedMap,
 	}
@@ -676,7 +686,41 @@ func (srv *server) sourceTimeout() time.Duration {
 	if srv.sourceFetchTimeout > 0 {
 		return srv.sourceFetchTimeout
 	}
+	if env := os.Getenv("CF_SOURCE_FETCH_TIMEOUT"); env != "" {
+		if d, err := time.ParseDuration(env); err == nil && d > 0 {
+			return d
+		}
+		if secs, err := strconv.Atoi(env); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
 	return defaultSourceFetchTimeout
+}
+
+func (srv *server) sourceRetryInterval() time.Duration {
+	if srv.sourceFetchRetryInterval > 0 {
+		return srv.sourceFetchRetryInterval
+	}
+	if env := os.Getenv("CF_SOURCE_RETRY_INTERVAL"); env != "" {
+		if d, err := time.ParseDuration(env); err == nil && d > 0 {
+			return d
+		}
+		if secs, err := strconv.Atoi(env); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return defaultSourceRetryInterval
+}
+
+func (srv *server) shouldRetrySource(ref string) bool {
+	if srv.failedSourcesAt == nil {
+		return true
+	}
+	failedAt, ok := srv.failedSourcesAt[ref]
+	if !ok {
+		return true
+	}
+	return time.Since(failedAt) >= srv.sourceRetryInterval()
 }
 
 // triggerBlueprintSourcesAsyncLocked checks for declared sources that are not yet
@@ -714,11 +758,13 @@ func (srv *server) triggerBlueprintSourcesAsyncLocked(optB ...*blueprint.Bluepri
 		if ref == "" || ref == blueprint.NativeProvider || existing[ref] {
 			continue
 		}
-		if srv.failedSources != nil && srv.failedSources[ref] != nil {
-			continue
-		}
 		if srv.loadingSources != nil && srv.loadingSources[ref] != nil {
 			continue
+		}
+		if srv.failedSources != nil && srv.failedSources[ref] != nil {
+			if !srv.shouldRetrySource(ref) {
+				continue
+			}
 		}
 
 		// Fast path: if provider schemas are already cached on disk,
@@ -727,6 +773,12 @@ func (srv *server) triggerBlueprintSourcesAsyncLocked(optB ...*blueprint.Bluepri
 			srv.Providers = append(srv.Providers, ref)
 			existing[ref] = true
 			addedCached = true
+			if srv.failedSources != nil {
+				delete(srv.failedSources, ref)
+			}
+			if srv.failedSourcesAt != nil {
+				delete(srv.failedSourcesAt, ref)
+			}
 			continue
 		}
 
@@ -749,6 +801,30 @@ func (srv *server) triggerBlueprintSourcesAsyncLocked(optB ...*blueprint.Bluepri
 	}
 }
 
+func (srv *server) fetchAndSaveSource(ctx context.Context, ref string) error {
+	if srv.fetchCtx != nil {
+		pkg, err := srv.fetchCtx(ctx, ref)
+		if err != nil {
+			return err
+		}
+		if pkg != nil {
+			crds, parseErr := schema.ParseCRDs(pkg.Docs)
+			if parseErr != nil {
+				return parseErr
+			}
+			if err := srv.Store.Save(pkg, crds); err != nil {
+				return err
+			}
+			if err := srv.Store.PinLock(srv.Lock, ref, pkg.Digest); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	_, _, err := srv.Store.FetchAndSave(ctx, srv.Lock, ref, srv.fetch)
+	return err
+}
+
 func (srv *server) fetchSourceBackground(ref string, done chan struct{}) {
 	defer close(done)
 
@@ -756,25 +832,7 @@ func (srv *server) fetchSourceBackground(ref string, done chan struct{}) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	var err error
-	if srv.fetchCtx != nil {
-		var pkg *xpkg.Package
-		pkg, err = srv.fetchCtx(ctx, ref)
-		if err == nil && pkg != nil {
-			crds, parseErr := schema.ParseCRDs(pkg.Docs)
-			if parseErr != nil {
-				err = parseErr
-			} else {
-				if saveErr := srv.Store.Save(pkg, crds); saveErr != nil {
-					err = saveErr
-				} else {
-					_ = srv.Store.PinLock(srv.Lock, ref, pkg.Digest)
-				}
-			}
-		}
-	} else {
-		_, _, err = srv.Store.FetchAndSave(ctx, srv.Lock, ref, srv.fetch)
-	}
+	err := srv.fetchAndSaveSource(ctx, ref)
 
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
@@ -786,6 +844,10 @@ func (srv *server) fetchSourceBackground(ref string, done chan struct{}) {
 			srv.failedSources = make(map[string]error)
 		}
 		srv.failedSources[ref] = err
+		if srv.failedSourcesAt == nil {
+			srv.failedSourcesAt = make(map[string]time.Time)
+		}
+		srv.failedSourcesAt[ref] = time.Now()
 		fmt.Fprintf(os.Stderr, "cf: warning: unable to fetch source %q: %v — continuing offline\n", ref, err)
 		return
 	}
@@ -802,6 +864,9 @@ func (srv *server) fetchSourceBackground(ref string, done chan struct{}) {
 	}
 	if srv.failedSources != nil {
 		delete(srv.failedSources, ref)
+	}
+	if srv.failedSourcesAt != nil {
+		delete(srv.failedSourcesAt, ref)
 	}
 	_ = srv.rebuildIndexLocked()
 }

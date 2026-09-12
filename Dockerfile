@@ -25,7 +25,7 @@ FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates tzdata && \
     addgroup -S cf && adduser -S cf -G cf -h /home/cf && \
-    mkdir -p /workspace /home/cf/.cache/compositionfactory && \
+    mkdir -p /workspace/.cache/compositionfactory /home/cf/.cache/compositionfactory && \
     chown -R cf:cf /workspace /home/cf
 
 WORKDIR /workspace
@@ -48,6 +48,7 @@ EXPOSE 8080
 ENV CF_ADDR=0.0.0.0:8080
 ENV CF_I_KNOW_THIS_IS_UNAUTHENTICATED=1
 ENV CF_CONTAINER=1
+ENV XDG_CACHE_HOME=/workspace/.cache
 
 ENTRYPOINT ["cf"]
 CMD ["serve"]

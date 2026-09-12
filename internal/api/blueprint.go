@@ -38,6 +38,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
@@ -567,6 +568,8 @@ func (srv *server) handleDeleteResource(w http.ResponseWriter, r *http.Request) 
 
 // syncBlueprintSourcesLocked ensures all sources declared in b.Spec.Sources
 // are present in srv.Store and indexed in srv.Index.
+// It releases srv.mu while performing remote network fetches so concurrent
+// HTTP requests are not blocked during downloads.
 func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.Blueprint) error {
 	if srv.Store == nil || b == nil {
 		return nil
@@ -590,25 +593,145 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 		}
 	}
 	origProviders := append([]string(nil), srv.Providers...)
-	var fetchErrs []string
+	var toFetch []string
+
 	for _, ref := range newProviders {
-		_, _, err := srv.Store.FetchAndSave(ctx, srv.Lock, ref, srv.fetch)
-		if err != nil {
-			if cache.IsFetchError(err) {
+		// Fast path: if provider schemas are already cached on disk,
+		// pin the lock immediately without any remote network call.
+		if digest, err := srv.Store.LoadDigest(ref); err == nil {
+			if err := srv.Store.PinLock(srv.Lock, ref, digest); err != nil {
+				srv.Providers = origProviders
+				return err
+			}
+			srv.Providers = append(srv.Providers, ref)
+			if srv.failedSources != nil {
+				delete(srv.failedSources, ref)
+			}
+			if srv.failedSourcesAt != nil {
+				delete(srv.failedSourcesAt, ref)
+			}
+		} else {
+			toFetch = append(toFetch, ref)
+		}
+	}
+
+	var fetchErrs []string
+
+	if len(toFetch) > 0 {
+		type fetchRes struct {
+			ref string
+			err error
+		}
+		resCh := make(chan fetchRes, len(toFetch))
+		var toWait []chan struct{}
+
+		if srv.loadingSources == nil {
+			srv.loadingSources = make(map[string]chan struct{})
+		}
+
+		timeout := srv.sourceTimeout()
+		for _, ref := range toFetch {
+			if ch, ok := srv.loadingSources[ref]; ok && ch != nil {
+				toWait = append(toWait, ch)
+				continue
+			}
+			done := make(chan struct{})
+			srv.loadingSources[ref] = done
+
+			fCtx := ctx
+			if _, hasDL := fCtx.Deadline(); !hasDL {
+				var cancel context.CancelFunc
+				fCtx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+			}
+
+			go func(r string, d chan struct{}, reqCtx context.Context) {
+				defer close(d)
+				err := srv.fetchAndSaveSource(reqCtx, r)
+				resCh <- fetchRes{ref: r, err: err}
+			}(ref, done, fCtx)
+		}
+
+		// Unlock srv.mu while remote fetches run so other HTTP requests are never blocked
+		srv.mu.Unlock()
+
+		for _, ch := range toWait {
+			select {
+			case <-ch:
+			case <-time.After(timeout):
+			case <-ctx.Done():
+			}
+		}
+
+		results := make([]fetchRes, 0, len(toFetch)-len(toWait))
+		for i := 0; i < cap(results); i++ {
+			select {
+			case res := <-resCh:
+				results = append(results, res)
+			case <-time.After(timeout):
+			case <-ctx.Done():
+			}
+		}
+
+		// Reacquire srv.mu before updating server state
+		srv.mu.Lock()
+
+		handled := make(map[string]bool, len(results))
+		for _, res := range results {
+			handled[res.ref] = true
+			delete(srv.loadingSources, res.ref)
+			if res.err != nil {
+				if cache.IsFetchError(res.err) || errors.Is(res.err, context.DeadlineExceeded) || errors.Is(res.err, context.Canceled) {
+					if srv.failedSources == nil {
+						srv.failedSources = make(map[string]error)
+					}
+					srv.failedSources[res.ref] = res.err
+					if srv.failedSourcesAt == nil {
+						srv.failedSourcesAt = make(map[string]time.Time)
+					}
+					srv.failedSourcesAt[res.ref] = time.Now()
+					fmt.Fprintf(os.Stderr, "cf: warning: unable to fetch source %q: %v — continuing offline\n", res.ref, res.err)
+					fetchErrs = append(fetchErrs, fmt.Sprintf("unable to fetch source %q: %v", res.ref, res.err))
+					continue
+				}
+				srv.Providers = origProviders
+				return res.err
+			}
+
+			alreadyHeld := false
+			for _, p := range srv.Providers {
+				if p == res.ref {
+					alreadyHeld = true
+					break
+				}
+			}
+			if !alreadyHeld {
+				srv.Providers = append(srv.Providers, res.ref)
+			}
+			if srv.failedSources != nil {
+				delete(srv.failedSources, res.ref)
+			}
+			if srv.failedSourcesAt != nil {
+				delete(srv.failedSourcesAt, res.ref)
+			}
+		}
+
+		for _, ref := range toFetch {
+			if !handled[ref] {
+				err := ctx.Err()
+				if err == nil {
+					err = context.DeadlineExceeded
+				}
 				if srv.failedSources == nil {
 					srv.failedSources = make(map[string]error)
 				}
 				srv.failedSources[ref] = err
-				fmt.Fprintf(os.Stderr, "cf: warning: unable to fetch source %q: %v — continuing offline\n", ref, err)
+				if srv.failedSourcesAt == nil {
+					srv.failedSourcesAt = make(map[string]time.Time)
+				}
+				srv.failedSourcesAt[ref] = time.Now()
 				fetchErrs = append(fetchErrs, fmt.Sprintf("unable to fetch source %q: %v", ref, err))
-				continue
 			}
-			srv.Providers = origProviders
-			return err
-		}
-		srv.Providers = append(srv.Providers, ref)
-		if srv.failedSources != nil {
-			delete(srv.failedSources, ref)
 		}
 	}
 
@@ -649,6 +772,9 @@ func (srv *server) syncBlueprintSourcesLocked(ctx context.Context, b *blueprint.
 			}
 			if !stillDeclared {
 				delete(srv.failedSources, failedRef)
+				if srv.failedSourcesAt != nil {
+					delete(srv.failedSourcesAt, failedRef)
+				}
 			}
 		}
 	}

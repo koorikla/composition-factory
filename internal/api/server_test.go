@@ -1060,3 +1060,293 @@ func TestOnDemandSourceFetchBoundedTimeout(t *testing.T) {
 		t.Fatalf("GET /api/providers does not report timeout error: %s", listRec.Body.String())
 	}
 }
+
+// TestSyncBlueprintSourcesLockedDoesNotBlockServerOnFetch (CF-464) verifies:
+// When a blueprint with an uncached provider is being saved/synced via syncBlueprintSourcesLocked,
+// network fetches do not hold srv.mu, so concurrent requests like GET /api/kinds and GET /api/blueprint
+// return immediately without blocking.
+func TestSyncBlueprintSourcesLockedDoesNotBlockServerOnFetch(t *testing.T) {
+	store := cache.New(t.TempDir())
+	sqsPkg := &xpkg.Package{
+		Ref:    testProviderRef,
+		Digest: "sha256:sqsdigest1234567890abcdef1234567890abcdef1234567890abcdef",
+		Docs: [][]byte{
+			managedCRDDoc("sqs.aws.m.upbound.io", "Queue", "queues"),
+		},
+	}
+	sqsCRDs, err := schema.ParseCRDs(sqsPkg.Docs)
+	if err != nil {
+		t.Fatalf("ParseCRDs: %v", err)
+	}
+	if err := store.Save(sqsPkg, sqsCRDs); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	idx, err := BuildIndex(store, []string{testProviderRef}, nil, "")
+	if err != nil {
+		t.Fatalf("BuildIndex: %v", err)
+	}
+
+	fetchStarted := make(chan struct{})
+	fetchRelease := make(chan struct{})
+	fetchDone := make(chan struct{})
+	var fetchCalledOnce sync.Once
+
+	const newUncachedProvider = "example.org/uncached-large-provider:v1"
+
+	o := Options{
+		Index:     idx,
+		Store:     store,
+		Blueprint: testBlueprintPath(t),
+		OutDir:    t.TempDir(),
+		Lock:      filepath.Join(t.TempDir(), ".cf.lock"),
+		fetch: func(ref string) (*xpkg.Package, error) {
+			if ref == newUncachedProvider {
+				fetchCalledOnce.Do(func() {
+					close(fetchStarted)
+				})
+				<-fetchRelease
+				defer close(fetchDone)
+				return &xpkg.Package{
+					Ref:    ref,
+					Digest: "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+					Docs: [][]byte{
+						managedCRDDoc("rds.aws.m.upbound.io", "Instance", "instances"),
+					},
+				}, nil
+			}
+			return nil, fmt.Errorf("unexpected fetch for %s", ref)
+		},
+	}
+
+	h, err := New(o)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	curBP := mustLoadBlueprint(t, o.Blueprint)
+	newBP := *curBP
+	newBP.Spec.Sources = append(append([]blueprint.Source(nil), curBP.Spec.Sources...), blueprint.Source{Provider: newUncachedProvider})
+	bpBytes, err := json.Marshal(newBP)
+	if err != nil {
+		t.Fatalf("marshal blueprint: %v", err)
+	}
+
+	// Start PUT /api/blueprint in a separate goroutine which will trigger fetch of newUncachedProvider
+	putDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		putDone <- do(t, h, "PUT", "/api/blueprint", string(bpBytes))
+	}()
+
+	// Wait until the fetch for the uncached provider has started
+	select {
+	case <-fetchStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fetch of uncached provider was not started")
+	}
+
+	// While the fetch is blocked (holding or not holding srv.mu), concurrent GET /api/kinds must return immediately!
+	kindsDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		kindsDone <- do(t, h, "GET", "/api/kinds", "")
+	}()
+
+	select {
+	case rec := <-kindsDone:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/kinds = %d, want 200: %s", rec.Code, rec.Body)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("GET /api/kinds blocked under srv.mu while syncBlueprintSourcesLocked was fetching uncached source")
+	}
+
+	// Concurrent GET /api/blueprint must also return immediately
+	bpGetDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		bpGetDone <- do(t, h, "GET", "/api/blueprint", "")
+	}()
+
+	select {
+	case rec := <-bpGetDone:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/blueprint = %d, want 200: %s", rec.Code, rec.Body)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("GET /api/blueprint blocked under srv.mu while syncBlueprintSourcesLocked was fetching uncached source")
+	}
+
+	// Release the fetch and ensure PUT completes cleanly
+	close(fetchRelease)
+	<-fetchDone
+	select {
+	case rec := <-putDone:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT /api/blueprint = %d, want 200: %s", rec.Code, rec.Body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("PUT /api/blueprint did not complete after fetch was released")
+	}
+}
+
+// TestBackgroundFetchTimeoutConfigurableViaEnv (CF-464) verifies:
+// CF_SOURCE_FETCH_TIMEOUT configures the background fetch timeout.
+func TestBackgroundFetchTimeoutConfigurableViaEnv(t *testing.T) {
+	t.Setenv("CF_SOURCE_FETCH_TIMEOUT", "65ms")
+
+	store := cache.New(t.TempDir())
+	idx, err := BuildIndex(store, nil, nil, "")
+	if err != nil {
+		t.Fatalf("BuildIndex: %v", err)
+	}
+
+	deadlineCh := make(chan time.Time, 1)
+
+	o := Options{
+		Index:     idx,
+		Store:     store,
+		Blueprint: testBlueprintPath(t),
+		OutDir:    t.TempDir(),
+		Lock:      filepath.Join(t.TempDir(), ".cf.lock"),
+		fetchCtx: func(ctx context.Context, ref string) (*xpkg.Package, error) {
+			if dl, ok := ctx.Deadline(); ok {
+				deadlineCh <- dl
+			}
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+
+	startTime := time.Now()
+	_, err = New(o)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	select {
+	case dl := <-deadlineCh:
+		remaining := dl.Sub(startTime)
+		// Should be roughly 65ms (within reasonable range, definitely not 15s)
+		if remaining > 500*time.Millisecond || remaining < 20*time.Millisecond {
+			t.Fatalf("expected context deadline close to 65ms, got remaining duration %v", remaining)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("fetchCtx was not called")
+	}
+}
+
+// TestFailedSourceRetryOnSubsequentRequest (CF-464) verifies:
+// Failed/timed out sources are not permanently locked out in srv.failedSources,
+// but can be retried on subsequent requests (e.g. after retry interval has elapsed).
+func TestFailedSourceRetryOnSubsequentRequest(t *testing.T) {
+	store := cache.New(t.TempDir())
+	idx, err := BuildIndex(store, nil, nil, "")
+	if err != nil {
+		t.Fatalf("BuildIndex: %v", err)
+	}
+
+	var fetchAttempts int32
+	var shouldSucceed bool
+	var mu sync.Mutex
+
+	fetchAttemptCh := make(chan int32, 10)
+
+	o := Options{
+		Index:                    idx,
+		Store:                    store,
+		Blueprint:                testBlueprintPath(t),
+		OutDir:                   t.TempDir(),
+		Lock:                     filepath.Join(t.TempDir(), ".cf.lock"),
+		sourceFetchTimeout:       50 * time.Millisecond,
+		sourceFetchRetryInterval: 30 * time.Millisecond,
+		fetch: func(ref string) (*xpkg.Package, error) {
+			mu.Lock()
+			fetchAttempts++
+			current := fetchAttempts
+			succeed := shouldSucceed
+			mu.Unlock()
+
+			fetchAttemptCh <- current
+
+			if !succeed {
+				return nil, fmt.Errorf("mock transient failure for %s (attempt %d)", ref, current)
+			}
+			return &xpkg.Package{
+				Ref:    ref,
+				Digest: "sha256:successdigest1234567890abcdef1234567890abcdef1234567890abcdef",
+				Docs: [][]byte{
+					managedCRDDoc("sqs.aws.m.upbound.io", "Queue", "queues"),
+				},
+			}, nil
+		},
+	}
+
+	h, err := New(o)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// 1. Initial background fetch starts and fails
+	select {
+	case att := <-fetchAttemptCh:
+		if att != 1 {
+			t.Fatalf("expected attempt 1, got %d", att)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("initial fetch was not invoked")
+	}
+
+	// Wait for failure to be recorded in /api/providers
+	deadline := time.Now().Add(1 * time.Second)
+	for {
+		rec := do(t, h, "GET", "/api/providers", "")
+		if strings.Contains(rec.Body.String(), "mock transient failure") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected failed status in /api/providers, got: %s", rec.Body)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Enable success for retry
+	mu.Lock()
+	shouldSucceed = true
+	mu.Unlock()
+
+	// Wait for retry interval to elapse
+	time.Sleep(50 * time.Millisecond)
+
+	// Subsequent request must trigger retry
+	rec := do(t, h, "GET", "/api/providers", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/providers = %d: %s", rec.Code, rec.Body)
+	}
+
+	// Verify that retry attempt (attempt 2) was invoked
+	select {
+	case att := <-fetchAttemptCh:
+		if att != 2 {
+			t.Fatalf("expected attempt 2, got %d", att)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("subsequent request did not trigger retry for failed source")
+	}
+
+	// Wait for retry to complete and provider to transition to ready
+	deadline = time.Now().Add(1 * time.Second)
+	foundReady := false
+	for {
+		rec = do(t, h, "GET", "/api/providers", "")
+		if strings.Contains(rec.Body.String(), "sha256:successdigest") {
+			foundReady = true
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !foundReady {
+		t.Fatalf("provider was not marked ready after successful retry: %s", rec.Body)
+	}
+}
