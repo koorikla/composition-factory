@@ -69,13 +69,21 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 			resKeyExpr = fmt.Sprintf("f\"%s-{_i}\"", r.Name)
 		}
 
-		sb.WriteString(fmt.Sprintf("%srsp.desired.resources[%s].resource.update({\n", indent, resKeyExpr))
+		if crd.Native {
+			sb.WriteString(fmt.Sprintf("%srsp.desired.resources[%s].resource.update(_present({\n", indent, resKeyExpr))
+		} else {
+			sb.WriteString(fmt.Sprintf("%srsp.desired.resources[%s].resource.update({\n", indent, resKeyExpr))
+		}
 		inner := indent + "    "
 		sb.WriteString(fmt.Sprintf("%s\"apiVersion\": %q,\n", inner, apiVersion))
 		sb.WriteString(fmt.Sprintf("%s\"kind\": %q,\n", inner, crd.Kind))
 
 		// Metadata
-		sb.WriteString(fmt.Sprintf("%s\"metadata\": {\n", inner))
+		if crd.Native {
+			sb.WriteString(fmt.Sprintf("%s\"metadata\": _present({\n", inner))
+		} else {
+			sb.WriteString(fmt.Sprintf("%s\"metadata\": {\n", inner))
+		}
 		metaInner := inner + "    "
 		if crd.Native {
 			var metaName *forProviderField
@@ -129,7 +137,11 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 				writePythonNodes(&sb, metaInner, root.children, false)
 			}
 		}
-		sb.WriteString(fmt.Sprintf("%s},\n", inner))
+		if crd.Native {
+			sb.WriteString(fmt.Sprintf("%s}),\n", inner))
+		} else {
+			sb.WriteString(fmt.Sprintf("%s},\n", inner))
+		}
 
 		// Spec
 		if crd.Native {
@@ -176,7 +188,11 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 			sb.WriteString(fmt.Sprintf("%s}),\n", inner))
 		}
 
-		sb.WriteString(fmt.Sprintf("%s})\n\n", indent))
+		if crd.Native {
+			sb.WriteString(fmt.Sprintf("%s}))\n\n", indent))
+		} else {
+			sb.WriteString(fmt.Sprintf("%s})\n\n", indent))
+		}
 	}
 
 	return sb.String(), nil

@@ -2014,3 +2014,182 @@ print("OK")
 		}
 	}
 }
+
+func TestCF453_PythonEmitterWrapsNativeResourceAndMetadataInPresent(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-native-opt"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: "python"},
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+					"ns":           {Type: "string"},
+					"automount":    {Type: "boolean"},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "sa",
+					Provider: "k8s",
+					Kind:     "ServiceAccount",
+					Fields: map[string]blueprint.Field{
+						"metadata.namespace":           {From: "params.ns"},
+						"automountServiceAccountToken": {From: "params.automount"},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := Composition(bp, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition emit failed: %v", err)
+	}
+
+	outStr := string(out)
+
+	if !strings.Contains(outStr, "\"metadata\": _present({") {
+		t.Errorf("expected native metadata to be wrapped in _present({, got:\n%s", outStr)
+	}
+
+	if !strings.Contains(outStr, "rsp.desired.resources[\"sa\"].resource.update(_present({") {
+		t.Errorf("expected native resource update dictionary to be wrapped in _present({, got:\n%s", outStr)
+	}
+}
+
+func TestCF453_PythonEmitterNativeOmissionRuntime(t *testing.T) {
+	pyBin, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test-native-opt"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: "python"},
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "XApp",
+				Plural:  "xapps",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+					"ns":           {Type: "string"},
+					"automount":    {Type: "boolean"},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "sa",
+					Provider: "k8s",
+					Kind:     "ServiceAccount",
+					Fields: map[string]blueprint.Field{
+						"metadata.namespace":           {From: "params.ns"},
+						"automountServiceAccountToken": {From: "params.automount"},
+					},
+				},
+			},
+		},
+	}
+
+	crds := nativeTestCRDs(t)
+	body, err := pythonTemplateBody(bp, crds)
+	if err != nil {
+		t.Fatalf("pythonTemplateBody: %v", err)
+	}
+
+	pyRunner := `
+import sys, types
+
+m1 = types.ModuleType("google.protobuf.json_format")
+m1.MessageToDict = lambda msg: msg if isinstance(msg, dict) else (getattr(msg, "__dict__", {}) if msg is not None else {})
+sys.modules["google.protobuf.json_format"] = m1
+
+m2 = types.ModuleType("crossplane.function.proto.v1")
+m2.run_function_pb2 = types.ModuleType("run_function_pb2")
+m2.run_function_pb2.RunFunctionRequest = object
+m2.run_function_pb2.RunFunctionResponse = object
+sys.modules["crossplane.function.proto.v1"] = m2
+sys.modules["crossplane.function.proto.v1.run_function_pb2"] = m2.run_function_pb2
+
+` + body + `
+
+class MockRes:
+    def __init__(self):
+        self.resource = {}
+    def update(self, d):
+        self.resource.update(d)
+
+class MockRsp:
+    def __init__(self):
+        self.desired = types.SimpleNamespace(resources={
+            "sa": MockRes(),
+        })
+
+# Case 1: ns and automount omitted -> metadata.namespace and automountServiceAccountToken stripped
+req1 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={
+            "metadata": {"name": "test-xr"},
+            "spec": {"providerName": "default"},
+        }),
+        resources={},
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={},
+)
+rsp1 = MockRsp()
+compose(req1, rsp1)
+sa1 = rsp1.desired.resources["sa"].resource
+
+if "automountServiceAccountToken" in sa1:
+    print(f"FAIL: automountServiceAccountToken should be omitted when None, got: {sa1}")
+    sys.exit(1)
+if "namespace" in sa1.get("metadata", {}):
+    print(f"FAIL: namespace should be omitted when None, got: {sa1.get('metadata')}")
+    sys.exit(2)
+if sa1.get("metadata", {}).get("name") != "test-xr-sa":
+    print(f"FAIL: name missing or wrong: {sa1.get('metadata')}")
+    sys.exit(3)
+
+# Case 2: ns and automount populated (even automount=False) -> both preserved
+req2 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={
+            "metadata": {"name": "test-xr"},
+            "spec": {"providerName": "default", "ns": "kube-system", "automount": False},
+        }),
+        resources={},
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={},
+)
+rsp2 = MockRsp()
+compose(req2, rsp2)
+sa2 = rsp2.desired.resources["sa"].resource
+
+if sa2.get("automountServiceAccountToken") is not False:
+    print(f"FAIL: automountServiceAccountToken should be False, got: {sa2.get('automountServiceAccountToken')}")
+    sys.exit(4)
+if sa2.get("metadata", {}).get("namespace") != "kube-system":
+    print(f"FAIL: namespace should be 'kube-system', got: {sa2.get('metadata')}")
+    sys.exit(5)
+
+print("OK")
+`
+	cmd := exec.Command(pyBin, "-c", pyRunner)
+	pyOut, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("python execution failed: %v\nOutput:\n%s", err, pyOut)
+	}
+}
