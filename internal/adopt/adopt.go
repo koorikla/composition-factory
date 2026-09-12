@@ -1870,6 +1870,30 @@ func isGoTemplatingStep(fnName, stepName string, step map[string]any, opts Optio
 	return false
 }
 
+func isUnsupportedEngine(fnName, stepName string, opts Options) bool {
+	lowerFn := strings.ToLower(fnName)
+	if lowerFn == "function-kcl" || strings.Contains(lowerFn, "kcl") || lowerFn == "function-python" || strings.Contains(lowerFn, "python") {
+		return true
+	}
+	if opts.FunctionPackages != nil {
+		if pkg, ok := opts.FunctionPackages[fnName]; ok {
+			lowerPkg := strings.ToLower(pkg)
+			if strings.Contains(lowerPkg, "kcl") || strings.Contains(lowerPkg, "python") {
+				return true
+			}
+		}
+		if stepName != "" {
+			if pkg, ok := opts.FunctionPackages[stepName]; ok {
+				lowerPkg := strings.ToLower(pkg)
+				if strings.Contains(lowerPkg, "kcl") || strings.Contains(lowerPkg, "python") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Options, report *LossReport, nameMapping map[string]string, hasXRD bool) error {
 	type parsedStep struct {
 		step       blueprint.PipelineStep
@@ -1952,7 +1976,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 					}
 				}
 			}
-		} else if fnName == "function-kcl" || strings.Contains(fnName, "kcl") || fnName == "function-python" || strings.Contains(fnName, "python") || stepName == "render-resources" {
+		} else if isUnsupportedEngine(fnName, stepName, opts) {
 			return fmt.Errorf("cannot adopt composition with function %q: cf adopt supports function-go-templating and function-patch-and-transform", fnName)
 		} else {
 			var pkg string
@@ -2129,7 +2153,7 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 		if isEnvConfigsStep(s) {
 			continue
 		}
-		if (s.FunctionRef == "function-auto-ready" || s.Name == "auto-ready") && s.Input == "" &&
+		if (s.FunctionRef == "function-auto-ready" || s.Name == "auto-ready" || (s.Name == blueprint.TemplatingStepName && s.FunctionRef == "function-auto-ready")) && s.Input == "" &&
 			(s.Package == "" || s.Package == "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0") {
 			continue
 		}
@@ -2137,11 +2161,46 @@ func parsePipelineComposition(pipeline []any, bp *blueprint.Blueprint, opts Opti
 		break
 	}
 
+	usedStepNames := map[string]bool{
+		blueprint.TemplatingStepName: true,
+	}
+	for _, ps := range otherSteps {
+		s := ps.step
+		if isEnvConfigsStep(s) {
+			continue
+		}
+		if s.Name != "" && s.Name != blueprint.TemplatingStepName {
+			usedStepNames[s.Name] = true
+		}
+	}
+
 	var finalSteps []blueprint.PipelineStep
 	for _, ps := range otherSteps {
 		s := ps.step
 		if isEnvConfigsStep(s) {
 			continue
+		}
+		if s.Name == blueprint.TemplatingStepName {
+			base := ""
+			if s.FunctionRef == "function-auto-ready" {
+				base = "auto-ready"
+			} else if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName || s.FunctionRef == "function-environment-configs" {
+				base = blueprint.EnvironmentConfigsStepName
+			} else {
+				trimmed := strings.TrimPrefix(s.FunctionRef, "function-")
+				base = normalizeDNSLabel(trimmed)
+			}
+			if base == "" || base == blueprint.TemplatingStepName {
+				base = "aux-step"
+			}
+			candidate := base
+			counter := 2
+			for usedStepNames[candidate] {
+				candidate = fmt.Sprintf("%s-%d", base, counter)
+				counter++
+			}
+			s.Name = candidate
+			usedStepNames[candidate] = true
 		}
 		if ps.pkgAssumed && report != nil {
 			isAutoReadyStep := (s.FunctionRef == "function-auto-ready" || s.Name == "auto-ready")
