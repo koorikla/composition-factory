@@ -10,7 +10,7 @@ import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
 import { parseFrom, findEnvWires } from "../wires.js";
-import { mapResourceCoordinates, deleteEnvKeyFromDoc, renameEnvKeyInDoc, parseEnvSelection } from "../utils.js";
+import { mapResourceCoordinates, deleteEnvKeyFromDoc, renameEnvKeyInDoc, parseEnvSelection, countEmptyValues, generateEnvironmentConfigYAML } from "../utils.js";
 
 import { state, PARAM_TYPES } from "./inspector/state.js";
 import {
@@ -1257,76 +1257,6 @@ function removeWire(resName, wirePath, isEnv, isAnn) {
       }
     });
   }, "unable to remove wire");
-}
-
-function countEmptyValues(doc) {
-  var env = (doc && doc.spec && doc.spec.environment) || {};
-  var emptyCount = 0;
-  Object.keys(env).forEach(function (k) {
-    var item = env[k] || {};
-    var val = item.value !== undefined && item.value !== "" ? item.value : (item.default !== undefined ? item.default : "");
-    if (val === "" || val === null || val === undefined) {
-      emptyCount++;
-    }
-  });
-  return emptyCount;
-}
-
-function generateEnvironmentConfigYAML(doc, selInfo) {
-  var env = (doc && doc.spec && doc.spec.environment) || {};
-  var keys = Object.keys(env).sort();
-  var name = "default";
-  if (selInfo && selInfo.mode === "Reference") {
-    name = selInfo.name || "default";
-  } else if (selInfo && selInfo.mode === "Selector") {
-    if (selInfo.name) {
-      name = selInfo.name;
-    } else if (selInfo.labels) {
-      var parts = [];
-      selInfo.labels.split(",").forEach(function (pair) {
-        var kv = pair.split("=");
-        if (kv.length === 2 && kv[0].trim()) {
-          parts.push(kv[0].trim() + "-" + kv[1].trim());
-        }
-      });
-      parts.sort();
-      name = parts.join("-") || "default";
-    }
-  }
-  var lines = [
-    "apiVersion: apiextensions.crossplane.io/v1beta1",
-    "kind: EnvironmentConfig",
-    "metadata:",
-    "  name: " + name
-  ];
-  if (selInfo && selInfo.mode === "Selector" && selInfo.labels) {
-    lines.push("  labels:");
-    selInfo.labels.split(",").forEach(function (pair) {
-      var parts = pair.split("=");
-      if (parts.length === 2 && parts[0].trim()) {
-        lines.push("    " + parts[0].trim() + ": " + JSON.stringify(parts[1].trim()));
-      }
-    });
-  }
-  lines.push("data:");
-  if (keys.length === 0) {
-    lines.push("  {}");
-  } else {
-    keys.forEach(function (k) {
-      var item = env[k] || {};
-      var val = item.value !== undefined && item.value !== "" ? item.value : (item.default !== undefined ? item.default : "");
-      if (item.type === "integer" || item.type === "number" || item.type === "boolean") {
-        if (val === "" || val === null || val === undefined) {
-          lines.push('  ' + k + ': ""');
-        } else {
-          lines.push('  ' + k + ': ' + val);
-        }
-      } else {
-        lines.push('  ' + k + ': ' + JSON.stringify(val || ""));
-      }
-    });
-  }
-  return lines.join("\n");
 }
 
 async function renderEnvironment() {
