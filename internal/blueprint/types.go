@@ -275,45 +275,19 @@ func (p *Parameter) UnmarshalJSON(data []byte) error {
 	p.Required = raw.Required
 	p.Description = raw.Description
 	p.Properties = raw.Properties
-	for _, item := range raw.Enum {
-		switch val := item.(type) {
-		case string:
-			p.Enum = append(p.Enum, val)
-		case bool:
-			if val {
-				p.Enum = append(p.Enum, "true")
-			} else {
-				p.Enum = append(p.Enum, "false")
-			}
-		case float64:
-			if val == float64(int64(val)) {
-				p.Enum = append(p.Enum, strconv.FormatInt(int64(val), 10))
-			} else {
-				p.Enum = append(p.Enum, strconv.FormatFloat(val, 'f', -1, 64))
-			}
-		default:
-			p.Enum = append(p.Enum, fmt.Sprintf("%v", val))
+	for i, item := range raw.Enum {
+		s, err := scalarToString(item)
+		if err != nil {
+			return fmt.Errorf("enum[%d]: %w", i, err)
 		}
+		p.Enum = append(p.Enum, s)
 	}
 	if raw.Default != nil {
-		switch val := raw.Default.(type) {
-		case string:
-			p.Default = val
-		case bool:
-			if val {
-				p.Default = "true"
-			} else {
-				p.Default = "false"
-			}
-		case float64:
-			if val == float64(int64(val)) {
-				p.Default = strconv.FormatInt(int64(val), 10)
-			} else {
-				p.Default = strconv.FormatFloat(val, 'f', -1, 64)
-			}
-		default:
-			p.Default = fmt.Sprintf("%v", val)
+		s, err := scalarToString(raw.Default)
+		if err != nil {
+			return fmt.Errorf("default: %w", err)
 		}
+		p.Default = s
 	}
 	return nil
 }
@@ -326,16 +300,15 @@ type EnvironmentKey struct {
 	Default     string `json:"default,omitempty"`
 }
 
-// UnmarshalJSON permits scalar values (booleans, numbers, strings) for Default and Value.
+// UnmarshalJSON handles string, number, and bool defaults cleanly.
 func (k *EnvironmentKey) UnmarshalJSON(data []byte) error {
-	type rawKey struct {
+	var raw struct {
 		Type        string `json:"type"`
 		Required    bool   `json:"required,omitempty"`
 		Description string `json:"description,omitempty"`
 		Default     any    `json:"default,omitempty"`
 		Value       any    `json:"value,omitempty"`
 	}
-	var raw rawKey
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&raw); err != nil {
@@ -349,24 +322,11 @@ func (k *EnvironmentKey) UnmarshalJSON(data []byte) error {
 		defVal = raw.Value
 	}
 	if defVal != nil {
-		switch val := defVal.(type) {
-		case string:
-			k.Default = val
-		case bool:
-			if val {
-				k.Default = "true"
-			} else {
-				k.Default = "false"
-			}
-		case float64:
-			if val == float64(int64(val)) {
-				k.Default = strconv.FormatInt(int64(val), 10)
-			} else {
-				k.Default = strconv.FormatFloat(val, 'f', -1, 64)
-			}
-		default:
-			k.Default = fmt.Sprintf("%v", val)
+		s, err := scalarToString(defVal)
+		if err != nil {
+			return fmt.Errorf("default: %w", err)
 		}
+		k.Default = s
 	}
 	return nil
 }
@@ -442,37 +402,57 @@ func (c *EnvironmentConfig) UnmarshalJSON(data []byte) error {
 	if len(raw.Data) > 0 {
 		c.Data = make(map[string]string, len(raw.Data))
 		for k, v := range raw.Data {
-			c.Data[k] = scalarToString(v)
+			s, err := scalarToString(v)
+			if err != nil {
+				return fmt.Errorf("data[%s]: %w", k, err)
+			}
+			c.Data[k] = s
 		}
 	}
 	if len(raw.Values) > 0 {
 		c.Values = make(map[string]string, len(raw.Values))
 		for k, v := range raw.Values {
-			c.Values[k] = scalarToString(v)
+			s, err := scalarToString(v)
+			if err != nil {
+				return fmt.Errorf("values[%s]: %w", k, err)
+			}
+			c.Values[k] = s
 		}
 	}
 	return nil
 }
 
-func scalarToString(v any) string {
+func scalarToString(v any) (string, error) {
 	if v == nil {
-		return ""
+		return "", nil
 	}
 	switch val := v.(type) {
 	case string:
-		return val
+		return val, nil
 	case bool:
 		if val {
-			return "true"
+			return "true", nil
 		}
-		return "false"
+		return "false", nil
 	case float64:
 		if val == float64(int64(val)) {
-			return strconv.FormatInt(int64(val), 10)
+			return strconv.FormatInt(int64(val), 10), nil
 		}
-		return strconv.FormatFloat(val, 'f', -1, 64)
+		return strconv.FormatFloat(val, 'f', -1, 64), nil
+	case int:
+		return strconv.Itoa(val), nil
+	case int64:
+		return strconv.FormatInt(val, 10), nil
+	case uint64:
+		return strconv.FormatUint(val, 10), nil
+	case json.Number:
+		return val.String(), nil
+	case map[string]any:
+		return "", fmt.Errorf("expected scalar (string, number, or boolean), got mapping")
+	case []any:
+		return "", fmt.Errorf("expected scalar (string, number, or boolean), got list")
 	default:
-		return fmt.Sprintf("%v", val)
+		return "", fmt.Errorf("expected scalar (string, number, or boolean), got %T", v)
 	}
 }
 
@@ -856,31 +836,34 @@ func (f *Field) UnmarshalJSON(data []byte) error {
 	if err := dec.Decode(&raw); err != nil {
 		return err
 	}
-	toString := func(v any) string {
-		if v == nil {
-			return ""
+	if raw.From != nil {
+		s, err := scalarToString(raw.From)
+		if err != nil {
+			return fmt.Errorf("from: %w", err)
 		}
-		switch val := v.(type) {
-		case string:
-			return val
-		case bool:
-			if val {
-				return "true"
-			}
-			return "false"
-		case float64:
-			if val == float64(int64(val)) {
-				return strconv.FormatInt(int64(val), 10)
-			}
-			return strconv.FormatFloat(val, 'f', -1, 64)
-		default:
-			return fmt.Sprintf("%v", val)
-		}
+		f.From = s
 	}
-	f.From = toString(raw.From)
-	f.Value = toString(raw.Value)
-	f.Raw = toString(raw.Raw)
-	f.Template = toString(raw.Template)
+	if raw.Value != nil {
+		s, err := scalarToString(raw.Value)
+		if err != nil {
+			return fmt.Errorf("value: %w", err)
+		}
+		f.Value = s
+	}
+	if raw.Raw != nil {
+		s, err := scalarToString(raw.Raw)
+		if err != nil {
+			return fmt.Errorf("raw: %w", err)
+		}
+		f.Raw = s
+	}
+	if raw.Template != nil {
+		s, err := scalarToString(raw.Template)
+		if err != nil {
+			return fmt.Errorf("template: %w", err)
+		}
+		f.Template = s
+	}
 	return nil
 }
 

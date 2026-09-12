@@ -2263,3 +2263,202 @@ func TestRejectMultiDocumentBlueprint(t *testing.T) {
 		}
 	})
 }
+
+func TestUnmarshalRejectsCompositeScalars(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "composite value in resource field",
+			yaml: `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  xrd:
+    group: example.com
+    kind: Test
+    plural: tests
+    version: v1alpha1
+    scope: Namespaced
+  resources:
+    - name: bucket
+      kind: ConfigMap
+      provider: k8s
+      fields:
+        metadata.name:
+          value:
+            prefix: my-bucket
+`,
+		},
+		{
+			name: "composite from in resource field",
+			yaml: `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  xrd:
+    group: example.com
+    kind: Test
+    plural: tests
+    version: v1alpha1
+    scope: Namespaced
+  resources:
+    - name: bucket
+      kind: ConfigMap
+      provider: k8s
+      fields:
+        metadata.name:
+          from:
+            nested: true
+`,
+		},
+		{
+			name: "composite raw in resource field",
+			yaml: `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  xrd:
+    group: example.com
+    kind: Test
+    plural: tests
+    version: v1alpha1
+    scope: Namespaced
+  resources:
+    - name: bucket
+      kind: ConfigMap
+      provider: k8s
+      fields:
+        metadata.name:
+          raw: [1, 2, 3]
+`,
+		},
+		{
+			name: "composite template in resource field",
+			yaml: `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  xrd:
+    group: example.com
+    kind: Test
+    plural: tests
+    version: v1alpha1
+    scope: Namespaced
+  resources:
+    - name: bucket
+      kind: ConfigMap
+      provider: k8s
+      fields:
+        metadata.name:
+          template:
+            tpl: hello
+`,
+		},
+		{
+			name: "composite default in parameter",
+			yaml: `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  xrd:
+    group: example.com
+    kind: Test
+    plural: tests
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      region:
+        type: string
+        default:
+          nested: us-east-1
+  resources: []
+`,
+		},
+		{
+			name: "composite enum entry in parameter",
+			yaml: `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  xrd:
+    group: example.com
+    kind: Test
+    plural: tests
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      region:
+        type: string
+        enum:
+          - us-east-1
+          - { invalid: enum }
+  resources: []
+`,
+		},
+		{
+			name: "composite default in environment key",
+			yaml: `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  xrd:
+    group: example.com
+    kind: Test
+    plural: tests
+    version: v1alpha1
+    scope: Namespaced
+  environment:
+    region:
+      type: string
+      default: [a, b, c]
+  resources: []
+`,
+		},
+		{
+			name: "composite data value in environmentConfigs",
+			yaml: `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: test
+spec:
+  xrd:
+    group: example.com
+    kind: Test
+    plural: tests
+    version: v1alpha1
+    scope: Namespaced
+  environmentConfigs:
+    - name: env-cfg
+      data:
+        key:
+          nested: map
+  resources: []
+`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(tc.yaml))
+			if err == nil {
+				t.Fatalf("Parse() succeeded on composite scalar in %s, want error", tc.name)
+			}
+		})
+	}
+}
