@@ -32,9 +32,13 @@ cd "$ROOT/.worktrees/CF-041"
 
 Branch from `origin/main`, not from local `main`: local is usually stale within
 minutes. `ROOT` is the main checkout wherever you start, so worktrees never nest.
-Everything you do happens inside that directory. If you find yourself
-editing a path that does not start with your worktree, stop — you are in someone
-else's tree.
+Everything you do happens inside that directory. If you find yourself editing a path that
+does not start with your worktree, stop and move the edit into your worktree: copy the
+file's current content across, revert the original with
+`git -C <that tree> checkout -- <path>` only if *you* made the change and nothing else in
+that tree is dirty, and otherwise leave it exactly as you found it and say so in your
+handover. Do not carry on editing outside your worktree, and do not try to "finish
+cleanly" there first — you are in someone else's tree and they are still working in it.
 
 **Resuming a pushed branch.** When your issue was parked or taken over, the branch in
 your prompt already exists on origin (`git rev-parse --verify --quiet
@@ -123,8 +127,12 @@ worktree, never from the shared checkout.
 `make test-race`, `make test-e2e` and `make test-docker` share a machine-wide pool of gate
 slots with every other agent (`AGENTS.md` §2). When every slot is taken they print
 `lock.sh: waiting for gate` and wait: that is the machine being shared, not a hang. Never
-bypass it — no `CF_GATE_SLOTS=off`, no other `GATE_SLOTS`, no killing a holder. Once a slot
-is yours the gate prints `lock.sh: gate acquired after <n>s`; keep that line for your
+bypass it — no `CF_GATE_SLOTS=off`, no other `GATE_SLOTS`. **Never kill another agent's
+gate holder yourself**, however certain you are that it is stuck: you cannot see the agent
+it belongs to, and `lsof <slot file>` naming a process is not evidence that the process is
+dead. A slot that is genuinely leaked is reclaimed by `docs/routines/janitor.md`, which can
+check what you cannot; say in your handover that you waited and how long. Once a slot is
+yours the gate prints `lock.sh: gate acquired after <n>s`; keep that line for your
 handover.
 
 If a gate fails for a reason unrelated to your change, say so in the handover with
@@ -145,6 +153,19 @@ tasks in one branch is how a revert becomes impossible.
 - **Preserve comments and docstrings** you did not come to change.
 
 ## 6. What you do and do not do
+
+- **Confirm the claim is still yours before every push.** Run §7's claim check — the same
+  command, compared against the same `Your claim:` line from your prompt — immediately
+  before each `git push`, not only before your handover. Leases are never renewed, and a
+  push is the one act that another agent cannot undo: by the time you hand back, work you
+  pushed over is already gone. If the newest trusted claim is no longer yours, **leave the
+  branch unpushed**. Commit what you have, comment on the issue
+
+  ```
+  superseded — <branch> · driver <driver-id> · <sha> not pushed · worktree <absolute path>
+  ```
+
+  and change no labels. Your commits stay in your worktree for whoever picks the issue up.
 
 - **Push your own topic branch after every green commit** — the branch named in your
   prompt, and nothing else:
@@ -188,17 +209,28 @@ happen on your own issue and nowhere else.
 
 **First, confirm the issue is still yours.** Leases are never renewed: after 120 minutes
 another driver may take your issue over, onto the same branch name. Print the newest claim
-by a project member — once when you start (keep the line), and again right before you hand
-back or park:
+by a project member — **before every push** (§6) and again right before you hand back or
+park:
 
 ```sh
 gh issue view <n> --json comments --jq '[.comments[] | select((.authorAssociation // "OWNER") | IN("OWNER", "MEMBER", "COLLABORATOR")) | (.body // "") | (split("\n")[0] // "") | select(startswith("taking —"))] | last'
 ```
 
-It must still be the line you started under, naming your branch and your driver id. If it
-is not, you were superseded: push your branch (§6; if the push is rejected, do not force
-it), comment `superseded — <branch> · driver <driver-id> · <sha> <pushed|not pushed> ·
-worktree <absolute path>` on the issue, and change no labels.
+**Compare it, character for character, with the `Your claim:` line in your prompt.** That
+line is the claim comment your driver's `claim.sh` posted, copied verbatim; it is the only
+thing that distinguishes your claim from the takeover that replaced it, because a takeover
+names the same branch and can name the same driver name pattern. Same branch, same driver
+id, same `lease until`, same `files:` — or it is not yours. If the line has no `Your
+claim:` in your prompt at all, treat any claim newer than your start as a takeover.
+
+If it is not yours, you were superseded: **leave the branch unpushed** (§6). Commit what
+you have, comment
+
+```
+superseded — <branch> · driver <driver-id> · <sha> not pushed · worktree <absolute path>
+```
+
+on the issue, and change no labels.
 
 **Otherwise, hand back.** Post one comment, then change the label:
 
