@@ -10705,3 +10705,195 @@ spec:
 		}
 	}
 }
+
+func TestAdoptGoTemplate_WhenEnvIndex(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition string
+		wantWhen  string
+		wantEnv   string
+	}{
+		{
+			name:      "env eq index $env",
+			condition: `eq (index $env "stage") "prod"`,
+			wantWhen:  `env.stage == "prod"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env ne index $env",
+			condition: `ne (index $env "stage") "dev"`,
+			wantWhen:  `env.stage != "dev"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env eq reversed index $env",
+			condition: `eq "prod" (index $env "stage")`,
+			wantWhen:  `env.stage == "prod"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env ne reversed index $env",
+			condition: `ne "dev" (index $env "stage")`,
+			wantWhen:  `env.stage != "dev"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env boolean index $env",
+			condition: `index $env "enabled"`,
+			wantWhen:  `env.enabled`,
+			wantEnv:   "enabled",
+		},
+		{
+			name:      "env boolean parens index $env",
+			condition: `(index $env "enabled")`,
+			wantWhen:  `env.enabled`,
+			wantEnv:   "enabled",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-when-env-index
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- if %s }}
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: prod-bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            {{- end }}
+`, tc.condition)
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 1 {
+				t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+			}
+			r := bp.Spec.Resources[0]
+			if r.When != tc.wantWhen {
+				t.Errorf("r.When = %q, want %q", r.When, tc.wantWhen)
+			}
+			if _, ok := bp.Spec.Environment[tc.wantEnv]; !ok {
+				t.Errorf("environment key %q not declared: %+v", tc.wantEnv, bp.Spec.Environment)
+			}
+		})
+	}
+}
+
+func TestAdoptGoTemplate_WhenEnvIndex_Variants(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition string
+		wantWhen  string
+		wantEnv   string
+	}{
+		{
+			name:      "env eq single quoted index",
+			condition: `eq (index $env 'stage') 'prod'`,
+			wantWhen:  `env.stage == "prod"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env ne single quoted index",
+			condition: `ne (index $env 'stage') 'dev'`,
+			wantWhen:  `env.stage != "dev"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env eq reversed single quoted index",
+			condition: `eq 'prod' (index $env 'stage')`,
+			wantWhen:  `env.stage == "prod"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env hasKey with index eq",
+			condition: `and (hasKey $env "stage") (eq (index $env "stage") "prod")`,
+			wantWhen:  `env.stage == "prod"`,
+			wantEnv:   "stage",
+		},
+		{
+			name:      "env hasKey with index boolean",
+			condition: `and (hasKey $env "enabled") (index $env "enabled")`,
+			wantWhen:  `env.enabled`,
+			wantEnv:   "enabled",
+		},
+		{
+			name:      "env outer parens eq index",
+			condition: `(eq (index $env "stage") "prod")`,
+			wantWhen:  `env.stage == "prod"`,
+			wantEnv:   "stage",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-when-env-index-variants
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- if %s }}
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: prod-bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            {{- end }}
+`, tc.condition)
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 1 {
+				t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+			}
+			r := bp.Spec.Resources[0]
+			if r.When != tc.wantWhen {
+				t.Errorf("r.When = %q, want %q", r.When, tc.wantWhen)
+			}
+			if _, ok := bp.Spec.Environment[tc.wantEnv]; !ok {
+				t.Errorf("environment key %q not declared: %+v", tc.wantEnv, bp.Spec.Environment)
+			}
+		})
+	}
+}
