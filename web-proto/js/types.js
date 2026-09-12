@@ -47,6 +47,7 @@
  * @property {Record<string, FieldMapping>} [fields] Resource fields mapped by path.
  * @property {Record<string, FieldMapping>} [envelope] Crossplane spec envelope overrides.
  * @property {Record<string, FieldMapping>} [annotations] metadata.annotations entries.
+ * @property {any} [connectionSecret] Connection secret configuration or references.
  */
 
 /**
