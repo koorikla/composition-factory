@@ -626,7 +626,7 @@ function appLabelRowHtml(res) {
     '<div class="fld-h"><span class="lbl" style="flex:0 0 auto">App label</span></div>' +
     essPathHtml("spec.selector.matchLabels[app]", "spec.selector.matchLabels[app] and spec.template.metadata.labels[app]") +
     '<div class="frow" style="margin-bottom:0">' +
-    '<input class="tin" data-wl-app="' + esc(res.name) + '" value="' + esc(appLabelState(res).label) + '" placeholder="e.g. ' + esc(res.name) + '" title="Sets both spec.selector.matchLabels and spec.template.metadata.labels">' +
+    '<input class="tin" data-wl-app="' + esc(res.name) + '" value="' + esc(appLabelState(res).label) + '" placeholder="e.g. ' + esc(res.name) + '"' + ariaLabel("App label", "spec.selector.matchLabels[app]") + ' title="Sets both spec.selector.matchLabels and spec.template.metadata.labels">' +
     '<button class="btn sm pri" data-wl-sync-app="' + esc(res.name) + '" title="Sync App Label across Selector and Template">Sync</button>' +
     '</div></div>';
 }
@@ -651,7 +651,7 @@ function serviceSelectorRowHtml(res, doc) {
     '<div class="fld-h"><span class="lbl" style="flex:0 0 auto">Target app</span></div>' +
     essPathHtml("spec.selector[app]") +
     '<div class="frow" style="margin-bottom:0">' +
-    '<input class="tin" data-svc-app="' + esc(res.name) + '" value="' + esc(serviceTargetOf(res)) + '" placeholder="app label" title="Routes traffic to pods whose app label matches"></div>';
+    '<input class="tin" data-svc-app="' + esc(res.name) + '" value="' + esc(serviceTargetOf(res)) + '" placeholder="app label"' + ariaLabel("Target app", "spec.selector[app]") + ' title="Routes traffic to pods whose app label matches"></div>';
   if (candidates.length) {
     h += '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">' +
       '<span class="dg" style="font-size:10px">Quick match:</span>' +
@@ -662,6 +662,10 @@ function serviceSelectorRowHtml(res, doc) {
       }).join("") + '</div>';
   }
   return h + '</div>';
+}
+
+function ariaLabel(label, path) {
+  return ' aria-label="' + esc(label + " \u2014 " + path) + '"';
 }
 
 /** The path under a row's label on its own line: it wraps rather than
@@ -688,9 +692,10 @@ function essValueControl(res, path, type, row, params, otherResources, otherStat
   }
   if (m === "r") return rawEditorHtml(path, (dm === "r" && entry) ? entry.raw : "", false, res, params, otherResources, otherStatusMap);
   var val = (dm === "v" && entry) ? entry.value : "";
+  var aria = ariaLabel(row.label || path.split(".").pop(), path);
   if (row.enum) {
     var opts = val && row.enum.indexOf(val) === -1 ? [val].concat(row.enum) : row.enum;
-    return '<select class="val tsel" data-v="' + esc(path) + '">' +
+    return '<select class="val tsel" data-v="' + esc(path) + '"' + aria + '>' +
       '<option value=""' + (val === "" ? " selected" : "") + '>unset &#8212; omitted from output</option>' +
       opts.map(function (o) {
         return '<option value="' + esc(o) + '"' + (val === o ? ' selected' : '') + '>' + esc(o) + '</option>';
@@ -698,13 +703,13 @@ function essValueControl(res, path, type, row, params, otherResources, otherStat
   }
   if (type === "boolean") {
     var bVal = val.toLowerCase();
-    return '<select class="val tsel" data-v="' + esc(path) + '">' +
+    return '<select class="val tsel" data-v="' + esc(path) + '"' + aria + '>' +
       '<option value=""' + (bVal === "" ? " selected" : "") + '>unset &#8212; omitted from output</option>' +
       '<option value="true"' + (bVal === "true" ? " selected" : "") + '>true</option>' +
       '<option value="false"' + (bVal === "false" ? " selected" : "") + '>false</option></select>';
   }
   var inputType = (type === "integer" || type === "number") ? 'type="number" ' : '';
-  return '<input class="val" ' + inputType + 'data-v="' + esc(path) + '" value="' + esc(val) + '" placeholder="' + esc(row.placeholder || "") + '">';
+  return '<input class="val" ' + inputType + 'data-v="' + esc(path) + '" value="' + esc(val) + '" placeholder="' + esc(row.placeholder || "") + '"' + aria + '>';
 }
 
 /** Expose-as-parameter: only for rows that name a parameter and hold a
@@ -732,8 +737,8 @@ function envRepeaterHtml(res, prefix, params, otherResources, otherStatusMap, en
     var np = prefix + "[" + i + "].name", vp = prefix + "[" + i + "].value";
     var nEntry = entryOf(res, np);
     h += '<div class="frow ess-env-row" data-env-row="' + i + '" style="align-items:flex-start">' +
-      '<input class="val" data-v="' + esc(np) + '" value="' + esc(nEntry ? nEntry.value : "") + '" placeholder="NAME" style="flex:0 0 38%">' +
-      '<div style="flex:1;min-width:0">' + essValueControl(res, vp, "string", {}, params, otherResources, otherStatusMap, env) + '</div>' +
+      '<input class="val" data-v="' + esc(np) + '" value="' + esc(nEntry ? nEntry.value : "") + '" placeholder="NAME" style="flex:0 0 38%"' + ariaLabel("Environment variable name", np) + '>' +
+      '<div style="flex:1;min-width:0">' + essValueControl(res, vp, "string", { label: "Environment variable value" }, params, otherResources, otherStatusMap, env) + '</div>' +
       modeButtons(vp, uiMode[vp] || docMode(entryOf(res, vp)), false) +
       '<button class="del" data-env-row-del="' + esc(prefix) + '|' + i + '" title="Remove variable">&#215;</button></div>';
   });
@@ -760,7 +765,6 @@ function schemaEssentials(res, flds) {
 function essentialsHtml(res, flds, doc, params, otherResources, otherStatusMap, env) {
   var profile = profileFor(res.kind, res.provider);
   var rows = profile && profile.essentials.length ? profile.essentials : schemaEssentials(res, flds);
-  if (!rows.length) return "";
   var isWl = res.provider === "k8s" && (res.kind === "Deployment" || res.kind === "StatefulSet" || res.kind === "DaemonSet");
   var isSvc = res.provider === "k8s" && res.kind === "Service";
   var cls = "insp-sec essentials" + (isWl ? " workload-card" : "") + (isSvc ? " service-card" : "");
@@ -768,6 +772,7 @@ function essentialsHtml(res, flds, doc, params, otherResources, otherStatusMap, 
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
     '<span style="font-size:11px;font-weight:600;color:var(--wire-xrd);text-transform:uppercase;letter-spacing:0.5px">Essentials</span>' +
     (isWl ? appLabelBadge(res) : (isSvc ? serviceTargetBadge(res) : '')) + '</div>';
+  if (!rows.length) return h + '<div class="g" style="padding:2px 0 0">nothing required &#8212; set fields below</div></div>';
   rows.forEach(function (row) {
     if (row.kind === "app-label") { h += appLabelRowHtml(res); return; }
     if (row.kind === "service-selector") { h += serviceSelectorRowHtml(res, doc); return; }
@@ -1163,6 +1168,7 @@ function snapshotFocusedEdit() {
   if (!key) return null;
   return {
     sel: ae.tagName.toLowerCase() + key,
+    inEss: !!ae.closest(".essentials"),
     value: ae.value,
     checked: ae.checked,
     selStart: ae.selectionStart, selEnd: ae.selectionEnd,
@@ -1170,15 +1176,25 @@ function snapshotFocusedEdit() {
   };
 }
 
+/** The same path can have a control in the essentials and in the field
+ *  list; prefer the copy in the section the snapshot came from. */
+function findFocusTarget(sel, inEss) {
+  var all = box.querySelectorAll(sel);
+  for (var i = 0; i < all.length; i++) {
+    if (!!all[i].closest(".essentials") === inEss) return all[i];
+  }
+  return all[0] || null;
+}
+
 function restoreFocusedEdit(snap) {
   if (!snap) return;
-  var el = box.querySelector(snap.sel);
+  var el = findFocusTarget(snap.sel, snap.inEss);
   if (!el && pendingRenamedParam) {
     var oldEsc = CSS.escape(pendingRenamedParam.from);
     var newEsc = CSS.escape(pendingRenamedParam.to);
     if (snap.sel.indexOf(oldEsc) !== -1) {
       var translatedSel = snap.sel.split(oldEsc).join(newEsc);
-      el = box.querySelector(translatedSel);
+      el = findFocusTarget(translatedSel, snap.inEss);
     }
   }
   if (!el && pendingRenamedEnvKey) {
@@ -1186,7 +1202,7 @@ function restoreFocusedEdit(snap) {
     var newEscEnv = CSS.escape(pendingRenamedEnvKey.to);
     if (snap.sel.indexOf(oldEscEnv) !== -1) {
       var translatedSelEnv = snap.sel.split(oldEscEnv).join(newEscEnv);
-      el = box.querySelector(translatedSelEnv);
+      el = findFocusTarget(translatedSelEnv, snap.inEss);
     }
   }
   if (!el) return;

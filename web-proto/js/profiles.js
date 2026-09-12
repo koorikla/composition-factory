@@ -136,9 +136,15 @@ export function setAppLabel(fields, value) {
  * `.app`) are removed so emit sees one form.
  */
 export function setServiceSelector(fields, value) {
+  clearServiceSelector(fields);
+  fields["spec.selector[app]"] = { value: value };
+}
+
+/** Remove the Service's app selector in every spelling. */
+export function clearServiceSelector(fields) {
+  delete fields["spec.selector[app]"];
   delete fields["spec.selector"];
   delete fields["spec.selector.app"];
-  fields["spec.selector[app]"] = { value: value };
 }
 
 /**

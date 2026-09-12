@@ -66,7 +66,7 @@ test.describe('CF-209 — Resource inspector wire dropdown lists declared enviro
     await regionRow.locator('button[data-m="w"]').click();
 
     // The wire select dropdown should now be rendered
-    const regionWireSel = insp.locator('select[data-wire="region"]');
+    const regionWireSel = regionRow.locator('select[data-wire="region"]');
     await expect(regionWireSel).toBeVisible();
 
     // Environment optgroup should exist and contain compatible env.clusterName (string)
@@ -113,7 +113,7 @@ test.describe('CF-209 — Resource inspector wire dropdown lists declared enviro
 
     // 9. When already wired to env.clusterName, entering wire mode again has env.clusterName selected
     await regionRow.locator('button[data-m="w"]').click();
-    const reWireSel = insp.locator('select[data-wire="region"]');
+    const reWireSel = regionRow.locator('select[data-wire="region"]');
     await expect(reWireSel).toBeVisible();
     await expect(reWireSel).toHaveValue('env.clusterName');
   });

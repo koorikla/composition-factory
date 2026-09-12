@@ -4,7 +4,7 @@
  */
 
 import { fanOut } from "../../wires.js";
-import { setAppLabel, setServiceSelector } from "../../profiles.js";
+import { setAppLabel, setServiceSelector, clearServiceSelector } from "../../profiles.js";
 import { state } from "./state.js";
 import { insertSnippetIntoTextarea, triggerExpressionPreview } from "./preview.js";
 import {
@@ -57,6 +57,16 @@ export async function commitEnvelopeValue(path, kind, text) {
   if (ok !== null) delete state.uiMode["env:" + path];
 }
 
+/**
+ * The section a control belongs to. The same path renders controls in the
+ * essentials and again in the field list, so a lookup keyed by path must
+ * search the section the event came from, not the whole pane.
+ */
+export function sectionOf(el) {
+  var scope = el && el.closest ? el.closest(".essentials, .fld") : null;
+  return scope || state.box || document.querySelector("#insp");
+}
+
 export var boxClickActions = [
   {
     selector: "[data-quick-snippet], [data-env-quick-snippet]",
@@ -66,8 +76,8 @@ export var boxClickActions = [
       var snippet = chip.getAttribute("data-snippet-val");
       if (!snippet) return;
       var taSelector = isEnv ? ('textarea[data-env-raw="' + CSS.escape(path) + '"]') : ('textarea[data-raw="' + CSS.escape(path) + '"]');
-      var box = state.box || document.querySelector("#insp");
-      var ta = box ? box.querySelector(taSelector) : null;
+      var scope = sectionOf(chip);
+      var ta = scope ? scope.querySelector(taSelector) : null;
       if (ta) {
         insertSnippetIntoTextarea(ta, snippet);
       }
@@ -228,10 +238,10 @@ export var boxClickActions = [
       var p2 = ok.getAttribute("data-npok");
       var isEnv = p2.indexOf("env:") === 0;
       var realPath = isEnv ? p2.slice(4) : p2;
-      var box = state.box || document.querySelector("#insp");
-      var nameEl = box.querySelector('[data-npname="' + CSS.escape(p2) + '"]');
-      var typeEl = box.querySelector('[data-nptype="' + CSS.escape(p2) + '"]');
-      var reqEl = box.querySelector('input[type="checkbox"][data-npreq="' + CSS.escape(p2) + '"]');
+      var scope = sectionOf(ok);
+      var nameEl = scope.querySelector('[data-npname="' + CSS.escape(p2) + '"]');
+      var typeEl = scope.querySelector('[data-nptype="' + CSS.escape(p2) + '"]');
+      var reqEl = scope.querySelector('input[type="checkbox"][data-npreq="' + CSS.escape(p2) + '"]');
       var isReq = reqEl ? reqEl.checked : (ok.getAttribute("data-npreq") === "true");
       var name = nameEl && nameEl.value.trim();
       var type = (typeEl && typeEl.value) || "string";
@@ -805,7 +815,7 @@ export function onBoxChange(e) {
     t.value = "";
     if (!snippet) return;
     var taSelector = isEnv ? ('textarea[data-env-raw="' + CSS.escape(path) + '"]') : ('textarea[data-raw="' + CSS.escape(path) + '"]');
-    var ta = box.querySelector(taSelector);
+    var ta = sectionOf(t).querySelector(taSelector);
     if (ta) {
       insertSnippetIntoTextarea(ta, snippet);
     }
@@ -859,16 +869,15 @@ export function onBoxChange(e) {
   if (t.hasAttribute("data-svc-app")) {
     var svcRname = t.getAttribute("data-svc-app");
     var svcVal = t.value.trim();
-    if (svcVal) {
-      state.op(function () {
-        return state.store.replaceDoc(function (d) {
-          var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === svcRname; });
-          if (!r) return;
-          r.fields = r.fields || {};
-          setServiceSelector(r.fields, svcVal);
-        });
+    state.op(function () {
+      return state.store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === svcRname; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        if (svcVal) setServiceSelector(r.fields, svcVal);
+        else clearServiceSelector(r.fields);
       });
-    }
+    });
     return;
   }
 
@@ -1201,7 +1210,7 @@ export function bindInspectorEvents(box, fseg) {
       if (t.matches && t.matches("[data-npname]")) {
         e.preventDefault();
         var npKey = t.getAttribute("data-npname");
-        var npAddBtn = box.querySelector('[data-npok="' + CSS.escape(npKey) + '"]');
+        var npAddBtn = sectionOf(t).querySelector('[data-npok="' + CSS.escape(npKey) + '"]');
         if (npAddBtn) npAddBtn.click();
         return;
       }

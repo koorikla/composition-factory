@@ -20,7 +20,7 @@ test('undo and redo round-trip an edit through the server', async ({ page, reque
   await expect(page.locator('#redoBtn')).toBeDisabled()
   await page.click('.node[data-id="work-queue"] .node-h')
   await page.click('#fseg button[data-f="all"]')
-  const input = page.locator('#insp input[data-v="maxMessageSize"]')
+  const input = page.locator('#insp .fld input[data-v="maxMessageSize"]')
   await input.fill('4096')
   await input.press('Tab')
   await expect(page.locator('#undoBtn')).toBeEnabled()
@@ -32,11 +32,13 @@ test('undo and redo round-trip an edit through the server', async ({ page, reque
   await expect.poll(() => serverValue(request, 'work-queue', 'maxMessageSize')).toBe('4096')
 })
 
+// Once set, maxMessageSize also gets an essentials row (CF-470); these
+// tests drive the field-list copy.
 test('Cmd/Ctrl+Z undoes on the canvas but never steals undo from a text field', async ({ page, request }) => {
   await page.goto('/')
   await page.click('.node[data-id="work-queue"] .node-h')
   await page.click('#fseg button[data-f="all"]')
-  const input = page.locator('#insp input[data-v="maxMessageSize"]')
+  const input = page.locator('#insp .fld input[data-v="maxMessageSize"]')
   await input.fill('1234')
   await input.press('Tab')
   await expect.poll(() => serverValue(request, 'work-queue', 'maxMessageSize')).toBe('1234')
@@ -59,7 +61,7 @@ test('Cmd/Ctrl+Y redoes on the canvas (CF-393, #284)', async ({ page, request })
   await page.goto('/')
   await page.click('.node[data-id="work-queue"] .node-h')
   await page.click('#fseg button[data-f="all"]')
-  const input = page.locator('#insp input[data-v="maxMessageSize"]')
+  const input = page.locator('#insp .fld input[data-v="maxMessageSize"]')
   await input.fill('9999')
   await input.press('Tab')
   await expect.poll(() => serverValue(request, 'work-queue', 'maxMessageSize')).toBe('9999')

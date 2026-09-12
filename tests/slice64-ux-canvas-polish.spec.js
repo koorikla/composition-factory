@@ -58,13 +58,14 @@ test("inspector auto-defaults providerConfigRef and provides segmented mode butt
   await page.goto("/")
   await page.click('.node[data-id="work-queue"]')
 
-  // Verify segmented mode buttons
-  const modeValBtn = page.locator('#insp button[data-m="v"][data-path="region"]')
+  // Verify segmented mode buttons (the field-list row; the essentials
+  // section has its own copy for the set region field, CF-470)
+  const modeValBtn = page.locator('#insp .fld button[data-m="v"][data-path="region"]')
   await expect(modeValBtn).toBeVisible()
   await expect(modeValBtn).toHaveText("Val")
-  const modeWireBtn = page.locator('#insp button[data-m="w"][data-path="region"]')
+  const modeWireBtn = page.locator('#insp .fld button[data-m="w"][data-path="region"]')
   await expect(modeWireBtn).toHaveText("Wire")
-  const modeRawBtn = page.locator('#insp button[data-m="r"][data-path="region"]')
+  const modeRawBtn = page.locator('#insp .fld button[data-m="r"][data-path="region"]')
   await expect(modeRawBtn).toHaveText("Raw")
 
   // Switch to All filter to inspect envelope fields

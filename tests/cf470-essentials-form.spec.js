@@ -1,5 +1,6 @@
 const { test, expect } = require('@playwright/test');
-const { resetDoc, ENGINE, dropKind } = require('./helpers');
+const { resetDoc, ENGINE, dropKind, guardPageErrors } = require('./helpers');
+guardPageErrors();
 
 test.beforeEach(async ({ request }) => {
   await resetDoc(request);
@@ -81,5 +82,96 @@ test.describe('CF-470 — essentials form', () => {
     await expect(ess.locator('[data-ess-row="region"]')).toHaveCount(1);
     const rows = await ess.locator('[data-ess-row]').count();
     expect(rows).toBeLessThan(10);
+  });
+
+  test('the new-parameter flow on a field-list row works beside the essentials copy of the same path', async ({ page, request }) => {
+    await page.goto('/');
+    await dropKind(page, 'Deployment', 'apps/v1', 400, 300);
+    await page.click('.node[data-id="deployment"] .node-h');
+    // The list row, not the essentials row: both render controls keyed by IMG.
+    const row = page.locator('#insp .fld').filter({ has: page.locator(`button[data-m="w"][data-path="${IMG}"]`) });
+    await expect(row).toHaveCount(1);
+    await row.locator('button[data-m="w"]').click();
+    await row.locator('select[data-wire]').selectOption('__new__');
+    await row.locator('[data-npname]').fill('imgParam');
+    await row.locator('[data-npok]').click();
+    await expect.poll(async () => {
+      const doc = await (await request.get(ENGINE + '/api/blueprint')).json();
+      const r = doc.spec.resources.find(x => x.name === 'deployment');
+      return { param: !!(doc.spec.xrd.parameters || {}).imgParam, from: r && r.fields[IMG] && r.fields[IMG].from };
+    }).toEqual({ param: true, from: 'params.imgParam' });
+  });
+
+  test('clearing the Service target app removes spec.selector[app] and shows Unset Selector', async ({ page, request }) => {
+    await page.goto('/');
+    await dropKind(page, 'Service', 'v1', 400, 300);
+    await page.click('.node[data-id="service"] .node-h');
+    const card = page.locator('#insp .service-card');
+    const inp = card.locator('input[data-svc-app]');
+    await expect(inp).toHaveValue('service');
+    await inp.fill('');
+    await inp.press('Enter');
+    await expect.poll(async () => {
+      const r = await resourceNamed(request, 'service');
+      return r && Object.keys(r.fields || {}).filter(k => k.indexOf('spec.selector') === 0);
+    }).toEqual([]);
+    await expect(card).toContainText('Unset Selector');
+  });
+
+  test('expose on replicas creates an integer parameter with default 2 and wires the field', async ({ page, request }) => {
+    await page.goto('/');
+    await dropKind(page, 'Deployment', 'apps/v1', 400, 300);
+    await page.click('.node[data-id="deployment"] .node-h');
+    await page.locator('#insp [data-ess-row="spec.replicas"] button[data-expose]').click();
+    await expect.poll(async () => {
+      const doc = await (await request.get(ENGINE + '/api/blueprint')).json();
+      const p = doc.spec.xrd.parameters.replicas;
+      const r = doc.spec.resources.find(x => x.name === 'deployment');
+      return { pType: p && p.type, pDefault: p && p.default, from: r && r.fields['spec.replicas'] && r.fields['spec.replicas'].from };
+    }).toEqual({ pType: 'integer', pDefault: '2', from: 'params.replicas' });
+  });
+
+  test('a wired essentials row shows the bound chip and unwire removes the entry', async ({ page, request }) => {
+    await page.goto('/');
+    await dropKind(page, 'Deployment', 'apps/v1', 400, 300);
+    await page.click('.node[data-id="deployment"] .node-h');
+    const row = page.locator(`#insp [data-ess-row="${IMG}"]`);
+    await row.locator('button[data-expose]').click();
+    const unwire = row.locator('.bound [data-unwire]');
+    await expect(unwire).toBeVisible();
+    await unwire.click();
+    await expect.poll(async () => {
+      const r = await resourceNamed(request, 'deployment');
+      return !!(r && r.fields[IMG]);
+    }).toBe(false);
+    await expect(row.locator('.bound')).toHaveCount(0);
+  });
+
+  test('expose with a name collision suffixes the resource name in CamelCase', async ({ page, request }) => {
+    const pre = await request.post(ENGINE + '/api/blueprint/parameters', { data: { name: 'image', parameter: { type: 'string', required: false } } });
+    expect(pre.status()).toBe(200);
+    await page.goto('/');
+    await dropKind(page, 'Deployment', 'apps/v1', 400, 300);
+    await page.click('.node[data-id="deployment"] .node-h');
+    await page.locator(`#insp [data-ess-row="${IMG}"] button[data-expose]`).click();
+    await expect.poll(async () => {
+      const doc = await (await request.get(ENGINE + '/api/blueprint')).json();
+      const ps = doc.spec.xrd.parameters || {};
+      const r = doc.spec.resources.find(x => x.name === 'deployment');
+      return { suffixed: ps.imageDeployment && ps.imageDeployment.default, original: ps.image && ps.image.default, from: r && r.fields[IMG] && r.fields[IMG].from };
+    }).toEqual({ suffixed: 'nginx:1.27', original: undefined, from: 'params.imageDeployment' });
+  });
+
+  test('the Service type enum select offers unset, which deletes spec.type', async ({ page, request }) => {
+    await page.goto('/');
+    await dropKind(page, 'Service', 'v1', 400, 300);
+    await page.click('.node[data-id="service"] .node-h');
+    const sel = page.locator('#insp [data-ess-row="spec.type"] select.val');
+    await expect(sel).toHaveValue('ClusterIP');
+    await sel.selectOption('');
+    await expect.poll(async () => {
+      const r = await resourceNamed(request, 'service');
+      return !!(r && r.fields['spec.type']);
+    }).toBe(false);
   });
 });

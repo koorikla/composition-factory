@@ -143,7 +143,10 @@ export function triggerExpressionPreview(textarea, isEnv, path) {
 
   var val = textarea.value.trim();
   var previewKey = isEnv ? ("env:" + path) : path;
-  var previewEl = box.querySelector('.expr-preview[data-preview-for="' + CSS.escape(previewKey) + '"]');
+  // The same path can have a raw editor in the essentials and in the field
+  // list; the preview belongs to the editor's own section.
+  var scope = (textarea.closest && textarea.closest(".essentials, .fld")) || box;
+  var previewEl = scope.querySelector('.expr-preview[data-preview-for="' + CSS.escape(previewKey) + '"]');
   if (!previewEl) return;
 
   if (!val) {
