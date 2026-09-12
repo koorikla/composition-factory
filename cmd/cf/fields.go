@@ -29,7 +29,7 @@ func (c *FieldsCmd) Run(out io.Writer) error {
 	var b *blueprint.Blueprint
 	var blueprintDir string
 
-	isDefault := c.Blueprint == "" || c.Blueprint == "doc.cf.yaml" || filepath.Base(c.Blueprint) == "doc.cf.yaml"
+	isDefault := c.Blueprint == "" || c.Blueprint == "doc.cf.yaml"
 	if _, err := os.Stat(c.Blueprint); err == nil || (!isDefault && c.Blueprint != "") {
 		loaded, err := blueprint.Load(c.Blueprint)
 		if err != nil {
