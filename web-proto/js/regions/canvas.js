@@ -386,9 +386,9 @@ function resourceCardHTML(d, r, sel) {
     statusRows.push(w.srcPath);
   });
   const schemaLeaves = (statusLeavesFor(meta) || []).filter(isValidStatusPath);
-  // Ensure atProvider.id is always offered as a primary output row for resource linking
-  const idPath = (schemaLeaves.length > 0 && schemaLeaves.find(function (p) { return p === "atProvider.id" || p === "id"; })) || "atProvider.id";
-  if (!seenStatus[idPath] && isValidStatusPath(idPath)) {
+  // Ensure atProvider.id or id is offered as a primary output row for resource linking when present in schema
+  const idPath = schemaLeaves.find(function (p) { return p === "atProvider.id" || p === "id"; });
+  if (idPath && !seenStatus[idPath] && isValidStatusPath(idPath)) {
     seenStatus[idPath] = true;
     statusRows.unshift(idPath);
   }
