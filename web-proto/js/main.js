@@ -267,9 +267,15 @@ store.subscribe("selection", function () {
     var t = e.target;
     // native undo inside text editing always wins
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-    if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
-    e.preventDefault();
-    if (e.shiftKey) store.redo(); else store.undo();
+    if (!(e.metaKey || e.ctrlKey)) return;
+    var k = e.key.toLowerCase();
+    if (k === "y") {
+      e.preventDefault();
+      store.redo();
+    } else if (k === "z") {
+      e.preventDefault();
+      if (e.shiftKey) store.redo(); else store.undo();
+    }
   });
   sync();
 })();
