@@ -626,6 +626,86 @@ func TestDeleteParameterRefusesWhenRawReferencesExist(t *testing.T) {
 	}
 }
 
+func TestDeleteParameter_RefusesRawIndexSpec(t *testing.T) {
+	b := editable()
+	b.Spec.XRD.Parameters["tier"] = Parameter{Type: "string"}
+	b.Spec.Resources[0].Fields["rawField"] = Field{Raw: `{{ (index $spec "tier") }}`}
+
+	err := b.DeleteParameter("tier")
+	if err == nil {
+		t.Fatal("DeleteParameter = nil, want refusal when raw field references parameter via index")
+	}
+	if !strings.Contains(err.Error(), "main-queue") {
+		t.Errorf("err = %v, want it to mention main-queue", err)
+	}
+}
+
+func TestRenameParameter_RewritesRawIndexSpec(t *testing.T) {
+	b := editable()
+	b.Spec.XRD.Parameters["tier"] = Parameter{Type: "string"}
+	b.Spec.Resources[0].Fields["rawField"] = Field{Raw: `{{ (index $spec "tier") }}`}
+	b.Spec.Templates = map[string]string{
+		"helper": `{{ (index .spec "tier") }}`,
+	}
+
+	if err := b.RenameParameter("tier", "ranking"); err != nil {
+		t.Fatalf("RenameParameter: %v", err)
+	}
+	if got := b.Spec.Resources[0].Fields["rawField"].Raw; got != `{{ (index $spec "ranking") }}` {
+		t.Errorf("raw field = %q, want {{ (index $spec \"ranking\") }}", got)
+	}
+	if got := b.Spec.Templates["helper"]; got != `{{ (index .spec "ranking") }}` {
+		t.Errorf("template = %q, want {{ (index .spec \"ranking\") }}", got)
+	}
+}
+
+func TestRawIndexParam_QuotesAndContainers(t *testing.T) {
+	b := editable()
+	b.Spec.XRD.Parameters["tier"] = Parameter{Type: "string"}
+	b.Spec.XRD.Parameters["tierExtra"] = Parameter{Type: "string"}
+	b.Spec.Resources[0].Fields["singleQuote"] = Field{Raw: `{{ index $params 'tier' }}`}
+	b.Spec.Resources[0].Fields["backtick"] = Field{Raw: "{{ (index .params `tier`) }}"}
+	b.Spec.Resources[0].Fields["unrelatedPrefix"] = Field{Raw: `{{ (index $spec "tierExtra") }}`}
+	b.Spec.Resources[0].Envelope = map[string]Field{
+		"config": {Raw: `{{ (index .params "tier") }}`},
+	}
+	b.Spec.Resources[0].Annotations = map[string]Field{
+		"note": {Raw: `{{ index params "tier" }}`},
+	}
+	b.Spec.Templates = map[string]string{
+		"tmpl": "{{ (index .spec `tier`) }}",
+	}
+
+	// DeleteParameter should refuse when referenced via single-quote or envelope/annotation/template
+	if err := b.DeleteParameter("tier"); err == nil {
+		t.Fatal("DeleteParameter = nil, want refusal when referenced via various raw index forms")
+	}
+
+	// RenameParameter should rename all quotes and containers, but not touch tierExtra
+	if err := b.RenameParameter("tier", "ranking"); err != nil {
+		t.Fatalf("RenameParameter: %v", err)
+	}
+
+	if got := b.Spec.Resources[0].Fields["singleQuote"].Raw; got != `{{ index $params 'ranking' }}` {
+		t.Errorf("singleQuote = %q, want {{ index $params 'ranking' }}", got)
+	}
+	if got := b.Spec.Resources[0].Fields["backtick"].Raw; got != "{{ (index .params `ranking`) }}" {
+		t.Errorf("backtick = %q, want {{ (index .params `ranking`) }}", got)
+	}
+	if got := b.Spec.Resources[0].Fields["unrelatedPrefix"].Raw; got != `{{ (index $spec "tierExtra") }}` {
+		t.Errorf("unrelatedPrefix = %q, want unchanged {{ (index $spec \"tierExtra\") }}", got)
+	}
+	if got := b.Spec.Resources[0].Envelope["config"].Raw; got != `{{ (index .params "ranking") }}` {
+		t.Errorf("envelope = %q, want {{ (index .params \"ranking\") }}", got)
+	}
+	if got := b.Spec.Resources[0].Annotations["note"].Raw; got != `{{ index params "ranking" }}` {
+		t.Errorf("annotation = %q, want {{ index params \"ranking\" }}", got)
+	}
+	if got := b.Spec.Templates["tmpl"]; got != "{{ (index .spec `ranking`) }}" {
+		t.Errorf("template = %q, want {{ (index .spec `ranking`) }}", got)
+	}
+}
+
 func TestAddResource(t *testing.T) {
 	b := editable()
 	newRes := Resource{

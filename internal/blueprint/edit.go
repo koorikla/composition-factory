@@ -235,8 +235,13 @@ func rawReferencesParam(raw, name string) bool {
 	if raw == "" || name == "" {
 		return false
 	}
-	re := regexp.MustCompile(`(?:\$spec|\.spec|\$params|\.params|params)\.` + regexp.QuoteMeta(name) + `($|[^a-zA-Z0-9_])`)
-	return re.MatchString(raw)
+	q := regexp.QuoteMeta(name)
+	reDotted := regexp.MustCompile(`(?:\$spec|\.spec|\$params|\.params|params)\.` + q + `($|[^a-zA-Z0-9_])`)
+	if reDotted.MatchString(raw) {
+		return true
+	}
+	reIndex := regexp.MustCompile(`\bindex\s+(?:\$spec|\.spec|\$params|\.params|params)\s+(?:"` + q + `"|'` + q + `'|` + "`" + q + "`)" + `($|[^a-zA-Z0-9_])`)
+	return reIndex.MatchString(raw)
 }
 
 // rewriteRawResource replaces references to from with to in a raw template/expression.
@@ -260,8 +265,15 @@ func rewriteRawParam(raw, from, to string) string {
 	if raw == "" || from == "" || to == "" || from == to {
 		return raw
 	}
-	re := regexp.MustCompile(`((\$spec|\.spec|\$params|\.params|params)\.)` + regexp.QuoteMeta(from) + `($|[^a-zA-Z0-9_])`)
-	return re.ReplaceAllString(raw, "${1}"+to+"${3}")
+	r := raw
+	reDotted := regexp.MustCompile(`((\$spec|\.spec|\$params|\.params|params)\.)` + regexp.QuoteMeta(from) + `($|[^a-zA-Z0-9_])`)
+	r = reDotted.ReplaceAllString(r, "${1}"+to+"${3}")
+
+	for _, q := range []string{`"`, `'`, "`"} {
+		reIndex := regexp.MustCompile(`(\bindex\s+(?:\$spec|\.spec|\$params|\.params|params)\s+` + regexp.QuoteMeta(q) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(q) + `)`)
+		r = reIndex.ReplaceAllString(r, "${1}"+to+"${2}")
+	}
+	return r
 }
 
 // anyStatusFrom reports whether any entry in fields wires from resource
