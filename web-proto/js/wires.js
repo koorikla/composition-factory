@@ -124,15 +124,33 @@ export function listWires(doc) {
         : (r.forEach && typeof r.forEach === "object" && typeof r.forEach.over === "string") ? r.forEach.over : null;
       if (forEachStr) {
         const parsed = parseFrom(forEachStr.trim());
-        if (parsed && parsed.kind === "status") {
-          out.push({
-            kind: "status",
-            srcResource: parsed.resource,
-            srcPath: parsed.statusPath,
-            resource: r.name,
-            path: "forEach",
-            from: forEachStr
-          });
+        if (parsed) {
+          if (parsed.kind === "status") {
+            out.push({
+              kind: "status",
+              srcResource: parsed.resource,
+              srcPath: parsed.statusPath,
+              resource: r.name,
+              path: "forEach",
+              from: forEachStr
+            });
+          } else if (parsed.kind === "param") {
+            out.push({
+              kind: "param",
+              param: parsed.param,
+              resource: r.name,
+              path: "forEach",
+              from: forEachStr
+            });
+          } else if (parsed.kind === "env") {
+            out.push({
+              kind: "env",
+              envKey: parsed.key,
+              resource: r.name,
+              path: "forEach",
+              from: forEachStr
+            });
+          }
         }
       }
     }
@@ -434,20 +452,21 @@ export function fanOutMap(doc) {
       addEnv(extractWhenEnv(r.when));
     }
     if (r.forEach) {
-      const fp = extractForEachParam(r.forEach);
-      if (fp) {
-        addParam(fp);
-      } else {
-        const forEachStr = typeof r.forEach === "string" ? r.forEach
-          : (r.forEach && typeof r.forEach === "object" && typeof r.forEach.over === "string") ? r.forEach.over : null;
-        if (forEachStr) {
+      const forEachStr = typeof r.forEach === "string" ? r.forEach
+        : (r.forEach && typeof r.forEach === "object" && typeof r.forEach.over === "string") ? r.forEach.over : null;
+      const parsed = forEachStr ? parseFrom(forEachStr.trim()) : null;
+      if (!parsed || (parsed.kind !== "param" && parsed.kind !== "env")) {
+        const fp = extractForEachParam(r.forEach);
+        if (fp) {
+          addParam(fp);
+        } else if (forEachStr) {
           const rawParams = extractRawParams(forEachStr, declaredParams);
           for (let k = 0; k < rawParams.length; k++) {
             addParam(rawParams[k]);
           }
         }
+        addEnv(extractForEachEnv(r.forEach));
       }
-      addEnv(extractForEachEnv(r.forEach));
     }
   }
 

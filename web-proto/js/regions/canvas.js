@@ -433,7 +433,25 @@ function resourceCardHTML(d, r, sel) {
     if (r.forEach) {
       const fe = typeof r.forEach === "string" ? r.forEach
         : (r.forEach && r.forEach.over) ? r.forEach.over : JSON.stringify(r.forEach);
-      h += '<span class="pill loop">for each</span><span>' + esc(fe) + '</span>';
+      const parsed = typeof fe === "string" ? parseFrom(fe.trim()) : null;
+      let dot = "var(--rule-2)";
+      let title = r.name + ".forEach \u2190 " + fe;
+      if (parsed) {
+        if (parsed.kind === "status") {
+          dot = "var(--wire-status)";
+          title = parsed.resource + ".status." + parsed.statusPath + " \u2192 " + r.name + ".forEach";
+        } else if (parsed.kind === "env") {
+          dot = "var(--shared)";
+          title = "env." + parsed.key + " \u2192 " + r.name + ".forEach";
+        } else if (parsed.kind === "param") {
+          dot = fanOut(d, parsed.param) > 1 ? "var(--shared)" : COLORS.xrd;
+          title = "$" + parsed.param + " \u2192 " + r.name + ".forEach";
+        }
+      }
+      h += '<div class="port" data-owner="' + esc(r.name) + '" data-path="forEach" title="' + esc(title) + '" style="position:relative;margin:0 -9px;padding:2.5px 9px;width:calc(100% + 18px)">' +
+        '<span class="d in" style="background:' + dot + '"></span>' +
+        '<span class="pill loop">for each</span><span class="nm">' + esc(fe) + '</span>' +
+        '</div>';
     }
     if (r.when) {
       const w = typeof r.when === "string" ? r.when : JSON.stringify(r.when);
@@ -720,6 +738,8 @@ function deleteWire(w) {
         delete res.envelope[envPath];
         if (!Object.keys(res.envelope).length) delete res.envelope;
       }
+    } else if (w.path === "forEach" || w.targetPath === "forEach") {
+      delete res.forEach;
     } else {
       if (res.fields && res.fields[w.path]) {
         delete res.fields[w.path];
