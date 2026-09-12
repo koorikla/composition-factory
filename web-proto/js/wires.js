@@ -273,6 +273,40 @@ export function isRawParamRef(raw, pn) {
 }
 
 /**
+ * Extract parameter names referenced in a raw template/expression string.
+ * @param {string} raw
+ * @param {string[]} [declaredParams]
+ * @returns {string[]}
+ */
+export function extractRawParams(raw, declaredParams) {
+  if (typeof raw !== "string" || !raw) return [];
+  const seen = new Set();
+  if (Array.isArray(declaredParams)) {
+    for (let p = 0; p < declaredParams.length; p++) {
+      const pn = declaredParams[p];
+      if (isRawParamRef(raw, pn)) {
+        seen.add(pn);
+      }
+    }
+  }
+  const rawParamRegex = /(?:\$spec|\.spec|\$params|\.params|params|parameters)\.([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)*)/g;
+  let m;
+  while ((m = rawParamRegex.exec(raw)) !== null) {
+    seen.add(m[1]);
+  }
+  const result = [];
+  for (const p of seen) {
+    const hasMoreSpecific = Array.from(seen).some(function (other) {
+      return other !== p && other.startsWith(p + ".");
+    });
+    if (!hasMoreSpecific) {
+      result.push(p);
+    }
+  }
+  return result;
+}
+
+/**
  * Compute the fan-out count map for every parameter in the document in a single pass.
  * @param {Object} doc The full blueprint document.
  * @returns {Record<string, number>} Map from param name to count.
@@ -307,46 +341,125 @@ export function fanOutMap(doc) {
     }
   }
 
+  const declaredParams = Object.keys((doc.spec && doc.spec.xrd && doc.spec.xrd.parameters) || {});
+
+  const checkRawDict = function (dict) {
+    if (!dict || typeof dict !== "object") return;
+    const keys = Object.keys(dict);
+    for (let j = 0; j < keys.length; j++) {
+      const f = dict[keys[j]];
+      if (!f) continue;
+      if ((!f.from || typeof f.from !== "string") && typeof f.raw === "string" && f.raw) {
+        const params = extractRawParams(f.raw, declaredParams);
+        for (let k = 0; k < params.length; k++) {
+          addParam(params[k]);
+        }
+      }
+    }
+  };
+
+  const checkConnectionSecret = function (cs) {
+    if (!cs) return;
+    if (typeof cs === "string") {
+      const parsed = parseFrom(cs);
+      if (parsed && parsed.kind === "param") {
+        addParam(parsed.param);
+      } else {
+        const params = extractRawParams(cs, declaredParams);
+        for (let k = 0; k < params.length; k++) {
+          addParam(params[k]);
+        }
+      }
+    } else if (typeof cs === "object") {
+      if (typeof cs.from === "string") {
+        const parsed = parseFrom(cs.from);
+        if (parsed && parsed.kind === "param") {
+          addParam(parsed.param);
+        }
+      }
+      if (typeof cs.raw === "string") {
+        const params = extractRawParams(cs.raw, declaredParams);
+        for (let k = 0; k < params.length; k++) {
+          addParam(params[k]);
+        }
+      }
+      if (typeof cs.name === "string") {
+        const parsed = parseFrom(cs.name);
+        if (parsed && parsed.kind === "param") {
+          addParam(parsed.param);
+        } else {
+          const params = extractRawParams(cs.name, declaredParams);
+          for (let k = 0; k < params.length; k++) {
+            addParam(params[k]);
+          }
+        }
+      }
+      if (typeof cs.namespace === "string") {
+        const parsed = parseFrom(cs.namespace);
+        if (parsed && parsed.kind === "param") {
+          addParam(parsed.param);
+        } else {
+          const params = extractRawParams(cs.namespace, declaredParams);
+          for (let k = 0; k < params.length; k++) {
+            addParam(params[k]);
+          }
+        }
+      }
+      if (Array.isArray(cs.keys)) {
+        for (let j = 0; j < cs.keys.length; j++) {
+          checkConnectionSecret(cs.keys[j]);
+        }
+      }
+    }
+  };
+
   const resources = (doc && doc.spec && doc.spec.resources) || [];
   for (let i = 0; i < resources.length; i++) {
     const r = resources[i];
     if (!r || typeof r !== "object") continue;
+    checkRawDict(r.fields);
+    checkRawDict(r.envelope);
+    checkRawDict(r.annotations);
+    checkConnectionSecret(r.connectionSecret);
     if (r.when) {
-      addParam(extractWhenParam(r.when));
+      const wp = extractWhenParam(r.when);
+      if (wp) {
+        addParam(wp);
+      } else {
+        const rawParams = extractRawParams(r.when, declaredParams);
+        for (let k = 0; k < rawParams.length; k++) {
+          addParam(rawParams[k]);
+        }
+      }
       addEnv(extractWhenEnv(r.when));
     }
     if (r.forEach) {
-      addParam(extractForEachParam(r.forEach));
+      const fp = extractForEachParam(r.forEach);
+      if (fp) {
+        addParam(fp);
+      } else {
+        const forEachStr = typeof r.forEach === "string" ? r.forEach
+          : (r.forEach && typeof r.forEach === "object" && typeof r.forEach.over === "string") ? r.forEach.over : null;
+        if (forEachStr) {
+          const rawParams = extractRawParams(forEachStr, declaredParams);
+          for (let k = 0; k < rawParams.length; k++) {
+            addParam(rawParams[k]);
+          }
+        }
+      }
       addEnv(extractForEachEnv(r.forEach));
     }
   }
 
   const templates = (doc && doc.spec && doc.spec.templates) || {};
   if (templates && typeof templates === "object") {
-    const declaredParams = Object.keys((doc.spec && doc.spec.xrd && doc.spec.xrd.parameters) || {});
     const tmplKeys = Object.keys(templates);
     for (let i = 0; i < tmplKeys.length; i++) {
       const body = templates[tmplKeys[i]];
       if (typeof body !== "string") continue;
-      const seen = new Set();
-      for (let p = 0; p < declaredParams.length; p++) {
-        const pn = declaredParams[p];
-        if (isRawParamRef(body, pn)) {
-          seen.add(pn);
-        }
-      }
-      const rawParamRegex = /(?:\$spec|\.spec|\$params|\.params|params|parameters)\.([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)*)/g;
-      let m;
-      while ((m = rawParamRegex.exec(body)) !== null) {
-        seen.add(m[1]);
-      }
-      for (const p of seen) {
-        const hasMoreSpecific = Array.from(seen).some(function (other) {
-          return other !== p && other.startsWith(p + ".");
-        });
-        if (!hasMoreSpecific) {
-          addParam(p);
-        }
+      const params = extractRawParams(body, declaredParams);
+      for (let k = 0; k < params.length; k++) {
+        addParam(params[k]);
       }
     }
   }
