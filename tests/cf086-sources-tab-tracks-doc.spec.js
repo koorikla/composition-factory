@@ -15,15 +15,15 @@ test('sources tab lists the providers the server serves after a starter example 
   await expect(page.locator('#region-palette')).toContainText('Installed Providers')
 
   await page.click('#examplesBtn')
-  await page.locator('button[data-load-id="rds-postgres"]').click()
+  await page.locator('button[data-load-id="s3-bucket"]').click()
   await expect(page.locator('#examplesOverlay')).toBeHidden()
-  await expect(page.locator('.node[data-id="db-instance"]')).toBeVisible({ timeout: 15000 })
+  await expect(page.locator('.node[data-id="bucket"]')).toBeVisible({ timeout: 15000 })
 
   const served = (await (await request.get(ENGINE + '/api/providers')).json()).providers.map(p => p.ref)
-  expect(served).toContain('ghcr.io/crossplane-contrib/provider-aws-rds:v2.7.0')
+  expect(served).toContain('ghcr.io/crossplane-contrib/provider-aws-s3:v2.7.0')
 
   const rail = page.locator('#region-palette')
-  await expect(rail).toContainText('provider-aws-rds', { timeout: 5000 })
+  await expect(rail).toContainText('provider-aws-s3', { timeout: 5000 })
   for (const ref of served) await expect(rail).toContainText(ref.split('/').pop().split(':')[0])
   await expect(rail).not.toContainText('provider-aws-sqs')
 })
