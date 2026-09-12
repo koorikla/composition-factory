@@ -350,13 +350,20 @@ func toYAML(n *node, isRoot bool) *yaml.Node {
 	if len(n.children) == 0 {
 		out.Style = yaml.FlowStyle
 	}
+	// A mapping whose entries are ALL named like wrapper keys would read
+	// back as a wrapper (one entry) or a malformed one (two); wrap each
+	// scalar so every entry reads as the entry it is. The root is never
+	// taken for a wrapper, so a top-level `value:` field stays bare.
+	allWrapperKeys := !isRoot && len(n.children) > 0
+	for _, c := range n.children {
+		if !wrapperKeys[c.label] {
+			allWrapperKeys = false
+			break
+		}
+	}
 	for _, c := range n.children {
 		v := toYAML(c, false)
-		// A mapping whose single entry is a wrapper key with a scalar value
-		// would read back as a wrapper for the whole mapping; wrap the
-		// scalar so it reads as the entry it is. The root is never taken
-		// for a wrapper, so a top-level `value:` field stays bare.
-		if !isRoot && len(n.children) == 1 && wrapperKeys[c.label] && v.Kind == yaml.ScalarNode {
+		if allWrapperKeys && v.Kind == yaml.ScalarNode {
 			v = flowMap("value", v)
 		}
 		out.Content = append(out.Content, strScalar(c.label), v)
@@ -373,7 +380,14 @@ func toYAML(n *node, isRoot bool) *yaml.Node {
 func Parse(nodes []*schema.Node, text string) (map[string]blueprint.Field, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(text), &doc); err != nil {
-		return nil, &Error{Line: yamlErrLine(err), Msg: strings.TrimPrefix(err.Error(), "yaml: ")}
+		line := yamlErrLine(err)
+		msg := strings.TrimPrefix(err.Error(), "yaml: ")
+		if line > 0 {
+			// Error() names the line itself; drop yaml.v3's own "line N: "
+			// so the message carries it exactly once.
+			msg = strings.TrimPrefix(msg, fmt.Sprintf("line %d: ", line))
+		}
+		return nil, &Error{Line: line, Msg: msg}
 	}
 	out := map[string]blueprint.Field{}
 	if doc.Kind == 0 || len(doc.Content) == 0 {
@@ -407,15 +421,19 @@ func isNull(n *yaml.Node) bool {
 }
 
 // wrapper recognises {value|from|raw|template: scalar}. A mapping that pairs
-// two wrapper keys, or wraps a null, is reported rather than fallen through:
-// both are certainly meant as wrappers and would otherwise surface as a
-// confusing "unknown field value" one level down.
+// two wrapper keys with scalar values, or wraps a null, is reported rather
+// than fallen through: both are certainly meant as wrappers and would
+// otherwise surface as a confusing "unknown field value" one level down.
+// Two wrapper-named keys whose values are themselves mappings are entries
+// (Render writes `from: {value: x}` for an annotation called "from").
 func wrapper(n *yaml.Node) (blueprint.Field, bool, *Error) {
 	if n.Kind != yaml.MappingNode {
 		return blueprint.Field{}, false, nil
 	}
-	if len(n.Content) == 4 && wrapperKeys[n.Content[0].Value] && wrapperKeys[n.Content[2].Value] {
-		return blueprint.Field{}, false, &Error{Line: n.Line, Msg: "a wrapper takes exactly one of value, from, raw, template"}
+	if len(n.Content) == 4 && wrapperKeys[n.Content[0].Value] && wrapperKeys[n.Content[2].Value] &&
+		n.Content[1].Kind == yaml.ScalarNode && n.Content[3].Kind == yaml.ScalarNode {
+		return blueprint.Field{}, false, &Error{Line: n.Line, Msg: "a wrapper takes exactly one of value, from, raw, template" +
+			" (entries that merely share those names take {value: ...} each)"}
 	}
 	if len(n.Content) != 2 {
 		return blueprint.Field{}, false, nil

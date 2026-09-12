@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -195,6 +196,20 @@ func TestRenderSingleWrapperKeyedEntryStaysAnEntry(t *testing.T) {
 	}
 }
 
+// When EVERY entry of a mapping is named like a wrapper key, each scalar is
+// wrapped too: {from: x, value: y} is otherwise refused by Parse as a
+// two-key wrapper.
+func TestRenderAllWrapperKeyedEntriesStayEntries(t *testing.T) {
+	nodes := deploymentNodes(t)
+	out := roundTrip(t, nodes, map[string]blueprint.Field{
+		"metadata.annotations[from]":  {Value: "x"},
+		"metadata.annotations[value]": {Value: "y"},
+	})
+	if !strings.Contains(out, "  annotations:\n    from: {value: x}\n    value: {value: y}\n") {
+		t.Errorf("entries not wrapped:\n%s", out)
+	}
+}
+
 // A literal at a branch position (a whole map, object or list) is written as
 // an explicit wrapper, since a bare scalar there is refused by Parse.
 func TestRenderLiteralAtBranchIsAnExplicitWrapper(t *testing.T) {
@@ -312,11 +327,18 @@ func TestParseWrapperWithNullIsAnError(t *testing.T) {
 	}
 }
 
-func TestParseSyntaxErrorCarriesLine(t *testing.T) {
+// yaml.v3's own message already names the line; Error() must not name it a
+// second time ("line 2: line 2: ...").
+func TestParseSyntaxErrorCarriesLineExactlyOnce(t *testing.T) {
 	_, err := Parse(deploymentNodes(t), "spec:\n  replicas: 1\n bad: [\n")
 	var me *Error
 	if !asError(err, &me) || me.Line == 0 {
 		t.Fatalf("want a syntax error with a line, got %v", err)
+	}
+	msg := me.Error()
+	prefix := fmt.Sprintf("line %d: ", me.Line)
+	if !strings.HasPrefix(msg, prefix) || strings.Contains(msg[len(prefix):], prefix) {
+		t.Errorf("message must carry %q exactly once: %q", prefix, msg)
 	}
 }
 
