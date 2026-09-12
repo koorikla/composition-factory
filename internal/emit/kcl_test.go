@@ -8,7 +8,6 @@ import (
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/schema"
-	"sigs.k8s.io/yaml"
 )
 
 func TestEmitKCLComposition(t *testing.T) {
@@ -402,8 +401,11 @@ spec:
         region:
           value: us-east-1
 `
-	var b blueprint.Blueprint
-	if err := yaml.Unmarshal([]byte(bpYAML), &b); err != nil {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	_ = os.WriteFile(p, []byte(bpYAML), 0600)
+	b, err := blueprint.Load(p)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -433,7 +435,7 @@ spec:
                 properties: {kind: {type: string}, name: {type: string}}
 `)
 	crds, _ := schema.ParseCRDs([][]byte{crdDoc})
-	_, err := Composition(&b, crds)
+	_, err = Composition(b, crds)
 	if err == nil {
 		t.Fatal("expected error on KCL with conventions, got nil")
 	}
@@ -1218,15 +1220,15 @@ spec:
         region:
           from: params.region
 `
-	var b blueprint.Blueprint
-	if err := yaml.Unmarshal([]byte(bpYAML), &b); err != nil {
+	b, err := blueprint.Parse([]byte(bpYAML))
+	if err != nil {
 		t.Fatal(err)
 	}
 	crds, err := schema.ParseCRDs([][]byte{fakeQueueCRD})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = Composition(&b, crds)
+	_, err = Composition(b, crds)
 	if err == nil {
 		t.Fatal("expected error on KCL with spec.templates, got nil")
 	}

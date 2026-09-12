@@ -21,9 +21,6 @@ func (b *Blueprint) validateEnvironment() error {
 	if len(b.Spec.Environment) == 0 {
 		return nil
 	}
-	if b.Engine() == EngineKCL {
-		return fmt.Errorf("spec.environment: engine %q does not support spec.environment", b.Engine())
-	}
 	names := make([]string, 0, len(b.Spec.Environment))
 	for n := range b.Spec.Environment {
 		names = append(names, n)
