@@ -174,12 +174,32 @@ export function cleanMemberRefs(draft, paramName, memberPath) {
     }
   }
   var fullParam = paramName + "." + memberPath;
+  var deletedTemplates = [];
+  if (draft.spec.templates && typeof draft.spec.templates === "object") {
+    Object.keys(draft.spec.templates).forEach(function (tName) {
+      if (typeof draft.spec.templates[tName] === "string" && isRawParamRef(draft.spec.templates[tName], fullParam)) {
+        delete draft.spec.templates[tName];
+        deletedTemplates.push(tName);
+      }
+    });
+    if (Object.keys(draft.spec.templates).length === 0) {
+      delete draft.spec.templates;
+    }
+    if (deletedTemplates.length > 0 && Array.isArray(draft.spec.conventions)) {
+      draft.spec.conventions = draft.spec.conventions.filter(function (c) {
+        return c && deletedTemplates.indexOf(c.template) === -1;
+      });
+      if (draft.spec.conventions.length === 0) {
+        delete draft.spec.conventions;
+      }
+    }
+  }
   var resources = draft.spec.resources || [];
   resources.forEach(function (r) {
     if (r.fields) {
       Object.keys(r.fields).forEach(function (k) {
         var f = r.fields[k];
-        if (f && (isParamRef(f.from, fullParam) || isRawParamRef(f.raw, fullParam))) {
+        if (f && (isParamRef(f.from, fullParam) || isRawParamRef(f.raw, fullParam) || (f.template && deletedTemplates.indexOf(f.template) !== -1))) {
           delete r.fields[k];
         }
       });
@@ -187,7 +207,7 @@ export function cleanMemberRefs(draft, paramName, memberPath) {
     if (r.envelope) {
       Object.keys(r.envelope).forEach(function (k) {
         var f = r.envelope[k];
-        if (f && (isParamRef(f.from, fullParam) || isRawParamRef(f.raw, fullParam))) {
+        if (f && (isParamRef(f.from, fullParam) || isRawParamRef(f.raw, fullParam) || (f.template && deletedTemplates.indexOf(f.template) !== -1))) {
           delete r.envelope[k];
         }
       });
@@ -196,7 +216,7 @@ export function cleanMemberRefs(draft, paramName, memberPath) {
     if (r.annotations) {
       Object.keys(r.annotations).forEach(function (k) {
         var f = r.annotations[k];
-        if (f && (isParamRef(f.from, fullParam) || isRawParamRef(f.raw, fullParam))) {
+        if (f && (isParamRef(f.from, fullParam) || isRawParamRef(f.raw, fullParam) || (f.template && deletedTemplates.indexOf(f.template) !== -1))) {
           delete r.annotations[k];
         }
       });
