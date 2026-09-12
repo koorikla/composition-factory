@@ -13276,3 +13276,341 @@ spec:
 		t.Fatalf("bp3.Validate failed: %v", err)
 	}
 }
+
+func TestAdoptTernaryEnvWhen(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-ternary-env-when
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- if ternary (index $env "enabled") true (hasKey $env "enabled") }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res1
+          spec:
+            forProvider: {}
+          {{- end }}
+          ---
+          {{- if ternary $env.featureActive true (hasKey $env "featureActive") }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res2
+          spec:
+            forProvider: {}
+          {{- end }}
+          ---
+          {{- if eq (ternary (index $env "stage") "dev" (hasKey $env "stage")) "prod" }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res3
+          spec:
+            forProvider: {}
+          {{- end }}
+          ---
+          {{- if ne (ternary (index $env "tier") "dev" (hasKey $env "tier")) "prod" }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res4
+          spec:
+            forProvider: {}
+          {{- end }}
+          ---
+          {{- if eq "prod" (ternary (index $env "stage") "dev" (hasKey $env "stage")) }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res5
+          spec:
+            forProvider: {}
+          {{- end }}
+          ---
+          {{- if ne "prod" (ternary (index $env "tier") "dev" (hasKey $env "tier")) }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res6
+          spec:
+            forProvider: {}
+          {{- end }}
+          ---
+          {{- if eq (ternary $env.stage "dev" (hasKey $env "stage")) "prod" }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res7
+          spec:
+            forProvider: {}
+          {{- end }}
+          ---
+          {{- if ne (ternary $env.tier "dev" (hasKey $env "tier")) "prod" }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res8
+          spec:
+            forProvider: {}
+          {{- end }}
+          ---
+          {{- if ternary (index $env 'singleQuoted') true (hasKey $env 'singleQuoted') }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res9
+          spec:
+            forProvider: {}
+          {{- end }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	res1 := bp.ResourceNamed("res1")
+	if res1 == nil {
+		t.Fatalf("expected res1 to exist")
+	}
+	if res1.When != "env.enabled" {
+		t.Errorf("res1.When = %q, want %q", res1.When, "env.enabled")
+	}
+	res2 := bp.ResourceNamed("res2")
+	if res2 == nil {
+		t.Fatalf("expected res2 to exist")
+	}
+	if res2.When != "env.featureActive" {
+		t.Errorf("res2.When = %q, want %q", res2.When, "env.featureActive")
+	}
+	res3 := bp.ResourceNamed("res3")
+	if res3 == nil {
+		t.Fatalf("expected res3 to exist")
+	}
+	if res3.When != `env.stage == "prod"` {
+		t.Errorf("res3.When = %q, want %q", res3.When, `env.stage == "prod"`)
+	}
+	res4 := bp.ResourceNamed("res4")
+	if res4 == nil {
+		t.Fatalf("expected res4 to exist")
+	}
+	if res4.When != `env.tier != "prod"` {
+		t.Errorf("res4.When = %q, want %q", res4.When, `env.tier != "prod"`)
+	}
+	res5 := bp.ResourceNamed("res5")
+	if res5 == nil {
+		t.Fatalf("expected res5 to exist")
+	}
+	if res5.When != `env.stage == "prod"` {
+		t.Errorf("res5.When = %q, want %q", res5.When, `env.stage == "prod"`)
+	}
+	res6 := bp.ResourceNamed("res6")
+	if res6 == nil {
+		t.Fatalf("expected res6 to exist")
+	}
+	if res6.When != `env.tier != "prod"` {
+		t.Errorf("res6.When = %q, want %q", res6.When, `env.tier != "prod"`)
+	}
+	res7 := bp.ResourceNamed("res7")
+	if res7 == nil {
+		t.Fatalf("expected res7 to exist")
+	}
+	if res7.When != `env.stage == "prod"` {
+		t.Errorf("res7.When = %q, want %q", res7.When, `env.stage == "prod"`)
+	}
+	res8 := bp.ResourceNamed("res8")
+	if res8 == nil {
+		t.Fatalf("expected res8 to exist")
+	}
+	if res8.When != `env.tier != "prod"` {
+		t.Errorf("res8.When = %q, want %q", res8.When, `env.tier != "prod"`)
+	}
+	res9 := bp.ResourceNamed("res9")
+	if res9 == nil {
+		t.Fatalf("expected res9 to exist")
+	}
+	if res9.When != "env.singleQuoted" {
+		t.Errorf("res9.When = %q, want %q", res9.When, "env.singleQuoted")
+	}
+	if _, ok := bp.Spec.Environment["enabled"]; !ok {
+		t.Errorf("expected enabled in bp.Spec.Environment, got %+v", bp.Spec.Environment)
+	}
+	if _, ok := bp.Spec.Environment["stage"]; !ok {
+		t.Errorf("expected stage in bp.Spec.Environment, got %+v", bp.Spec.Environment)
+	}
+	if _, ok := bp.Spec.Environment["singleQuoted"]; !ok {
+		t.Errorf("expected singleQuoted in bp.Spec.Environment, got %+v", bp.Spec.Environment)
+	}
+}
+
+func TestAdoptTernaryEnvForEach(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-ternary-env-foreach
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          {{- range $i := until (int (ternary (index $env "retries") 3 (hasKey $env "retries"))) }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res1
+          spec:
+            forProvider: {}
+          {{- end }}
+          ---
+          {{- range $i := until (int (ternary $env.count 5 (hasKey $env "count"))) }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res2
+          spec:
+            forProvider: {}
+          {{- end }}
+          ---
+          {{- range $i := until (int (ternary (index $env 'sqCount') 2 (hasKey $env 'sqCount'))) }}
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res3
+          spec:
+            forProvider: {}
+          {{- end }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	res1 := bp.ResourceNamed("res1")
+	if res1 == nil {
+		t.Fatalf("expected res1 to exist")
+	}
+	if res1.ForEach != "env.retries" {
+		t.Errorf("res1.ForEach = %q, want %q", res1.ForEach, "env.retries")
+	}
+	res2 := bp.ResourceNamed("res2")
+	if res2 == nil {
+		t.Fatalf("expected res2 to exist")
+	}
+	if res2.ForEach != "env.count" {
+		t.Errorf("res2.ForEach = %q, want %q", res2.ForEach, "env.count")
+	}
+	res3 := bp.ResourceNamed("res3")
+	if res3 == nil {
+		t.Fatalf("expected res3 to exist")
+	}
+	if res3.ForEach != "env.sqCount" {
+		t.Errorf("res3.ForEach = %q, want %q", res3.ForEach, "env.sqCount")
+	}
+	if env, ok := bp.Spec.Environment["retries"]; !ok {
+		t.Errorf("expected retries in bp.Spec.Environment, got %+v", bp.Spec.Environment)
+	} else if env.Default != "3" {
+		t.Errorf("expected retries default '3', got %q", env.Default)
+	}
+	if env, ok := bp.Spec.Environment["count"]; !ok {
+		t.Errorf("expected count in bp.Spec.Environment, got %+v", bp.Spec.Environment)
+	} else if env.Default != "5" {
+		t.Errorf("expected count default '5', got %q", env.Default)
+	}
+	if env, ok := bp.Spec.Environment["sqCount"]; !ok {
+		t.Errorf("expected sqCount in bp.Spec.Environment, got %+v", bp.Spec.Environment)
+	} else if env.Default != "2" {
+		t.Errorf("expected sqCount default '2', got %q", env.Default)
+	}
+}
+
+func TestAdoptTernaryEnvField(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-ternary-env-field
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          apiVersion: ec2.aws.upbound.io/v1beta1
+          kind: Subnet
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: res1
+          spec:
+            forProvider:
+              f1: {{ ternary (index $env "timeout") 30 (hasKey $env "timeout") | quote }}
+              f2: {{ ternary (index $env "retries") 3 (hasKey $env "retries") }}
+              f3: {{ ternary $env.flag true (hasKey $env "flag") }}
+              f4: {{ ternary (index $env 'region') "us-east-1" (hasKey $env 'region') | quote }}
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	res1 := bp.ResourceNamed("res1")
+	if res1 == nil {
+		t.Fatalf("expected res1 to exist")
+	}
+	for field, wantFrom := range map[string]string{
+		"f1": "env.timeout",
+		"f2": "env.retries",
+		"f3": "env.flag",
+		"f4": "env.region",
+	} {
+		f := res1.Fields[field]
+		if f.From != wantFrom {
+			t.Errorf("%s.From = %q, want %q (Raw: %q)", field, f.From, wantFrom, f.Raw)
+		}
+	}
+	for _, expectedEnv := range []string{"timeout", "retries", "flag", "region"} {
+		if _, ok := bp.Spec.Environment[expectedEnv]; !ok {
+			t.Errorf("expected %q in bp.Spec.Environment, got %+v", expectedEnv, bp.Spec.Environment)
+		}
+	}
+}
