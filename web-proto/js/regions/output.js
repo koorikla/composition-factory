@@ -809,12 +809,15 @@ function drawTopbar(doc) {
           return '<option value="' + esc(eng) + '">' + esc(eng) + '</option>';
         }).join("");
         el.engineSel.value = curDocEngine;
+        syncTplSourceState(curDocEngine);
       }
     }).catch(function () {
       el.ver.textContent = "";
       if (el.engineSel && el.engineSel.options.length === 0) {
         el.engineSel.innerHTML = '<option value="go-templating">go-templating</option><option value="kcl">kcl</option><option value="python">python</option>';
       }
+      var curDocEngine = (store.state.doc && store.state.doc.spec && store.state.doc.spec.emit && store.state.doc.spec.emit.engine) || "go-templating";
+      syncTplSourceState(curDocEngine);
     });
   }
   var bp = el.tabs.querySelector('[data-t="bp"]');
@@ -1199,11 +1202,16 @@ function bindOutputEvents() {
   if (el.engineSel) {
     el.engineSel.addEventListener("change", function () {
       var val = el.engineSel.value;
+      syncTplSourceState(val);
       store.replaceDoc(function (doc) {
         doc.spec = doc.spec || {};
         if (val && val !== "go-templating") {
           doc.spec.emit = doc.spec.emit || {};
           doc.spec.emit.engine = val;
+          delete doc.spec.emit.templateSource;
+          if (Object.keys(doc.spec.emit).length === 0) {
+            delete doc.spec.emit;
+          }
         } else {
           if (doc.spec.emit) {
             delete doc.spec.emit.engine;
@@ -1219,6 +1227,7 @@ function bindOutputEvents() {
           var curDoc = store.state.doc;
           var curEng = (curDoc && curDoc.spec && curDoc.spec.emit && curDoc.spec.emit.engine) || "go-templating";
           el.engineSel.value = curEng;
+          syncTplSourceState(curEng);
         }
       });
     });
@@ -1226,6 +1235,11 @@ function bindOutputEvents() {
 
   if (el.tplSource) {
     el.tplSource.addEventListener("change", function () {
+      var curEng = (store.state.doc && store.state.doc.spec && store.state.doc.spec.emit && store.state.doc.spec.emit.engine) || "go-templating";
+      if (curEng !== "go-templating") {
+        el.tplSource.value = "Inline";
+        return;
+      }
       var val = el.tplSource.value;
       store.replaceDoc(function (doc) {
         doc.spec = doc.spec || {};
@@ -1253,6 +1267,22 @@ function bindOutputEvents() {
   }
 }
 
+function syncTplSourceState(engine) {
+  if (!el.tplSource) return;
+  var isGo = !engine || engine === "go-templating";
+  var fsOpt = el.tplSource.querySelector('option[value="FileSystem"]');
+  var tooltip = isGo ? "" : "FileSystem template emission is only available for go-templating";
+  if (fsOpt) {
+    fsOpt.disabled = !isGo;
+    fsOpt.title = tooltip;
+  }
+  el.tplSource.disabled = !isGo;
+  el.tplSource.title = tooltip;
+  if (!isGo) {
+    el.tplSource.value = "Inline";
+  }
+}
+
 function bindOutputStoreSubscriptions() {
   store.subscribe("doc", function (doc) {
     var curJson = JSON.stringify(doc);
@@ -1262,14 +1292,19 @@ function bindOutputStoreSubscriptions() {
     }
     drawTopbar(doc);
     drawWarn(doc);
+    var curEng = "go-templating";
     if (el.engineSel) {
-      var curEng = (doc && doc.spec && doc.spec.emit && doc.spec.emit.engine) || "go-templating";
+      curEng = (doc && doc.spec && doc.spec.emit && doc.spec.emit.engine) || "go-templating";
       if (el.engineSel.value !== curEng) {
         el.engineSel.value = curEng;
       }
     }
+    syncTplSourceState(curEng);
     if (el.tplSource) {
       var curMode = (doc && doc.spec && doc.spec.emit && doc.spec.emit.templateSource) || "Inline";
+      if (curEng !== "go-templating") {
+        curMode = "Inline";
+      }
       if (el.tplSource.value !== curMode) {
         el.tplSource.value = curMode;
       }
@@ -1364,6 +1399,8 @@ export function init(rootEl, deps) {
 
   /* ---------- first paint ---------- */
   buildTabs();
+  var initialEng = (store.state.doc && store.state.doc.spec && store.state.doc.spec.emit && store.state.doc.spec.emit.engine) || "go-templating";
+  syncTplSourceState(initialEng);
   if (store.state.doc) {
     lastDocJson = JSON.stringify(store.state.doc);
     docRevision = 0;
