@@ -13614,3 +13614,58 @@ spec:
 		}
 	}
 }
+
+func TestAdoptEnvironment_DeclaredAnnotationOverrulesInference(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xsubnets.aws.example.org
+  annotations:
+    factory.crossplane.io/environment-keys: '{"timeout":{"type":"integer","default":"30"},"flag":{"type":"boolean","default":"true"}}'
+spec:
+  compositeTypeRef:
+    apiVersion: aws.example.org/v1alpha1
+    kind: XSubnet
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        inline:
+          template: |
+            apiVersion: ec2.aws.upbound.io/v1beta1
+            kind: Subnet
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: res1
+            spec:
+              forProvider:
+                timeout: {{ ternary (index $env "timeout") 30 (hasKey $env "timeout") }}
+                flag: {{ ternary $env.flag true (hasKey $env "flag") }}
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.HasTrueLoss() {
+		t.Errorf("unexpected true loss: %+v", report.Drops)
+	}
+
+	timeoutKey := bp.Spec.Environment["timeout"]
+	if timeoutKey.Type != "integer" {
+		t.Errorf("expected timeout type integer, got %q", timeoutKey.Type)
+	}
+	if timeoutKey.Default != "30" {
+		t.Errorf("expected timeout default 30, got %q", timeoutKey.Default)
+	}
+
+	flagKey := bp.Spec.Environment["flag"]
+	if flagKey.Type != "boolean" {
+		t.Errorf("expected flag type boolean, got %q", flagKey.Type)
+	}
+	if flagKey.Default != "true" {
+		t.Errorf("expected flag default true, got %q", flagKey.Default)
+	}
+}

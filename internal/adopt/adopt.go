@@ -465,6 +465,7 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 			}
 		}
 	}
+	var annotatedEnvKeys map[string]blueprint.EnvironmentKey
 	if meta, ok := compDoc["metadata"].(map[string]any); ok {
 		if name, ok := meta["name"].(string); ok && name != "" {
 			if targetComp != "" || bp.Metadata.Name == "" {
@@ -482,6 +483,10 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 				var envKeys map[string]blueprint.EnvironmentKey
 				if err := json.Unmarshal([]byte(envKeysRaw), &envKeys); err == nil && len(envKeys) > 0 {
 					bp.Spec.Environment = envKeys
+					annotatedEnvKeys = make(map[string]blueprint.EnvironmentKey, len(envKeys))
+					for k, v := range envKeys {
+						annotatedEnvKeys[k] = v
+					}
 				}
 			}
 		}
@@ -641,11 +646,19 @@ func Adopt(manifest []byte, opts Options) (*blueprint.Blueprint, *LossReport, er
 		}
 	}
 
+	// Restore declared type and default for environment keys from annotation
+	for k, v := range annotatedEnvKeys {
+		bp.Spec.Environment[k] = v
+	}
+
 	// 6. Deduplicate and collect provider sources
 	collectSources(bp, opts.DefaultProviderRef)
 
 	// Prune unknown forProvider fields against CRD schema if store is available
 	pruneUnknownForProviderFields(bp, opts, report)
+
+	// Report contradiction if inferred environment key type contradicts CRD schema type
+	checkEnvironmentFieldSchemaContradictions(bp, opts, report, annotatedEnvKeys)
 
 	if xrdDoc == nil {
 		pruneOrphanedParameters(bp, opts.BaseBlueprint, report)
@@ -4554,6 +4567,135 @@ func pruneUnknownForProviderFields(bp *blueprint.Blueprint, opts Options, report
 				fmt.Sprintf("field %q is not in %s spec.forProvider (unknown field pruned by schema)", fieldPath, crd.Kind),
 			)
 			delete(r.Fields, fieldPath)
+		}
+	}
+}
+
+func isFieldTypeCompatible(targetType, paramType string, isMap bool, isIntOrString bool) bool {
+	if isMap {
+		return paramType == "string" || paramType == "integer" || paramType == "number" || paramType == "boolean"
+	}
+	if isIntOrString {
+		return paramType == "string" || paramType == "integer"
+	}
+	switch targetType {
+	case "string":
+		return paramType == "string" || paramType == "integer" || paramType == "number" || paramType == "boolean"
+	case "integer":
+		return paramType == "integer"
+	case "number":
+		return paramType == "number" || paramType == "integer"
+	case "boolean":
+		return paramType == "boolean"
+	case "":
+		return true
+	}
+	return false
+}
+
+func checkEnvironmentFieldSchemaContradictions(bp *blueprint.Blueprint, opts Options, report *LossReport, annotatedEnvKeys map[string]blueprint.EnvironmentKey) {
+	if bp == nil || opts.Store == nil || report == nil || len(bp.Spec.Environment) == 0 {
+		return
+	}
+	wantNamespaced := bp.Spec.XRD.Scope == "Namespaced" || bp.Spec.XRD.Scope == ""
+
+	var allStoreCRDs []schema.CRD
+	allStoreCRDsLoaded := false
+	getAllStoreCRDs := func() []schema.CRD {
+		if allStoreCRDsLoaded {
+			return allStoreCRDs
+		}
+		allStoreCRDsLoaded = true
+		if list, err := opts.Store.List(); err == nil {
+			for _, ref := range list {
+				if got, err := opts.Store.Load(ref); err == nil {
+					allStoreCRDs = append(allStoreCRDs, got...)
+				}
+			}
+		}
+		return allStoreCRDs
+	}
+
+	seenDrops := make(map[string]bool)
+
+	for i := range bp.Spec.Resources {
+		r := &bp.Spec.Resources[i]
+		if r.Provider == blueprint.NativeProvider || strings.HasSuffix(r.Provider, ".yaml") || strings.HasSuffix(r.Provider, ".yml") {
+			continue
+		}
+		var crd *schema.CRD
+		if r.Provider != "" {
+			if got, err := opts.Store.Load(r.Provider); err == nil {
+				crd = resolveResourceCRD(got, *r, wantNamespaced)
+			}
+		}
+		if crd == nil {
+			crd = resolveResourceCRD(getAllStoreCRDs(), *r, wantNamespaced)
+		}
+		if crd == nil {
+			continue
+		}
+
+		nodes, err := crd.ForProvider()
+		if err != nil || len(nodes) == 0 {
+			continue
+		}
+
+		leaves := schema.Leaves(nodes, "")
+		fieldNodes := make(map[string]*schema.Node, len(leaves))
+		for _, l := range leaves {
+			if l.Node != nil {
+				fieldNodes[l.Path] = l.Node
+			}
+		}
+
+		// Sort field paths for deterministic reporting order
+		var fNames []string
+		for k := range r.Fields {
+			fNames = append(fNames, k)
+		}
+		sort.Strings(fNames)
+
+		for _, fieldPath := range fNames {
+			f := r.Fields[fieldPath]
+			if f.From == "" || !strings.HasPrefix(f.From, "env.") {
+				continue
+			}
+			envKey := strings.TrimPrefix(f.From, "env.")
+			if annotatedEnvKeys != nil {
+				if _, isAnnotated := annotatedEnvKeys[envKey]; isAnnotated {
+					continue
+				}
+			}
+
+			envDecl, exists := bp.Spec.Environment[envKey]
+			if !exists {
+				continue
+			}
+
+			basePath, _, isMap := blueprint.ParseFieldPath(fieldPath)
+			lookup := reArrayIdx.ReplaceAllString(fieldPath, "[0]")
+			if isMap {
+				lookup = reArrayIdx.ReplaceAllString(basePath, "[0]")
+			}
+			node := fieldNodes[lookup]
+			if node == nil && isMap {
+				node = fieldNodes[basePath]
+			}
+			if node == nil || node.Type == "" {
+				continue
+			}
+
+			isIntOrString := node.Format == "int-or-string"
+			if !isFieldTypeCompatible(node.Type, envDecl.Type, isMap, isIntOrString) {
+				dropPath := fmt.Sprintf("environment.%s", envKey)
+				dropReason := fmt.Sprintf("inferred type %q contradicts CRD schema type %q of field %q on resource %q", envDecl.Type, node.Type, fieldPath, r.Name)
+				dropKey := dropPath + "|" + dropReason
+				if !seenDrops[dropKey] {
+					seenDrops[dropKey] = true
+					report.Record(dropPath, dropReason)
+				}
+			}
 		}
 	}
 }

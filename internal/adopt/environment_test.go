@@ -233,3 +233,78 @@ func TestEnvironment_RoundTrip(t *testing.T) {
 		t.Errorf("Round-trip emitted Composition diff (-gen1 +gen2):\n%s", diff)
 	}
 }
+
+func TestEnvironment_RoundTrip_IntegerKeyWiredToField(t *testing.T) {
+	bpOriginal := &blueprint.Blueprint{
+		APIVersion: blueprint.APIVersion,
+		Kind:       blueprint.Kind,
+		Metadata:   blueprint.Metadata{Name: "xqueues.platform.sparky.ee"},
+		Spec: blueprint.Spec{
+			Sources: []blueprint.Source{
+				{Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v2"},
+			},
+			XRD: blueprint.XRD{
+				Group:   "platform.sparky.ee",
+				Kind:    "XQueue",
+				Plural:  "xqueues",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"providerName": {Type: "string", Required: true},
+				},
+			},
+			Environment: map[string]blueprint.EnvironmentKey{
+				"region":  {Type: "string", Default: "us-east-1", Description: "target region"},
+				"maxSize": {Type: "integer", Default: "2048", Description: "max message size"},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "main-queue",
+					Kind:     "Queue",
+					Provider: "xpkg.upbound.io/upbound/provider-aws-sqs:v2",
+					Fields: map[string]blueprint.Field{
+						"region":         {From: "env.region"},
+						"maxMessageSize": {From: "env.maxSize"},
+					},
+				},
+			},
+		},
+	}
+
+	crds := testCRDs(t)
+	compGen1, err := emit.Composition(bpOriginal, crds)
+	if err != nil {
+		t.Fatalf("First emit.Composition failed: %v", err)
+	}
+	fnsGen1, err := emit.Functions(bpOriginal)
+	if err != nil {
+		t.Fatalf("emit.Functions failed: %v", err)
+	}
+	manifest := string(compGen1) + "\n---\n" + string(fnsGen1)
+
+	bpAdopted, report, err := Adopt([]byte(manifest), Options{
+		DefaultProviderRef: "xpkg.upbound.io/upbound/provider-aws-sqs:v2",
+	})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if report.HasTrueLoss() {
+		t.Errorf("Adopt had unexpected true loss: %+v", report.Drops)
+	}
+
+	if bpAdopted.Spec.Environment["maxSize"].Type != "integer" {
+		t.Errorf("expected maxSize type integer, got %q", bpAdopted.Spec.Environment["maxSize"].Type)
+	}
+	if bpAdopted.Spec.Environment["maxSize"].Default != "2048" {
+		t.Errorf("expected maxSize default 2048, got %q", bpAdopted.Spec.Environment["maxSize"].Default)
+	}
+
+	compGen2, err := emit.Composition(bpAdopted, crds)
+	if err != nil {
+		t.Fatalf("Second emit.Composition failed: %v", err)
+	}
+
+	if diff := cmp.Diff(string(compGen1), string(compGen2)); diff != "" {
+		t.Errorf("Round-trip emitted Composition diff (-gen1 +gen2):\n%s", diff)
+	}
+}
