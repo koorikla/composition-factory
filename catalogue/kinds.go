@@ -280,6 +280,9 @@ func Matches(p Provider, q string) bool {
 func Search(entries []Provider, query, typ string) []Provider {
 	query = strings.ToLower(strings.TrimSpace(query))
 	typ = strings.ToLower(strings.TrimSpace(typ))
+	if typ != "" && typ != "provider" && typ != "function" {
+		return nil
+	}
 
 	out := make([]Provider, 0, len(entries))
 	for _, e := range entries {
