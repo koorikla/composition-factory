@@ -118,12 +118,51 @@ spec:
   s3_use_path_style: true
 EOF
 
-# 6. Generate sqs-queue starter with workspace isolation
+# 6. Generate sqs-queue blueprint with status wires into composed Secret and workspace isolation
 echo "==> Ensuring provider schema for sqs-queue is cached..."
 ./bin/cf provider add ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0 || true
 
-echo "==> Generating sqs-queue starter with --group-suffix=${WORKSPACE_GROUP_SUFFIX}..."
-./bin/cf gen internal/examples/sqs-queue.cf.yaml --out "${OUT_DIR}" --group-suffix="${WORKSPACE_GROUP_SUFFIX}"
+cat <<EOF > "${OUT_DIR}/sqs-blueprint.yaml"
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: sqs-queue
+spec:
+  sources:
+    - provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+  xrd:
+    group: messaging.sparky.ee
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+        description: ProviderConfig reference to reconcile against.
+      region:
+        type: string
+        default: us-east-1
+        description: AWS region for SQS queues.
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: ghcr.io/crossplane-contrib/provider-aws-sqs:v2.7.0
+      fields:
+        region: {from: params.region}
+        sqsManagedSseEnabled: {value: true}
+    - name: queue-secret
+      kind: Secret
+      provider: k8s
+      fields:
+        type: {value: "Opaque"}
+        stringData[queueUrl]: {from: resources.main-queue.status.atProvider.url}
+        stringData[queueArn]: {from: resources.main-queue.status.atProvider.arn}
+EOF
+
+echo "==> Generating sqs-queue blueprint with status wires and --group-suffix=${WORKSPACE_GROUP_SUFFIX}..."
+./bin/cf gen "${OUT_DIR}/sqs-blueprint.yaml" --out "${OUT_DIR}" --group-suffix="${WORKSPACE_GROUP_SUFFIX}"
 
 # 7. Ensure workspace namespace exists
 echo "==> Ensuring namespace ${WORKSPACE_NAMESPACE} exists..."
@@ -245,10 +284,57 @@ for q in $QUEUES; do
     exit 1
   fi
   echo "    Queue ${EXTERNAL_NAME} confirmed present in floci."
+
+  # 13. Verify status wires reached the composed Secret and match AWS CLI
+  echo "==> Verifying status wires reached composed Secret and match AWS CLI..."
+  AWS_URL=$(aws --endpoint-url http://127.0.0.1:4566 sqs get-queue-url --queue-name "${EXTERNAL_NAME}" --output text --query 'QueueUrl')
+  AWS_ARN=$(aws --endpoint-url http://127.0.0.1:4566 sqs get-queue-attributes --queue-url "${AWS_URL}" --attribute-names QueueArn --output text --query 'Attributes.QueueArn')
+
+  echo "    AWS CLI reports for ${EXTERNAL_NAME}:"
+  echo "      QueueUrl: ${AWS_URL}"
+  echo "      QueueArn: ${AWS_ARN}"
+
+  SECRET_NAME="test-queue-queue-secret"
+  echo "    Waiting for secret ${SECRET_NAME} to contain populated status wire data..."
+  SECRET_POPULATED=false
+  for s in {1..30}; do
+    SECRET_URL_B64=$(kubectl get secret "${SECRET_NAME}" -n "${WORKSPACE_NAMESPACE}" -o jsonpath='{.data.queueUrl}' 2>/dev/null || true)
+    SECRET_ARN_B64=$(kubectl get secret "${SECRET_NAME}" -n "${WORKSPACE_NAMESPACE}" -o jsonpath='{.data.queueArn}' 2>/dev/null || true)
+    if [ -n "${SECRET_URL_B64}" ] && [ -n "${SECRET_ARN_B64}" ]; then
+      SECRET_POPULATED=true
+      break
+    fi
+    sleep 2
+  done
+
+  if [ "${SECRET_POPULATED}" = false ]; then
+    echo "ERROR: Secret ${SECRET_NAME} was not populated with status wires!" >&2
+    kubectl get secret "${SECRET_NAME}" -n "${WORKSPACE_NAMESPACE}" -o yaml >&2 || true
+    exit 1
+  fi
+
+  SECRET_URL=$(echo "${SECRET_URL_B64}" | base64 -d)
+  SECRET_ARN=$(echo "${SECRET_ARN_B64}" | base64 -d)
+
+  echo "    Secret ${SECRET_NAME} contains:"
+  echo "      queueUrl: ${SECRET_URL}"
+  echo "      queueArn: ${SECRET_ARN}"
+
+  if [ "${SECRET_URL}" != "${AWS_URL}" ]; then
+    echo "ERROR: Secret queueUrl '${SECRET_URL}' does not match AWS CLI URL '${AWS_URL}'!" >&2
+    exit 1
+  fi
+  if [ "${SECRET_ARN}" != "${AWS_ARN}" ]; then
+    echo "ERROR: Secret queueArn '${SECRET_ARN}' does not match AWS CLI ARN '${AWS_ARN}'!" >&2
+    exit 1
+  fi
+
+  echo "    Status wires verified: Secret queueUrl and queueArn match AWS CLI output exactly."
 done
 
 echo "==> Teardown: deleting XR..."
 kubectl delete -f "${XR_MANIFEST}" --timeout=60s || true
+kubectl delete secret test-queue-queue-secret -n "${WORKSPACE_NAMESPACE}" --timeout=15s 2>/dev/null || true
 
 echo "==> Waiting for managed Queues to be deleted..."
 for i in {1..30}; do
