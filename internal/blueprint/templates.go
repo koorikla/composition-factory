@@ -87,6 +87,14 @@ func TemplateBlockLines(name, body string) []string {
 // Template names are visited in sorted order so the first error reported is
 // deterministic — Validate's contract everywhere else.
 func (b *Blueprint) validateTemplates() error {
+	if b.Engine() != EngineGoTemplating {
+		if len(b.Spec.Conventions) > 0 {
+			return fmt.Errorf("spec.conventions: engine %q does not support template: conventions", b.Engine())
+		}
+		if len(b.Spec.Templates) > 0 {
+			return fmt.Errorf("spec.templates: engine %q does not support template: blocks", b.Engine())
+		}
+	}
 	names := make([]string, 0, len(b.Spec.Templates))
 	for n := range b.Spec.Templates {
 		names = append(names, n)

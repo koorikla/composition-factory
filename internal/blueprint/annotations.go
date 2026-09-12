@@ -154,6 +154,9 @@ func (b *Blueprint) validateResourceAnnotations(r Resource) error {
 		}
 
 		if f.Template != "" {
+			if b.Engine() != EngineGoTemplating {
+				return fmt.Errorf("resource %q %s: engine %q does not support template: fields", r.Name, label, b.Engine())
+			}
 			// Deliberately NO native refusal here, unlike fields: the fields
 			// rule exists because a template call's output re-indents to the
 			// fixed forProvider column, which a native field at an arbitrary
