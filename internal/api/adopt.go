@@ -72,6 +72,16 @@ func (srv *server) handleAdoptBlueprint(w http.ResponseWriter, r *http.Request) 
 	persisted := false
 	if req.Persist && srv.Blueprint != "" {
 		srv.mu.Lock()
+		if ifMatch := r.Header.Get("If-Match"); ifMatch != "" {
+			if cur, err := blueprint.Load(srv.Blueprint); err == nil {
+				curBytes, err := json.Marshal(cur)
+				if err == nil && !etagMatches(ifMatch, etagFor(curBytes)) {
+					srv.mu.Unlock()
+					writeJSONError(w, http.StatusPreconditionFailed, "precondition failed: If-Match header does not match current blueprint revision")
+					return
+				}
+			}
+		}
 		if !srv.persistBlueprint(w, r, bp) {
 			srv.mu.Unlock()
 			return
