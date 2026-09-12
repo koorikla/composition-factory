@@ -9311,3 +9311,249 @@ spec:
 		t.Fatalf("bp.Validate() failed: %v", err)
 	}
 }
+
+func TestAdoptGoTemplate_ParamWithDefault(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-param-default
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResource
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: test-cm
+              annotations:
+                crossplane.io/composition-resource-name: test-cm
+                example.org/tier: '{{ default "standard" $spec.tier }}'
+            data:
+              storageType: '{{ default "gp3" $spec.volumeType }}'
+              region: '{{- default "us-east-1" .spec.region -}}'
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+
+	f, ok := r.Fields["data[storageType]"]
+	if !ok {
+		f, ok = r.Fields["data.storageType"]
+	}
+	if !ok {
+		t.Fatalf("data.storageType missing: %+v", r.Fields)
+	}
+	if f.From != "params.volumeType" {
+		t.Errorf("data.storageType From = %q, want %q (Raw = %q)", f.From, "params.volumeType", f.Raw)
+	}
+
+	fReg, ok := r.Fields["data[region]"]
+	if !ok {
+		fReg, ok = r.Fields["data.region"]
+	}
+	if !ok {
+		t.Fatalf("data.region missing: %+v", r.Fields)
+	}
+	if fReg.From != "params.region" {
+		t.Errorf("data.region From = %q, want %q (Raw = %q)", fReg.From, "params.region", fReg.Raw)
+	}
+
+	ann, ok := r.Annotations["example.org/tier"]
+	if !ok {
+		t.Fatalf("example.org/tier annotation missing: %+v", r.Annotations)
+	}
+	if ann.From != "params.tier" {
+		t.Errorf("annotation example.org/tier From = %q, want %q (Raw = %q)", ann.From, "params.tier", ann.Raw)
+	}
+}
+
+func TestAdoptGoTemplate_ParamWithDefault_VariationsAndXRDless(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-param-default-variations
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResource
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: test-dep
+              annotations:
+                crossplane.io/composition-resource-name: test-dep
+                example.org/env: '{{ default "dev" $spec.environment }}'
+                example.org/piped: '{{ $spec.tier | default "standard" | quote }}'
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: '{{ default "app" (index $spec "containerName") }}'
+                      image: '{{ default "nginx:latest" $spec.appImage }}'
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+
+	// Check annotations
+	if r.Annotations["example.org/env"].From != "params.environment" {
+		t.Errorf("annotation example.org/env From = %q, want %q", r.Annotations["example.org/env"].From, "params.environment")
+	}
+
+	// Check piped default annotation
+	if r.Annotations["example.org/piped"].From != "params.tier" {
+		t.Errorf("annotation example.org/piped From = %q, want %q", r.Annotations["example.org/piped"].From, "params.tier")
+	}
+
+	// Check index access default field in slice object
+	fName, ok := r.Fields["spec.template.spec.containers[0].name"]
+	if !ok {
+		t.Fatalf("spec.template.spec.containers[0].name missing: %+v", r.Fields)
+	}
+	if fName.From != "params.containerName" {
+		t.Errorf("spec.template.spec.containers[0].name From = %q, want %q", fName.From, "params.containerName")
+	}
+
+	// Check field in slice object
+	fImg, ok := r.Fields["spec.template.spec.containers[0].image"]
+	if !ok {
+		t.Fatalf("spec.template.spec.containers[0].image missing: %+v", r.Fields)
+	}
+	if fImg.From != "params.appImage" {
+		t.Errorf("spec.template.spec.containers[0].image From = %q, want %q", fImg.From, "params.appImage")
+	}
+
+	// Check XRDless parameters are guarded (not required)
+	for _, pName := range []string{"environment", "tier", "containerName", "appImage"} {
+		p, ok := bp.Spec.XRD.Parameters[pName]
+		if !ok {
+			t.Errorf("parameter %q missing from XRD parameters", pName)
+			continue
+		}
+		if p.Required {
+			t.Errorf("parameter %q should be optional when guarded by default fallback, got Required: true", pName)
+		}
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Errorf("bp.Validate() failed: %v", err)
+	}
+
+	nativeCRDs, err := k8s.Kinds()
+	if err != nil {
+		t.Fatalf("k8s.Kinds: %v", err)
+	}
+	outputs, err := emit.Generate(bp, nativeCRDs, "")
+	if err != nil {
+		t.Fatalf("emit.Generate failed on adopted blueprint: %v", err)
+	}
+	if len(outputs) == 0 {
+		t.Fatalf("emit.Generate returned 0 outputs")
+	}
+}
+
+func TestAdoptGoTemplate_SliceElementParamWithDefault(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-slice-param-default
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XResource
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: example.org/v1alpha1
+            kind: CustomWidget
+            metadata:
+              name: test-widget
+              annotations:
+                crossplane.io/composition-resource-name: test-widget
+            spec:
+              forProvider:
+                items:
+                  - '{{ default "first" $spec.primaryItem }}'
+                  - '{{ default "second" (index $spec "secondaryItem") }}'
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+
+	f0, ok := r.Fields["items[0]"]
+	if !ok {
+		t.Fatalf("items[0] missing: %+v", r.Fields)
+	}
+	if f0.From != "params.primaryItem" {
+		t.Errorf("items[0] From = %q, want %q", f0.From, "params.primaryItem")
+	}
+
+	f1, ok := r.Fields["items[1]"]
+	if !ok {
+		t.Fatalf("items[1] missing: %+v", r.Fields)
+	}
+	if f1.From != "params.secondaryItem" {
+		t.Errorf("items[1] From = %q, want %q", f1.From, "params.secondaryItem")
+	}
+
+	for _, pName := range []string{"primaryItem", "secondaryItem"} {
+		p, ok := bp.Spec.XRD.Parameters[pName]
+		if !ok {
+			t.Errorf("parameter %q missing from XRD parameters", pName)
+			continue
+		}
+		if p.Required {
+			t.Errorf("parameter %q should be optional when guarded by default fallback", pName)
+		}
+	}
+}

@@ -36,15 +36,18 @@ type paramEvidence struct {
 }
 
 var (
-	reEvidenceRef      = regexp.MustCompile(`\{\{-?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)\s*(\|\s*quote\s*)?-?\}\}`)
-	reEvidenceGuard    = regexp.MustCompile(`hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']`)
-	reEvidenceIfSimple = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
-	reEvidenceIfEq     = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*"[^"]*"\s*-?\}\}`)
-	reEvidenceIfEqRev  = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+"[^"]*"\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
-	reEvidenceLoop     = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
-	reTemplateAction   = regexp.MustCompile(`\{\{-?(.*?)-?\}\}`)
-	reEvidenceAnySpec  = regexp.MustCompile(`(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)`)
-	reArrayIdx         = regexp.MustCompile(`\[\d+\]`)
+	reEvidenceRef               = reParamVar
+	reEvidenceQuote             = regexp.MustCompile(`\|\s*quote\b`)
+	reEvidenceGuard             = regexp.MustCompile(`hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["']([a-zA-Z0-9_.-]+)["']`)
+	reEvidenceGuardDefault      = regexp.MustCompile(`default\s+(?:\([^)]+\)|["'][^"']*["']|\S+)\s+(?:\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)|\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)`)
+	reEvidenceGuardPipedDefault = regexp.MustCompile(`(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\|\s*default\b`)
+	reEvidenceIfSimple          = regexp.MustCompile(`\{\{-?\s*if\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
+	reEvidenceIfEq              = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*"[^"]*"\s*-?\}\}`)
+	reEvidenceIfEqRev           = regexp.MustCompile(`\{\{-?\s*if\s+(?:eq|ne)\s+"[^"]*"\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*-?\}\}`)
+	reEvidenceLoop              = regexp.MustCompile(`\{\{-?\s*range\s+\$i\s*:=\s*until\s+\(int\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\)\s*-?\}\}`)
+	reTemplateAction            = regexp.MustCompile(`\{\{-?(.*?)-?\}\}`)
+	reEvidenceAnySpec           = regexp.MustCompile(`(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)`)
+	reArrayIdx                  = regexp.MustCompile(`\[\d+\]`)
 )
 
 // collectTemplateEvidence scans one go-templating template body.
@@ -70,9 +73,18 @@ func collectTemplateEvidence(tmpl string, ev map[string]*paramEvidence) {
 		}
 	}
 	for _, m := range reEvidenceRef.FindAllStringSubmatchIndex(tmpl, -1) {
-		name := tmpl[m[2]:m[3]]
+		var name string
+		if m[2] >= 0 {
+			name = tmpl[m[2]:m[3]]
+		} else if len(m) >= 6 && m[4] >= 0 {
+			name = tmpl[m[4]:m[5]]
+		}
+		if name == "" {
+			continue
+		}
 		e := get(name)
-		quoted := m[4] >= 0
+		full := tmpl[m[0]:m[1]]
+		quoted := reEvidenceQuote.MatchString(full)
 		if !quoted {
 			before := byte(0)
 			after := byte(0)
@@ -89,6 +101,9 @@ func collectTemplateEvidence(tmpl string, ev map[string]*paramEvidence) {
 		} else {
 			e.unquoted++
 		}
+		if strings.Contains(full, "default") {
+			e.guarded = true
+		}
 	}
 	for _, m := range reEvidenceIfSimple.FindAllStringSubmatch(tmpl, -1) {
 		get(m[1]).boolean = true
@@ -103,6 +118,18 @@ func collectTemplateEvidence(tmpl string, ev map[string]*paramEvidence) {
 		get(m[1]).integer = true
 	}
 	for _, m := range reEvidenceGuard.FindAllStringSubmatch(tmpl, -1) {
+		get(m[1]).guarded = true
+	}
+	for _, m := range reEvidenceGuardDefault.FindAllStringSubmatch(tmpl, -1) {
+		pName := m[1]
+		if pName == "" && len(m) >= 3 {
+			pName = m[2]
+		}
+		if pName != "" {
+			get(pName).guarded = true
+		}
+	}
+	for _, m := range reEvidenceGuardPipedDefault.FindAllStringSubmatch(tmpl, -1) {
 		get(m[1]).guarded = true
 	}
 }

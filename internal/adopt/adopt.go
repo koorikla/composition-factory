@@ -1112,7 +1112,7 @@ func parseParameter(pName string, pObj map[string]any, isRequired bool, report *
 
 var (
 	reDefine             = regexp.MustCompile(`(?s)\{\{-?\s*define\s+"([^"]+)"\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}`)
-	reParamVar           = regexp.MustCompile(`\{\{-?\s*\(?\s*(?:(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)|index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+?)["'])(?:\s*\|\s*quote)?\s*\)?(?:\s*\|\s*quote)?\s*-?\}\}`)
+	reParamVar           = regexp.MustCompile(`\{\{-?\s*\(?\s*(?:default\s+(?:\([^)]+\)|["'][^"']*["']|\S+)\s+)?\(?\s*(?:(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+?)|index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+?)["'])\s*\)?(?:\s*\|\s*default\s+(?:\([^)]+\)|["'][^"']*["']|\S+))?(?:\s*\|\s*quote)?\s*\)?(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reEvidenceIndexSpec  = regexp.MustCompile(`\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']`)
 	reEnvVar             = regexp.MustCompile(`\{\{-?\s*(?:default\s+(?:["'][^"']*["']|\S+)\s+)?(?:\$env\.([a-zA-Z0-9_.-]+?)|\(index\s+\$env\s+["']([a-zA-Z0-9_.-]+?)["']\)|index\s+\$env\s+["']([a-zA-Z0-9_.-]+?)["'])(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*(?:\(index\s+(?:\$?[.]?observed(?:\.resources)?|\$observed)\s+"([^"]+)"\)|(?:\$?[.]?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+))\.resource\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)(?:\s*\|\s*quote)?\s*-?\}\}`)
