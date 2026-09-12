@@ -7917,3 +7917,112 @@ spec:
 		t.Errorf("items[3] From = %q, want env.bar", f.From)
 	}
 }
+
+func TestAdoptGoTemplate_GotemplatingAnnotation(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xbuckets.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XBucket
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: my-bucket
+            spec:
+              forProvider:
+                region: us-east-1
+`
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	if bp.Spec.Resources[0].Name != "my-bucket" {
+		t.Errorf("expected resource name %q, got %q", "my-bucket", bp.Spec.Resources[0].Name)
+	}
+	if _, exists := bp.Spec.Resources[0].Annotations["gotemplating.fn.crossplane.io/composition-resource-name"]; exists {
+		t.Errorf("expected gotemplating.fn.crossplane.io/composition-resource-name to be stripped from res.Annotations")
+	}
+}
+
+func TestAdoptGoTemplate_GotemplatingAnnotation_QuotedAndBrokenChunk(t *testing.T) {
+	manifest := `
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xbuckets.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XBucket
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                "gotemplating.fn.crossplane.io/composition-resource-name": "valid-bucket"
+            spec:
+              forProvider:
+                region: us-east-1
+            ---
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: broken-bucket
+            spec:
+              forProvider:
+                broken: [unclosed
+`
+	bp, report, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	if bp.Spec.Resources[0].Name != "valid-bucket" {
+		t.Errorf("expected resource name %q, got %q", "valid-bucket", bp.Spec.Resources[0].Name)
+	}
+	if report == nil || !report.HasTrueLoss() {
+		t.Fatalf("expected loss report for broken chunk, got %+v", report)
+	}
+	foundBrokenDrop := false
+	for _, d := range report.Drops {
+		if d.Path == "template.resource.broken-bucket" && strings.Contains(d.Reason, "failed to parse chunk YAML") {
+			foundBrokenDrop = true
+			break
+		}
+	}
+	if !foundBrokenDrop {
+		t.Fatalf("expected drop for template.resource.broken-bucket, got drops: %+v", report.Drops)
+	}
+}

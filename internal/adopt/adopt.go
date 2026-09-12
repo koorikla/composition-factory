@@ -1133,7 +1133,7 @@ var (
 	reTemplateInclude    = regexp.MustCompile(`^\{\{-?\s*include\s+["']([^"']+)["'](?:\s+[^}]*)?-?\}\}$`)
 	reDocSeparator       = regexp.MustCompile(`(?m)^\s*---\s*$`)
 	reSetResourceNameAnn = regexp.MustCompile(`setResourceNameAnnotation\s+(?:\(printf\s+"([^"]+)"|"([^"]+)")`)
-	reChunkResNameAnn    = regexp.MustCompile(`["']crossplane\.io/composition-resource-name["']\s*:\s*["']?([a-zA-Z0-9._-]+)["']?`)
+	reChunkResNameAnn    = regexp.MustCompile(`["']?(?:crossplane\.io|gotemplating\.fn\.crossplane\.io)/composition-resource-name["']?\s*:\s*["']?([a-zA-Z0-9._-]+)["']?`)
 	reChunkKind          = regexp.MustCompile(`(?m)^\s*kind:\s*["']?([a-zA-Z0-9]+)["']?`)
 	reChunkName          = regexp.MustCompile(`(?m)^\s*name:\s*["']?([a-zA-Z0-9._-]+)["']?`)
 	rePrintfFormat       = regexp.MustCompile(`printf\s+"([^"]+)"`)
@@ -1327,12 +1327,16 @@ func extractResourceName(m map[string]any, kind string, placeholders []string) s
 	name := ""
 	if meta != nil {
 		if anns, ok := meta["annotations"].(map[string]any); ok {
-			if annName, ok := anns["crossplane.io/composition-resource-name"].(string); ok && annName != "" {
-				unmasked := unmaskString(annName, placeholders)
-				if clean := extractCleanName(unmasked); clean != "" {
-					return clean
+			for _, key := range []string{"crossplane.io/composition-resource-name", "gotemplating.fn.crossplane.io/composition-resource-name"} {
+				if annName, ok := anns[key].(string); ok && annName != "" {
+					unmasked := unmaskString(annName, placeholders)
+					if clean := extractCleanName(unmasked); clean != "" {
+						return clean
+					}
+					if name == "" {
+						name = annName
+					}
 				}
-				name = annName
 			}
 			for k, v := range anns {
 				unmaskedK := unmaskString(fmt.Sprint(k), placeholders)
@@ -2564,7 +2568,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 				v := anns[k]
 				rawK := unmaskString(fmt.Sprint(k), placeholders)
 				rawStr := unmaskString(formatScalarValue(v), placeholders)
-				if k == "crossplane.io/composition-resource-name" || strings.Contains(rawK, "setResourceNameAnnotation") || strings.Contains(rawStr, "setResourceNameAnnotation") {
+				if blueprint.ReservedAnnotationKey(k) || blueprint.ReservedAnnotationKey(rawK) || strings.Contains(rawK, "setResourceNameAnnotation") || strings.Contains(rawStr, "setResourceNameAnnotation") {
 					continue
 				}
 				if rePlaceholder.MatchString(fmt.Sprint(k)) {
