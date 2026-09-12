@@ -28,9 +28,11 @@ var defaultPipeline = []blueprint.PipelineStep{{
 // effectivePipeline resolves a blueprint's declared steps, falling back to
 // defaultPipeline. When spec.environment is non-empty, the function-environment-configs
 // step is auto-injected ahead of the templating step (if not already present).
-// If a step named "environment-configs" or referencing function-environment-configs
-// already exists, duplicate step injection is prevented and any missing configuration
-// is merged. Emitted step names are guaranteed to be unique.
+// If a step referencing function-environment-configs already exists, duplicate
+// step injection is prevented and any missing configuration is merged.
+// If an unrelated step is already named "environment-configs", a unique step name
+// is generated for function-environment-configs so both steps are preserved.
+// Emitted step names are guaranteed to be unique.
 // Both Composition and Functions go through this one resolver so the pipeline they describe can never disagree.
 func effectivePipeline(b *blueprint.Blueprint) []blueprint.PipelineStep {
 	if b == nil {
@@ -44,25 +46,43 @@ func effectivePipeline(b *blueprint.Blueprint) []blueprint.PipelineStep {
 	if b.HasEnvironment() {
 		hasEnvStep := false
 		for i, s := range steps {
-			if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName || s.Name == blueprint.EnvironmentConfigsStepName {
+			if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
 				hasEnvStep = true
-				if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
-					if steps[i].Input == "" {
-						steps[i].Input = b.EnvironmentConfigsInput()
-					}
-					if steps[i].Package == "" {
-						steps[i].Package = blueprint.EnvironmentConfigsFunctionPackage
-					}
-					if steps[i].Position == "" {
-						steps[i].Position = blueprint.PositionBefore
-					}
+				if steps[i].Input == "" {
+					steps[i].Input = b.EnvironmentConfigsInput()
+				}
+				if steps[i].Package == "" {
+					steps[i].Package = blueprint.EnvironmentConfigsFunctionPackage
+				}
+				if steps[i].Position == "" {
+					steps[i].Position = blueprint.PositionBefore
 				}
 				break
 			}
 		}
 		if !hasEnvStep {
+			stepName := blueprint.EnvironmentConfigsStepName
+			nameTaken := func(name string) bool {
+				if name == blueprint.TemplatingStepName {
+					return true
+				}
+				for _, s := range steps {
+					if s.Name == name {
+						return true
+					}
+				}
+				return false
+			}
+			if nameTaken(stepName) {
+				stepName = "environment-configs-fn"
+				suffix := 2
+				for nameTaken(stepName) {
+					stepName = fmt.Sprintf("environment-configs-fn-%d", suffix)
+					suffix++
+				}
+			}
 			envStep := blueprint.PipelineStep{
-				Name:        blueprint.EnvironmentConfigsStepName,
+				Name:        stepName,
 				FunctionRef: blueprint.EnvironmentConfigsFunctionName,
 				Package:     blueprint.EnvironmentConfigsFunctionPackage,
 				Position:    blueprint.PositionBefore,

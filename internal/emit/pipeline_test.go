@@ -564,3 +564,78 @@ func TestPipelineDuplicateEnvironmentConfigsStep_SameFunction(t *testing.T) {
 		t.Errorf("want exactly one step named %q in spec.pipeline, got %d", "environment-configs", count)
 	}
 }
+
+func TestEffectivePipeline_UnrelatedStepNamedEnvironmentConfigsDropsFunction(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Resources[0].Fields["region"] = blueprint.Field{From: "env.region"}
+	b.Spec.Environment = map[string]blueprint.EnvironmentKey{
+		"region": {Type: "string"},
+	}
+	// A user pipeline has a step named "environment-configs", but its function is function-auto-ready
+	b.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "environment-configs",
+			FunctionRef: "function-auto-ready",
+			Package:     "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0",
+		},
+	}
+
+	if err := b.Validate(); err != nil {
+		t.Fatalf("blueprint validation failed: %v", err)
+	}
+
+	fns, err := Functions(b)
+	if err != nil {
+		t.Fatalf("Functions: %v", err)
+	}
+	fnsStr := string(fns)
+	if !strings.Contains(fnsStr, "function-environment-configs") {
+		t.Errorf("functions.yaml must contain function-environment-configs, but it was dropped:\n%s", fnsStr)
+	}
+
+	compBytes, err := Composition(b, testCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	compStr := string(compBytes)
+	if !strings.Contains(compStr, "function-environment-configs") {
+		t.Errorf("Composition must contain a step referencing function-environment-configs, but it was dropped:\n%s", compStr)
+	}
+}
+
+func TestEffectivePipeline_CollisionWithEnvironmentConfigsFn(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Resources[0].Fields["region"] = blueprint.Field{From: "env.region"}
+	b.Spec.Environment = map[string]blueprint.EnvironmentKey{
+		"region": {Type: "string"},
+	}
+	b.Spec.Pipeline = []blueprint.PipelineStep{
+		{
+			Name:        "environment-configs",
+			FunctionRef: "function-auto-ready",
+			Package:     "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0",
+		},
+		{
+			Name:        "environment-configs-fn",
+			FunctionRef: "function-custom",
+			Package:     "xpkg.upbound.io/crossplane-contrib/function-custom:v0.1.0",
+		},
+	}
+
+	eff := effectivePipeline(b)
+	foundEnvConfigs := false
+	for _, s := range eff {
+		if s.FunctionRef == blueprint.EnvironmentConfigsFunctionName {
+			foundEnvConfigs = true
+			if s.Name != "environment-configs-fn-2" {
+				t.Errorf("expected injected step name environment-configs-fn-2, got %q", s.Name)
+			}
+		}
+	}
+	if !foundEnvConfigs {
+		t.Errorf("expected effectivePipeline to contain function-environment-configs step")
+	}
+	if len(eff) != 3 {
+		t.Errorf("expected 3 steps in effective pipeline, got %d", len(eff))
+	}
+}
