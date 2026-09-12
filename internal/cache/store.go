@@ -301,17 +301,30 @@ func cleanFunctionRef(ref string) string {
 
 // FindFunction returns the lock entry matching function name or ref, if found.
 func (l *Lock) FindFunction(nameOrRef string) (LockEntry, bool) {
-	if l == nil {
+	if l == nil || nameOrRef == "" {
 		return LockEntry{}, false
 	}
-	clean := cleanFunctionRef(nameOrRef)
-
+	// First pass: exact reference match.
 	for _, f := range l.Functions {
 		if f.Ref == nameOrRef {
 			return f, true
 		}
-		if fClean := cleanFunctionRef(f.Ref); fClean == clean && clean != "" {
+	}
+	// Second pass: repository prefix match with tag or digest.
+	for _, f := range l.Functions {
+		if strings.HasPrefix(f.Ref, nameOrRef+":") || strings.HasPrefix(f.Ref, nameOrRef+"@") {
 			return f, true
+		}
+	}
+	// Third pass: normalized name fallback for unqualified function names only.
+	if !strings.Contains(nameOrRef, "/") {
+		clean := cleanFunctionRef(nameOrRef)
+		if clean != "" {
+			for _, f := range l.Functions {
+				if cleanFunctionRef(f.Ref) == clean {
+					return f, true
+				}
+			}
 		}
 	}
 	return LockEntry{}, false
@@ -319,17 +332,30 @@ func (l *Lock) FindFunction(nameOrRef string) (LockEntry, bool) {
 
 // FindProvider returns the lock entry matching provider ref, if found.
 func (l *Lock) FindProvider(providerRef string) (LockEntry, bool) {
-	if l == nil {
+	if l == nil || providerRef == "" {
 		return LockEntry{}, false
 	}
-	reqLast := cleanRefSegment(providerRef)
+	// First pass: exact reference match.
 	for _, p := range l.Providers {
-		if p.Ref == providerRef || strings.HasPrefix(p.Ref, providerRef+":") || strings.HasPrefix(p.Ref, providerRef+"@") {
+		if p.Ref == providerRef {
 			return p, true
 		}
-		pLast := cleanRefSegment(p.Ref)
-		if pLast == reqLast && reqLast != "" {
+	}
+	// Second pass: repository prefix match with tag or digest.
+	for _, p := range l.Providers {
+		if strings.HasPrefix(p.Ref, providerRef+":") || strings.HasPrefix(p.Ref, providerRef+"@") {
 			return p, true
+		}
+	}
+	// Third pass: bare segment fallback for unqualified provider names only.
+	if !strings.Contains(providerRef, "/") {
+		reqLast := cleanRefSegment(providerRef)
+		if reqLast != "" {
+			for _, p := range l.Providers {
+				if cleanRefSegment(p.Ref) == reqLast {
+					return p, true
+				}
+			}
 		}
 	}
 	return LockEntry{}, false

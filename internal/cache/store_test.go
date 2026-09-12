@@ -897,3 +897,72 @@ func TestPinLock(t *testing.T) {
 		t.Errorf("function entry = %+v, ok = %v", f, ok)
 	}
 }
+
+func TestLockFindProviderPrecedence(t *testing.T) {
+	l := &Lock{
+		Providers: []LockEntry{
+			{Ref: "ghcr.io/crossplane-contrib/provider-aws:v0.40.0", Digest: "sha256:contrib"},
+			{Ref: "xpkg.upbound.io/upbound/provider-aws:v1.0.0", Digest: "sha256:upbound"},
+		},
+	}
+	entry, ok := l.FindProvider("xpkg.upbound.io/upbound/provider-aws:v1.0.0")
+	if !ok {
+		t.Fatal("expected to find provider")
+	}
+	if entry.Digest != "sha256:upbound" {
+		t.Fatalf("expected digest sha256:upbound, got %s (returned ref: %s)", entry.Digest, entry.Ref)
+	}
+}
+
+func TestLockFindFunctionPrecedence(t *testing.T) {
+	l := &Lock{
+		Functions: []LockEntry{
+			{Ref: "internal.registry/custom/function-auto-ready:v0.1.0", Digest: "sha256:custom"},
+			{Ref: "xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0", Digest: "sha256:official"},
+		},
+	}
+	entry, ok := l.FindFunction("xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0")
+	if !ok {
+		t.Fatal("expected to find function")
+	}
+	if entry.Digest != "sha256:official" {
+		t.Fatalf("expected digest sha256:official, got %s (returned ref: %s)", entry.Digest, entry.Ref)
+	}
+}
+
+func TestLockFindProviderQualifiedRepoMismatch(t *testing.T) {
+	l := &Lock{
+		Providers: []LockEntry{
+			{Ref: "ghcr.io/crossplane-contrib/provider-aws:v0.40.0", Digest: "sha256:contrib"},
+		},
+	}
+	if _, ok := l.FindProvider("xpkg.upbound.io/upbound/provider-aws:v1.0.0"); ok {
+		t.Fatal("expected qualified ref from different repository to return false, but matched")
+	}
+	if _, ok := l.FindProvider("xpkg.upbound.io/upbound/provider-aws"); ok {
+		t.Fatal("expected untagged qualified ref from different repository to return false, but matched")
+	}
+	if entry, ok := l.FindProvider("provider-aws"); !ok || entry.Digest != "sha256:contrib" {
+		t.Fatalf("expected bare segment fallback to find provider, got (%+v, %v)", entry, ok)
+	}
+}
+
+func TestLockFindFunctionQualifiedRepoMismatch(t *testing.T) {
+	l := &Lock{
+		Functions: []LockEntry{
+			{Ref: "internal.registry/custom/function-auto-ready:v0.1.0", Digest: "sha256:custom"},
+		},
+	}
+	if _, ok := l.FindFunction("xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.5.0"); ok {
+		t.Fatal("expected qualified ref from different repository to return false, but matched")
+	}
+	if _, ok := l.FindFunction("xpkg.upbound.io/crossplane-contrib/function-auto-ready"); ok {
+		t.Fatal("expected untagged qualified ref from different repository to return false, but matched")
+	}
+	if entry, ok := l.FindFunction("function-auto-ready"); !ok || entry.Digest != "sha256:custom" {
+		t.Fatalf("expected unqualified fallback to find function, got (%+v, %v)", entry, ok)
+	}
+	if entry, ok := l.FindFunction("auto-ready"); !ok || entry.Digest != "sha256:custom" {
+		t.Fatalf("expected unqualified bare fallback to find function, got (%+v, %v)", entry, ok)
+	}
+}
