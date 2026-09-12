@@ -457,7 +457,14 @@ func kclLoopedRHS(rhs string) string {
 func kclStructuredRHS(s structuredRHS, fallbackRHS string) string {
 	switch s.kind {
 	case rhsLiteral:
-		return kclFormatLiteral(s.value, s.targetType)
+		lit := kclFormatLiteral(s.value, s.targetType)
+		if s.isByte {
+			if s.targetType != "" && s.targetType != "string" {
+				return fmt.Sprintf("base64.encode(str(%s))", lit)
+			}
+			return fmt.Sprintf("base64.encode(%s)", lit)
+		}
+		return lit
 	case rhsRaw:
 		return s.value
 	case rhsTemplate:
@@ -535,6 +542,8 @@ func kclRHS(rhs string, targetType string) string {
 			res = translateParamAccessToKCL(param)
 		} else if strings.HasPrefix(inner, "$observed.") {
 			res = translateObservedAccessToKCL(inner)
+		} else if strings.HasPrefix(inner, "\"") && strings.HasSuffix(inner, "\"") {
+			res = inner
 		}
 		if res != "" {
 			if isByte {

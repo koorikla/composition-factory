@@ -273,7 +273,11 @@ func pythonLoopedRHS(rhs string) string {
 func pythonStructuredRHS(s structuredRHS, fallbackRHS string) string {
 	switch s.kind {
 	case rhsLiteral:
-		return pythonFormatLiteral(s.value, s.targetType)
+		lit := pythonFormatLiteral(s.value, s.targetType)
+		if s.isByte {
+			return fmt.Sprintf("_b64(%s)", lit)
+		}
+		return lit
 	case rhsRaw:
 		return s.value
 	case rhsTemplate:
@@ -365,6 +369,8 @@ func pythonRHS(rhs string, targetType string) string {
 			res = fmt.Sprintf("env.get(%q)", key)
 		} else if strings.HasPrefix(inner, "$observed.") || strings.Contains(inner, "$observed") {
 			res = translateObservedAccessToPython(inner)
+		} else if strings.HasPrefix(inner, "\"") && strings.HasSuffix(inner, "\"") {
+			res = inner
 		}
 		if res != "" {
 			if isByte {

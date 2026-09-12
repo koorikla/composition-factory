@@ -1777,3 +1777,71 @@ func TestCF427_KCLOptionalMetadataNameFallback(t *testing.T) {
 		t.Errorf("expected custom name: https://sqs.aws/custom-url, got:\n%s", out2Str)
 	}
 }
+
+func TestMetadataNameByteTarget_KCL(t *testing.T) {
+	crds := nativeTestCRDs(t)
+
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xmeta"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EngineKCL},
+			XRD: blueprint.XRD{
+				Group:   "platform.sparky.ee",
+				Kind:    "XMeta",
+				Plural:  "xmetas",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "my-svc",
+					Kind:     "Service",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {Value: "my-static-svc"},
+					},
+				},
+				{
+					Name:     "my-secret",
+					Kind:     "Secret",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"data[svc_name]": {From: "resources.my-svc.metadata.name"},
+					},
+				},
+			},
+		},
+	}
+
+	comp, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition failed: %v", err)
+	}
+	s := string(comp)
+
+	expected := `svc_name = base64.encode("my-static-svc")`
+	if !strings.Contains(s, expected) {
+		t.Errorf("expected KCL to base64.encode static metadata name %q, got:\n%s", expected, s)
+	}
+
+	dockerBin, err := exec.LookPath("docker")
+	if err == nil {
+		kclBody, err := kclTemplateBody(b, crds)
+		if err != nil {
+			t.Fatalf("kclTemplateBody: %v", err)
+		}
+		cmd := exec.Command(dockerBin, "run", "-i", "--rm", "kcllang/kcl:v0.11.0", "kcl", "run",
+			"-D", `params={"oxr": {"metadata": {"name": "test-xr"}, "spec": {}}}`, "-")
+		cmd.Stdin = strings.NewReader(kclBody)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out)
+		}
+		expectedB64 := "bXktc3RhdGljLXN2Yw==" // base64 of "my-static-svc"
+		if !strings.Contains(string(out), expectedB64) {
+			t.Errorf("expected base64 encoded static metadata name %q in KCL output, got:\n%s", expectedB64, string(out))
+		}
+	}
+}

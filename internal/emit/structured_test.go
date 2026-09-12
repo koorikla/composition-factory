@@ -375,3 +375,176 @@ spec:
 		}
 	})
 }
+
+func TestMetadataNameByteTarget_GoTemplating(t *testing.T) {
+	crds := nativeTestCRDs(t)
+
+	t.Run("default naming to Secret data", func(t *testing.T) {
+		b := &blueprint.Blueprint{
+			APIVersion: "factory.crossplane.io/v1alpha1",
+			Kind:       "Blueprint",
+			Metadata:   blueprint.Metadata{Name: "xmeta"},
+			Spec: blueprint.Spec{
+				XRD: blueprint.XRD{
+					Group:   "platform.sparky.ee",
+					Kind:    "XMeta",
+					Plural:  "xmetas",
+					Version: "v1alpha1",
+					Scope:   "Namespaced",
+				},
+				Resources: []blueprint.Resource{
+					{
+						Name:     "my-svc",
+						Kind:     "Service",
+						Provider: blueprint.NativeProvider,
+					},
+					{
+						Name:     "my-secret",
+						Kind:     "Secret",
+						Provider: blueprint.NativeProvider,
+						Fields: map[string]blueprint.Field{
+							"data[svc_name]": {From: "resources.my-svc.metadata.name"},
+						},
+					},
+				},
+			},
+		}
+
+		comp, err := Composition(b, crds)
+		if err != nil {
+			t.Fatalf("Composition failed: %v", err)
+		}
+		s := string(comp)
+
+		if strings.Contains(s, "$xr-my-svc") {
+			t.Errorf("emitted Go template contains illegal identifier $xr-my-svc:\n%s", s)
+		}
+		if !strings.Contains(s, `{{ printf "%s-my-svc" $xr | b64enc | quote }}`) {
+			t.Errorf("expected '{{ printf \"%%s-my-svc\" $xr | b64enc | quote }}' in composition, got:\n%s", s)
+		}
+
+		// Verify template body parses and renders without bad character U+002D '-'
+		tmplBody := extractTemplate(t, comp)
+		rendered, err := renderTemplate(t, tmplBody, map[string]any{})
+		if err != nil {
+			t.Fatalf("renderTemplate failed: %v\n---\n%s", err, tmplBody)
+		}
+		// my-xqueue is the default XR name in renderTemplate
+		expectedB64 := "bXkteHF1ZXVlLW15LXN2Yw==" // base64 of "my-xqueue-my-svc"
+		if !strings.Contains(rendered, expectedB64) {
+			t.Errorf("expected base64 encoded name %q in rendered output, got:\n%s", expectedB64, rendered)
+		}
+	})
+
+	t.Run("static naming to Secret data", func(t *testing.T) {
+		b := &blueprint.Blueprint{
+			APIVersion: "factory.crossplane.io/v1alpha1",
+			Kind:       "Blueprint",
+			Metadata:   blueprint.Metadata{Name: "xmeta"},
+			Spec: blueprint.Spec{
+				XRD: blueprint.XRD{
+					Group:   "platform.sparky.ee",
+					Kind:    "XMeta",
+					Plural:  "xmetas",
+					Version: "v1alpha1",
+					Scope:   "Namespaced",
+				},
+				Resources: []blueprint.Resource{
+					{
+						Name:     "my-svc",
+						Kind:     "Service",
+						Provider: blueprint.NativeProvider,
+						Fields: map[string]blueprint.Field{
+							"metadata.name": {Value: "my-static-svc"},
+						},
+					},
+					{
+						Name:     "my-secret",
+						Kind:     "Secret",
+						Provider: blueprint.NativeProvider,
+						Fields: map[string]blueprint.Field{
+							"data[svc_name]": {From: "resources.my-svc.metadata.name"},
+						},
+					},
+				},
+			},
+		}
+
+		comp, err := Composition(b, crds)
+		if err != nil {
+			t.Fatalf("Composition failed: %v", err)
+		}
+		s := string(comp)
+
+		if strings.Contains(s, "{{  | b64enc | quote }}") {
+			t.Errorf("emitted Go template contains empty expression '{{  | b64enc | quote }}':\n%s", s)
+		}
+
+		// Verify template body parses and renders
+		tmplBody := extractTemplate(t, comp)
+		rendered, err := renderTemplate(t, tmplBody, map[string]any{})
+		if err != nil {
+			t.Fatalf("renderTemplate failed: %v\n---\n%s", err, tmplBody)
+		}
+		expectedB64 := "bXktc3RhdGljLXN2Yw==" // base64 of "my-static-svc"
+		if !strings.Contains(rendered, expectedB64) {
+			t.Errorf("expected base64 encoded static name %q in rendered output, got:\n%s", expectedB64, rendered)
+		}
+	})
+
+	t.Run("default naming to CRD format byte field", func(t *testing.T) {
+		byteCrds := byteContainerCRD(t)
+		b := &blueprint.Blueprint{
+			APIVersion: "factory.crossplane.io/v1alpha1",
+			Kind:       "Blueprint",
+			Metadata:   blueprint.Metadata{Name: "xmeta"},
+			Spec: blueprint.Spec{
+				Sources: []blueprint.Source{{Provider: "example.org"}},
+				XRD: blueprint.XRD{
+					Group:   "platform.sparky.ee",
+					Kind:    "XMeta",
+					Plural:  "xmetas",
+					Version: "v1alpha1",
+					Scope:   "Namespaced",
+					Parameters: map[string]blueprint.Parameter{
+						"providerName": {Type: "string", Required: true},
+					},
+				},
+				Resources: []blueprint.Resource{
+					{
+						Name:     "my-svc",
+						Kind:     "Service",
+						Provider: blueprint.NativeProvider,
+					},
+					{
+						Name:     "target",
+						Kind:     "ByteContainer",
+						Provider: "example.org",
+						Fields: map[string]blueprint.Field{
+							"payload": {From: "resources.my-svc.metadata.name"},
+						},
+					},
+				},
+			},
+		}
+
+		comp, err := Composition(b, byteCrds)
+		if err != nil {
+			t.Fatalf("Composition failed: %v", err)
+		}
+		s := string(comp)
+
+		if strings.Contains(s, "$xr-my-svc") {
+			t.Errorf("emitted Go template contains illegal identifier $xr-my-svc:\n%s", s)
+		}
+		if !strings.Contains(s, `{{ printf "%s-my-svc" $xr | b64enc | quote }}`) {
+			t.Errorf("expected '{{ printf \"%%s-my-svc\" $xr | b64enc | quote }}' in composition, got:\n%s", s)
+		}
+
+		tmplBody := extractTemplate(t, comp)
+		_, err = renderTemplate(t, tmplBody, map[string]any{"providerName": "default"})
+		if err != nil {
+			t.Fatalf("renderTemplate failed: %v\n---\n%s", err, tmplBody)
+		}
+	})
+}

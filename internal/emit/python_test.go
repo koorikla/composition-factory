@@ -1910,3 +1910,107 @@ print("OK")
 		t.Fatalf("python execution failed: %v\nOutput:\n%s", err, pyOut)
 	}
 }
+
+func TestMetadataNameByteTarget_Python(t *testing.T) {
+	crds := nativeTestCRDs(t)
+
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xmeta"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EnginePython},
+			XRD: blueprint.XRD{
+				Group:   "platform.sparky.ee",
+				Kind:    "XMeta",
+				Plural:  "xmetas",
+				Version: "v1alpha1",
+				Scope:   "Namespaced",
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name:     "my-svc",
+					Kind:     "Service",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name": {Value: "my-static-svc"},
+					},
+				},
+				{
+					Name:     "my-secret",
+					Kind:     "Secret",
+					Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"data[svc_name]": {From: "resources.my-svc.metadata.name"},
+					},
+				},
+			},
+		},
+	}
+
+	comp, err := Composition(b, crds)
+	if err != nil {
+		t.Fatalf("Composition failed: %v", err)
+	}
+	s := string(comp)
+
+	expected := `"svc_name": _b64("my-static-svc")`
+	if !strings.Contains(s, expected) {
+		t.Errorf("expected Python to _b64 static metadata name %q, got:\n%s", expected, s)
+	}
+
+	pyBin, err := exec.LookPath("python3")
+	if err == nil {
+		body, err := pythonTemplateBody(b, crds)
+		if err != nil {
+			t.Fatalf("pythonTemplateBody: %v", err)
+		}
+		pyRunner := `
+import sys, types
+
+m = types.ModuleType("google.protobuf.json_format")
+m.MessageToDict = lambda x: x
+sys.modules["google.protobuf.json_format"] = m
+m2 = types.ModuleType("crossplane.function.proto.v1")
+m2.run_function_pb2 = types.ModuleType("run_function_pb2")
+m2.run_function_pb2.RunFunctionRequest = object
+m2.run_function_pb2.RunFunctionResponse = object
+sys.modules["crossplane.function.proto.v1"] = m2
+sys.modules["crossplane.function.proto.v1.run_function_pb2"] = m2.run_function_pb2
+
+` + body + `
+
+class MockRes:
+    def __init__(self):
+        self.resource = {}
+    def update(self, d):
+        self.resource.update(d)
+
+class MockRsp:
+    def __init__(self):
+        self.desired = types.SimpleNamespace(resources={
+            "my-svc": MockRes(),
+            "my-secret": MockRes(),
+        })
+
+req = types.SimpleNamespace(
+    observed=types.SimpleNamespace(composite=types.SimpleNamespace(resource={"metadata": {"name": "test-xr"}}), resources={}),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={}
+)
+rsp = MockRsp()
+compose(req, rsp)
+sec = rsp.desired.resources["my-secret"].resource
+data = sec.get("data", {})
+if data.get("svc_name") != "bXktc3RhdGljLXN2Yw==":
+    print(f"FAIL: expected base64 static name 'bXktc3RhdGljLXN2Yw==', got: {data.get('svc_name')}")
+    sys.exit(1)
+print("OK")
+`
+		cmd := exec.Command(pyBin, "-c", pyRunner)
+		pyOut, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("python execution failed: %v\nOutput:\n%s", err, pyOut)
+		}
+	}
+}

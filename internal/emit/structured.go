@@ -115,6 +115,9 @@ func resolveMetadataNameRef(r blueprint.Resource, what string, ref blueprint.Fro
 		} else if targetType != "" {
 			sTarget.targetType = targetType
 		}
+		if sTarget.kind == rhsLiteral && sTarget.rawExpr == "" {
+			sTarget.rawExpr = fmt.Sprintf("%q", sTarget.value)
+		}
 		return sTarget, rhsTarget, guardTarget, nil
 	}
 
@@ -127,7 +130,7 @@ func resolveMetadataNameRef(r blueprint.Resource, what string, ref blueprint.Fro
 	if isMap {
 		s.targetType = "string"
 	}
-	s.rawExpr = fmt.Sprintf("$xr-%s", ref.Resource)
+	s.rawExpr = fmt.Sprintf(`printf "%%s-%s" $xr`, ref.Resource)
 	rhs := fmt.Sprintf("{{ $xr }}-%s", ref.Resource)
 	return s, rhs, "", nil
 }
@@ -271,7 +274,12 @@ func resolveFieldRHSWithVisited(p string, f blueprint.Field, r blueprint.Resourc
 				}
 				sMeta.isByte = isByte
 				if isByte {
-					rhsMeta = fmt.Sprintf("{{ %s | b64enc | quote }}", sMeta.rawExpr)
+					expr := sMeta.rawExpr
+					if expr == "" && sMeta.kind == rhsLiteral {
+						expr = fmt.Sprintf("%q", sMeta.value)
+						sMeta.rawExpr = expr
+					}
+					rhsMeta = fmt.Sprintf("{{ %s | b64enc | quote }}", expr)
 				}
 				return sMeta, rhsMeta, guardMeta, nil
 			}
