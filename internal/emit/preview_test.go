@@ -375,3 +375,87 @@ func TestPreviewExpression_CrossplaneHelperSignatures(t *testing.T) {
 		}
 	})
 }
+
+// CF-442: PreviewExpression must populate placeholder values for all declared
+// object member properties, including optional properties without defaults,
+// so expressions dereferencing them do not fail under missingkey=error.
+func TestPreviewExpression_OptionalObjectProperties(t *testing.T) {
+	bp := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "test"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group:   "example.org",
+				Version: "v1alpha1",
+				Kind:    "App",
+				Plural:  "apps",
+				Parameters: map[string]blueprint.Parameter{
+					"config": {
+						Type: "object",
+						Properties: map[string]blueprint.Parameter{
+							"cluster": {
+								Type: "string",
+							},
+							"replicas": {
+								Type: "integer",
+							},
+							"enabled": {
+								Type: "boolean",
+							},
+							"tier": {
+								Type: "string",
+								Enum: []string{"staging", "prod"},
+							},
+							"nested": {
+								Type: "object",
+								Properties: map[string]blueprint.Parameter{
+									"subKey": {
+										Type: "string",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	got, err := PreviewExpression(bp, "", "cluster is {{ $spec.config.cluster }}")
+	if err != nil {
+		t.Fatalf("PreviewExpression failed: %v", err)
+	}
+	want := "cluster is sample"
+	if got != want {
+		t.Errorf("PreviewExpression got %q, want %q", got, want)
+	}
+
+	got2, err := PreviewExpression(bp, "", "{{ $spec.config.replicas }}-{{ $spec.config.enabled }}")
+	if err != nil {
+		t.Fatalf("PreviewExpression failed: %v", err)
+	}
+	want2 := "1-true"
+	if got2 != want2 {
+		t.Errorf("PreviewExpression got %q, want %q", got2, want2)
+	}
+
+	// Expressions using the default helper must not crash on optional object members.
+	got3, err := PreviewExpression(bp, "", `{{ default "dev" $spec.config.cluster }}`)
+	if err != nil {
+		t.Fatalf("PreviewExpression with default helper failed: %v", err)
+	}
+	if got3 != "sample" {
+		t.Errorf("PreviewExpression got %q, want %q", got3, "sample")
+	}
+
+	// Expressions referencing nested optional object properties and enums.
+	got4, err := PreviewExpression(bp, "", "{{ $spec.config.tier }}-{{ $spec.config.nested.subKey }}")
+	if err != nil {
+		t.Fatalf("PreviewExpression nested failed: %v", err)
+	}
+	want4 := "staging-sample"
+	if got4 != want4 {
+		t.Errorf("PreviewExpression got %q, want %q", got4, want4)
+	}
+}
