@@ -219,6 +219,10 @@ func rawReferencesResource(raw, name string) bool {
 	if reIndex.MatchString(raw) {
 		return true
 	}
+	reHasKey := regexp.MustCompile(`\bhasKey\s+(?:(?:\$|\$\.|\.)?(?:observed\.)?resources)\s+(?:"` + q + `"|'` + q + `'|` + "`" + q + "`)" + `($|[^a-zA-Z0-9_-])`)
+	if reHasKey.MatchString(raw) {
+		return true
+	}
 	reGetComposed := regexp.MustCompile(`\bgetComposedResource\s+[^\s"'` + "`" + `]+\s+(?:"` + q + `"|'` + q + `'|` + "`" + q + "`)" + `($|[^a-zA-Z0-9_-])`)
 	return reGetComposed.MatchString(raw)
 }
@@ -264,6 +268,9 @@ func rewriteRawResource(raw, from, to string) string {
 	for _, q := range []string{`"`, `'`, "`"} {
 		reIndex := regexp.MustCompile(`(\bindex\s+(?:(?:\$|\$\.|\.)?(?:observed\.)?resources)\s+` + regexp.QuoteMeta(q) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(q) + `)`)
 		r = reIndex.ReplaceAllString(r, "${1}"+to+"${2}")
+
+		reHasKey := regexp.MustCompile(`(\bhasKey\s+(?:(?:\$|\$\.|\.)?(?:observed\.)?resources)\s+` + regexp.QuoteMeta(q) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(q) + `)`)
+		r = reHasKey.ReplaceAllString(r, "${1}"+to+"${2}")
 
 		reGetComposed := regexp.MustCompile(`(\bgetComposedResource\s+[^\s"'` + "`" + `]+\s+` + regexp.QuoteMeta(q) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(q) + `)`)
 		r = reGetComposed.ReplaceAllString(r, "${1}"+to+"${2}")
