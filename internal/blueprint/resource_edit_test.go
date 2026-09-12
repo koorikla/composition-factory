@@ -238,12 +238,26 @@ func TestRawReferencesResourceBoundaries(t *testing.T) {
 		resName  string
 		expected bool
 	}{
-		{"quoted exact", `"main"`, "main", true},
-		{"quoted prefix-sharing", `"main-queue"`, "main", false},
-		{"single quoted exact", `'main'`, "main", true},
-		{"single quoted prefix-sharing", `'main-queue'`, "main", false},
-		{"backtick exact", "`main`", "main", true},
-		{"backtick prefix-sharing", "`main-queue`", "main", false},
+		{"bare double quoted exact", `"main"`, "main", false},
+		{"bare double quoted prefix-sharing", `"main-queue"`, "main", false},
+		{"bare single quoted exact", `'main'`, "main", false},
+		{"bare single quoted prefix-sharing", `'main-queue'`, "main", false},
+		{"bare backtick exact", "`main`", "main", false},
+		{"bare backtick prefix-sharing", "`main-queue`", "main", false},
+		{"unanchored quoted in condition", `{{ if eq $spec.tier "main" }}`, "main", false},
+		{"index dot observed double quoted exact", `{{ index .observed.resources "main" }}`, "main", true},
+		{"index dot observed double quoted prefix-sharing", `{{ index .observed.resources "main-queue" }}`, "main", false},
+		{"index dollar dot observed double quoted exact", `{{ index $.observed.resources "main" }}`, "main", true},
+		{"index dollar dot observed double quoted prefix-sharing", `{{ index $.observed.resources "main-queue" }}`, "main", false},
+		{"index dollar observed double quoted exact", `{{ index $observed.resources "main" }}`, "main", true},
+		{"index dollar observed double quoted prefix-sharing", `{{ index $observed.resources "main-queue" }}`, "main", false},
+		{"index observed double quoted exact", `{{ index observed.resources "main" }}`, "main", true},
+		{"index resources double quoted exact", `{{ index resources "main" }}`, "main", true},
+		{"index resources double quoted prefix-sharing", `{{ index resources "main-queue" }}`, "main", false},
+		{"index single quoted exact", `{{ index .observed.resources 'main' }}`, "main", true},
+		{"index single quoted prefix-sharing", `{{ index .observed.resources 'main-queue' }}`, "main", false},
+		{"index backtick exact", "{{ index .observed.resources `main` }}", "main", true},
+		{"index backtick prefix-sharing", "{{ index .observed.resources `main-queue` }}", "main", false},
 		{"dot observed dot status", ".observed.resources.main.resource.status", "main", true},
 		{"dot observed prefix-sharing", ".observed.resources.main-queue.resource.status", "main", false},
 		{"dollar dot observed dot status", "$.observed.resources.main.resource.status", "main", true},
@@ -291,6 +305,34 @@ func TestRewriteRawResourceBoundaries(t *testing.T) {
 			from:     "main",
 			to:       "primary",
 			expected: `{{ index $.observed.resources "main-queue" }}`,
+		},
+		{
+			name:     "single quoted index exact",
+			raw:      `{{ index $.observed.resources 'main' }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ index $.observed.resources 'primary' }}`,
+		},
+		{
+			name:     "backtick index exact",
+			raw:      "{{ index $.observed.resources `main` }}",
+			from:     "main",
+			to:       "primary",
+			expected: "{{ index $.observed.resources `primary` }}",
+		},
+		{
+			name:     "index resources exact",
+			raw:      `{{ index resources "main" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ index resources "primary" }}`,
+		},
+		{
+			name:     "unanchored quoted string left alone",
+			raw:      `{{ if eq $spec.tier "main" }}`,
+			from:     "main",
+			to:       "primary",
+			expected: `{{ if eq $spec.tier "main" }}`,
 		},
 		{
 			name:     "dot observed rewrites exact",
@@ -371,5 +413,61 @@ func TestRewriteRawResourceBoundaries(t *testing.T) {
 				t.Errorf("rewriteRawResource(%q, %q, %q) = %q, want %q", tt.raw, tt.from, tt.to, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestDeleteResource_BlockedByUnrelatedQuotedStringInRaw(t *testing.T) {
+	b := wiredBlueprint(func(b *Blueprint) {
+		b.Spec.Resources = []Resource{
+			{
+				Name: "db",
+				Kind: "Instance",
+			},
+			{
+				Name: "app",
+				Kind: "Deployment",
+				Fields: map[string]Field{
+					"tier": {
+						Raw: `{{ if eq $spec.tier "db" }}primary{{ end }}`,
+					},
+				},
+			},
+		}
+	})
+
+	err := b.DeleteResource("db")
+	if err != nil {
+		t.Fatalf("DeleteResource(\"db\") failed: %v", err)
+	}
+}
+
+func TestRenameResource_CorruptsUnrelatedQuotedStringInRaw(t *testing.T) {
+	b := wiredBlueprint(func(b *Blueprint) {
+		b.Spec.Resources = []Resource{
+			{
+				Name: "db",
+				Kind: "Instance",
+			},
+			{
+				Name: "app",
+				Kind: "Deployment",
+				Fields: map[string]Field{
+					"tier": {
+						Raw: `{{ if eq $spec.tier "db" }}primary{{ end }}`,
+					},
+				},
+			},
+		}
+	})
+
+	err := b.RenameResource("db", "database")
+	if err != nil {
+		t.Fatalf("RenameResource failed: %v", err)
+	}
+
+	gotRaw := b.Spec.Resources[1].Fields["tier"].Raw
+	wantRaw := `{{ if eq $spec.tier "db" }}primary{{ end }}`
+	if gotRaw != wantRaw {
+		t.Errorf("app raw field corrupted by renaming db: got %q, want %q", gotRaw, wantRaw)
 	}
 }
