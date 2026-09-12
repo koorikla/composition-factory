@@ -382,11 +382,31 @@ func toYAML(n *node, isRoot bool) *yaml.Node {
 
 // ---- Parse ----------------------------------------------------------------
 
-// Parse walks manifest YAML against the schema tree and flattens it to
+// Options tunes Parse for the kind the tree belongs to.
+type Options struct {
+	// ObjectRooted says the tree is an object's own top level (metadata,
+	// spec, data ...) — a native or crds:-sourced kind, or a function input —
+	// rather than a managed resource's spec.forProvider body. It only picks
+	// the hint an unknown top-level envelope key gets (see unknownFieldMsg).
+	// The API passes crd.Native || crd.IsFunctionInput() from the CRD the
+	// resource resolved to.
+	ObjectRooted bool
+}
+
+// Parse is ParseWith with the rooting inferred from the tree: a top-level
+// metadata node means an object's own top level. That is right for the
+// vendored native kinds and for managed kinds, and wrong for a
+// crds:-sourced kind whose tree has only spec and status — callers that
+// hold the resolved CRD use ParseWith and say so.
+func Parse(nodes []*schema.Node, text string) (map[string]blueprint.Field, error) {
+	return ParseWith(nodes, text, Options{ObjectRooted: childSchema(nil, "metadata", nodes) != nil})
+}
+
+// ParseWith walks manifest YAML against the schema tree and flattens it to
 // fields. A mapping whose only key is value/from/raw/template with a scalar
 // value is a wrapper; a null scalar leaves its field unset. Every error is
 // an *Error carrying the field path and the line of the offending node.
-func Parse(nodes []*schema.Node, text string) (map[string]blueprint.Field, error) {
+func ParseWith(nodes []*schema.Node, text string, o Options) (map[string]blueprint.Field, error) {
 	out := map[string]blueprint.Field{}
 	dec := yaml.NewDecoder(strings.NewReader(text))
 	var doc yaml.Node
@@ -418,10 +438,17 @@ func Parse(nodes []*schema.Node, text string) (map[string]blueprint.Field, error
 	if body.Kind != yaml.MappingNode {
 		return nil, &Error{Line: body.Line, Msg: "manifest must be a mapping"}
 	}
-	if err := walkObject(body, nodes, "", out); err != nil {
+	p := &parser{out: out, objectRooted: o.ObjectRooted}
+	if err := p.walkObject(body, nodes, ""); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// parser carries one walk's output and the kind's rooting.
+type parser struct {
+	out          map[string]blueprint.Field
+	objectRooted bool
 }
 
 // syntaxError turns a yaml.v3 parse error into an *Error. Error() names the
@@ -570,28 +597,28 @@ func checkScalar(v *yaml.Node, sn *schema.Node, path string) *Error {
 const forProviderHint = "paste only the spec.forProvider body — apiVersion, kind and metadata are generated"
 
 // unknownFieldMsg explains a key the schema does not declare. A top-level
-// envelope key gets a dedicated hint: the tree of a native kind is the
+// envelope key gets a dedicated hint: an object-rooted tree is the
 // object's own top level (metadata, spec, data ...) so only apiVersion,
 // kind and status are foreign there; a managed kind's tree is the
-// spec.forProvider body, which has no metadata or spec of its own —
-// the presence of a top-level metadata node is what tells the two apart.
-// Otherwise the closest declared sibling is suggested when one is close.
-func unknownFieldMsg(key string, top bool, siblings []*schema.Node) string {
+// spec.forProvider body, which has no metadata or spec of its own. Which
+// of the two applies comes from the resolved CRD (Options.ObjectRooted),
+// never from the tree's shape. Otherwise the closest declared sibling is
+// suggested when one is close.
+func unknownFieldMsg(key string, top, objectRooted bool, siblings []*schema.Node) string {
 	if top {
-		nativeRooted := childSchema(nil, "metadata", siblings) != nil
 		switch key {
 		case "apiVersion", "kind":
-			if nativeRooted {
+			if objectRooted {
 				return "omit apiVersion and kind; the generator emits them"
 			}
 			return forProviderHint
 		case "status":
-			if nativeRooted {
+			if objectRooted {
 				return "omit status; the server owns it"
 			}
 			return forProviderHint
 		case "metadata", "spec":
-			if !nativeRooted {
+			if !objectRooted {
 				return forProviderHint
 			}
 		}
@@ -606,7 +633,7 @@ func unknownFieldMsg(key string, top bool, siblings []*schema.Node) string {
 	return "unknown field"
 }
 
-func walkObject(m *yaml.Node, children []*schema.Node, prefix string, out map[string]blueprint.Field) error {
+func (p *parser) walkObject(m *yaml.Node, children []*schema.Node, prefix string) error {
 	seen := map[string]bool{}
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		k, v := m.Content[i], m.Content[i+1]
@@ -620,16 +647,16 @@ func walkObject(m *yaml.Node, children []*schema.Node, prefix string, out map[st
 		seen[k.Value] = true
 		sn := childSchema(nil, k.Value, children)
 		if sn == nil {
-			return &Error{Path: path, Line: k.Line, Msg: unknownFieldMsg(k.Value, prefix == "", children)}
+			return &Error{Path: path, Line: k.Line, Msg: unknownFieldMsg(k.Value, prefix == "", p.objectRooted, children)}
 		}
-		if err := walkValue(v, sn, path, out); err != nil {
+		if err := p.walkValue(v, sn, path); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]blueprint.Field) error {
+func (p *parser) walkValue(v *yaml.Node, sn *schema.Node, path string) error {
 	v = deref(v)
 	if isNull(v) {
 		return nil
@@ -638,7 +665,7 @@ func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]bluepr
 		werr.Path = path
 		return werr
 	} else if ok {
-		out[path] = f
+		p.out[path] = f
 		return nil
 	}
 	switch {
@@ -646,7 +673,7 @@ func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]bluepr
 		if v.Kind != yaml.MappingNode {
 			return &Error{Path: path, Line: v.Line, Msg: "expected a mapping of keys; to set the whole map verbatim use {raw: \"...\"}"}
 		}
-		return walkMap(v, path, out)
+		return p.walkMap(v, path)
 	case sn.Type == "array" && len(sn.Children) > 0:
 		if v.Kind != yaml.SequenceNode {
 			return &Error{Path: path, Line: v.Line, Msg: "expected a list; to set the whole list verbatim use {raw: \"...\"}"}
@@ -661,13 +688,13 @@ func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]bluepr
 				werr.Path = ep
 				return werr
 			} else if ok {
-				out[ep] = f
+				p.out[ep] = f
 				continue
 			}
 			if item.Kind != yaml.MappingNode {
 				return &Error{Path: ep, Line: item.Line, Msg: "expected a mapping for a list element; to set it verbatim use {raw: \"...\"}"}
 			}
-			if err := walkObject(item, sn.Children, ep, out); err != nil {
+			if err := p.walkObject(item, sn.Children, ep); err != nil {
 				return err
 			}
 		}
@@ -685,11 +712,11 @@ func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]bluepr
 			if len(parts) == 0 {
 				return &Error{Path: path, Line: v.Line, Msg: "an empty list sets nothing; leave the field out to unset it"}
 			}
-			out[path] = blueprint.Field{Value: strings.Join(parts, ",")}
+			p.out[path] = blueprint.Field{Value: strings.Join(parts, ",")}
 			return nil
 		}
 		if v.Kind == yaml.ScalarNode {
-			out[path] = blueprint.Field{Value: v.Value}
+			p.out[path] = blueprint.Field{Value: v.Value}
 			return nil
 		}
 		return &Error{Path: path, Line: v.Line, Msg: "expected a list of scalars"}
@@ -697,7 +724,7 @@ func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]bluepr
 		if v.Kind != yaml.MappingNode {
 			return &Error{Path: path, Line: v.Line, Msg: "expected a mapping; to set the whole object verbatim use {raw: \"...\"}"}
 		}
-		return walkObject(v, sn.Children, path, out)
+		return p.walkObject(v, sn.Children, path)
 	default:
 		if v.Kind != yaml.ScalarNode {
 			msg := "expected a scalar or a {value|from|raw|template} wrapper"
@@ -709,7 +736,7 @@ func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]bluepr
 		if err := checkScalar(v, sn, path); err != nil {
 			return err
 		}
-		out[path] = blueprint.Field{Value: v.Value}
+		p.out[path] = blueprint.Field{Value: v.Value}
 		return nil
 	}
 }
@@ -717,7 +744,7 @@ func walkValue(v *yaml.Node, sn *schema.Node, path string, out map[string]bluepr
 // walkMap flattens a map node's entries to path[key] fields. Entries are
 // scalars or wrappers; a nested structure has no field form and must be
 // set verbatim through {raw: "..."} on the map itself.
-func walkMap(v *yaml.Node, path string, out map[string]blueprint.Field) error {
+func (p *parser) walkMap(v *yaml.Node, path string) error {
 	seen := map[string]bool{}
 	for i := 0; i+1 < len(v.Content); i += 2 {
 		k, ev := v.Content[i], deref(v.Content[i+1])
@@ -733,14 +760,14 @@ func walkMap(v *yaml.Node, path string, out map[string]blueprint.Field) error {
 			continue
 		}
 		if ev.Kind == yaml.ScalarNode {
-			out[ep] = blueprint.Field{Value: ev.Value}
+			p.out[ep] = blueprint.Field{Value: ev.Value}
 			continue
 		}
 		if f, ok, werr := wrapper(ev, noMember); werr != nil {
 			werr.Path = ep
 			return werr
 		} else if ok {
-			out[ep] = f
+			p.out[ep] = f
 			continue
 		}
 		return &Error{Path: ep, Line: ev.Line, Msg: "a map entry must be a scalar or a {value|from|raw|template} wrapper"}

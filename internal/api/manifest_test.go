@@ -134,3 +134,21 @@ func TestPutResourceManifestSyntaxErrorBodyShape(t *testing.T) {
 		t.Errorf("got %s", rec.Body)
 	}
 }
+
+// The envelope-key hint follows the resolved CRD's rooting, not the tree's
+// shape: a native kind is told to omit apiVersion/kind, a managed kind to
+// paste only the forProvider body.
+func TestPutResourceManifestEnvelopeKeyHintsFollowTheKind(t *testing.T) {
+	h := testHandler(t)
+	seedDeployment(t, h)
+	for _, tc := range []struct{ name, yaml, want string }{
+		{"web", "apiVersion: apps/v1\nspec: {}\n", "omit apiVersion and kind"},
+		{"main-queue", "spec:\n  forProvider:\n    region: x\n", "paste only the spec.forProvider body"},
+	} {
+		body, _ := json.Marshal(map[string]string{"yaml": tc.yaml})
+		rec := do(t, h, "PUT", "/api/blueprint/resources/"+tc.name+"/manifest", string(body))
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s: status %d body %s, want 400 containing %q", tc.name, rec.Code, rec.Body, tc.want)
+		}
+	}
+}

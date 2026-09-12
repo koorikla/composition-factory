@@ -53,18 +53,30 @@ func (m manifestErr) Body() map[string]any {
 }
 
 // fieldTreeFor resolves r's kind against the blueprint's sources exactly the
-// way the emitter does and returns the settable field tree. Caller must
-// hold srv.mu (loadSourceCRDs requires it).
-func (srv *server) fieldTreeFor(b *blueprint.Blueprint, r blueprint.Resource) ([]*schema.Node, error) {
+// way the emitter does and returns the settable field tree with the CRD it
+// came from (the parser takes the kind's rooting from the CRD, not from the
+// tree's shape). Caller must hold srv.mu (loadSourceCRDs requires it).
+func (srv *server) fieldTreeFor(b *blueprint.Blueprint, r blueprint.Resource) ([]*schema.Node, schema.CRD, error) {
 	crds, err := srv.loadSourceCRDs(b)
 	if err != nil {
-		return nil, err
+		return nil, schema.CRD{}, err
 	}
 	crd, err := emit.ResolveKind(crds, r, b.Spec.XRD.Scope == "Namespaced")
 	if err != nil {
-		return nil, err
+		return nil, schema.CRD{}, err
 	}
-	return crd.FieldTree()
+	nodes, err := crd.FieldTree()
+	if err != nil {
+		return nil, schema.CRD{}, err
+	}
+	return nodes, crd, nil
+}
+
+// parseOptionsFor is the parser's view of the resolved CRD: object-rooted
+// for a native or crds:-sourced kind and a function input (their tree is
+// the object's own top level), forProvider-rooted for a managed resource.
+func parseOptionsFor(crd schema.CRD) manifest.Options {
+	return manifest.Options{ObjectRooted: crd.Native || crd.IsFunctionInput()}
 }
 
 // handleGetResourceManifest serves GET /api/blueprint/resources/{name}/manifest.
@@ -92,7 +104,7 @@ func (srv *server) handleGetResourceManifest(w http.ResponseWriter, r *http.Requ
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("resource %q is not declared", name))
 		return
 	}
-	nodes, err := srv.fieldTreeFor(b, *res)
+	nodes, _, err := srv.fieldTreeFor(b, *res)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -123,11 +135,11 @@ func (srv *server) handleSetResourceManifest(w http.ResponseWriter, r *http.Requ
 		if res == nil {
 			return http.StatusNotFound, fmt.Errorf("resource %q is not declared", name)
 		}
-		nodes, err := srv.fieldTreeFor(b, *res)
+		nodes, crd, err := srv.fieldTreeFor(b, *res)
 		if err != nil {
 			return http.StatusBadRequest, err
 		}
-		fields, err := manifest.Parse(nodes, req.YAML)
+		fields, err := manifest.ParseWith(nodes, req.YAML, parseOptionsFor(crd))
 		if err != nil {
 			var me *manifest.Error
 			if errors.As(err, &me) {

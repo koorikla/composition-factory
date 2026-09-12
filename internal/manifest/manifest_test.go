@@ -440,6 +440,28 @@ func TestParseEnvelopeKeysGetADedicatedHint(t *testing.T) {
 	if !asError(err, &me) || !strings.HasSuffix(me.Error(), `unknown field; did you mean "region"?`) {
 		t.Fatalf("managed sibling hint: got %v", err)
 	}
+
+	// A crds:-sourced kind is object-rooted like a native one but its tree
+	// usually has only spec (and status): the caller says so explicitly, and
+	// the tree's shape must not turn that into the forProvider hint.
+	crdsSourced := []*schema.Node{
+		{Name: "spec", Type: "object", Children: []*schema.Node{{Name: "size", Type: "integer"}}},
+		{Name: "status", Type: "object", Children: []*schema.Node{{Name: "ready", Type: "boolean"}}},
+	}
+	rooted := Options{ObjectRooted: true}
+	_, err = ParseWith(crdsSourced, "apiVersion: example.org/v1\nspec: {size: 1}\n", rooted)
+	if !asError(err, &me) || me.Path != "apiVersion" || !strings.Contains(me.Msg, "omit apiVersion and kind") {
+		t.Fatalf("crds-sourced apiVersion: got %v", err)
+	}
+	_, err = ParseWith(crdsSourced, "metadata: {}\nspec: {size: 1}\n", rooted)
+	if !asError(err, &me) || me.Path != "metadata" || strings.Contains(me.Msg, "forProvider") {
+		t.Fatalf("crds-sourced metadata must not get the managed hint: got %v", err)
+	}
+	// And a managed tree stays managed when the caller says so, whatever it holds.
+	_, err = ParseWith(nodes, "spec:\n  forProvider: {}\n", Options{ObjectRooted: false})
+	if !asError(err, &me) || me.Path != "spec" || !strings.Contains(me.Msg, "paste only the spec.forProvider body") {
+		t.Fatalf("explicit managed: got %v", err)
+	}
 }
 
 // An all-wrapper-key mapping wraps a list-valued member too: Parse treats
