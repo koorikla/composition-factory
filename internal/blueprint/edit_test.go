@@ -706,6 +706,60 @@ func TestRawIndexParam_QuotesAndContainers(t *testing.T) {
 	}
 }
 
+func TestRawReferencesParam_ObservedCompositeSpec(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		param    string
+		expected bool
+	}{
+		{"index dot observed composite spec", `{{ (index .observed.composite.resource.spec "tier") }}`, "tier", true},
+		{"index dollar dot observed composite spec", `{{ (index $.observed.composite.resource.spec "tier") }}`, "tier", true},
+		{"index dollar dot spec", `{{ (index $.spec "tier") }}`, "tier", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rawReferencesParam(tt.raw, tt.param)
+			if got != tt.expected {
+				t.Errorf("rawReferencesParam(%q, %q) = %v, want %v", tt.raw, tt.param, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDeleteParameter_RefusesObservedCompositeSpec(t *testing.T) {
+	b := editable()
+	b.Spec.XRD.Parameters["tier"] = Parameter{Type: "string"}
+	b.Spec.Resources[0].Fields["rawField"] = Field{Raw: `{{ (index .observed.composite.resource.spec "tier") }}`}
+
+	err := b.DeleteParameter("tier")
+	if err == nil {
+		t.Fatal("DeleteParameter = nil, want refusal when raw field references parameter via .observed.composite.resource.spec")
+	}
+	if !strings.Contains(err.Error(), "main-queue") {
+		t.Errorf("err = %v, want it to mention main-queue", err)
+	}
+}
+
+func TestRenameParameter_RewritesObservedCompositeSpec(t *testing.T) {
+	b := editable()
+	b.Spec.XRD.Parameters["tier"] = Parameter{Type: "string"}
+	b.Spec.Resources[0].Fields["rawField"] = Field{Raw: `{{ (index .observed.composite.resource.spec "tier") }}`}
+	b.Spec.Templates = map[string]string{
+		"helper": `{{ (index $.observed.composite.resource.spec "tier") }}`,
+	}
+
+	if err := b.RenameParameter("tier", "ranking"); err != nil {
+		t.Fatalf("RenameParameter: %v", err)
+	}
+	if got := b.Spec.Resources[0].Fields["rawField"].Raw; got != `{{ (index .observed.composite.resource.spec "ranking") }}` {
+		t.Errorf("raw field = %q, want {{ (index .observed.composite.resource.spec \\\"ranking\\\") }}", got)
+	}
+	if got := b.Spec.Templates["helper"]; got != `{{ (index $.observed.composite.resource.spec "ranking") }}` {
+		t.Errorf("template = %q, want {{ (index $.observed.composite.resource.spec \\\"ranking\\\") }}", got)
+	}
+}
+
 func TestAddResource(t *testing.T) {
 	b := editable()
 	newRes := Resource{
