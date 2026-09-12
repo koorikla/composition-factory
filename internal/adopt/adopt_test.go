@@ -9845,6 +9845,7 @@ func TestCollectSourcesDeduplicatesCRDs(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 func TestAdoptGoTemplate_ForEachParamIndexSpec_Variants(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -9943,5 +9944,79 @@ spec:
 				t.Errorf("parameter %q Type = %q, want 'integer'", tc.wantParam, param.Type)
 			}
 		})
+	}
+}
+
+func TestAdoptPreservesNonNameMetadataReferencesAsRaw(t *testing.T) {
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+  - step: patch-and-transform
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: test-cm
+            annotations:
+              crossplane.io/composition-resource-name: cm
+              my-anno: {{ .observed.resources.sa.resource.metadata.uid }}
+          data:
+            ns: {{ .observed.resources.sa.resource.metadata.namespace }}
+          items:
+            - {{ .observed.resources.sa.resource.metadata.labels.app }}
+`
+	bp, _, err := Adopt([]byte(compYAML), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+	res := bp.ResourceNamed("cm")
+	if res == nil {
+		t.Fatal("resource cm not found")
+	}
+	field, ok := res.Fields["data[ns]"]
+	if !ok {
+		t.Fatal("field data[ns] not found")
+	}
+	if field.From != "" {
+		t.Errorf("field.From = %q, want empty From because non-name metadata cannot be a status wire", field.From)
+	}
+	if field.Raw == "" {
+		t.Errorf("field.Raw is empty, want raw template preserved")
+	}
+
+	itemField, ok := res.Fields["items[0]"]
+	if !ok {
+		t.Fatal("field items[0] not found")
+	}
+	if itemField.From != "" {
+		t.Errorf("itemField.From = %q, want empty From", itemField.From)
+	}
+	if itemField.Raw == "" {
+		t.Errorf("itemField.Raw is empty, want raw template preserved")
+	}
+
+	annoField, ok := res.Annotations["my-anno"]
+	if !ok {
+		t.Fatal("annotation my-anno not found")
+	}
+	if annoField.From != "" {
+		t.Errorf("annoField.From = %q, want empty From", annoField.From)
+	}
+	if annoField.Raw == "" {
+		t.Errorf("annoField.Raw is empty, want raw template preserved")
 	}
 }

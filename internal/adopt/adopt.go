@@ -2849,10 +2849,13 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 							field = "atProvider." + field
 						}
 						fromPath = "resources." + srcRes + ".status." + field
+						res.Annotations[rawK] = blueprint.Field{From: fromPath}
+					} else if targetField == "name" {
+						fromPath = "resources." + srcRes + ".metadata.name"
+						res.Annotations[rawK] = blueprint.Field{From: fromPath}
 					} else {
-						fromPath = "resources." + srcRes + ".metadata." + targetField
+						res.Annotations[rawK] = blueprint.Field{Raw: rawStr}
 					}
-					res.Annotations[rawK] = blueprint.Field{From: fromPath}
 				} else if m := reXRResourceRef.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
 					srcRes := m[1]
 					if nameMapping != nil && nameMapping[srcRes] != "" {
@@ -3236,7 +3239,11 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 				}
 				targetKind := m[3]
 				targetField := m[4]
-				out[path] = blueprint.Field{From: "resources." + srcRes + "." + targetKind + "." + targetField}
+				if targetKind == "metadata" && targetField != "name" {
+					out[path] = blueprint.Field{Raw: rawStr}
+				} else {
+					out[path] = blueprint.Field{From: "resources." + srcRes + "." + targetKind + "." + targetField}
+				}
 			} else if m := reXRResourceRef.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
 				srcRes := m[1]
 				if nameMapping != nil && nameMapping[srcRes] != "" {
@@ -3305,7 +3312,11 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 						}
 						targetKind := m[3]
 						targetField := m[4]
-						out[elemPath] = blueprint.Field{From: "resources." + srcRes + "." + targetKind + "." + targetField}
+						if targetKind == "metadata" && targetField != "name" {
+							out[elemPath] = blueprint.Field{Raw: rawStr}
+						} else {
+							out[elemPath] = blueprint.Field{From: "resources." + srcRes + "." + targetKind + "." + targetField}
+						}
 					} else if m := reXRResourceRef.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
 						srcRes := m[1]
 						if nameMapping != nil && nameMapping[srcRes] != "" {
