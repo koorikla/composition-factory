@@ -11949,3 +11949,175 @@ spec:
 		t.Errorf("slice element subnets[0] From = %q, want %q", sliceElem.From, wantSliceElem)
 	}
 }
+
+func TestAdoptGoTemplate_ForEachStatusVariants(t *testing.T) {
+	tests := []struct {
+		name        string
+		loopExpr    string
+		wantForEach string
+	}{
+		{
+			name:        "status default index double quotes",
+			loopExpr:    `until (int (default 1 (index $.observed.resources "subnet").resource.status.count))`,
+			wantForEach: "resources.subnet.status.count",
+		},
+		{
+			name:        "status index single quotes",
+			loopExpr:    `until (int (index $.observed.resources 'subnet').resource.status.count)`,
+			wantForEach: "resources.subnet.status.count",
+		},
+		{
+			name:        "status dollar observed resources without dot",
+			loopExpr:    `until (int (index $observed.resources "subnet").resource.status.count)`,
+			wantForEach: "resources.subnet.status.count",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-foreach-status
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            ---
+            apiVersion: ec2.aws.upbound.io/v1beta1
+            kind: Subnet
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: subnet
+            spec:
+              forProvider:
+                cidrBlock: 10.0.0.0/24
+            ---
+            {{- range $i := %s }}
+            apiVersion: ec2.aws.upbound.io/v1beta1
+            kind: RouteTable
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: route-table
+            spec:
+              forProvider:
+                vpcId: vpc-12345
+            {{- end }}
+`, tc.loopExpr)
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 2 {
+				t.Fatalf("expected 2 resources, got %d", len(bp.Spec.Resources))
+			}
+			r := bp.Spec.Resources[1]
+			if r.ForEach != tc.wantForEach {
+				t.Errorf("r.ForEach = %q, want %q", r.ForEach, tc.wantForEach)
+			}
+		})
+	}
+}
+
+func TestAdoptGoTemplate_ForEachStatusAdditionalVariants(t *testing.T) {
+	tests := []struct {
+		name        string
+		loopExpr    string
+		wantForEach string
+	}{
+		{
+			name:        "status dot notation default",
+			loopExpr:    `until (int (default 1 $.observed.resources.subnet.resource.status.count))`,
+			wantForEach: "resources.subnet.status.count",
+		},
+		{
+			name:        "status dot notation dollar without dot default",
+			loopExpr:    `until (int (default 1 $observed.resources.subnet.resource.status.count))`,
+			wantForEach: "resources.subnet.status.count",
+		},
+		{
+			name:        "status dot notation dollar without dot no default",
+			loopExpr:    `until (int $observed.resources.subnet.resource.status.count)`,
+			wantForEach: "resources.subnet.status.count",
+		},
+		{
+			name:        "status single quotes with dollar without dot and default",
+			loopExpr:    `until (int (default 1 (index $observed.resources 'subnet').resource.status.count))`,
+			wantForEach: "resources.subnet.status.count",
+		},
+		{
+			name:        "status pipe default",
+			loopExpr:    `until (int ((index $.observed.resources "subnet").resource.status.count | default 1))`,
+			wantForEach: "resources.subnet.status.count",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-foreach-status-additional
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            ---
+            apiVersion: ec2.aws.upbound.io/v1beta1
+            kind: Subnet
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: subnet
+            spec:
+              forProvider:
+                cidrBlock: 10.0.0.0/24
+            ---
+            {{- range $i := %s }}
+            apiVersion: ec2.aws.upbound.io/v1beta1
+            kind: RouteTable
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: route-table
+            spec:
+              forProvider:
+                vpcId: vpc-12345
+            {{- end }}
+`, tc.loopExpr)
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 2 {
+				t.Fatalf("expected 2 resources, got %d", len(bp.Spec.Resources))
+			}
+			r := bp.Spec.Resources[1]
+			if r.ForEach != tc.wantForEach {
+				t.Errorf("r.ForEach = %q, want %q", r.ForEach, tc.wantForEach)
+			}
+		})
+	}
+}
