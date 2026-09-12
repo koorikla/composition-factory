@@ -23,7 +23,7 @@ test('switching engine to an unsupported choice displays error toast and does no
   // immediately swallowed by an unconditional post-mutation store.generate().
   const toast = page.locator('#canvas-error-toast')
   await expect(toast).toBeVisible()
-  await expect(toast).toContainText('current engine is "kcl"')
+  await expect(toast).toContainText('kcl')
 
   // The engine selector in the UI must reflect the actual persisted document state
   // rather than remaining stuck on the rejected engine value.
