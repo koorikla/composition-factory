@@ -245,7 +245,11 @@ func rawReferencesParam(raw, name string) bool {
 		return true
 	}
 	reIndex := regexp.MustCompile(`\bindex\s+(?:(?:\$|\$\.|\.)?observed\.composite\.resource\.spec|(?:\$|\$\.|\.)spec|(?:\$|\$\.|\.)?params)\s+(?:"` + q + `"|'` + q + `'|` + "`" + q + "`)" + `($|[^a-zA-Z0-9_])`)
-	return reIndex.MatchString(raw)
+	if reIndex.MatchString(raw) {
+		return true
+	}
+	reHasKey := regexp.MustCompile(`\bhasKey\s+(?:(?:\$|\$\.|\.)?observed\.composite\.resource\.spec|(?:\$|\$\.|\.)spec|(?:\$|\$\.|\.)?params)\s+(?:"` + q + `"|'` + q + `'|` + "`" + q + "`)" + `($|[^a-zA-Z0-9_])`)
+	return reHasKey.MatchString(raw)
 }
 
 // rewriteRawResource replaces references to from with to in a raw template/expression.
@@ -279,6 +283,9 @@ func rewriteRawParam(raw, from, to string) string {
 	for _, q := range []string{`"`, `'`, "`"} {
 		reIndex := regexp.MustCompile(`(\bindex\s+(?:(?:\$|\$\.|\.)?observed\.composite\.resource\.spec|(?:\$|\$\.|\.)spec|(?:\$|\$\.|\.)?params)\s+` + regexp.QuoteMeta(q) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(q) + `)`)
 		r = reIndex.ReplaceAllString(r, "${1}"+to+"${2}")
+
+		reHasKey := regexp.MustCompile(`(\bhasKey\s+(?:(?:\$|\$\.|\.)?observed\.composite\.resource\.spec|(?:\$|\$\.|\.)spec|(?:\$|\$\.|\.)?params)\s+` + regexp.QuoteMeta(q) + `)` + regexp.QuoteMeta(from) + `(` + regexp.QuoteMeta(q) + `)`)
+		r = reHasKey.ReplaceAllString(r, "${1}"+to+"${2}")
 	}
 	return r
 }
