@@ -55,8 +55,88 @@ func isByteTarget(node *schema.Node, r blueprint.Resource, p string, isMap bool)
 	return false
 }
 
+// targetCustomNameField returns the custom name field declared on a resource if any.
+func targetCustomNameField(targetDecl *blueprint.Resource) (blueprint.Field, bool) {
+	if targetDecl == nil {
+		return blueprint.Field{}, false
+	}
+	if f, ok := targetDecl.Fields["metadata.name"]; ok && !isFieldEmpty(f) {
+		return f, true
+	}
+	if f, ok := targetDecl.Fields["name"]; ok && !isFieldEmpty(f) {
+		return f, true
+	}
+	if targetDecl.Envelope != nil {
+		if f, ok := targetDecl.Envelope["metadata.name"]; ok && !isFieldEmpty(f) {
+			return f, true
+		}
+		if f, ok := targetDecl.Envelope["name"]; ok && !isFieldEmpty(f) {
+			return f, true
+		}
+	}
+	return blueprint.Field{}, false
+}
+
+func isFieldEmpty(f blueprint.Field) bool {
+	return f.Value == "" && f.From == "" && f.Raw == "" && f.Template == ""
+}
+
+func resolveMetadataNameRef(r blueprint.Resource, what string, ref blueprint.FromRef, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool, targetType string, isMap bool, visited map[string]bool) (structuredRHS, string, string, error) {
+	var s structuredRHS
+	targetDecl := b.ResourceNamed(ref.Resource)
+	if targetDecl == nil {
+		return s, "", "", fmt.Errorf("resource %q %s: references unknown resource %q", r.Name, what, ref.Resource)
+	}
+	if targetDecl.ForEach != "" {
+		return s, "", "", fmt.Errorf("resource %q %s: resource %q is looped (forEach: %s), so its name is indexed (%s-0, %s-1, ...) -- reference an unlooped resource",
+			r.Name, what, ref.Resource, targetDecl.ForEach, ref.Resource, ref.Resource)
+	}
+	if visited != nil && visited[ref.Resource] {
+		return s, "", "", fmt.Errorf("resource %q %s: cycle detected in metadata.name references at resource %q", r.Name, what, ref.Resource)
+	}
+
+	if targetField, ok := targetCustomNameField(targetDecl); ok {
+		newVisited := make(map[string]bool, len(visited)+1)
+		for k, v := range visited {
+			newVisited[k] = v
+		}
+		if r.Name != "" {
+			newVisited[r.Name] = true
+		}
+
+		targetNode := &schema.Node{Type: "string"}
+		sTarget, rhsTarget, guardTarget, err := resolveFieldRHSWithVisited("metadata.name", targetField, *targetDecl, b, crds, wantNamespaced, targetNode, false, newVisited)
+		if err != nil {
+			return s, "", "", fmt.Errorf("resource %q %s: resolving target %q metadata.name: %w", r.Name, what, ref.Resource, err)
+		}
+		if isMap {
+			sTarget.targetType = "string"
+		} else if targetType != "" {
+			sTarget.targetType = targetType
+		}
+		return sTarget, rhsTarget, guardTarget, nil
+	}
+
+	s.kind = rhsMetadata
+	s.resource = ref.Resource
+	s.statusPath = "metadata.name"
+	s.optional = false
+	s.guard = ""
+	s.targetType = targetType
+	if isMap {
+		s.targetType = "string"
+	}
+	s.rawExpr = fmt.Sprintf("$xr-%s", ref.Resource)
+	rhs := fmt.Sprintf("{{ $xr }}-%s", ref.Resource)
+	return s, rhs, "", nil
+}
+
 // resolveFieldRHS resolves a single blueprint field into its structured form and Go-template RHS/guard.
 func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool, node *schema.Node, isMap bool) (structuredRHS, string, string, error) {
+	return resolveFieldRHSWithVisited(p, f, r, b, crds, wantNamespaced, node, isMap, nil)
+}
+
+func resolveFieldRHSWithVisited(p string, f blueprint.Field, r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool, node *schema.Node, isMap bool, visited map[string]bool) (structuredRHS, string, string, error) {
 	var s structuredRHS
 	var rhs, guard string
 
@@ -184,22 +264,7 @@ func resolveFieldRHS(p string, f blueprint.Field, r blueprint.Resource, b *bluep
 			}
 
 			if ref.IsMetadataName() {
-				targetDecl := b.ResourceNamed(ref.Resource)
-				if targetDecl == nil {
-					return s, "", "", fmt.Errorf("resource %q field %q: references unknown resource %q", r.Name, p, ref.Resource)
-				}
-				s.kind = rhsMetadata
-				s.resource = ref.Resource
-				s.statusPath = "metadata.name"
-				s.optional = false
-				s.guard = ""
-				s.targetType = targetType
-				if isMap {
-					s.targetType = "string"
-				}
-				s.rawExpr = fmt.Sprintf("$xr-%s", ref.Resource)
-				rhs = fmt.Sprintf("{{ $xr }}-%s", ref.Resource)
-				return s, rhs, "", nil
+				return resolveMetadataNameRef(r, fmt.Sprintf("field %q", p), ref, b, crds, wantNamespaced, targetType, isMap, visited)
 			}
 
 			g, expr, leafType, err := statusWire(ref, r, fmt.Sprintf("field %q", p), b, crds, wantNamespaced)
