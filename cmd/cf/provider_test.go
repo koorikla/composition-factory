@@ -181,3 +181,39 @@ func TestProviderAddNative(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderAddRejectsFunctionPackageWithoutMutatingLockfile(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".cf.lock")
+	fnFetch := func(ref string) (*xpkg.Package, error) {
+		return &xpkg.Package{
+			Ref:    ref,
+			Digest: "sha256:fn123",
+			Docs: [][]byte{[]byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: autoreadies.autoready.fn.crossplane.io}
+spec:
+  group: autoready.fn.crossplane.io
+  scope: Namespaced
+  names: {kind: AutoReady, plural: autoreadies}
+  versions:
+  - {name: v1alpha1, served: true, storage: true}
+`)},
+		}, nil
+	}
+	cmd := &ProviderAddCmd{
+		Ref:      "xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.5.0",
+		CacheDir: filepath.Join(dir, "cache"),
+		Lock:     lockPath,
+		fetch:    fnFetch,
+	}
+	var out bytes.Buffer
+	err := cmd.Run(&out)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if _, statErr := os.Stat(lockPath); statErr == nil {
+		t.Fatalf("lockfile %s was written despite command failure", lockPath)
+	}
+}

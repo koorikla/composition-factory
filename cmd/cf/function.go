@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
@@ -27,7 +28,16 @@ type FunctionAddCmd struct {
 
 func (c *FunctionAddCmd) Run(out io.Writer) error {
 	store := cache.New(c.CacheDir)
-	pkg, crds, err := store.FetchAndSave(context.Background(), c.Lock, c.Ref, c.fetch)
+	_, loadErr := store.Load(c.Ref)
+	wasCached := loadErr == nil
+	cleanup := func(ref string) {
+		if !wasCached {
+			_ = store.Delete(ref)
+			_ = os.Remove(c.CacheDir)
+		}
+	}
+
+	pkg, crds, err := store.FetchAndSave(context.Background(), "", c.Ref, c.fetch)
 	if err != nil {
 		return err
 	}
@@ -43,7 +53,12 @@ func (c *FunctionAddCmd) Run(out io.Writer) error {
 		}
 	}
 	if inputs == 0 && managed > 0 {
+		cleanup(pkg.Ref)
 		return fmt.Errorf("package %q is a provider package, not a function (use 'cf provider add %s')", c.Ref, c.Ref)
+	}
+	if err := store.PinLock(c.Lock, pkg.Ref, pkg.Digest); err != nil {
+		cleanup(pkg.Ref)
+		return err
 	}
 	noun := "function input schemas"
 	if inputs == 1 {

@@ -154,3 +154,39 @@ spec:
 		t.Errorf("lock functions = %+v, want sha256:autoreadyfeed", l.Functions)
 	}
 }
+
+func TestFunctionAddRejectsProviderPackageWithoutMutatingLockfile(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".cf.lock")
+	provFetch := func(ref string) (*xpkg.Package, error) {
+		return &xpkg.Package{
+			Ref:    ref,
+			Digest: "sha256:prov123",
+			Docs: [][]byte{[]byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: queues.sqs.aws.upbound.io}
+spec:
+  group: sqs.aws.upbound.io
+  scope: Cluster
+  names: {kind: Queue, plural: queues, categories: [managed]}
+  versions:
+  - {name: v1beta1, served: true, storage: true}
+`)},
+		}, nil
+	}
+	cmd := &FunctionAddCmd{
+		Ref:      "xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0",
+		CacheDir: filepath.Join(dir, "cache"),
+		Lock:     lockPath,
+		fetch:    provFetch,
+	}
+	var out bytes.Buffer
+	err := cmd.Run(&out)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if _, statErr := os.Stat(lockPath); statErr == nil {
+		t.Fatalf("lockfile %s was written despite command failure", lockPath)
+	}
+}
