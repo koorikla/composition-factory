@@ -265,7 +265,7 @@ func TestAssembleProvidersFallsBackToStoreListWhenSourcesEmpty(t *testing.T) {
 	})
 }
 
-func TestAssembleProvidersIncludesCachedProvidersAlongsideBlueprintSources(t *testing.T) {
+func TestAssembleProvidersExcludesUndeclaredCachedProvidersWhenSourcesPresent(t *testing.T) {
 	dir := t.TempDir()
 	store := cache.New(filepath.Join(dir, "cache"))
 	refDeclared := "example.org/provider-declared:v1"
@@ -282,7 +282,7 @@ func TestAssembleProvidersIncludesCachedProvidersAlongsideBlueprintSources(t *te
 	}
 
 	got := AssembleProviders(store, bp, nil, false)
-	want := []string{refDeclared, refCached}
+	want := []string{refDeclared}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("AssembleProviders() = %v, want %v", got, want)
 	}
@@ -321,7 +321,7 @@ spec:
 		t.Fatalf("buildAPIOptions: %v", err)
 	}
 
-	wantProviders := []string{refDeclared, refCached}
+	wantProviders := []string{refDeclared}
 	if !reflect.DeepEqual(opts.Providers, wantProviders) {
 		t.Errorf("opts.Providers = %v, want %v", opts.Providers, wantProviders)
 	}
