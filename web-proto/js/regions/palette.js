@@ -63,7 +63,9 @@ let envErr = null;
 let envType = "string";      // environment add-form type
 
 let providers = null;        // server-side cached providers, null = not loaded
+let providersLoaded = false;
 let providerSeq = 0;
+let providerPollTimer = null;
 let providersErr = null;     // verbatim server error from the last add/list
 let replaceRef = null;       // failed source the add field is replacing (CF-152), or null
 let catRows = null;          // catalogue search results, null = untouched
@@ -143,7 +145,10 @@ export function switchTab(r) {
       c.setAttribute("aria-pressed", String(c.getAttribute("data-r") === rail));
     });
   }
-  if (rail === "kinds") loadKinds();
+  if (rail === "kinds") {
+    loadKinds();
+    loadProviders();
+  }
   if (rail === "src") {
     if (providers === null) loadProviders();
     loadCluster();
@@ -195,16 +200,61 @@ function loadCluster() {
   });
 }
 
+function scheduleProviderPoll() {
+  clearTimeout(providerPollTimer);
+  providerPollTimer = setTimeout(pollBackgroundProviders, 500);
+}
+
 function loadProviders() {
   const seq = ++providerSeq;
   api.getProviders().then(function (r) {
     if (seq !== providerSeq) return;
     providers = r.providers || [];
-    if (rail === "src") drawRail();
+    providersLoaded = true;
+    const hasLoading = (providers || []).some(function (p) { return p.status === "loading"; });
+    clearTimeout(providerPollTimer);
+    if (hasLoading) {
+      scheduleProviderPoll();
+    } else {
+      providerPollTimer = null;
+    }
+    if (rail === "src" || rail === "kinds") drawRail();
   }).catch(function () {
     if (seq !== providerSeq) return;
     providers = null;        // endpoint absent or down: fall back to doc sources
-    if (rail === "src") drawRail();
+    providersLoaded = true;
+    clearTimeout(providerPollTimer);
+    providerPollTimer = null;
+    if (rail === "src" || rail === "kinds") drawRail();
+  });
+}
+
+function pollBackgroundProviders() {
+  clearTimeout(providerPollTimer);
+  const prevLoading = (providers || []).filter(function (p) { return p.status === "loading"; });
+  api.getProviders().then(function (r) {
+    ++providerSeq;
+    providers = r.providers || [];
+    providersLoaded = true;
+    const stillLoading = (providers || []).filter(function (p) { return p.status === "loading"; });
+
+    if (stillLoading.length > 0) {
+      scheduleProviderPoll();
+    } else {
+      providerPollTimer = null;
+    }
+
+    if (prevLoading.length > 0) {
+      loadKinds();
+    }
+    if (rail === "src" || rail === "kinds") drawRail();
+  }).catch(function () {
+    const stillLoading = (providers || []).some(function (p) { return p.status === "loading"; });
+    if (stillLoading) {
+      providerPollTimer = setTimeout(pollBackgroundProviders, 1000);
+    } else {
+      providerPollTimer = null;
+    }
   });
 }
 
@@ -221,11 +271,28 @@ function loadFunctions(q) {
 /* ---------------- tab renderers ---------------- */
 
 function drawKindsEmpty(q) {
+  const loading = (providers || []).filter(function (p) { return p.status === "loading"; });
   if (!q) {
+    if (loading.length > 0) {
+      const names = loading.map(function (p) { return (p.ref || "").split("/").pop() || p.ref; }).join(", ");
+      return '<div class="empty" data-state="loading-providers" style="padding:18px 12px;text-align:center">' +
+        '<div style="display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--ink);margin-bottom:6px">' +
+        '<span class="spinner"></span> Downloading provider schemas\u2026</div>' +
+        '<div class="dg" style="color:var(--muted);font-size:11px;word-break:break-all">' + esc(names) + '</div>' +
+        '<div class="dg" style="color:var(--faint);font-size:10.5px;margin-top:8px">Kinds will appear automatically once downloaded.</div>' +
+        '</div>';
+    }
     return '<div class="empty">No kinds available. Add a provider in <button class="btn link" data-tab-switch="src" style="font-weight:600;text-decoration:underline;cursor:pointer;color:inherit;background:none;border:none;padding:0;font-size:inherit">SOURCES</button> or run: <code>cf provider add &lt;ref&gt;</code>.</div>';
   }
 
   let h = '<div class="empty">';
+  if (loading.length > 0) {
+    const names = loading.map(function (p) { return (p.ref || "").split("/").pop() || p.ref; }).join(", ");
+    h += '<div class="warnbar provider-download-banner" role="status" style="margin:0 0 10px;text-align:left;display:flex;align-items:center;gap:6px;background:var(--wire-status-soft);color:var(--wire-status)">' +
+      '<span class="spinner"></span>' +
+      '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">Downloading ' + esc(names) + '\u2026</span>' +
+      '</div>';
+  }
   if (providersErr) {
     h += '<div class="warnbar" role="alert" style="margin:0 0 10px;text-align:left">' + esc(providersErr) + '</div>';
   }
@@ -319,8 +386,9 @@ function isClusterGroup(g, items) {
 
 function drawKinds() {
   if (kindsError) return '<div class="empty">' + esc(kindsError) + "</div>";
-  if (!kindsLoaded) return '<div class="empty">Loading kinds…</div>';
+  if (!kindsLoaded || !providersLoaded) return '<div class="empty">Loading kinds…</div>';
   const q = (searchEl && searchEl.value || "").trim();
+  const loading = (providers || []).filter(function (p) { return p.status === "loading"; });
   if (!kinds.length) {
     return drawKindsEmpty(q);
   }
@@ -352,6 +420,13 @@ function drawKinds() {
   });
 
   let h = "";
+  if (loading.length > 0) {
+    const names = loading.map(function (p) { return (p.ref || "").split("/").pop() || p.ref; }).join(", ");
+    h += '<div class="warnbar provider-download-banner" role="status" style="margin:0 0 6px;padding:6px 10px;font-size:11px;background:var(--wire-status-soft);color:var(--wire-status);border-radius:4px;display:flex;align-items:center;gap:6px">' +
+      '<span class="spinner"></span>' +
+      '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(names) + '">Downloading ' + esc(names) + '\u2026</span>' +
+      '</div>';
+  }
   order.forEach(function (g) {
     const items = byGroup[g];
     items.sort(function (a, b) { return (a.kind || "").localeCompare(b.kind || ""); });
@@ -614,7 +689,7 @@ function drawSources() {
 
   // Providers tab
   let sources = providers !== null
-    ? providers.map(function (p) { return { provider: p.ref, digest: p.digest, kinds: p.kinds, error: p.error || "" }; })
+    ? providers.map(function (p) { return { provider: p.ref, digest: p.digest, kinds: p.kinds, error: p.error || "", status: p.status || "" }; })
     : (doc.spec && doc.spec.sources || []).slice();
   const nativeCount = kinds.filter(function (k) { return k.provider === "k8s"; }).length;
   if (nativeCount) sources = sources.concat([{ provider: "k8s", digest: "", kinds: nativeCount, native: true }]);
@@ -637,6 +712,18 @@ function drawSources() {
         '<span class="pill" style="background:transparent;color:var(--err);border:1px solid var(--err);flex:0 0 auto;margin-top:3px">failed</span>' +
         '<button class="btn sm" data-replace-ref="' + esc(ref) + '" style="flex:0 0 auto" title="Replace this source with another ref (e.g. a version that exists)">Replace</button>' +
         '<button class="del src-row-remove" data-remove-ref="' + esc(ref) + '" title="Remove this source from the blueprint">&#215;</button>' +
+        '</div>';
+      return;
+    }
+    if (s.status === "loading") {
+      const fam = famOf(ref);
+      h += '<div class="src-row" data-ref="' + esc(ref) + '" data-state="loading" style="cursor:default;align-items:flex-start;flex-wrap:wrap" ' +
+        'title="Downloading provider package in background">' +
+        '<span class="sw" style="width:5px;height:22px;border-radius:1.5px;background:' + COLORS[fam] + '"></span>' +
+        '<span style="min-width:0;flex:1"><span class="nm" style="display:block">' + esc(ref.split("/").pop()) + "</span>" +
+        '<span class="dg" style="display:block;word-break:break-all">' + esc(ref) + '</span>' +
+        '<span class="dg" style="display:block;color:var(--muted);margin-top:2px"><span class="spinner" style="margin-right:4px"></span>Downloading schemas\u2026</span></span>' +
+        '<span class="pill" style="font-size:9.5px;background:var(--wire-status-soft);color:var(--wire-status);display:inline-flex;align-items:center;gap:4px;flex:0 0 auto;margin-top:3px"><span class="spinner"></span>downloading</span>' +
         '</div>';
       return;
     }
@@ -1492,6 +1579,7 @@ function bindPaletteStoreSubscriptions() {
     if (sig !== lastSourcesSig) {
       lastSourcesSig = sig;
       providers = null;
+      providersLoaded = false;
       expandedProvider = null;
       providerKinds = null;
       replaceRef = null;       // the source being replaced may be gone
@@ -1529,4 +1617,5 @@ export function init(rootEl, deps) {
   /* ---- boot ---- */
   drawRail();   // paints "Loading kinds…" immediately
   loadKinds();
+  loadProviders();
 }
