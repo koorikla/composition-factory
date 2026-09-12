@@ -8562,3 +8562,262 @@ spec:
 		}
 	}
 }
+
+func TestAdoptGoTemplate_HasKeyParamWhenGuard(t *testing.T) {
+	manifest := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-comp
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec }}
+            {{- if and (hasKey $spec "tier") (eq $spec.tier "prod") }}
+            ---
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: prod-bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            {{- end }}
+`
+
+	bp, _, err := Adopt([]byte(manifest), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+	}
+	r := bp.Spec.Resources[0]
+	wantWhen := `params.tier == "prod"`
+	if r.When != wantWhen {
+		t.Errorf("r.When = %q, want %q", r.When, wantWhen)
+	}
+}
+
+func TestAdoptGoTemplate_HasKeyParamWhenGuard_Variants(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition string
+		wantWhen  string
+		wantParam string
+		wantType  string
+	}{
+		{
+			name:      "and hasKey eq dot spec",
+			condition: `and (hasKey $spec "tier") (eq $spec.tier "prod")`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "and hasKey eq index spec",
+			condition: `and (hasKey $spec "tier") (eq (index $spec "tier") "prod")`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "and hasKey eq rev dot spec",
+			condition: `and (hasKey $spec "tier") (eq "prod" $spec.tier)`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "and hasKey eq rev index spec",
+			condition: `and (hasKey $spec "tier") (eq "prod" (index $spec "tier"))`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "or not hasKey ne dot spec",
+			condition: `or (not (hasKey $spec "tier")) (ne $spec.tier "prod")`,
+			wantWhen:  `params.tier != "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "or not hasKey ne index spec",
+			condition: `or (not (hasKey $spec "tier")) (ne (index $spec "tier") "prod")`,
+			wantWhen:  `params.tier != "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "or not hasKey ne rev dot spec",
+			condition: `or (not (hasKey $spec "tier")) (ne "prod" $spec.tier)`,
+			wantWhen:  `params.tier != "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "or not hasKey ne rev index spec",
+			condition: `or (not (hasKey $spec "tier")) (ne "prod" (index $spec "tier"))`,
+			wantWhen:  `params.tier != "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "and hasKey ne dot spec",
+			condition: `and (hasKey $spec "tier") (ne $spec.tier "prod")`,
+			wantWhen:  `params.tier != "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "and hasKey simple truthiness",
+			condition: `and (hasKey $spec "enabled") $spec.enabled`,
+			wantWhen:  `params.enabled`,
+			wantParam: "enabled",
+			wantType:  "boolean",
+		},
+		{
+			name:      "and hasKey simple index truthiness",
+			condition: `and (hasKey $spec "enabled") (index $spec "enabled")`,
+			wantWhen:  `params.enabled`,
+			wantParam: "enabled",
+			wantType:  "boolean",
+		},
+		{
+			name:      "and hasKey dot spec prefix",
+			condition: `and (hasKey .spec "tier") (eq .spec.tier "prod")`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "and hasKey dollar dot spec prefix",
+			condition: `and (hasKey $.spec "tier") (eq $.spec.tier "prod")`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "and hasKey full composite path prefix",
+			condition: `and (hasKey .observed.composite.resource.spec "tier") (eq .observed.composite.resource.spec.tier "prod")`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "outer parentheses",
+			condition: `(and (hasKey $spec "tier") (eq $spec.tier "prod"))`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "single quotes in hasKey and value",
+			condition: `and (hasKey $spec 'tier') (eq $spec.tier 'prod')`,
+			wantWhen:  `params.tier == "prod"`,
+			wantParam: "tier",
+			wantType:  "string",
+		},
+		{
+			name:      "and hasKey bool eq true",
+			condition: `and (hasKey $spec "enabled") (eq $spec.enabled true)`,
+			wantWhen:  `params.enabled`,
+			wantParam: "enabled",
+			wantType:  "boolean",
+		},
+		{
+			name:      "and hasKey bool eq true rev",
+			condition: `and (hasKey $spec "enabled") (eq true $spec.enabled)`,
+			wantWhen:  `params.enabled`,
+			wantParam: "enabled",
+			wantType:  "boolean",
+		},
+		{
+			name:      "or not hasKey bool ne false",
+			condition: `or (not (hasKey $spec "enabled")) (ne $spec.enabled false)`,
+			wantWhen:  `params.enabled`,
+			wantParam: "enabled",
+			wantType:  "boolean",
+		},
+		{
+			name:      "or not hasKey bool ne false rev",
+			condition: `or (not (hasKey $spec "enabled")) (ne false $spec.enabled)`,
+			wantWhen:  `params.enabled`,
+			wantParam: "enabled",
+			wantType:  "boolean",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := fmt.Sprintf(`apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-haskey-when
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $spec := .observed.composite.resource.spec }}
+            {{- if %s }}
+            ---
+            apiVersion: s3.aws.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                crossplane.io/composition-resource-name: prod-bucket
+            spec:
+              forProvider:
+                region: us-east-1
+            {{- end }}
+`, tc.condition)
+
+			bp, _, err := Adopt([]byte(manifest), Options{})
+			if err != nil {
+				t.Fatalf("Adopt failed: %v", err)
+			}
+			if len(bp.Spec.Resources) != 1 {
+				t.Fatalf("expected 1 resource, got %d", len(bp.Spec.Resources))
+			}
+			r := bp.Spec.Resources[0]
+			if r.When != tc.wantWhen {
+				t.Errorf("r.When = %q, want %q", r.When, tc.wantWhen)
+			}
+			p, ok := bp.Spec.XRD.Parameters[tc.wantParam]
+			if !ok {
+				t.Fatalf("parameter %q not declared in XRD parameters: %+v", tc.wantParam, bp.Spec.XRD.Parameters)
+			}
+			if p.Type != tc.wantType {
+				t.Errorf("parameter %q type = %q, want %q", tc.wantParam, p.Type, tc.wantType)
+			}
+			if !p.Required {
+				t.Errorf("parameter %q Required = false, want true", tc.wantParam)
+			}
+		})
+	}
+}

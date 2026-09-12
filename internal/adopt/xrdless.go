@@ -211,6 +211,25 @@ func applyXRDlessEvidence(bp *blueprint.Blueprint, compDocs []map[string]any, sy
 		e.schemaType = st
 	}
 
+	for _, r := range bp.Spec.Resources {
+		if r.When != "" {
+			source, param, op, _, err := blueprint.ParseWhen(r.When)
+			if err == nil && (source == "params" || source == "") {
+				e := ev[param]
+				if e == nil {
+					e = &paramEvidence{}
+					ev[param] = e
+				}
+				e.required = true
+				if op == "" {
+					e.boolean = true
+				} else {
+					e.quoted++
+				}
+			}
+		}
+	}
+
 	names := make([]string, 0, len(bp.Spec.XRD.Parameters))
 	for n := range bp.Spec.XRD.Parameters {
 		names = append(names, n)
