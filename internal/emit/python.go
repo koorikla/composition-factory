@@ -483,16 +483,16 @@ func translateWhenToPython(when string, env ...map[string]blueprint.EnvironmentK
 func translateForEachToPython(forEach string, env ...map[string]blueprint.EnvironmentKey) string {
 	if strings.HasPrefix(forEach, "params.") {
 		param := strings.TrimPrefix(forEach, "params.")
-		return fmt.Sprintf("range(int(spec.get(%q, 0)))", param)
+		return fmt.Sprintf("range(int(spec.get(%q, 0) or 0))", param)
 	}
 	if key, ok := blueprint.EnvRef(forEach); ok {
 		if len(env) > 0 && env[0] != nil {
 			if d, ok := env[0][key]; ok && d.Default != "" {
 				defVal := pythonFormatLiteral(d.Default, d.Type)
-				return fmt.Sprintf("range(int(env.get(%q, %s)))", key, defVal)
+				return fmt.Sprintf("range(int(env.get(%q, %s) or 0))", key, defVal)
 			}
 		}
-		return fmt.Sprintf("range(int(env.get(%q, 0)))", key)
+		return fmt.Sprintf("range(int(env.get(%q, 0) or 0))", key)
 	}
 	if strings.HasPrefix(forEach, "resources.") {
 		res, path, _ := blueprint.StatusRef(forEach)

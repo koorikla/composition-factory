@@ -1004,8 +1004,8 @@ func TestPythonEnvironmentDefaults(t *testing.T) {
 	if !strings.Contains(body, `"name": env.get("region", "us-east-1")`) {
 		t.Errorf("expected envelope providerConfigRef name with default in python body, got:\n%s", body)
 	}
-	if !strings.Contains(body, `range(int(env.get("count", 3)))`) {
-		t.Errorf("expected range(int(env.get(\"count\", 3))) in python body, got:\n%s", body)
+	if !strings.Contains(body, `range(int(env.get("count", 3) or 0))`) {
+		t.Errorf("expected range(int(env.get(\"count\", 3) or 0)) in python body, got:\n%s", body)
 	}
 	if !strings.Contains(body, `bool(env.get("enabled", True))`) {
 		t.Errorf("expected bool(env.get(\"enabled\", True)) in python body, got:\n%s", body)
@@ -1379,6 +1379,205 @@ if "queueUrl" in qp4:
 if "policy" in qp4:
     print(f"FAIL: policy present when omitted: {qp4}")
     sys.exit(4)
+
+print("OK")
+`
+	cmd := exec.Command(pyBin, "-c", pyRunner)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("python execution failed: %v\nOutput:\n%s", err, out)
+	}
+}
+
+func TestCF420_TranslateForEachToPython_SafeIntFallback(t *testing.T) {
+	// params.
+	gotParam := translateForEachToPython("params.replicas")
+	wantParam := `range(int(spec.get("replicas", 0) or 0))`
+	if gotParam != wantParam {
+		t.Errorf("translateForEachToPython(params.replicas) = %q, want %q", gotParam, wantParam)
+	}
+
+	// env. without default
+	gotEnvNoDef := translateForEachToPython("env.count")
+	wantEnvNoDef := `range(int(env.get("count", 0) or 0))`
+	if gotEnvNoDef != wantEnvNoDef {
+		t.Errorf("translateForEachToPython(env.count no default) = %q, want %q", gotEnvNoDef, wantEnvNoDef)
+	}
+
+	// env. with default
+	envWithDef := map[string]blueprint.EnvironmentKey{
+		"count": {Type: "integer", Default: "3"},
+	}
+	gotEnvDef := translateForEachToPython("env.count", envWithDef)
+	wantEnvDef := `range(int(env.get("count", 3) or 0))`
+	if gotEnvDef != wantEnvDef {
+		t.Errorf("translateForEachToPython(env.count with default) = %q, want %q", gotEnvDef, wantEnvDef)
+	}
+}
+
+func TestCF420_PythonForEachNullSafetyRuntime(t *testing.T) {
+	bpYAML := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xloop-null-test
+spec:
+  emit:
+    engine: python
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+  xrd:
+    group: aws.example.org
+    version: v1alpha1
+    kind: XLoop
+    plural: xloops
+    scope: Namespaced
+    parameters:
+      providerName:
+        type: string
+        required: true
+      replicas:
+        type: integer
+        default: "3"
+  environment:
+    extraCount:
+      type: integer
+      default: "2"
+  resources:
+    - name: main-queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      fields:
+        region:
+          value: "eu-north-1"
+    - name: replica-param
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      forEach: params.replicas
+      fields:
+        region:
+          value: "eu-north-1"
+    - name: replica-env
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      forEach: env.extraCount
+      fields:
+        region:
+          value: "eu-north-1"
+    - name: replica-status
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v1.14.0
+      kind: Queue
+      forEach: resources.main-queue.status.atProvider.maxMessageSize
+      fields:
+        region:
+          value: "eu-north-1"
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bp.yaml")
+	if err := os.WriteFile(p, []byte(bpYAML), 0600); err != nil {
+		t.Fatal(err)
+	}
+	b, err := blueprint.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	crds := wireCRDs(t)
+	body, err := pythonTemplateBody(b, crds)
+	if err != nil {
+		t.Fatalf("pythonTemplateBody: %v", err)
+	}
+
+	if !strings.Contains(body, `range(int(spec.get("replicas", 0) or 0))`) {
+		t.Errorf("expected safe param loop expression in python body:\n%s", body)
+	}
+	if !strings.Contains(body, `range(int(env.get("extraCount", 2) or 0))`) {
+		t.Errorf("expected safe env loop expression in python body:\n%s", body)
+	}
+	if !strings.Contains(body, `range(int(_get(ocds, "main-queue", "resource", "status", "atProvider", "maxMessageSize", default=0)))`) {
+		t.Errorf("expected safe status loop expression in python body:\n%s", body)
+	}
+
+	pyBin, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available in PATH")
+	}
+
+	pyRunner := `
+import sys, types
+
+m = types.ModuleType("google.protobuf.json_format")
+m.MessageToDict = lambda x: x
+sys.modules["google.protobuf.json_format"] = m
+m2 = types.ModuleType("crossplane.function.proto.v1")
+m2.run_function_pb2 = types.ModuleType("run_function_pb2")
+m2.run_function_pb2.RunFunctionRequest = object
+m2.run_function_pb2.RunFunctionResponse = object
+sys.modules["crossplane.function.proto.v1"] = m2
+sys.modules["crossplane.function.proto.v1.run_function_pb2"] = m2.run_function_pb2
+
+` + body + `
+
+class MockDict(dict):
+    def __missing__(self, key):
+        self[key] = types.SimpleNamespace(resource={})
+        return self[key]
+
+class MockRsp:
+    def __init__(self):
+        self.desired = types.SimpleNamespace(
+            resources=MockDict()
+        )
+
+# Test case 1: explicitly null integer fields (repro for CF-420)
+req1 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={"spec": {"replicas": None}}),
+        resources={
+            "main-queue": types.SimpleNamespace(resource={
+                "status": {"atProvider": {"maxMessageSize": None}}
+            }),
+        },
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={"apiextensions.crossplane.io/environment": {"extraCount": None}},
+)
+rsp1 = MockRsp()
+# Must not raise TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
+compose(req1, rsp1)
+
+# All null-bounded loops must execute 0 iterations
+for name in rsp1.desired.resources.keys():
+    if name.startswith("replica-param-") or name.startswith("replica-env-") or name.startswith("replica-status-"):
+        print(f"FAIL: unexpected resource emitted for null loop bound: {name}")
+        sys.exit(1)
+
+# Test case 2: populated positive counts
+req2 = types.SimpleNamespace(
+    observed=types.SimpleNamespace(
+        composite=types.SimpleNamespace(resource={"spec": {"replicas": 2}}),
+        resources={
+            "main-queue": types.SimpleNamespace(resource={
+                "status": {"atProvider": {"maxMessageSize": 1}}
+            }),
+        },
+    ),
+    desired=types.SimpleNamespace(composite=types.SimpleNamespace(resource={}), resources={}),
+    context={"apiextensions.crossplane.io/environment": {"extraCount": 3}},
+)
+rsp2 = MockRsp()
+compose(req2, rsp2)
+
+keys2 = set(rsp2.desired.resources.keys())
+expected = {
+    "main-queue",
+    "replica-param-0", "replica-param-1",
+    "replica-env-0", "replica-env-1", "replica-env-2",
+    "replica-status-0",
+}
+if not expected.issubset(keys2):
+    print(f"FAIL: missing expected resources in populated case: expected {expected}, got {keys2}")
+    sys.exit(2)
 
 print("OK")
 `
