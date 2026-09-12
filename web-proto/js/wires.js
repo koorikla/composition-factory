@@ -154,6 +154,31 @@ export function listWires(doc) {
         }
       }
     }
+    if (r.when) {
+      const whenStr = typeof r.when === "string" ? r.when : null;
+      if (whenStr) {
+        const parsed = parseWhen(whenStr.trim());
+        if (parsed && parsed.param) {
+          if (parsed.source === "params") {
+            out.push({
+              kind: "param",
+              param: parsed.param,
+              resource: r.name,
+              path: "when",
+              from: whenStr
+            });
+          } else if (parsed.source === "env") {
+            out.push({
+              kind: "env",
+              envKey: parsed.param,
+              resource: r.name,
+              path: "when",
+              from: whenStr
+            });
+          }
+        }
+      }
+    }
   });
   docWiresCache.set(doc, out);
   return out;
@@ -440,16 +465,20 @@ export function fanOutMap(doc) {
     checkRawDict(r.annotations);
     checkConnectionSecret(r.connectionSecret);
     if (r.when) {
-      const wp = extractWhenParam(r.when);
-      if (wp) {
-        addParam(wp);
-      } else {
-        const rawParams = extractRawParams(r.when, declaredParams);
-        for (let k = 0; k < rawParams.length; k++) {
-          addParam(rawParams[k]);
+      const whenStr = typeof r.when === "string" ? r.when : null;
+      const parsed = whenStr ? parseWhen(whenStr.trim()) : null;
+      if (!parsed || !parsed.param || (parsed.source !== "params" && parsed.source !== "env")) {
+        const wp = extractWhenParam(r.when);
+        if (wp) {
+          addParam(wp);
+        } else {
+          const rawParams = extractRawParams(r.when, declaredParams);
+          for (let k = 0; k < rawParams.length; k++) {
+            addParam(rawParams[k]);
+          }
         }
+        addEnv(extractWhenEnv(r.when));
       }
-      addEnv(extractWhenEnv(r.when));
     }
     if (r.forEach) {
       const forEachStr = typeof r.forEach === "string" ? r.forEach

@@ -80,6 +80,10 @@ export function applyWire(srcOwner, srcPath, targetRes, targetPath) {
     } else if (targetPath.indexOf("annotations.") === 0) {
       r.annotations = r.annotations || {};
       r.annotations[targetPath.slice("annotations.".length)] = { from: fromExpr };
+    } else if (targetPath === "forEach") {
+      r.forEach = fromExpr;
+    } else if (targetPath === "when") {
+      r.when = fromExpr;
     } else {
       r.fields = r.fields || {};
       r.fields[targetPath] = { from: fromExpr };
@@ -540,9 +544,15 @@ export function onWireDragDown(e, portEl) {
     if (dir === "out") {
       if (tOwner === xrId || tOwner === envId || tOwner === "environment") return false;
       if (tPath.startsWith("status.") || tPath.indexOf("status.") === 0) return false;
+      if (tPath === "when") {
+        return owner === xrId || owner === envId || owner === "environment";
+      }
       return true;
     }
     if (dir === "in") {
+      if (path === "when") {
+        return tOwner === xrId || tOwner === envId || tOwner === "environment";
+      }
       return tOwner === xrId || tOwner === envId || tOwner === "environment" || tPath.startsWith("status.") || tPath.indexOf("status.") === 0;
     }
     return false;

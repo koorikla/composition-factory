@@ -215,3 +215,147 @@ test.describe('CF-395 — Canvas drops wires for forEach loop bounds referencing
     await expect(wirePath).toBeVisible();
   });
 });
+
+test.describe('CF-397 — Canvas drops wires for when conditional guards referencing XRD parameters or environment keys', () => {
+  guardPageErrors();
+
+  test.beforeEach(async ({ request }) => {
+    await resetDoc(request);
+  });
+
+  test('listWires emits wire descriptors for when referencing params and env', async () => {
+    const { listWires } = await import('../web-proto/js/wires.js');
+    const doc = {
+      spec: {
+        xrd: {
+          parameters: {
+            enableVpc: { type: 'boolean', default: true }
+          }
+        },
+        environment: {
+          featureFlag: { type: 'boolean', default: true }
+        },
+        resources: [
+          { name: 'res-param', type: 'Queue', when: 'params.enableVpc' },
+          { name: 'res-env', type: 'Queue', when: 'env.featureFlag' }
+        ]
+      }
+    };
+
+    const wires = listWires(doc);
+
+    const paramWire = wires.find(w => w.resource === 'res-param' && w.path === 'when');
+    expect(paramWire).toBeDefined();
+    expect(paramWire.kind).toBe('param');
+    expect(paramWire.param).toBe('enableVpc');
+    expect(paramWire.from).toBe('params.enableVpc');
+
+    const envWire = wires.find(w => w.resource === 'res-env' && w.path === 'when');
+    expect(envWire).toBeDefined();
+    expect(envWire.kind).toBe('env');
+    expect(envWire.envKey).toBe('featureFlag');
+    expect(envWire.from).toBe('env.featureFlag');
+  });
+
+  test('XRD parameter when condition renders input port and connects wire, synchronized with inspector', async ({ page, request }) => {
+    const pristine = require('./fixtures/pristine-doc.json');
+    const doc = JSON.parse(JSON.stringify(pristine));
+    doc.spec.xrd.parameters.enableVpc = {
+      type: 'boolean',
+      default: true
+    };
+    doc.spec.resources[0].when = 'params.enableVpc';
+
+    const putRes = await request.put(`${ENGINE}/api/blueprint`, { data: doc });
+    expect(putRes.ok()).toBeTruthy();
+
+    await page.goto('/');
+    await canvasSettled(page);
+
+    // 1. Resource node card renders an input port for when
+    const wqCard = page.locator('.node[data-id="work-queue"]');
+    await expect(wqCard).toBeVisible();
+    const port = wqCard.locator('.port[data-owner="work-queue"][data-path="when"]');
+    await expect(port).toBeVisible();
+    await expect(port.locator('.d.in')).toBeVisible();
+
+    // 2. SVG canvas renders visible wire connecting XRD parameter to when port
+    const wirePath = page.locator('svg.wires path.wire-path[title*="when"]');
+    await expect(wirePath).toHaveCount(1);
+    await expect(wirePath).toBeVisible();
+    await expect(page.locator('svg.wires path.wire-path.wire-xrd[title*="when"]')).toHaveCount(1);
+
+    // 3. Open resource inspector and verify when selector is synchronized
+    await wqCard.locator('.node-h').click();
+    const whenSel = page.locator('[data-when-param="work-queue"]');
+    await expect(whenSel).toBeVisible();
+    await expect(whenSel).toHaveValue('params.enableVpc');
+
+    // 4. Click the wire to select it
+    const idx = await page.locator('svg.wires path.wire-path[title*="when"]').getAttribute('data-wire-idx');
+    await clickWire(page, Number(idx));
+    await expect(page.locator('svg.wires path.wire-path.wire-selected[title*="when"]')).toBeVisible();
+
+    // 5. Delete the wire via Backspace
+    await page.keyboard.press('Backspace');
+
+    // 6. deleteWire removes when from blueprint and canvas
+    await expect.poll(async () => {
+      const res = await request.get(`${ENGINE}/api/blueprint`);
+      const updated = await res.json();
+      const r = updated.spec.resources.find(res => res.name === 'work-queue');
+      return r ? r.when : undefined;
+    }).toBeUndefined();
+
+    await expect(page.locator('svg.wires path.wire-path[title*="when"]')).toHaveCount(0);
+    await expect(wqCard.locator('.port[data-path="when"]')).toHaveCount(0);
+
+    // 7. Inspector synchronizes back to empty ("— always —")
+    await wqCard.locator('.node-h').click();
+    await expect(whenSel).toBeVisible();
+    await expect(whenSel).toHaveValue('');
+  });
+
+  test('Environment key when condition renders input port and connects shared wire', async ({ page, request }) => {
+    const pristine = require('./fixtures/pristine-doc.json');
+    const doc = JSON.parse(JSON.stringify(pristine));
+    doc.spec.environment = {
+      featureFlag: { type: 'boolean', default: true }
+    };
+    doc.spec.resources[1].when = 'env.featureFlag';
+
+    const putRes = await request.put(`${ENGINE}/api/blueprint`, { data: doc });
+    expect(putRes.ok()).toBeTruthy();
+
+    await page.goto('/');
+    await canvasSettled(page);
+
+    // 1. Resource node card renders an input port for when
+    const dlCard = page.locator('.node[data-id="dead-letter"]');
+    await expect(dlCard).toBeVisible();
+    const port = dlCard.locator('.port[data-owner="dead-letter"][data-path="when"]');
+    await expect(port).toBeVisible();
+    await expect(port.locator('.d.in')).toBeVisible();
+
+    // 2. SVG canvas renders shared wire connecting EnvironmentConfig to dead-letter when port
+    const wirePath = page.locator('svg.wires path.wire-path.wire-shared[title*="when"]');
+    await expect(wirePath).toHaveCount(1);
+    await expect(wirePath).toBeVisible();
+
+    // 3. Click and delete wire using Delete key
+    const idx = await page.locator('svg.wires path.wire-path[title*="when"]').getAttribute('data-wire-idx');
+    await clickWire(page, Number(idx));
+    await expect(page.locator('svg.wires path.wire-path.wire-selected[title*="when"]')).toBeVisible();
+    await page.keyboard.press('Delete');
+
+    // 4. deleteWire removes when from dead-letter
+    await expect.poll(async () => {
+      const res = await request.get(`${ENGINE}/api/blueprint`);
+      const updated = await res.json();
+      const r = updated.spec.resources.find(res => res.name === 'dead-letter');
+      return r ? r.when : undefined;
+    }).toBeUndefined();
+
+    await expect(page.locator('svg.wires path.wire-path[title*="when"]')).toHaveCount(0);
+  });
+});

@@ -17,7 +17,7 @@ import { store as defaultStore } from "../store.js";
 import * as defaultApi from "../api.js";
 import { esc } from "../dom.js";
 import { startDrag } from "../drag.js";
-import { listWires, fanOut, envFanOut, parseFrom } from "../wires.js";
+import { listWires, fanOut, envFanOut, parseFrom, parseWhen } from "../wires.js";
 import { famOf, uniqueResourceName, COLORS, getEnvConfigName } from "../utils.js";
 import { switchTab } from "./palette.js";
 import {
@@ -455,7 +455,22 @@ function resourceCardHTML(d, r, sel) {
     }
     if (r.when) {
       const w = typeof r.when === "string" ? r.when : JSON.stringify(r.when);
-      h += '<span class="pill cond">when</span><span>' + esc(w) + '</span>';
+      const parsed = typeof w === "string" ? parseWhen(w.trim()) : null;
+      let dot = "var(--rule-2)";
+      let title = r.name + ".when \u2190 " + w;
+      if (parsed && parsed.param) {
+        if (parsed.source === "env") {
+          dot = "var(--shared)";
+          title = "env." + parsed.param + " \u2192 " + r.name + ".when";
+        } else if (parsed.source === "params") {
+          dot = fanOut(d, parsed.param) > 1 ? "var(--shared)" : COLORS.xrd;
+          title = "$" + parsed.param + " \u2192 " + r.name + ".when";
+        }
+      }
+      h += '<div class="port" data-owner="' + esc(r.name) + '" data-path="when" title="' + esc(title) + '" style="position:relative;margin:0 -9px;padding:2.5px 9px;width:calc(100% + 18px)">' +
+        '<span class="d in" style="background:' + dot + '"></span>' +
+        '<span class="pill cond">when</span><span class="nm">' + esc(w) + '</span>' +
+        '</div>';
     }
     h += '</div>';
   }
@@ -740,6 +755,8 @@ function deleteWire(w) {
       }
     } else if (w.path === "forEach" || w.targetPath === "forEach") {
       delete res.forEach;
+    } else if (w.path === "when" || w.targetPath === "when") {
+      delete res.when;
     } else {
       if (res.fields && res.fields[w.path]) {
         delete res.fields[w.path];
