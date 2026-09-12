@@ -4,6 +4,7 @@
  */
 
 import { fanOut } from "../../wires.js";
+import { setAppLabel } from "../../profiles.js";
 import { state } from "./state.js";
 import { insertSnippetIntoTextarea, triggerExpressionPreview } from "./preview.js";
 import {
@@ -454,12 +455,7 @@ export var boxClickActions = [
           var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname; });
           if (!r) return;
           r.fields = r.fields || {};
-          delete r.fields["spec.selector.matchLabels"];
-          delete r.fields["spec.template.metadata.labels"];
-          delete r.fields["spec.selector.matchLabels.app"];
-          delete r.fields["spec.template.metadata.labels.app"];
-          r.fields["spec.selector.matchLabels[app]"] = { value: val };
-          r.fields["spec.template.metadata.labels[app]"] = { value: val };
+          setAppLabel(r.fields, val);
           if (!r.fields["spec.template.spec.containers[0].name"]) {
             r.fields["spec.template.spec.containers[0].name"] = { value: rname };
           }
@@ -481,7 +477,6 @@ export var boxClickActions = [
           delete r.fields["spec.selector"];
           delete r.fields["spec.selector.app"];
           r.fields["spec.selector[app]"] = { value: matchApp };
-          r.fields["spec.ports[0].port"] = { raw: "8080" };
         });
       });
     }
@@ -795,12 +790,7 @@ export function onBoxChange(e) {
           var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === wlAppRname; });
           if (!r) return;
           r.fields = r.fields || {};
-          delete r.fields["spec.selector.matchLabels"];
-          delete r.fields["spec.template.metadata.labels"];
-          delete r.fields["spec.selector.matchLabels.app"];
-          delete r.fields["spec.template.metadata.labels.app"];
-          r.fields["spec.selector.matchLabels[app]"] = { value: wlAppVal };
-          r.fields["spec.template.metadata.labels[app]"] = { value: wlAppVal };
+          setAppLabel(r.fields, wlAppVal);
         });
       });
     }

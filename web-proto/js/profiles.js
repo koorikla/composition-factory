@@ -78,7 +78,9 @@ function starterFor(kind, name) {
 
 /**
  * Essentials rows. kind: "app-label" (writes selector + template labels),
- * "field" (one path), "env" (repeater over <prefix>[i].name/.value).
+ * "service-selector" (a Service's spec.selector[app], with quick-match
+ * against the workloads on the canvas), "field" (one path), "env"
+ * (repeater over <prefix>[i].name/.value).
  * `param` is the XRD parameter name "expose" creates.
  */
 function essentialsFor(kind) {
@@ -114,9 +116,27 @@ function essentialsFor(kind) {
   return null;
 }
 
-/** @returns {{starter:(name:string)=>Object, essentials:Array}|null} */
+/**
+ * Set the app label a workload selects on: both the selector and the pod
+ * template get `[app]` entries, and the legacy spellings of the same label
+ * (whole map as raw, or dotted `.app`) are removed so emit sees one form.
+ */
+export function setAppLabel(fields, value) {
+  delete fields["spec.selector.matchLabels"];
+  delete fields["spec.template.metadata.labels"];
+  delete fields["spec.selector.matchLabels.app"];
+  delete fields["spec.template.metadata.labels.app"];
+  fields["spec.selector.matchLabels[app]"] = { value: value };
+  fields["spec.template.metadata.labels[app]"] = { value: value };
+}
+
+/**
+ * Only the index's native kinds ("k8s") get a Kubernetes starter: a provider
+ * CRD that happens to be called Service or Job must keep its schema scaffold.
+ * @returns {{starter:(name:string)=>Object, essentials:Array}|null}
+ */
 export function profileFor(kind, provider) {
-  if (provider && provider !== "k8s") return null;
+  if (provider !== "k8s") return null;
   const ess = essentialsFor(kind);
   const hasStarter = starterFor(kind, "x") !== null;
   if (!ess && !hasStarter) return null;

@@ -19,7 +19,7 @@ import { esc } from "../dom.js";
 import { startDrag } from "../drag.js";
 import { listWires, fanOut, envFanOut, parseFrom, parseWhen } from "../wires.js";
 import { famOf, uniqueResourceName, COLORS, getEnvConfigName } from "../utils.js";
-import { profileFor, STARTER_IMAGE } from "../profiles.js";
+import { profileFor, containerPrefix, STARTER_IMAGE } from "../profiles.js";
 import { switchTab } from "./palette.js";
 import {
   XR_ID,
@@ -1625,18 +1625,19 @@ function onDragLeave(e) {
   if (e.target === cwEl) cwEl.style.outline = "";
 }
 
-export function scaffoldResourceFields(res, flds, _doc, _isExplicit) {
+export function scaffoldResourceFields(res, flds, _doc) {
   const fields = {};
   const kind = res && res.kind || "";
   const name = res && res.name || "";
 
   // 1. Native kinds: the profile's starter. Drop and the Scaffold button
-  // write the same thing; isExplicit no longer gates the container block.
+  // write the same thing.
   const profile = profileFor(kind, res && res.provider);
   if (profile) Object.assign(fields, profile.starter(name));
 
   // 2. Required branches from schema
   const branches = (flds && flds.requiredBranches) || [];
+  const c = containerPrefix(kind);
   branches.forEach(function (b) {
     if (b.path === "spec.selector") {
       if (!fields["spec.selector.matchLabels[app]"] && !fields["spec.selector[app]"]) {
@@ -1646,12 +1647,8 @@ export function scaffoldResourceFields(res, flds, _doc, _isExplicit) {
       if (!fields["spec.template.metadata.labels[app]"]) {
         fields["spec.template.metadata.labels[app]"] = { value: name };
       }
-      if (!fields["spec.template.spec.containers[0].name"]) {
-        fields["spec.template.spec.containers[0].name"] = { value: name };
-      }
-      if (!fields["spec.template.spec.containers[0].image"]) {
-        fields["spec.template.spec.containers[0].image"] = { value: STARTER_IMAGE };
-      }
+      if (!fields[c + ".name"]) fields[c + ".name"] = { value: name };
+      if (!fields[c + ".image"]) fields[c + ".image"] = { value: STARTER_IMAGE };
     }
   });
 

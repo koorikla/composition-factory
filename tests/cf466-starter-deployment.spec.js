@@ -80,12 +80,74 @@ test.describe('CF-466 — starters are valid good-practice minimums in map-entry
     await page.click('.node[data-id="deployment"] .node-h');
     const card = page.locator('.workload-card');
     await expect(card).toBeVisible();
-    await card.locator('input[data-wl-app]').fill('web:prod,v1');
+    await card.locator('input[data-wl-app]').fill('web-prod_v1');
     await card.locator('button[data-wl-sync-app]').click();
     await expect(card.locator('.chip-ok')).toContainText('Selectors Aligned');
     await expect.poll(async () => {
       const r = await resourceNamed(request, 'deployment');
       return r && r.fields['spec.selector.matchLabels[app]'] && r.fields['spec.selector.matchLabels[app]'].value;
-    }).toBe('web:prod,v1');
+    }).toBe('web-prod_v1');
+  });
+
+  test('Scaffold on a legacy blueprint supersedes raw whole-map labels so Generate accepts the doc', async ({ page, request }) => {
+    // A blueprint written by the pre-fix drop: labels as raw JSON, no container.
+    const doc = await (await request.get(ENGINE + '/api/blueprint')).json();
+    doc.spec.resources.push({
+      name: 'legacy-deploy',
+      kind: 'Deployment',
+      provider: 'k8s',
+      fields: {
+        'spec.selector.matchLabels': { raw: '{"app":"legacy-deploy"}' },
+        'spec.template.metadata.labels': { raw: '{"app":"legacy-deploy"}' },
+      },
+    });
+    expect((await request.put(ENGINE + '/api/blueprint', { data: doc })).status()).toBe(200);
+
+    await page.goto('/');
+    await page.click('.node[data-id="legacy-deploy"] .node-h');
+    const btn = page.locator('#insp [data-scaffold-required="legacy-deploy"]');
+    await expect(btn).toBeVisible();
+    await btn.click();
+
+    await expect.poll(async () => {
+      const r = await resourceNamed(request, 'legacy-deploy');
+      if (!r || !r.fields) return null;
+      const f = r.fields;
+      return {
+        image: f['spec.template.spec.containers[0].image'] && f['spec.template.spec.containers[0].image'].value,
+        bracketBesideRaw: !!f['spec.selector.matchLabels[app]'] || !!f['spec.template.metadata.labels[app]'],
+        rawKept: !!f['spec.selector.matchLabels'] && !!f['spec.template.metadata.labels'],
+      };
+    }).toEqual({ image: 'nginx:1.27', bracketBesideRaw: false, rawKept: true });
+
+    const gen = await request.post(ENGINE + '/api/generate', { data: { write: false } });
+    expect(gen.status()).toBe(200);
+    const comp = (await gen.json()).outputs.find(o => o.path.includes('compositions/'));
+    expect(comp.body).toContain("image: 'nginx:1.27'");
+  });
+
+  test('Service quick-match writes the [app] selector and keeps the starter port', async ({ page, request }) => {
+    await page.goto('/');
+    await dropKind(page, 'Deployment', 'apps/v1', 200, 200);
+    await expect(page.locator('.node[data-id="deployment"]')).toBeVisible();
+    await dropKind(page, 'Service', 'v1', 500, 320);
+    await expect(page.locator('.node[data-id="service"]')).toBeVisible();
+
+    await page.click('.node[data-id="service"] .node-h');
+    const card = page.locator('.service-card');
+    await expect(card).toBeVisible();
+    await card.locator('button[data-svc-match-wl]').first().click();
+
+    await expect.poll(async () => {
+      const r = await resourceNamed(request, 'service');
+      if (!r || !r.fields) return null;
+      const f = r.fields;
+      return {
+        sel: f['spec.selector[app]'] && f['spec.selector[app]'].value,
+        port: f['spec.ports[0].port'] && f['spec.ports[0].port'].value,
+        target: f['spec.ports[0].targetPort'] && f['spec.ports[0].targetPort'].value,
+        anyRaw: Object.values(f).some(e => e && e.raw),
+      };
+    }).toEqual({ sel: 'deployment', port: '80', target: '80', anyRaw: false });
   });
 });

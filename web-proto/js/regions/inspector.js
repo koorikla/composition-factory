@@ -763,25 +763,47 @@ function metadataConventionsHtml(res) {
   return h;
 }
 
+function isFieldSet(e) { return !!e && (!!e.from || (e.raw !== undefined && e.raw !== null && e.raw !== "") || (e.value !== undefined && e.value !== null && e.value !== "")); }
+
+/** True when a default at key k is already covered by a whole-value entry:
+ *  a dotted ancestor (`spec.template: {raw}` covers the container block) or,
+ *  for a map/list entry, its parent or the dotted spelling of the same key
+ *  (`spec.selector.matchLabels: {raw}` covers `spec.selector.matchLabels[app]`).
+ *  Writing the default beside such an entry makes emit refuse the doc. */
+function coveredByWhole(fields, k) {
+  for (var br = k.indexOf("["); br !== -1; br = k.indexOf("[", br + 1)) {
+    var parent = k.slice(0, br);
+    var key = k.slice(br + 1, k.indexOf("]", br));
+    if (isFieldSet(fields[parent]) || isFieldSet(fields[parent + "." + key])) return true;
+  }
+  var parts = k.split(".");
+  for (var i = 1; i < parts.length; i++) {
+    if (isFieldSet(fields[parts.slice(0, i).join(".")])) return true;
+  }
+  return false;
+}
+
 function checkMissingRequired(res, flds) {
   if (!res) return false;
   var rf = res.fields || {};
-  function isSet(e) { return !!e && (!!e.from || (e.raw !== undefined && e.raw !== null && e.raw !== "") || (e.value !== undefined && e.value !== null && e.value !== "")); }
   function hasField(p) {
-    if (isSet(rf[p])) return true;
-    return Object.keys(rf).some(function (k) { return (k === p || k.startsWith(p + ".") || k.startsWith(p + "[")) && isSet(rf[k]); });
+    if (isFieldSet(rf[p])) return true;
+    return Object.keys(rf).some(function (k) { return (k === p || k.startsWith(p + ".") || k.startsWith(p + "[")) && isFieldSet(rf[k]); });
   }
+  // Only a pod template set as one whole entry excuses its parts; a template
+  // that has labels but no container is still missing the container.
+  var wholeTemplate = isFieldSet(rf["spec.template"]);
   var k = res.kind;
   if (k === "Deployment" || k === "StatefulSet" || k === "DaemonSet") {
     if (!hasField("spec.selector.matchLabels") && !hasField("spec.selector")) return true;
-    if (!hasField("spec.template.metadata.labels") && !hasField("spec.template")) return true;
-    if (!hasField("spec.template.spec.containers[0].name") && !hasField("spec.template")) return true;
-    if (!hasField("spec.template.spec.containers[0].image") && !hasField("spec.template")) return true;
+    if (!hasField("spec.template.metadata.labels") && !wholeTemplate) return true;
+    if (!hasField("spec.template.spec.containers[0].name") && !wholeTemplate) return true;
+    if (!hasField("spec.template.spec.containers[0].image") && !wholeTemplate) return true;
     if (k === "StatefulSet" && !hasField("spec.serviceName")) return true;
   } else if (k === "Job") {
-    if (!hasField("spec.template.metadata.labels") && !hasField("spec.template")) return true;
-    if (!hasField("spec.template.spec.containers[0].name") && !hasField("spec.template")) return true;
-    if (!hasField("spec.template.spec.containers[0].image") && !hasField("spec.template")) return true;
+    if (!hasField("spec.template.metadata.labels") && !wholeTemplate) return true;
+    if (!hasField("spec.template.spec.containers[0].name") && !wholeTemplate) return true;
+    if (!hasField("spec.template.spec.containers[0].image") && !wholeTemplate) return true;
   } else if (k === "CronJob") {
     if (!hasField("spec.schedule") || !hasField("spec.jobTemplate.spec.template.spec.containers[0].name") || !hasField("spec.jobTemplate.spec.template.spec.containers[0].image")) return true;
   } else if (k === "Service") {
@@ -793,7 +815,7 @@ function checkMissingRequired(res, flds) {
       if (!isFieldEffectivelyRequired(f, res)) return false;
       if (hasField(f.path)) return false;
       var parts = f.path.split(".");
-      for (var j = 1; j < parts.length; j++) { if (isSet(rf[parts.slice(0, j).join(".")])) return false; }
+      for (var j = 1; j < parts.length; j++) { if (isFieldSet(rf[parts.slice(0, j).join(".")])) return false; }
       return true;
     })) return true;
   } else if (k === "Queue" || k === "Bucket" || k === "Instance") {
@@ -809,14 +831,14 @@ async function scaffoldResource(resName) {
   if (!res) return;
   var flds = null;
   try { var meta = await kindMeta(res); if (meta) flds = await fieldsFor(meta.apiVersion, res.kind); } catch (_) {}
-  var defaults = scaffoldResourceFields(res, flds, doc, true);
+  var defaults = scaffoldResourceFields(res, flds, doc);
   await op(function () {
     return store.replaceDoc(function (d) {
       var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === resName; });
       if (!r) return;
       r.fields = r.fields || {};
       Object.keys(defaults).forEach(function (k) {
-        if (!r.fields[k] || (!r.fields[k].value && !r.fields[k].from && !r.fields[k].raw)) r.fields[k] = defaults[k];
+        if (!isFieldSet(r.fields[k]) && !coveredByWhole(r.fields, k)) r.fields[k] = defaults[k];
       });
     });
   });
