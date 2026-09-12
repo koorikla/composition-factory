@@ -1340,6 +1340,55 @@ func inferProvider(apiVersion, kind string, defaultProvider string, store *cache
 	return ""
 }
 
+func extractCompositionResourceName(m map[string]any, placeholders []string) string {
+	meta, _ := m["metadata"].(map[string]any)
+	if meta == nil {
+		return ""
+	}
+	anns, ok := meta["annotations"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, key := range []string{"crossplane.io/composition-resource-name", "gotemplating.fn.crossplane.io/composition-resource-name"} {
+		if annName, ok := anns[key].(string); ok && annName != "" {
+			unmasked := unmaskString(annName, placeholders)
+			if clean := extractCleanName(unmasked); clean != "" {
+				return clean
+			}
+			return unmasked
+		}
+	}
+	for k, v := range anns {
+		unmaskedK := unmaskString(fmt.Sprint(k), placeholders)
+		unmaskedV := unmaskString(formatScalarValue(v), placeholders)
+		if m := reSetResourceNameAnn.FindStringSubmatch(unmaskedK); len(m) >= 2 {
+			candidate := m[1]
+			if candidate == "" && len(m) >= 3 {
+				candidate = m[2]
+			}
+			if clean := extractCleanName(candidate); clean != "" {
+				return clean
+			}
+			if candidate != "" {
+				return candidate
+			}
+		}
+		if m := reSetResourceNameAnn.FindStringSubmatch(unmaskedV); len(m) >= 2 {
+			candidate := m[1]
+			if candidate == "" && len(m) >= 3 {
+				candidate = m[2]
+			}
+			if clean := extractCleanName(candidate); clean != "" {
+				return clean
+			}
+			if candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
 func extractResourceName(m map[string]any, kind string, placeholders []string) string {
 	meta, _ := m["metadata"].(map[string]any)
 	name := ""
@@ -2239,6 +2288,31 @@ func parseGoTemplateBody(tmpl string, bp *blueprint.Blueprint, opts Options, rep
 			if forEach != "" {
 				res.ForEach = forEach
 			}
+
+			origName := res.Name
+			uniqueName(bp, res)
+			if res.Name != origName && nameMapping != nil {
+				compResName := extractCompositionResourceName(doc, placeholderTable)
+				rawName := extractResourceName(doc, res.Kind, placeholderTable)
+				if compResName != "" {
+					nameMapping[compResName] = res.Name
+					if clean := extractCleanName(compResName); clean != "" && clean != res.Name {
+						nameMapping[clean] = res.Name
+					}
+				}
+				if rawName != "" && rawName != strings.ToLower(res.Kind) {
+					nameMapping[rawName] = res.Name
+					if clean := extractCleanName(rawName); clean != "" && clean != res.Name {
+						nameMapping[clean] = res.Name
+					}
+				}
+				for k, v := range nameMapping {
+					if v == origName && (k == compResName || k == rawName) {
+						nameMapping[k] = res.Name
+					}
+				}
+			}
+
 			bp.Spec.Resources = append(bp.Spec.Resources, *res)
 		}
 	}

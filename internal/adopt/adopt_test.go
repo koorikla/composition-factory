@@ -9047,3 +9047,145 @@ spec:
 		t.Errorf("custom-env step not found in adopted pipeline: %+v", bp.Spec.Pipeline)
 	}
 }
+
+func TestCF306_AdoptGoTemplateDuplicateResourceNames(t *testing.T) {
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-duplicate-names
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XStorage
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            labels:
+              app: primary
+          spec:
+            forProvider:
+              region: us-east-1
+          ---
+          apiVersion: s3.aws.upbound.io/v1beta1
+          kind: Bucket
+          metadata:
+            labels:
+              app: secondary
+          spec:
+            forProvider:
+              region: us-west-2
+`
+	bp, _, err := Adopt([]byte(compYAML), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(bp.Spec.Resources))
+	}
+
+	if bp.Spec.Resources[0].Name == bp.Spec.Resources[1].Name {
+		t.Errorf("resources must have distinct names, both are %q", bp.Spec.Resources[0].Name)
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Errorf("bp.Validate() failed on adopted resources: %v", err)
+	}
+}
+
+func TestCF306_AdoptGoTemplateDuplicateResourceNames_StatusReferenceRewriting(t *testing.T) {
+	compYAML := `apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: test-duplicate-names-status-rewrite
+spec:
+  compositeTypeRef:
+    apiVersion: example.org/v1alpha1
+    kind: XStorage
+  mode: Pipeline
+  pipeline:
+  - step: render
+    functionRef:
+      name: function-go-templating
+    input:
+      apiVersion: gotemplating.fn.crossplane.io/v1beta1
+      kind: GoTemplate
+      source: Inline
+      inline:
+        template: |
+          ---
+          apiVersion: sqs.aws.upbound.io/v1beta1
+          kind: Queue
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: my-queue
+          spec:
+            forProvider:
+              delaySeconds: 0
+          ---
+          apiVersion: sqs.aws.upbound.io/v1beta1
+          kind: Queue
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: My_Queue
+          spec:
+            forProvider:
+              delaySeconds: 10
+          ---
+          apiVersion: sqs.aws.upbound.io/v1beta1
+          kind: Queue
+          metadata:
+            annotations:
+              crossplane.io/composition-resource-name: consumer
+          spec:
+            forProvider:
+              redrivePolicy: '{{ (index $.observed.resources "My_Queue").resource.status.atProvider.arn }}'
+`
+	bp, _, err := Adopt([]byte(compYAML), Options{})
+	if err != nil {
+		t.Fatalf("Adopt failed: %v", err)
+	}
+
+	if len(bp.Spec.Resources) != 3 {
+		t.Fatalf("expected 3 resources, got %d", len(bp.Spec.Resources))
+	}
+
+	if bp.Spec.Resources[0].Name != "my-queue" {
+		t.Errorf("expected resource 0 name 'my-queue', got %q", bp.Spec.Resources[0].Name)
+	}
+	if bp.Spec.Resources[1].Name != "my-queue-2" {
+		t.Errorf("expected resource 1 name 'my-queue-2', got %q", bp.Spec.Resources[1].Name)
+	}
+	if bp.Spec.Resources[2].Name != "consumer" {
+		t.Errorf("expected resource 2 name 'consumer', got %q", bp.Spec.Resources[2].Name)
+	}
+
+	consumer := bp.ResourceNamed("consumer")
+	if consumer == nil {
+		t.Fatalf("resource 'consumer' not found")
+	}
+	field, ok := consumer.Fields["redrivePolicy"]
+	if !ok {
+		t.Fatalf("expected field 'redrivePolicy' on consumer")
+	}
+	wantFrom := "resources.my-queue-2.status.atProvider.arn"
+	if field.From != wantFrom {
+		t.Errorf("expected From wire %q, got %q", wantFrom, field.From)
+	}
+
+	if err := bp.Validate(); err != nil {
+		t.Errorf("bp.Validate() failed: %v", err)
+	}
+}
