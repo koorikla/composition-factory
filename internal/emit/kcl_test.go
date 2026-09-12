@@ -1236,3 +1236,106 @@ spec:
 		t.Errorf("expected error to mention spec.templates, got: %v", err)
 	}
 }
+
+func TestMetadataRefCustomNameTargetKCL(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xapp"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EngineKCL},
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XApp", Plural: "xapps",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"image": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "sa", Kind: "ServiceAccount", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name":                {Value: "custom-sa"},
+						"automountServiceAccountToken": {Value: "true"},
+					},
+				},
+				{
+					Name: "app", Kind: "Deployment", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"spec.selector.matchLabels":              {Raw: "{app: web}"},
+						"spec.template.metadata.labels":          {Raw: "{app: web}"},
+						"spec.template.spec.containers[0].name":  {Value: "app"},
+						"spec.template.spec.containers[0].image": {From: "params.image"},
+						"spec.template.spec.serviceAccountName":  {From: "resources.sa.metadata.name"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	comp, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(comp)
+	if !strings.Contains(s, `serviceAccountName = "custom-sa"`) {
+		t.Fatalf("expected KCL to contain custom serviceAccountName, got:\n%s", s)
+	}
+}
+
+func TestMetadataRefCustomNameTargetParamKCL(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xapp"},
+		Spec: blueprint.Spec{
+			Emit: &blueprint.Emit{Engine: blueprint.EngineKCL},
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XApp", Plural: "xapps",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"image":  {Type: "string", Required: true},
+					"saName": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "sa", Kind: "ServiceAccount", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name":                {From: "params.saName"},
+						"automountServiceAccountToken": {Value: "true"},
+					},
+				},
+				{
+					Name: "app", Kind: "Deployment", Provider: blueprint.NativeProvider,
+					Annotations: map[string]blueprint.Field{
+						"app.kubernetes.io/sa-ref": {From: "resources.sa.metadata.name"},
+					},
+					Fields: map[string]blueprint.Field{
+						"spec.selector.matchLabels":              {Raw: "{app: web}"},
+						"spec.template.metadata.labels":          {Raw: "{app: web}"},
+						"spec.template.spec.containers[0].name":  {Value: "app"},
+						"spec.template.spec.containers[0].image": {From: "params.image"},
+						"spec.template.spec.serviceAccountName":  {From: "resources.sa.metadata.name"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	comp, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	s := string(comp)
+	if !strings.Contains(s, `serviceAccountName = _spec?.saName`) {
+		t.Fatalf("expected KCL to contain serviceAccountName = _spec?.saName, got:\n%s", s)
+	}
+	if !strings.Contains(s, `"app.kubernetes.io/sa-ref" = _spec?.saName`) {
+		t.Fatalf("expected KCL to contain annotation ref, got:\n%s", s)
+	}
+}

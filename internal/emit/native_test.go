@@ -1009,3 +1009,170 @@ func TestNativeMetadataLabelsParityAcrossEngines(t *testing.T) {
 		t.Errorf("Python looped missing labels:\n%s", string(compPyLooped))
 	}
 }
+
+func TestMetadataRefCustomNameTarget(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xapp"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XApp", Plural: "xapps",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"image": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "sa", Kind: "ServiceAccount", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name":                {Value: "custom-sa"},
+						"automountServiceAccountToken": {Value: "true"},
+					},
+				},
+				{
+					Name: "app", Kind: "Deployment", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"spec.selector.matchLabels":              {Raw: "{app: web}"},
+						"spec.template.metadata.labels":          {Raw: "{app: web}"},
+						"spec.template.spec.containers[0].name":  {Value: "app"},
+						"spec.template.spec.containers[0].image": {From: "params.image"},
+						"spec.template.spec.serviceAccountName":  {From: "resources.sa.metadata.name"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	comp, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	docs := renderedNativeDocs(t, comp, map[string]any{"image": "nginx:latest"})
+	deploy, ok := docs["Deployment"]
+	if !ok {
+		t.Fatal("rendered docs missing Deployment")
+	}
+	spec, _ := deploy["spec"].(map[string]any)
+	tpl, _ := spec["template"].(map[string]any)
+	pspec, _ := tpl["spec"].(map[string]any)
+	saName, _ := pspec["serviceAccountName"].(string)
+	if saName != "custom-sa" {
+		t.Fatalf("serviceAccountName = %q, want custom-sa", saName)
+	}
+}
+
+func TestMetadataRefCustomNameTargetParam(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xapp"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XApp", Plural: "xapps",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"image":  {Type: "string", Required: true},
+					"saName": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "sa", Kind: "ServiceAccount", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name":                {From: "params.saName"},
+						"automountServiceAccountToken": {Value: "true"},
+					},
+				},
+				{
+					Name: "app", Kind: "Deployment", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"spec.selector.matchLabels":              {Raw: "{app: web}"},
+						"spec.template.metadata.labels":          {Raw: "{app: web}"},
+						"spec.template.spec.containers[0].name":  {Value: "app"},
+						"spec.template.spec.containers[0].image": {From: "params.image"},
+						"spec.template.spec.serviceAccountName":  {From: "resources.sa.metadata.name"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	comp, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	docs := renderedNativeDocs(t, comp, map[string]any{"image": "nginx:latest", "saName": "my-param-sa"})
+	deploy, ok := docs["Deployment"]
+	if !ok {
+		t.Fatal("rendered docs missing Deployment")
+	}
+	spec, _ := deploy["spec"].(map[string]any)
+	tpl, _ := spec["template"].(map[string]any)
+	pspec, _ := tpl["spec"].(map[string]any)
+	saName, _ := pspec["serviceAccountName"].(string)
+	if saName != "my-param-sa" {
+		t.Fatalf("serviceAccountName = %q, want my-param-sa", saName)
+	}
+}
+
+func TestMetadataRefCustomNameTargetAnnotation(t *testing.T) {
+	b := &blueprint.Blueprint{
+		APIVersion: "factory.crossplane.io/v1alpha1",
+		Kind:       "Blueprint",
+		Metadata:   blueprint.Metadata{Name: "xapp"},
+		Spec: blueprint.Spec{
+			XRD: blueprint.XRD{
+				Group: "platform.sparky.ee", Kind: "XApp", Plural: "xapps",
+				Version: "v1alpha1", Scope: "Namespaced",
+				Parameters: map[string]blueprint.Parameter{
+					"image": {Type: "string", Required: true},
+				},
+			},
+			Resources: []blueprint.Resource{
+				{
+					Name: "sa", Kind: "ServiceAccount", Provider: blueprint.NativeProvider,
+					Fields: map[string]blueprint.Field{
+						"metadata.name":                {Value: "custom-sa"},
+						"automountServiceAccountToken": {Value: "true"},
+					},
+				},
+				{
+					Name: "app", Kind: "Deployment", Provider: blueprint.NativeProvider,
+					Annotations: map[string]blueprint.Field{
+						"app.kubernetes.io/sa-ref": {From: "resources.sa.metadata.name"},
+					},
+					Fields: map[string]blueprint.Field{
+						"spec.selector.matchLabels":              {Raw: "{app: web}"},
+						"spec.template.metadata.labels":          {Raw: "{app: web}"},
+						"spec.template.spec.containers[0].name":  {Value: "app"},
+						"spec.template.spec.containers[0].image": {From: "params.image"},
+					},
+				},
+			},
+		},
+	}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	comp, err := Composition(b, nativeTestCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	docs := renderedNativeDocs(t, comp, map[string]any{"image": "nginx:latest"})
+	deploy, ok := docs["Deployment"]
+	if !ok {
+		t.Fatal("rendered docs missing Deployment")
+	}
+	meta, _ := deploy["metadata"].(map[string]any)
+	annos, _ := meta["annotations"].(map[string]any)
+	saRef, _ := annos["app.kubernetes.io/sa-ref"].(string)
+	if saRef != "custom-sa" {
+		t.Fatalf("annotation sa-ref = %q, want custom-sa", saRef)
+	}
+}

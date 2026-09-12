@@ -97,17 +97,19 @@ func planAnnotations(r blueprint.Resource, b *blueprint.Blueprint, crds []schema
 			}
 			if ref.Resource != "" {
 				if ref.IsMetadataName() {
+					sMeta, rhsMeta, guardMeta, err := resolveMetadataNameRef(r, fmt.Sprintf("annotation %q", k), ref, b, crds, wantNamespaced, "string", false, nil)
+					if err != nil {
+						return nil, err
+					}
+					if sMeta.kind == rhsMetadata {
+						rhsMeta = fmt.Sprintf(`{{ printf "%%s-%s" $xr | quote }}`, ref.Resource)
+						sMeta.rawExpr = fmt.Sprintf(`printf "%%s-%s" $xr`, ref.Resource)
+					}
 					plan = append(plan, forProviderField{
-						path: k,
-						rhs:  fmt.Sprintf(`{{ printf "%%s-%s" $xr | quote }}`, ref.Resource),
-						structured: structuredRHS{
-							kind:       rhsMetadata,
-							resource:   ref.Resource,
-							statusPath: "metadata.name",
-							optional:   false,
-							guard:      "",
-							rawExpr:    fmt.Sprintf(`printf "%%s-%s" $xr`, ref.Resource),
-						},
+						path:       k,
+						rhs:        rhsMeta,
+						guard:      guardMeta,
+						structured: sMeta,
 					})
 					continue
 				}

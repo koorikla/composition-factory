@@ -68,7 +68,7 @@ func planSingleResource(r blueprint.Resource, b *blueprint.Blueprint, crds []sch
 	var metaPlan, bodyPlan []forProviderField
 	if crd.Native {
 		for _, fld := range plan {
-			if strings.HasPrefix(fld.path, "metadata.") {
+			if strings.HasPrefix(fld.path, "metadata.") || fld.path == "name" {
 				metaPlan = append(metaPlan, fld)
 			} else {
 				bodyPlan = append(bodyPlan, fld)
