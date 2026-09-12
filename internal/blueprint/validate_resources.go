@@ -32,8 +32,11 @@ func (b *Blueprint) validateResources() error {
 				return fmt.Errorf("spec.resources[%d] %q: needs a kind", i, r.Name)
 			}
 		}
-		if !resourceNameRE.MatchString(r.Name) {
-			return fmt.Errorf("spec.resources[%d] %q: invalid resource name (must be a DNS label, e.g. main-queue)", i, r.Name)
+		if err := checkScalar(fmt.Sprintf("spec.resources[%d].name", i), r.Name); err != nil {
+			return err
+		}
+		if !resourceNameRE.MatchString(r.Name) || yamlKeywords[strings.ToLower(r.Name)] {
+			return fmt.Errorf("spec.resources[%d] %q: invalid resource name (must be a DNS label, e.g. main-queue, and not a YAML keyword)", i, r.Name)
 		}
 		if err := checkScalar(fmt.Sprintf("spec.resources[%d].kind", i), r.Kind); err != nil {
 			return err
