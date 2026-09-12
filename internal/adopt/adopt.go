@@ -1247,7 +1247,7 @@ var (
 	reEvidenceIndexSpec  = regexp.MustCompile(`\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']`)
 	reEnvVar             = regexp.MustCompile(`\{\{-?\s*\(?\s*(?:default\s+(?:["'][^"']*["']|\S+)\s+)?\(?\s*(?:\$env\.([a-zA-Z0-9_.-]+?)|\(index\s+\$env\s+["']([a-zA-Z0-9_.-]+?)["']\)|index\s+\$env\s+["']([a-zA-Z0-9_.-]+?)["'])\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*-?\}\}`)
 	reObservedStatus     = regexp.MustCompile(`\{\{-?\s*\(?\s*(?:\(index\s+(?:\$?[.]?observed(?:\.resources)?|\$observed)\s+["']([^"']+)["']\)|(?:\$?[.]?observed(?:\.resources)?|\$observed)\.([a-zA-Z0-9_-]+)|\(+\s*getComposedResource\s+(?:(?:\([^)]+\)|[^\s"'\x60\)]+)\s+["'\x60]([^"'\x60]+)["'\x60]|["'\x60]([^"'\x60]+)["'\x60]\s+(?:\([^)]+\)|[^\s"'\x60\)]+))\s*\)+)(?:\.resource)?\.(status(?:\.atProvider)?|metadata)\.([a-zA-Z0-9_.-]+?)\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*\)?(?:\s*\|\s*b64enc)?(?:\s*\|\s*quote)?\s*-?\}\}`)
-	reXRResourceRef      = regexp.MustCompile(`\{\{-?\s*(?:\$xr|\$?[.]observed\.composite\.resource\.metadata\.name)\s*-?\}\}-([a-zA-Z0-9_-]+)`)
+	reXRResourceRef      = regexp.MustCompile(`(?:\{\{-?\s*(?:\$xr|\$?[.]observed\.composite\.resource\.metadata\.name)\s*-?\}\}-([a-zA-Z0-9_-]+)|\{\{-?\s*\(?\s*printf\s+["']%s[-_]([a-zA-Z0-9_-]+)["']\s+\(?\s*(?:\$xr|\$?[.]observed\.composite\.resource\.metadata\.name)\s*\)?\s*\)?(?:\s*\|\s*(?:quote|b64enc))*\s*-?\}\}|\{\{-?\s*\(?\s*printf\s+["']%s[-_]%s["']\s+\(?\s*(?:\$xr|\$?[.]observed\.composite\.resource\.metadata\.name)\s*\)?\s+["']([a-zA-Z0-9_-]+)["']\s*\)?(?:\s*\|\s*(?:quote|b64enc))*\s*-?\}\}|\{\{-?\s*\(?\s*printf\s+["']%s[-_]%s["']\s+["']([a-zA-Z0-9_-]+)["']\s+\(?\s*(?:\$xr|\$?[.]observed\.composite\.resource\.metadata\.name)\s*\)?\s*\)?(?:\s*\|\s*(?:quote|b64enc))*\s*-?\}\})`)
 	reWhenIfSimple       = regexp.MustCompile(`\{\{-?\s*if\s+\(?(?:(?:and\s+\(\s*hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["'][^"']+["']\s*\)|or\s+\(\s*not\s+\(\s*hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["'][^"']+["']\s*\)\s*\))\s+)?\(?(?:(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)|\(?\s*index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\)*\s*-?\}\}`)
 	reWhenIfBoolEq       = regexp.MustCompile(`\{\{-?\s*if\s+\(?(?:(?:and\s+\(\s*hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["'][^"']+["']\s*\)|or\s+\(\s*not\s+\(\s*hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["'][^"']+["']\s*\)\s*\))\s+)?\(?eq\s+(?:\(?\s*(?:default\s+false\s+)?(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*(?:default\s+false\s+)?index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\s+true\)*\s*-?\}\}`)
 	reWhenIfBoolEqRev    = regexp.MustCompile(`\{\{-?\s*if\s+\(?(?:(?:and\s+\(\s*hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["'][^"']+["']\s*\)|or\s+\(\s*not\s+\(\s*hasKey\s+(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s+["'][^"']+["']\s*\)\s*\))\s+)?\(?eq\s+true\s+(?:\(?\s*(?:default\s+false\s+)?(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\.([a-zA-Z0-9_.-]+)\s*\)?|\(?\s*(?:default\s+false\s+)?index\s+\(?\s*(?:\$spec|\$?[.]spec|\$?[.]observed\.composite\.resource\.spec)\s*\)?\s+["']([a-zA-Z0-9_.-]+)["']\s*\)?)\)*\s*-?\}\}`)
@@ -1360,6 +1360,18 @@ func matchObservedStatus(s string) (srcRes, targetKind, targetField string, ok b
 	targetKind = m[5]
 	targetField = m[6]
 	return srcRes, targetKind, targetField, true
+}
+
+func matchResourceRef(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if m := reXRResourceRef.FindStringSubmatch(trimmed); len(m) > 1 && m[0] == trimmed {
+		for i := 1; i < len(m); i++ {
+			if m[i] != "" {
+				return m[i]
+			}
+		}
+	}
+	return ""
 }
 
 func isReservedCompositeField(name string) bool {
@@ -3512,8 +3524,7 @@ func resourceFromMap(m map[string]any, opts Options, placeholders []string, repo
 					} else {
 						res.Annotations[rawK] = blueprint.Field{Raw: rawStr}
 					}
-				} else if m := reXRResourceRef.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
-					srcRes := m[1]
+				} else if srcRes := matchResourceRef(trimmed); srcRes != "" {
 					if nameMapping != nil && nameMapping[srcRes] != "" {
 						srcRes = nameMapping[srcRes]
 					} else {
@@ -3906,8 +3917,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 				} else {
 					out[path] = blueprint.Field{From: "resources." + srcRes + "." + targetKind + "." + targetField}
 				}
-			} else if m := reXRResourceRef.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
-				srcRes := m[1]
+			} else if srcRes := matchResourceRef(trimmed); srcRes != "" {
 				if nameMapping != nil && nameMapping[srcRes] != "" {
 					srcRes = nameMapping[srcRes]
 				} else {
@@ -3977,8 +3987,7 @@ func extractFields(prefix string, obj map[string]any, out map[string]blueprint.F
 						} else {
 							out[elemPath] = blueprint.Field{From: "resources." + srcRes + "." + targetKind + "." + targetField}
 						}
-					} else if m := reXRResourceRef.FindStringSubmatch(trimmed); len(m) >= 2 && m[0] == trimmed {
-						srcRes := m[1]
+					} else if srcRes := matchResourceRef(trimmed); srcRes != "" {
 						if nameMapping != nil && nameMapping[srcRes] != "" {
 							srcRes = nameMapping[srcRes]
 						} else {
