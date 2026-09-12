@@ -16,6 +16,11 @@ type CatalogueCmd struct {
 }
 
 func (c *CatalogueCmd) Run(out io.Writer) error {
+	typ := strings.ToLower(strings.TrimSpace(c.Type))
+	if typ != "" && typ != "provider" && typ != "function" {
+		return fmt.Errorf("invalid type %q (must be \"provider\" or \"function\")", c.Type)
+	}
+
 	entries, err := catalogue.Load()
 	if err != nil {
 		return err
