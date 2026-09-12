@@ -7,6 +7,8 @@
  * Field forms are exactly-one-of {value|from|raw}.
  */
 
+import { isRawEnvRef, isWhenReferencingEnv } from "./utils.js";
+
 /**
  * Parse a from: expression into its wire descriptor.
  * @param {string} from
@@ -379,13 +381,24 @@ export function findEnvWires(doc, key) {
   const wires = [];
   const ref = "env." + key;
   const refDollar = "$env." + key;
+
+  const templates = (doc && doc.spec && doc.spec.templates) || {};
+  if (templates && typeof templates === "object") {
+    Object.keys(templates).forEach(function (tName) {
+      const tmpl = templates[tName];
+      if (typeof tmpl === "string" && isRawEnvRef(tmpl, key)) {
+        wires.push("templates." + tName);
+      }
+    });
+  }
+
   const resources = (doc && doc.spec && doc.spec.resources) || [];
   resources.forEach(function (r) {
     const checkDict = function (dict, prefix) {
       if (!dict) return;
       Object.keys(dict).forEach(function (p) {
         const f = dict[p];
-        if (f && (f.from === ref || f.from === refDollar)) {
+        if (f && (f.from === ref || f.from === refDollar || (typeof f.raw === "string" && isRawEnvRef(f.raw, key)))) {
           wires.push(r.name + "." + (prefix ? prefix + "." : "") + p);
         }
       });
@@ -395,7 +408,7 @@ export function findEnvWires(doc, key) {
     if (r.annotations) {
       Object.keys(r.annotations).forEach(function (k) {
         const f = r.annotations[k];
-        if (f && (f.from === ref || f.from === refDollar)) {
+        if (f && (f.from === ref || f.from === refDollar || (typeof f.raw === "string" && isRawEnvRef(f.raw, key)))) {
           wires.push(r.name + ".annotations." + k);
         }
       });
@@ -403,19 +416,25 @@ export function findEnvWires(doc, key) {
     if (r.connectionSecret) {
       let csMatched = false;
       if (typeof r.connectionSecret === "string") {
-        if (r.connectionSecret === ref || r.connectionSecret === refDollar) {
+        if (r.connectionSecret === ref || r.connectionSecret === refDollar || isRawEnvRef(r.connectionSecret, key)) {
           csMatched = true;
         }
       } else if (typeof r.connectionSecret === "object") {
         if (r.connectionSecret.name === ref || r.connectionSecret.name === refDollar ||
-            r.connectionSecret.namespace === ref || r.connectionSecret.namespace === refDollar) {
+            r.connectionSecret.namespace === ref || r.connectionSecret.namespace === refDollar ||
+            (typeof r.connectionSecret.name === "string" && isRawEnvRef(r.connectionSecret.name, key)) ||
+            (typeof r.connectionSecret.namespace === "string" && isRawEnvRef(r.connectionSecret.namespace, key))) {
           csMatched = true;
         } else if (Array.isArray(r.connectionSecret.keys)) {
           r.connectionSecret.keys.forEach(function (item) {
-            if (typeof item === "string" && (item === ref || item === refDollar)) {
+            if (typeof item === "string" && (item === ref || item === refDollar || isRawEnvRef(item, key))) {
               csMatched = true;
-            } else if (item && typeof item === "object" && (item.from === ref || item.from === refDollar)) {
-              csMatched = true;
+            } else if (item && typeof item === "object") {
+              if (item.from === ref || item.from === refDollar ||
+                  (typeof item.from === "string" && isRawEnvRef(item.from, key)) ||
+                  (typeof item.raw === "string" && isRawEnvRef(item.raw, key))) {
+                csMatched = true;
+              }
             }
           });
         }
@@ -425,20 +444,23 @@ export function findEnvWires(doc, key) {
       }
     }
     if (r.when) {
-      const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const re = new RegExp("(?:\\$env|\\.env|env)\\." + escaped + "(?:$|[^a-zA-Z0-9_])");
-      if (re.test(r.when)) {
+      if (isWhenReferencingEnv(r.when, key)) {
         wires.push(r.name + ".when");
       }
     }
     if (r.forEach) {
-      if (r.forEach === ref || r.forEach === refDollar) {
+      if (r.forEach === ref || r.forEach === refDollar || (typeof r.forEach === "string" && isRawEnvRef(r.forEach, key))) {
         wires.push(r.name + ".forEach");
-      } else if (typeof r.forEach === "object" && (r.forEach.over === ref || r.forEach.over === refDollar)) {
-        wires.push(r.name + ".forEach");
+      } else if (typeof r.forEach === "object") {
+        if (r.forEach.over === ref || r.forEach.over === refDollar || (typeof r.forEach.over === "string" && isRawEnvRef(r.forEach.over, key))) {
+          wires.push(r.name + ".forEach");
+        }
       }
     }
   });
   return wires;
 }
+
+export { isRawEnvRef };
+
 

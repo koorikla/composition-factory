@@ -120,13 +120,15 @@ function isEnvRef(ref, keyName) {
   return false;
 }
 
-function isRawEnvRef(raw, keyName) {
+export function isRawEnvRef(raw, keyName) {
   if (typeof raw !== "string" || !raw || !keyName) return false;
   var escaped = keyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   var re = new RegExp("(?:\\$env|\\.env|env)\\." + escaped + "(?:$|[^a-zA-Z0-9_])");
   if (re.test(raw)) return true;
   var reIndex = new RegExp("\\bindex\\s+(?:(?:\\$|\\$\\.|\\.)?env)\\s+(?:\"" + escaped + "\"|'" + escaped + "'|`" + escaped + "`)(?:$|[^a-zA-Z0-9_])");
-  return reIndex.test(raw);
+  if (reIndex.test(raw)) return true;
+  var reHasKey = new RegExp("\\bhasKey\\s+(?:(?:\\$|\\$\\.|\\.)?env)\\s+(?:\"" + escaped + "\"|'" + escaped + "'|`" + escaped + "`)(?:$|[^a-zA-Z0-9_])");
+  return reHasKey.test(raw);
 }
 
 function isObjectReferencingEnv(obj, keyName) {
@@ -139,7 +141,7 @@ function isObjectReferencingEnv(obj, keyName) {
   return false;
 }
 
-function isWhenReferencingEnv(whenStr, keyName) {
+export function isWhenReferencingEnv(whenStr, keyName) {
   if (!whenStr || typeof whenStr !== "string") return false;
   if (isEnvRef(whenStr, keyName) || isRawEnvRef(whenStr, keyName)) return true;
   var m = /^(?:env|\$env)\.([A-Za-z0-9_-]+)/.exec(whenStr);
@@ -280,6 +282,26 @@ export function deleteEnvKeyFromDoc(d, keyName) {
 }
 
 /**
+ * Rename environment key references inside Go templates and raw expressions.
+ * Handles dotted references, index calls, and hasKey expressions.
+ *
+ * @param {string} raw
+ * @param {string} oldKey
+ * @param {string} newKey
+ * @returns {string}
+ */
+export function replaceRawEnv(raw, oldKey, newKey) {
+  if (typeof raw !== "string" || !raw || !oldKey || !newKey) return raw;
+  var escaped = oldKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  var re = new RegExp("((?:\\$env|\\.env|env)\\.)" + escaped + "((?:$|[^a-zA-Z0-9_]))", "g");
+  var res = raw.replace(re, "$1" + newKey + "$2");
+  var reIndex = new RegExp("(\\bindex\\s+(?:(?:\\$|\\$\\.|\\.)?env)\\s+(?:\"|'|`))" + escaped + "((?:\"|'|`)(?:$|[^a-zA-Z0-9_]))", "g");
+  res = res.replace(reIndex, "$1" + newKey + "$2");
+  var reHasKey = new RegExp("(\\bhasKey\\s+(?:(?:\\$|\\$\\.|\\.)?env)\\s+(?:\"|'|`))" + escaped + "((?:\"|'|`)(?:$|[^a-zA-Z0-9_]))", "g");
+  return res.replace(reHasKey, "$1" + newKey + "$2");
+}
+
+/**
  * Rename an environment key in a blueprint doc and rewrite all
  * references to it in resources and environmentConfigs.
  *
@@ -331,13 +353,8 @@ export function renameEnvKeyInDoc(d, oldKey, newKey) {
     return ref;
   }
 
-  function replaceRawEnv(raw) {
-    if (typeof raw !== "string" || !raw) return raw;
-    var escaped = oldKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    var re = new RegExp("((?:\\$env|\\.env|env)\\.)" + escaped + "((?:$|[^a-zA-Z0-9_]))", "g");
-    var res = raw.replace(re, "$1" + newKey + "$2");
-    var reIndex = new RegExp("(\\bindex\\s+(?:(?:\\$|\\$\\.|\\.)?env)\\s+(?:\"|'|`))" + escaped + "((?:\"|'|`)(?:$|[^a-zA-Z0-9_]))", "g");
-    return res.replace(reIndex, "$1" + newKey + "$2");
+  function replaceRaw(raw) {
+    return replaceRawEnv(raw, oldKey, newKey);
   }
 
   function replaceInObject(obj) {
@@ -346,7 +363,7 @@ export function renameEnvKeyInDoc(d, oldKey, newKey) {
       var v = obj[k];
       if (typeof v === "string") {
         var r1 = replaceEnvRef(v);
-        obj[k] = r1 !== v ? r1 : replaceRawEnv(v);
+        obj[k] = r1 !== v ? r1 : replaceRaw(v);
       } else if (typeof v === "object") {
         replaceInObject(v);
       }
@@ -361,7 +378,7 @@ export function renameEnvKeyInDoc(d, oldKey, newKey) {
         var f = r.fields[k];
         if (f) {
           if (f.from) f.from = replaceEnvRef(f.from);
-          if (f.raw) f.raw = replaceRawEnv(f.raw);
+          if (f.raw) f.raw = replaceRaw(f.raw);
         }
       });
     }
@@ -370,7 +387,7 @@ export function renameEnvKeyInDoc(d, oldKey, newKey) {
         var f = r.envelope[k];
         if (f) {
           if (f.from) f.from = replaceEnvRef(f.from);
-          if (f.raw) f.raw = replaceRawEnv(f.raw);
+          if (f.raw) f.raw = replaceRaw(f.raw);
         }
       });
     }
@@ -379,7 +396,7 @@ export function renameEnvKeyInDoc(d, oldKey, newKey) {
         var f = r.annotations[k];
         if (f) {
           if (f.from) f.from = replaceEnvRef(f.from);
-          if (f.raw) f.raw = replaceRawEnv(f.raw);
+          if (f.raw) f.raw = replaceRaw(f.raw);
         }
       });
     }
@@ -393,7 +410,7 @@ export function renameEnvKeyInDoc(d, oldKey, newKey) {
               r.connectionSecret.keys[idx] = replaceEnvRef(item);
             } else if (item && typeof item === "object") {
               if (item.from) item.from = replaceEnvRef(item.from);
-              if (item.raw) item.raw = replaceRawEnv(item.raw);
+              if (item.raw) item.raw = replaceRaw(item.raw);
               replaceInObject(item);
             }
           });
@@ -404,7 +421,7 @@ export function renameEnvKeyInDoc(d, oldKey, newKey) {
     }
     if (r.when) {
       if (typeof r.when === "string") {
-        r.when = replaceRawEnv(r.when);
+        r.when = replaceRaw(r.when);
       } else if (typeof r.when === "object") {
         replaceInObject(r.when);
       }
@@ -420,7 +437,7 @@ export function renameEnvKeyInDoc(d, oldKey, newKey) {
   if (d.spec && d.spec.templates && typeof d.spec.templates === "object") {
     Object.keys(d.spec.templates).forEach(function (tName) {
       if (typeof d.spec.templates[tName] === "string") {
-        d.spec.templates[tName] = replaceRawEnv(d.spec.templates[tName]);
+        d.spec.templates[tName] = replaceRaw(d.spec.templates[tName]);
       }
     });
   }
