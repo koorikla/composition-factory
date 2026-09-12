@@ -48,6 +48,9 @@ func (srv *server) handleRender(w http.ResponseWriter, r *http.Request) {
 
 // renderInputs loads and validates the blueprint and its source CRDs under srv.mu.
 func (srv *server) renderInputs(w http.ResponseWriter) (*blueprint.Blueprint, []schema.CRD, bool) {
+	if cur, err := blueprint.Load(srv.Blueprint); err == nil && cur != nil {
+		srv.awaitBlueprintSources(cur)
+	}
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 

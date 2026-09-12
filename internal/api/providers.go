@@ -37,6 +37,7 @@ type providerEntry struct {
 	Ref    string `json:"ref"`
 	Digest string `json:"digest"`
 	Kinds  int    `json:"kinds"`
+	Status string `json:"status,omitempty"`
 	Error  string `json:"error,omitempty"`
 }
 
@@ -63,9 +64,9 @@ func (srv *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A declared source the server has not tried yet is neither held nor
-	// known to have failed; attempt it (memoized, so a failed ref is not
-	// re-fetched on every list) so the list can name the reason.
-	_ = srv.ensureBlueprintSourcesLoadedLocked(r.Context(), b)
+	// known to have failed; trigger background loading so it loads asynchronously
+	// without blocking the response.
+	srv.triggerBlueprintSourcesAsyncLocked(b)
 
 	entries, err := srv.providerEntriesLocked(b)
 	if err != nil {
@@ -107,11 +108,22 @@ func (srv *server) providerEntriesLocked(b *blueprint.Blueprint) ([]providerEntr
 			continue
 		}
 		seen[ref] = true
+		if srv.loadingSources != nil && srv.loadingSources[ref] != nil {
+			entries = append(entries, providerEntry{
+				Ref:    ref,
+				Status: "loading",
+			})
+			continue
+		}
 		reason := "source is declared but not loaded"
 		if err := srv.failedSources[ref]; err != nil {
 			reason = err.Error()
 		}
-		entries = append(entries, providerEntry{Ref: ref, Error: reason})
+		entries = append(entries, providerEntry{
+			Ref:    ref,
+			Status: "failed",
+			Error:  reason,
+		})
 	}
 	return entries, nil
 }
@@ -389,6 +401,9 @@ func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		delete(srv.failedSources, ref)
+		if srv.loadingSources != nil {
+			delete(srv.loadingSources, ref)
+		}
 		entries, err := srv.providerEntriesLocked(b)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
@@ -429,6 +444,13 @@ func (srv *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) 
 	if err := srv.evictProviderLocked(ref); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	if srv.failedSources != nil {
+		delete(srv.failedSources, ref)
+	}
+	if srv.loadingSources != nil {
+		delete(srv.loadingSources, ref)
 	}
 
 	entries, err := srv.providerEntriesLocked(b)

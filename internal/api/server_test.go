@@ -12,7 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
@@ -867,5 +869,194 @@ func TestAddFunctionFetchFailureIs502(t *testing.T) {
 	}
 	if body.Error != fetchErr {
 		t.Errorf("error = %q, want %q", body.Error, fetchErr)
+	}
+}
+
+// TestServerStartupDoesNotBlockOnUncachedSourceFetch (CF-438) verifies:
+//  1. Decouple initial kind indexing and HTTP request serving from synchronous blocking OCI downloads;
+//     GET /api/kinds and GET /api/blueprint return immediately with available native kinds
+//     without waiting on remote network calls under srv.mu.
+//  2. GET /api/providers returns immediately with provider status "loading" while remote sources load in background.
+func TestServerStartupDoesNotBlockOnUncachedSourceFetch(t *testing.T) {
+	store := cache.New(t.TempDir()) // empty cache, provider is uncached
+	idx, err := BuildIndex(store, nil, nil, "")
+	if err != nil {
+		t.Fatalf("BuildIndex: %v", err)
+	}
+
+	fetchStarted := make(chan struct{})
+	fetchRelease := make(chan struct{})
+	fetchDone := make(chan struct{})
+	var fetchCalledOnce sync.Once
+
+	o := Options{
+		Index:     idx,
+		Store:     store,
+		Blueprint: testBlueprintPath(t),
+		OutDir:    t.TempDir(),
+		Lock:      filepath.Join(t.TempDir(), ".cf.lock"),
+		fetch: func(ref string) (*xpkg.Package, error) {
+			fetchCalledOnce.Do(func() {
+				close(fetchStarted)
+			})
+			<-fetchRelease
+			defer close(fetchDone)
+			return &xpkg.Package{
+				Ref:    ref,
+				Digest: "sha256:released",
+				Docs: [][]byte{
+					managedCRDDoc("sqs.aws.m.upbound.io", "Queue", "queues"),
+				},
+			}, nil
+		},
+	}
+
+	h, err := New(o)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// 1. GET /api/kinds must return immediately with native kinds without waiting for remote fetch
+	kindsDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		kindsDone <- do(t, h, "GET", "/api/kinds", "")
+	}()
+
+	select {
+	case rec := <-kindsDone:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/kinds = %d, want 200: %s", rec.Code, rec.Body)
+		}
+		// Must include native kinds (e.g. k8s)
+		if !strings.Contains(rec.Body.String(), "ConfigMap") && !strings.Contains(rec.Body.String(), "Deployment") {
+			t.Fatalf("GET /api/kinds response does not contain native kinds: %s", rec.Body)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("GET /api/kinds blocked on uncached provider fetch under srv.mu")
+	}
+
+	// 2. GET /api/blueprint must return immediately
+	bpDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		bpDone <- do(t, h, "GET", "/api/blueprint", "")
+	}()
+
+	select {
+	case rec := <-bpDone:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/blueprint = %d, want 200: %s", rec.Code, rec.Body)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("GET /api/blueprint blocked on uncached provider fetch under srv.mu")
+	}
+
+	// 3. GET /api/providers must return immediately with provider status "loading"
+	provDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		provDone <- do(t, h, "GET", "/api/providers", "")
+	}()
+
+	select {
+	case rec := <-provDone:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/providers = %d, want 200: %s", rec.Code, rec.Body)
+		}
+		var resp struct {
+			Providers []struct {
+				Ref    string `json:"ref"`
+				Status string `json:"status"`
+			} `json:"providers"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal providers: %v", err)
+		}
+		foundLoading := false
+		for _, p := range resp.Providers {
+			if strings.Contains(p.Ref, "provider-aws-sqs") && p.Status == "loading" {
+				foundLoading = true
+				break
+			}
+		}
+		if !foundLoading {
+			t.Fatalf("GET /api/providers did not report provider status 'loading': %s", rec.Body)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("GET /api/providers blocked on uncached provider fetch under srv.mu")
+	}
+
+	// Clean up background goroutine
+	close(fetchRelease)
+	<-fetchDone
+	// Wait briefly for background goroutine to finish Save and index rebuild
+	time.Sleep(20 * time.Millisecond)
+}
+
+// TestOnDemandSourceFetchBoundedTimeout (CF-438) verifies:
+// On-demand provider fetches apply strict, bounded timeouts / cancellation contexts
+// rather than unbounded context.Background().
+func TestOnDemandSourceFetchBoundedTimeout(t *testing.T) {
+	store := cache.New(t.TempDir())
+	idx, err := BuildIndex(store, nil, nil, "")
+	if err != nil {
+		t.Fatalf("BuildIndex: %v", err)
+	}
+
+	timedOut := make(chan struct{})
+	hasDeadline := make(chan bool, 1)
+
+	o := Options{
+		Index:              idx,
+		Store:              store,
+		Blueprint:          testBlueprintPath(t),
+		OutDir:             t.TempDir(),
+		Lock:               filepath.Join(t.TempDir(), ".cf.lock"),
+		sourceFetchTimeout: 50 * time.Millisecond,
+		fetchCtx: func(ctx context.Context, ref string) (*xpkg.Package, error) {
+			_, ok := ctx.Deadline()
+			hasDeadline <- ok
+			<-ctx.Done()
+			close(timedOut)
+			return nil, ctx.Err()
+		},
+	}
+
+	h, err := New(o)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Verify that context passed to fetch has a deadline
+	select {
+	case ok := <-hasDeadline:
+		if !ok {
+			t.Fatal("fetch context has no deadline; expected strict bounded timeout")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("fetch was not invoked")
+	}
+
+	// Verify that context cancels upon timeout expiry
+	select {
+	case <-timedOut:
+		// Succeeded: fetch cancelled when bounded timeout expired
+	case <-time.After(1 * time.Second):
+		t.Fatal("fetch context was not cancelled within bounded timeout")
+	}
+
+	// Verify that provider now appears in /api/providers as failed with context deadline exceeded
+	deadline := time.Now().Add(1 * time.Second)
+	var listRec *httptest.ResponseRecorder
+	for {
+		listRec = do(t, h, "GET", "/api/providers", "")
+		if strings.Contains(listRec.Body.String(), "context deadline exceeded") {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(listRec.Body.String(), "context deadline exceeded") {
+		t.Fatalf("GET /api/providers does not report timeout error: %s", listRec.Body.String())
 	}
 }

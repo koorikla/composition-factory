@@ -3,8 +3,10 @@ package api
 import (
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/koorikla/compositionfactory/internal/cache"
 	"github.com/koorikla/compositionfactory/internal/xpkg"
@@ -36,7 +38,18 @@ func TestCF088DeclaredSourceLoadsOnDemand(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	kinds := do(t, h, "GET", "/api/kinds", "")
+	var kinds *httptest.ResponseRecorder
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		kinds = do(t, h, "GET", "/api/kinds", "")
+		if kinds.Code == http.StatusOK && strings.Contains(kinds.Body.String(), `"Queue"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if kinds.Code != http.StatusOK || !strings.Contains(kinds.Body.String(), `"Queue"`) {
 		t.Errorf("GET /api/kinds = %d; the declared source's kinds are not served:\n%s", kinds.Code, kinds.Body)
 	}

@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 	"github.com/koorikla/compositionfactory/internal/cache"
@@ -63,6 +64,13 @@ type Options struct {
 	// network — the same unexported seam ProviderAddCmd carries in
 	// cmd/cf/provider.go. nil means the real xpkg.Fetch.
 	fetch func(ref string) (*xpkg.Package, error)
+
+	// fetchCtx is swapped in tests so context timeouts and cancellations
+	// can be verified directly. nil means using fetch or xpkg.Fetch.
+	fetchCtx func(ctx context.Context, ref string) (*xpkg.Package, error)
+
+	// sourceFetchTimeout overrides defaultSourceFetchTimeout in tests.
+	sourceFetchTimeout time.Duration
 
 	// render and lookPath are swapped in tests so POST /api/render never
 	// execs the real crossplane CLI — the same unexported-seam pattern as
@@ -138,20 +146,25 @@ type server struct {
 	// and handleListProviders.
 	mu              sync.Mutex
 	failedSources   map[string]error
+	loadingSources  map[string]chan struct{}
 	cachedProviders map[string]bool
 }
 
+// defaultSourceFetchTimeout is the maximum duration an on-demand provider fetch
+// may run before being cancelled.
+const defaultSourceFetchTimeout = 15 * time.Second
+
 // index returns the server's current index. It is a snapshot: POST
-// /api/providers may swap in a rebuilt index at any moment, so a handler
-// takes the pointer once under mu and serves its whole response from that
-// one consistent index, rather than re-reading srv.Index mid-request.
+// /api/providers or background source loading may swap in a rebuilt index at
+// any moment, so a handler takes the pointer once under mu and serves its whole
+// response from that one consistent index, rather than re-reading srv.Index mid-request.
 //
-// CF-088: uncached declared sources are loaded on demand under mu before
-// returning the index snapshot.
+// CF-438: uncached declared sources are triggered asynchronously in the
+// background without blocking the snapshot or holding srv.mu across network I/O.
 func (srv *server) index() *index.Index {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
-	_ = srv.ensureBlueprintSourcesLoadedLocked(context.Background(), nil)
+	srv.triggerBlueprintSourcesAsyncLocked()
 	return srv.Index
 }
 
@@ -190,12 +203,18 @@ func New(o Options) (http.Handler, error) {
 	srv := &server{
 		Options:         o,
 		failedSources:   make(map[string]error),
+		loadingSources:  make(map[string]chan struct{}),
 		cachedProviders: cachedMap,
 	}
 	// srv.Providers is mutable state (POST /api/providers appends to it), so
 	// it must not share a backing array with the caller's slice — an append
 	// with spare capacity would write into memory the caller still holds.
 	srv.Providers = append([]string(nil), o.Providers...)
+
+	srv.mu.Lock()
+	srv.triggerBlueprintSourcesAsyncLocked()
+	srv.mu.Unlock()
+
 	mux := http.NewServeMux()
 
 	// Deliberately no catch-all "/" pattern: registering one would make
@@ -224,12 +243,7 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("PUT /api/blueprint/resources/{name}", srv.handleSetResource)
 	mux.HandleFunc("POST /api/blueprint/resources/{name}/rename", srv.handleRenameResource)
 	mux.HandleFunc("DELETE /api/blueprint/resources/{name}", srv.handleDeleteResource)
-	mux.HandleFunc("GET /api/providers", func(w http.ResponseWriter, r *http.Request) {
-		srv.mu.Lock()
-		_ = srv.ensureBlueprintSourcesLoadedLocked(r.Context(), nil)
-		srv.mu.Unlock()
-		srv.handleListProviders(w, r)
-	})
+	mux.HandleFunc("GET /api/providers", srv.handleListProviders)
 	mux.HandleFunc("POST /api/providers", srv.handleAddProvider)
 	mux.HandleFunc("DELETE /api/providers/{ref}", srv.handleDeleteProvider)
 	mux.HandleFunc("GET /api/functions", srv.handleListFunctions)
@@ -656,4 +670,162 @@ func defaultIsContainer() bool {
 		return true
 	}
 	return false
+}
+
+func (srv *server) sourceTimeout() time.Duration {
+	if srv.sourceFetchTimeout > 0 {
+		return srv.sourceFetchTimeout
+	}
+	return defaultSourceFetchTimeout
+}
+
+// triggerBlueprintSourcesAsyncLocked checks for declared sources that are not yet
+// loaded, cached, or failed, and kicks off a background fetch for each without
+// blocking or holding srv.mu during network I/O.
+// Caller must hold srv.mu.
+func (srv *server) triggerBlueprintSourcesAsyncLocked(optB ...*blueprint.Blueprint) {
+	if srv.Store == nil {
+		return
+	}
+	var b *blueprint.Blueprint
+	if len(optB) > 0 && optB[0] != nil {
+		b = optB[0]
+	} else if srv.Blueprint != "" {
+		cur, err := blueprint.Load(srv.Blueprint)
+		if err != nil || cur == nil {
+			return
+		}
+		b = cur
+	}
+	if b == nil {
+		return
+	}
+
+	existing := make(map[string]bool, len(srv.Providers))
+	for _, p := range srv.Providers {
+		existing[p] = true
+	}
+
+	var toFetch []string
+	addedCached := false
+
+	for _, s := range b.Spec.Sources {
+		ref := s.Provider
+		if ref == "" || ref == blueprint.NativeProvider || existing[ref] {
+			continue
+		}
+		if srv.failedSources != nil && srv.failedSources[ref] != nil {
+			continue
+		}
+		if srv.loadingSources != nil && srv.loadingSources[ref] != nil {
+			continue
+		}
+
+		// Fast path: if provider schemas are already cached on disk,
+		// load into memory immediately without any network call.
+		if _, err := srv.Store.Load(ref); err == nil {
+			srv.Providers = append(srv.Providers, ref)
+			existing[ref] = true
+			addedCached = true
+			continue
+		}
+
+		// Uncached: queue for background remote fetch.
+		if srv.loadingSources == nil {
+			srv.loadingSources = make(map[string]chan struct{})
+		}
+		done := make(chan struct{})
+		srv.loadingSources[ref] = done
+		toFetch = append(toFetch, ref)
+	}
+
+	if addedCached {
+		_ = srv.rebuildIndexLocked(b)
+	}
+
+	for _, ref := range toFetch {
+		done := srv.loadingSources[ref]
+		go srv.fetchSourceBackground(ref, done)
+	}
+}
+
+func (srv *server) fetchSourceBackground(ref string, done chan struct{}) {
+	defer close(done)
+
+	timeout := srv.sourceTimeout()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	var err error
+	if srv.fetchCtx != nil {
+		var pkg *xpkg.Package
+		pkg, err = srv.fetchCtx(ctx, ref)
+		if err == nil && pkg != nil {
+			crds, parseErr := schema.ParseCRDs(pkg.Docs)
+			if parseErr != nil {
+				err = parseErr
+			} else {
+				if saveErr := srv.Store.Save(pkg, crds); saveErr != nil {
+					err = saveErr
+				} else {
+					_ = srv.Store.PinLock(srv.Lock, ref, pkg.Digest)
+				}
+			}
+		}
+	} else {
+		_, _, err = srv.Store.FetchAndSave(ctx, srv.Lock, ref, srv.fetch)
+	}
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	delete(srv.loadingSources, ref)
+
+	if err != nil {
+		if srv.failedSources == nil {
+			srv.failedSources = make(map[string]error)
+		}
+		srv.failedSources[ref] = err
+		fmt.Fprintf(os.Stderr, "cf: warning: unable to fetch source %q: %v — continuing offline\n", ref, err)
+		return
+	}
+
+	alreadyHeld := false
+	for _, p := range srv.Providers {
+		if p == ref {
+			alreadyHeld = true
+			break
+		}
+	}
+	if !alreadyHeld {
+		srv.Providers = append(srv.Providers, ref)
+	}
+	if srv.failedSources != nil {
+		delete(srv.failedSources, ref)
+	}
+	_ = srv.rebuildIndexLocked()
+}
+
+// awaitBlueprintSources waits for any pending background fetches of sources declared in b
+// to complete or time out. It releases srv.mu while waiting so other HTTP requests are never blocked.
+func (srv *server) awaitBlueprintSources(b *blueprint.Blueprint) {
+	srv.mu.Lock()
+	srv.triggerBlueprintSourcesAsyncLocked(b)
+	var toWait []chan struct{}
+	if b != nil {
+		for _, s := range b.Spec.Sources {
+			if ch, ok := srv.loadingSources[s.Provider]; ok && ch != nil {
+				toWait = append(toWait, ch)
+			}
+		}
+	}
+	srv.mu.Unlock()
+
+	timeout := srv.sourceTimeout()
+	for _, ch := range toWait {
+		select {
+		case <-ch:
+		case <-time.After(timeout):
+		}
+	}
 }

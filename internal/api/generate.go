@@ -11,7 +11,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -82,6 +81,10 @@ func (srv *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	if cur, err := blueprint.Load(srv.Blueprint); err == nil && cur != nil {
+		srv.awaitBlueprintSources(cur)
 	}
 
 	// Held for the whole handler, not just the write half. Two concurrent
@@ -161,8 +164,8 @@ func (srv *server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 // native Kubernetes kinds, exactly the way `cf gen` does. Native kinds name
 // no source (blueprint.Validate refuses a source called "k8s") and live in
 // no cache: they are compiled into the binary and always available.
+// Caller must hold srv.mu.
 func (srv *server) loadSourceCRDs(b *blueprint.Blueprint) ([]schema.CRD, error) {
-	_ = srv.ensureBlueprintSourcesLoadedLocked(context.Background(), b)
 	for _, s := range b.Spec.Sources {
 		if s.Provider != "" && s.Provider != blueprint.NativeProvider {
 			if fetchErr, ok := srv.failedSources[s.Provider]; ok && fetchErr != nil {

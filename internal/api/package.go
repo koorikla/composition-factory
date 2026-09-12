@@ -23,6 +23,9 @@ func (srv *server) handlePackage(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if cur, err := blueprint.Load(srv.Blueprint); err == nil && cur != nil {
+		srv.awaitBlueprintSources(cur)
+	}
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
