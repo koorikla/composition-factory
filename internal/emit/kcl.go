@@ -131,7 +131,7 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 				if err != nil {
 					return "", err
 				}
-				writeKCLNodes(&sb, metaInner, root.children)
+				writeKCLNodes(&sb, metaInner, root.children, "")
 			}
 		}
 		sb.WriteString(fmt.Sprintf("%s}\n", inner))
@@ -142,7 +142,7 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 			if err != nil {
 				return "", err
 			}
-			writeKCLNodes(&sb, inner, root.children)
+			writeKCLNodes(&sb, inner, root.children, "")
 		} else {
 			sb.WriteString(fmt.Sprintf("%sspec = {\n", inner))
 			specInner := inner + "    "
@@ -153,7 +153,7 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 			if err != nil {
 				return "", err
 			}
-			writeKCLNodes(&sb, specInner+"    ", root.children)
+			writeKCLNodes(&sb, specInner+"    ", root.children, "")
 			sb.WriteString(fmt.Sprintf("%s}\n", specInner))
 
 			hasPCRInPlan := false
@@ -197,11 +197,11 @@ func kclTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, error) 
 	return sb.String(), nil
 }
 
-func writeKCLNodes(sb *strings.Builder, indent string, nodes []*nativeNode) {
+func writeKCLNodes(sb *strings.Builder, indent string, nodes []*nativeNode, inheritedGuard string) {
 	for i := 0; i < len(nodes); {
 		c := nodes[i]
 		if !c.indexed {
-			writeKCLNode(sb, indent, c)
+			writeKCLNode(sb, indent, c, inheritedGuard)
 			i++
 			continue
 		}
@@ -245,14 +245,82 @@ func kclNestedParamGuard(s structuredRHS, fallbackRHS string) (bool, string) {
 	return false, ""
 }
 
-func writeKCLNode(sb *strings.Builder, indent string, n *nativeNode) {
+// nativeNodeAllOptional returns true if every leaf in the subtree rooted at n is optional.
+func nativeNodeAllOptional(n *nativeNode) bool {
+	if len(n.children) == 0 {
+		return n.leaf != nil && (n.leaf.structured.optional || n.leaf.guard != "")
+	}
+	for _, child := range n.children {
+		if !nativeNodeAllOptional(child) {
+			return false
+		}
+	}
+	return true
+}
+
+func kclNodeFieldGuard(f *forProviderField) string {
+	if f == nil || (!f.structured.optional && f.guard == "") {
+		return ""
+	}
+	if f.structured.kind == rhsParam {
+		if len(f.structured.paramSegs) > 0 {
+			return "_spec?." + strings.Join(f.structured.paramSegs, "?.") + " != None"
+		}
+		if f.structured.param != "" {
+			return translateParamAccessToKCL(f.structured.param) + " != None"
+		}
+	} else if f.structured.kind == rhsStatus {
+		return kclRawStatusAccess(f.structured) + " != None"
+	} else if f.structured.kind == rhsEnv {
+		if len(f.structured.paramSegs) > 0 {
+			return "_env?." + strings.Join(f.structured.paramSegs, "?.") + " != None"
+		}
+		if f.structured.param != "" {
+			return "_env?." + f.structured.param + " != None"
+		}
+	}
+	if isNested, guardExpr := kclNestedParamGuard(f.structured, f.rhs); isNested {
+		return guardExpr + " != None"
+	}
+	rhs := strings.TrimSpace(f.rhs)
+	if strings.HasPrefix(rhs, "{{") && strings.HasSuffix(rhs, "}}") {
+		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(rhs, "{{"), "}}"))
+		inner = strings.TrimSuffix(inner, "| quote")
+		inner = strings.TrimSpace(inner)
+		if strings.HasPrefix(inner, "$spec.") {
+			param := strings.TrimPrefix(inner, "$spec.")
+			return translateParamAccessToKCL(param) + " != None"
+		}
+	}
+	return ""
+}
+
+func collectKCLNativeSubtreeGuards(n *nativeNode, guards *[]string, seen map[string]bool) {
+	if n.leaf != nil {
+		if g := kclNodeFieldGuard(n.leaf); g != "" {
+			if !seen[g] {
+				seen[g] = true
+				*guards = append(*guards, g)
+			}
+		}
+	}
+	for _, child := range n.children {
+		collectKCLNativeSubtreeGuards(child, guards, seen)
+	}
+}
+
+func writeKCLNode(sb *strings.Builder, indent string, n *nativeNode, inheritedGuard string) {
 	if n.leaf != nil {
 		rhs := kclStructuredRHS(n.leaf.structured, n.leaf.rhs)
-		if n.leaf.structured.kind == rhsStatus {
+		g := kclNodeFieldGuard(n.leaf)
+		if g != "" && g != inheritedGuard {
+			sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, g))
+			sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.seg), rhs))
+		} else if n.leaf.structured.kind == rhsStatus && inheritedGuard == "" {
 			raw := kclRawStatusAccess(n.leaf.structured)
 			sb.WriteString(fmt.Sprintf("%sif %s != None:\n", indent, raw))
 			sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.seg), rhs))
-		} else if isNested, guardExpr := kclNestedParamGuard(n.leaf.structured, n.leaf.rhs); isNested {
+		} else if isNested, guardExpr := kclNestedParamGuard(n.leaf.structured, n.leaf.rhs); isNested && inheritedGuard == "" {
 			sb.WriteString(fmt.Sprintf("%sif %s != None:\n", indent, guardExpr))
 			sb.WriteString(fmt.Sprintf("%s    %s = %s\n", indent, quoteKCLKey(n.seg), rhs))
 		} else {
@@ -260,9 +328,28 @@ func writeKCLNode(sb *strings.Builder, indent string, n *nativeNode) {
 		}
 		return
 	}
-	sb.WriteString(fmt.Sprintf("%s%s = {\n", indent, quoteKCLKey(n.seg)))
-	writeKCLNodes(sb, indent+"    ", n.children)
-	sb.WriteString(fmt.Sprintf("%s}\n", indent))
+
+	allOptional := nativeNodeAllOptional(n)
+	guard := ""
+	if allOptional {
+		var guards []string
+		seen := make(map[string]bool)
+		collectKCLNativeSubtreeGuards(n, &guards, seen)
+		guard = strings.Join(guards, " or ")
+	}
+
+	wrap := guard != "" && guard != inheritedGuard
+	curIndent := indent
+	childInheritedGuard := inheritedGuard
+	if wrap {
+		sb.WriteString(fmt.Sprintf("%sif %s:\n", indent, guard))
+		curIndent = indent + "    "
+		childInheritedGuard = guard
+	}
+
+	sb.WriteString(fmt.Sprintf("%s%s = {\n", curIndent, quoteKCLKey(n.seg)))
+	writeKCLNodes(sb, curIndent+"    ", n.children, childInheritedGuard)
+	sb.WriteString(fmt.Sprintf("%s}\n", curIndent))
 }
 
 func writeKCLElement(sb *strings.Builder, indent string, elem *nativeNode) {
@@ -272,7 +359,7 @@ func writeKCLElement(sb *strings.Builder, indent string, elem *nativeNode) {
 		return
 	}
 	sb.WriteString(fmt.Sprintf("%s{\n", indent))
-	writeKCLNodes(sb, indent+"    ", elem.children)
+	writeKCLNodes(sb, indent+"    ", elem.children, "")
 	sb.WriteString(fmt.Sprintf("%s}\n", indent))
 }
 

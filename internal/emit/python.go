@@ -113,7 +113,7 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 				if err != nil {
 					return "", err
 				}
-				writePythonNodes(&sb, metaInner, root.children)
+				writePythonNodes(&sb, metaInner, root.children, false)
 			}
 		}
 		sb.WriteString(fmt.Sprintf("%s},\n", inner))
@@ -124,7 +124,7 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 			if err != nil {
 				return "", err
 			}
-			writePythonNodes(&sb, inner, root.children)
+			writePythonNodes(&sb, inner, root.children, true)
 		} else {
 			sb.WriteString(fmt.Sprintf("%s\"spec\": _present({\n", inner))
 			specInner := inner + "    "
@@ -135,7 +135,7 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 			if err != nil {
 				return "", err
 			}
-			writePythonNodes(&sb, specInner+"    ", root.children)
+			writePythonNodes(&sb, specInner+"    ", root.children, false)
 			sb.WriteString(fmt.Sprintf("%s}),\n", specInner))
 
 			hasPCRInPlan := false
@@ -169,11 +169,11 @@ func pythonTemplateBody(b *blueprint.Blueprint, crds []schema.CRD) (string, erro
 	return sb.String(), nil
 }
 
-func writePythonNodes(sb *strings.Builder, indent string, nodes []*nativeNode) {
+func writePythonNodes(sb *strings.Builder, indent string, nodes []*nativeNode, isTopLevelNative bool) {
 	for i := 0; i < len(nodes); {
 		c := nodes[i]
 		if !c.indexed {
-			writePythonNode(sb, indent, c)
+			writePythonNode(sb, indent, c, isTopLevelNative)
 			i++
 			continue
 		}
@@ -192,15 +192,19 @@ func writePythonNodes(sb *strings.Builder, indent string, nodes []*nativeNode) {
 	}
 }
 
-func writePythonNode(sb *strings.Builder, indent string, n *nativeNode) {
+func writePythonNode(sb *strings.Builder, indent string, n *nativeNode, isTopLevelNative bool) {
 	if n.leaf != nil {
 		rhs := pythonStructuredRHS(n.leaf.structured, n.leaf.rhs)
 		sb.WriteString(fmt.Sprintf("%s%q: %s,\n", indent, n.seg, rhs))
 		return
 	}
 	sb.WriteString(fmt.Sprintf("%s%q: _present({\n", indent, n.seg))
-	writePythonNodes(sb, indent+"    ", n.children)
-	sb.WriteString(fmt.Sprintf("%s}),\n", indent))
+	writePythonNodes(sb, indent+"    ", n.children, false)
+	if isTopLevelNative {
+		sb.WriteString(fmt.Sprintf("%s}),\n", indent))
+	} else {
+		sb.WriteString(fmt.Sprintf("%s}) or None,\n", indent))
+	}
 }
 
 func writePythonElement(sb *strings.Builder, indent string, elem *nativeNode) {
@@ -210,7 +214,7 @@ func writePythonElement(sb *strings.Builder, indent string, elem *nativeNode) {
 		return
 	}
 	sb.WriteString(fmt.Sprintf("%s_present({\n", indent))
-	writePythonNodes(sb, indent+"    ", elem.children)
+	writePythonNodes(sb, indent+"    ", elem.children, false)
 	sb.WriteString(fmt.Sprintf("%s}),\n", indent))
 }
 
