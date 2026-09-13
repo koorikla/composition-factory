@@ -219,9 +219,9 @@ func writeTemplatePreamble(d *Doc, ti int, b *blueprint.Blueprint) {
 	}
 }
 
-// collectStatusGuards traverses fields to collect and deduplicate all status wire guards
-// required by the resource's body fields. The returned slice is sorted deterministically.
-func collectStatusGuards(fields []forProviderField) []string {
+// collectStatusGuards traverses fields and annotations to collect and deduplicate
+// all status wire guards required by the resource. The returned slice is sorted deterministically.
+func collectStatusGuards(fieldLists ...[]forProviderField) []string {
 	var guards []string
 	seen := make(map[string]bool)
 	var walk func(flds []forProviderField)
@@ -238,7 +238,9 @@ func collectStatusGuards(fields []forProviderField) []string {
 			}
 		}
 	}
-	walk(fields)
+	for _, flds := range fieldLists {
+		walk(flds)
+	}
 	sort.Strings(guards)
 	return guards
 }
@@ -291,7 +293,7 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 		}
 		d.Line(ti, "{{- if %s }}", cond)
 	}
-	statusGuards := collectStatusGuards(bodyPlan)
+	statusGuards := collectStatusGuards(annPlan, metaPlan, bodyPlan)
 	statusGuarded := len(statusGuards) > 0
 	if statusGuarded {
 		var statusCond string

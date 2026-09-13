@@ -189,10 +189,11 @@ func TestAnnotationStatusWireRendersBothWays(t *testing.T) {
 		if err != nil {
 			t.Fatalf("render must succeed while the source is unobserved, got: %v", err)
 		}
-		anns := docAnnotations(t, rendered, "QueuePolicy")
-		if _, present := anns["example.com/queue-url"]; present {
-			t.Errorf("example.com/queue-url must be omitted while unobserved, got %v",
-				anns["example.com/queue-url"])
+		if hasDocKind(t, rendered, "QueuePolicy") {
+			t.Errorf("QueuePolicy must be omitted while unobserved\n---\n%s", rendered)
+		}
+		if !hasDocKind(t, rendered, "Queue") {
+			t.Errorf("Queue must be rendered while unobserved\n---\n%s", rendered)
 		}
 		for _, bad := range []string{"<no value>", "<nil>"} {
 			if strings.Contains(rendered, bad) {
@@ -203,9 +204,9 @@ func TestAnnotationStatusWireRendersBothWays(t *testing.T) {
 }
 
 // Annotations on a NATIVE kind — the motivating IRSA case: the ServiceAccount
-// carries the wired annotation once the source is observed, the key is
-// cleanly absent before, and the native document still has no Crossplane
-// envelope anywhere near it.
+// carries the wired annotation once the source is observed, the dependent
+// ServiceAccount is gated entirely while unobserved, and the native document
+// still has no Crossplane envelope anywhere near it.
 func TestNativeAnnotationRendersOnTheObject(t *testing.T) {
 	native, err := k8s.Kinds()
 	if err != nil {
@@ -252,20 +253,11 @@ func TestNativeAnnotationRendersOnTheObject(t *testing.T) {
 		if err != nil {
 			t.Fatalf("render must succeed while the source is unobserved, got: %v", err)
 		}
-		anns := docAnnotations(t, rendered, "ServiceAccount")
-		if _, present := anns["eks.amazonaws.com/role-arn"]; present {
-			t.Errorf("role-arn must be omitted while unobserved, got %v", anns["eks.amazonaws.com/role-arn"])
+		if hasDocKind(t, rendered, "ServiceAccount") {
+			t.Errorf("ServiceAccount must be omitted while unobserved\n---\n%s", rendered)
 		}
-		if anns["example.com/team"] != "platform" {
-			t.Errorf("team = %v — the unconditional annotation must render regardless", anns["example.com/team"])
-		}
-		for _, doc := range renderedDocs(t, rendered) {
-			if doc["kind"] != "ServiceAccount" {
-				continue
-			}
-			if _, has := doc["spec"]; has {
-				t.Errorf("ServiceAccount grew a spec — annotations must not disturb the native body\n---\n%s", rendered)
-			}
+		if !hasDocKind(t, rendered, "Queue") {
+			t.Errorf("Queue must be rendered while unobserved\n---\n%s", rendered)
 		}
 		for _, bad := range []string{"<no value>", "<nil>"} {
 			if strings.Contains(rendered, bad) {

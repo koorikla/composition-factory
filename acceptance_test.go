@@ -1527,28 +1527,15 @@ func TestAcceptanceIRSARenders(t *testing.T) {
 		return anns
 	}
 
-	t.Run("unobserved: the annotation key is cleanly absent", func(t *testing.T) {
+	t.Run("unobserved: the dependent ServiceAccount is gated entirely", func(t *testing.T) {
 		rendered, err := renderComposition(t, "testdata/xr-irsa.yaml", comp, fns, "--xrd", xrd, "--timeout", "5m")
 		if err != nil {
 			t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
 		}
 		docs := decodeRenderedDocs(t, rendered)
 
-		anns := saAnnotations(t, docs, rendered)
-		if v, present := anns["eks.amazonaws.com/role-arn"]; present {
-			t.Errorf("eks.amazonaws.com/role-arn = %v — the key must be omitted entirely while the "+
-				"Role is unobserved, never rendered empty", v)
-		}
-		if got := anns["crossplane.io/composition-resource-name"]; got != "sa" {
-			t.Errorf("composition-resource-name = %v, want sa — the function-set annotation must "+
-				"survive beside authored ones", got)
-		}
-		sa := docs["ServiceAccount"]
-		if got := sa["automountServiceAccountToken"]; got != true {
-			t.Errorf("automountServiceAccountToken = %v (%T), want true", got, got)
-		}
-		if _, has := sa["spec"]; has {
-			t.Errorf("ServiceAccount grew a spec — a native object carries no Crossplane envelope\n---\n%s", rendered)
+		if _, hasSA := docs["ServiceAccount"]; hasSA {
+			t.Errorf("ServiceAccount must not be rendered while Role status is unobserved\n---\n%s", rendered)
 		}
 
 		role, ok := docs["Role"]

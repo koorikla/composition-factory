@@ -9,11 +9,9 @@
 #
 # The ARN only exists once AWS has created the Role, so the annotation is a
 # cross-resource status wire: `from: resources.role.status.atProvider.arn`.
-# The generated Composition guards it with the hasKey chain every status wire
-# gets — on the first reconcile (Role not yet observed) the ServiceAccount
-# renders WITHOUT the annotation key, cleanly, and Crossplane fills it in on
-# a later reconcile once the Role reports its ARN. Never an empty value,
-# never "<no value>".
+# The generated Composition gates the ServiceAccount until the Role status is
+# observed; once observed, Crossplane emits the ServiceAccount with the
+# role-arn annotation. Never an empty value, never "<no value>".
 apiVersion: factory.crossplane.io/v1alpha1
 kind: Blueprint
 metadata:

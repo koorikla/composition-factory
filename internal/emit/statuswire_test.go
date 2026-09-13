@@ -210,6 +210,222 @@ func hasDocKind(t *testing.T, rendered, kind string) bool {
 	return false
 }
 
+func hasDocResourceName(t *testing.T, rendered, resourceName string) bool {
+	t.Helper()
+	for _, docText := range strings.Split(rendered, "\n---\n") {
+		trimmed := strings.TrimSpace(docText)
+		if trimmed == "" {
+			continue
+		}
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(docText), &doc); err != nil {
+			t.Fatalf("rendered output is not valid YAML: %v\n---\n%s", err, docText)
+		}
+		meta, _ := doc["metadata"].(map[string]any)
+		anns, _ := meta["annotations"].(map[string]any)
+		if anns["crossplane.io/composition-resource-name"] == resourceName {
+			return true
+		}
+	}
+	return false
+}
+
+// CF-482: Composed resources whose annotation is wired to another resource's status
+// must be gated entirely until prerequisite status fields exist in observed state.
+func TestStatusWireInAnnotationGatesDependentResource(t *testing.T) {
+	b := wireBlueprint()
+	b.Spec.Resources[1].Fields = map[string]blueprint.Field{
+		"region":   {Value: "eu-north-1"},
+		"queueUrl": {Value: "https://static"},
+	}
+	b.Spec.Resources[1].Annotations = map[string]blueprint.Field{
+		"crossplane.io/external-name": {From: "resources.main-queue.status.atProvider.url"},
+	}
+
+	got, err := Composition(b, wireCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmplBody := extractTemplate(t, got)
+
+	// When source is unobserved: QueuePolicy must NOT be rendered at all.
+	rendered, err := renderTemplateObserved(t, tmplBody,
+		map[string]any{"providerName": "localstack"}, nil)
+	if err != nil {
+		t.Fatalf("render must succeed when source is unobserved, got: %v", err)
+	}
+	if hasDocKind(t, rendered, "QueuePolicy") {
+		t.Fatalf("QueuePolicy must NOT be rendered while main-queue status is unobserved; got rendered output:\n%s", rendered)
+	}
+	if !hasDocKind(t, rendered, "Queue") {
+		t.Fatalf("Queue must be rendered while unobserved; got rendered output:\n%s", rendered)
+	}
+
+	// When source is observed: QueuePolicy must be rendered and have the annotation.
+	renderedObs, err := renderTemplateObserved(t, tmplBody,
+		map[string]any{"providerName": "localstack"},
+		observedQueue("https://sqs.eu-north-1.amazonaws.com/1/demo"))
+	if err != nil {
+		t.Fatalf("render with observed source: %v", err)
+	}
+	if !hasDocKind(t, renderedObs, "QueuePolicy") {
+		t.Fatalf("QueuePolicy must be rendered when status is observed; got:\n%s", renderedObs)
+	}
+	doc := renderedPolicyDoc(t, renderedObs)
+	meta, _ := doc["metadata"].(map[string]any)
+	anns, _ := meta["annotations"].(map[string]any)
+	if anns["crossplane.io/external-name"] != "https://sqs.eu-north-1.amazonaws.com/1/demo" {
+		t.Errorf("crossplane.io/external-name = %v, want observed url", anns["crossplane.io/external-name"])
+	}
+}
+
+// CF-482: Literal repro — two Queue resources, the second annotated with the
+// first's observed status. The second resource must be gated entirely until observed.
+func TestStatusWireInAnnotationLiteralRepro(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.Resources = []blueprint.Resource{
+		{
+			Name: "main-queue", Kind: "Queue",
+			Fields: map[string]blueprint.Field{
+				"region": {Value: "eu-north-1"},
+			},
+		},
+		{
+			Name: "follower-queue", Kind: "Queue",
+			Annotations: map[string]blueprint.Field{
+				"crossplane.io/external-name": {From: "resources.main-queue.status.atProvider.url"},
+			},
+			Fields: map[string]blueprint.Field{
+				"region": {Value: "eu-north-1"},
+			},
+		},
+	}
+	got, err := Composition(b, wireCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmplBody := extractTemplate(t, got)
+
+	// When unobserved: main-queue rendered, follower-queue must NOT be rendered.
+	rendered, err := renderTemplateObserved(t, tmplBody,
+		map[string]any{"providerName": "localstack"}, nil)
+	if err != nil {
+		t.Fatalf("render must succeed when source is unobserved, got: %v", err)
+	}
+	if !hasDocResourceName(t, rendered, "main-queue") {
+		t.Fatalf("main-queue must be rendered while unobserved; got:\n%s", rendered)
+	}
+	if hasDocResourceName(t, rendered, "follower-queue") {
+		t.Fatalf("follower-queue must NOT be rendered while main-queue status is unobserved; got rendered output:\n%s", rendered)
+	}
+
+	// When observed: both rendered.
+	renderedObs, err := renderTemplateObserved(t, tmplBody,
+		map[string]any{"providerName": "localstack"},
+		observedQueue("https://sqs.eu-north-1.amazonaws.com/1/demo"))
+	if err != nil {
+		t.Fatalf("render with observed source: %v", err)
+	}
+	if !hasDocResourceName(t, renderedObs, "main-queue") {
+		t.Fatalf("main-queue must be rendered when observed")
+	}
+	if !hasDocResourceName(t, renderedObs, "follower-queue") {
+		t.Fatalf("follower-queue must be rendered when observed")
+	}
+	for _, docText := range strings.Split(renderedObs, "\n---\n") {
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(docText), &doc); err != nil {
+			continue
+		}
+		meta, _ := doc["metadata"].(map[string]any)
+		anns, _ := meta["annotations"].(map[string]any)
+		if anns["crossplane.io/composition-resource-name"] == "follower-queue" {
+			if anns["crossplane.io/external-name"] != "https://sqs.eu-north-1.amazonaws.com/1/demo" {
+				t.Errorf("follower-queue crossplane.io/external-name = %v, want observed url", anns["crossplane.io/external-name"])
+			}
+		}
+	}
+}
+
+// CF-482: A resource with status wires in both an annotation and a field:
+// must not render until BOTH status dependencies are observed.
+func TestStatusWireInAnnotationAndField(t *testing.T) {
+	b := wireBlueprint()
+	b.Spec.Resources[1].Fields["queueUrl"] = blueprint.Field{
+		From: "resources.main-queue.status.atProvider.url",
+	}
+	b.Spec.Resources[1].Annotations = map[string]blueprint.Field{
+		"crossplane.io/external-name": {From: "resources.main-queue.status.atProvider.maxMessageSize"},
+	}
+	got, err := Composition(b, wireCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmplBody := extractTemplate(t, got)
+
+	t.Run("neither observed", func(t *testing.T) {
+		rendered, err := renderTemplateObserved(t, tmplBody,
+			map[string]any{"providerName": "localstack"}, nil)
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if hasDocKind(t, rendered, "QueuePolicy") {
+			t.Errorf("QueuePolicy must not render when neither status field is observed\n---\n%s", rendered)
+		}
+	})
+
+	t.Run("only url observed", func(t *testing.T) {
+		rendered, err := renderTemplateObserved(t, tmplBody,
+			map[string]any{"providerName": "localstack"},
+			map[string]any{"main-queue": map[string]any{"resource": map[string]any{
+				"status": map[string]any{"atProvider": map[string]any{
+					"url": "https://q",
+				}}}}})
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if hasDocKind(t, rendered, "QueuePolicy") {
+			t.Errorf("QueuePolicy must not render when only url is observed\n---\n%s", rendered)
+		}
+	})
+
+	t.Run("only maxMessageSize observed", func(t *testing.T) {
+		rendered, err := renderTemplateObserved(t, tmplBody,
+			map[string]any{"providerName": "localstack"},
+			map[string]any{"main-queue": map[string]any{"resource": map[string]any{
+				"status": map[string]any{"atProvider": map[string]any{
+					"maxMessageSize": 2048,
+				}}}}})
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if hasDocKind(t, rendered, "QueuePolicy") {
+			t.Errorf("QueuePolicy must not render when only maxMessageSize is observed\n---\n%s", rendered)
+		}
+	})
+
+	t.Run("both observed", func(t *testing.T) {
+		rendered, err := renderTemplateObserved(t, tmplBody,
+			map[string]any{"providerName": "localstack"},
+			map[string]any{"main-queue": map[string]any{"resource": map[string]any{
+				"status": map[string]any{"atProvider": map[string]any{
+					"url": "https://q", "maxMessageSize": 2048,
+				}}}}})
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if !hasDocKind(t, rendered, "QueuePolicy") {
+			t.Fatalf("QueuePolicy must render when both status fields are observed\n---\n%s", rendered)
+		}
+		doc := renderedPolicyDoc(t, rendered)
+		meta, _ := doc["metadata"].(map[string]any)
+		anns, _ := meta["annotations"].(map[string]any)
+		if anns["crossplane.io/external-name"] != "2048" {
+			t.Errorf("crossplane.io/external-name = %v, want 2048", anns["crossplane.io/external-name"])
+		}
+	})
+}
+
 // CF-481: Composed resources referencing status fields of another resource
 // must be gated entirely until prerequisite status fields exist in observed state.
 func TestStatusWireGatesDependentResourceWhenUnobserved(t *testing.T) {
