@@ -264,6 +264,18 @@ fields:
   selector.matchLabels[app]: {from: params.appName}
 ```
 
+### Manifest view of a resource
+
+The canvas inspector and the `get_resource_manifest` / `set_resource_manifest` tools show a
+resource's `fields` as nested manifest-shaped YAML. A plain scalar is a `value:`; a mapping
+whose only key is `value`, `from`, `raw` or `template` is that wrapper; everything else
+recurses. The kind's schema decides the grammar: a map node's children become `[key]`
+entries, an array-of-objects' items become `[i]`, object members use dots. Arrays of scalars
+read as a flow list (`command: [sh, -c]`) and store as a comma-separated `value:`. A whole
+object or map set verbatim is always written explicitly as `{raw: "..."}`. A genuine literal
+map that happens to be exactly `{from: x}` is written `{from: {value: x}}`.
+
+
 ---
 
 ## Annotations Authoring
