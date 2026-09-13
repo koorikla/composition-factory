@@ -160,6 +160,7 @@ func TestAnnotationParamWireRendersBothWays(t *testing.T) {
 // guard chain field wires get, executed, not string-matched.
 func TestAnnotationStatusWireRendersBothWays(t *testing.T) {
 	b := wireBlueprint()
+	delete(b.Spec.Resources[1].Fields, "queueUrl")
 	b.Spec.Resources[1].Annotations = map[string]blueprint.Field{
 		"example.com/queue-url": {From: "resources.main-queue.status.atProvider.url"},
 	}

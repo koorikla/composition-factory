@@ -219,6 +219,30 @@ func writeTemplatePreamble(d *Doc, ti int, b *blueprint.Blueprint) {
 	}
 }
 
+// collectStatusGuards traverses fields to collect and deduplicate all status wire guards
+// required by the resource's body fields. The returned slice is sorted deterministically.
+func collectStatusGuards(fields []forProviderField) []string {
+	var guards []string
+	seen := make(map[string]bool)
+	var walk func(flds []forProviderField)
+	walk = func(flds []forProviderField) {
+		for _, f := range flds {
+			if f.structured.kind == rhsStatus && f.guard != "" {
+				if !seen[f.guard] {
+					seen[f.guard] = true
+					guards = append(guards, f.guard)
+				}
+			}
+			if f.isMap && len(f.entries) > 0 {
+				walk(f.entries)
+			}
+		}
+	}
+	walk(fields)
+	sort.Strings(guards)
+	return guards
+}
+
 func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) error {
 	pres, err := planSingleResource(r, b, crds, wantNamespaced)
 	if err != nil {
@@ -266,6 +290,17 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 			return fmt.Errorf("resource %q: %w", r.Name, err)
 		}
 		d.Line(ti, "{{- if %s }}", cond)
+	}
+	statusGuards := collectStatusGuards(bodyPlan)
+	statusGuarded := len(statusGuards) > 0
+	if statusGuarded {
+		var statusCond string
+		if len(statusGuards) == 1 {
+			statusCond = statusGuards[0]
+		} else {
+			statusCond = "and (" + strings.Join(statusGuards, ") (") + ")"
+		}
+		d.Line(ti, "{{- if %s }}", statusCond)
 	}
 	looped := r.ForEach != ""
 	loopGuarded := false
@@ -417,6 +452,9 @@ func writeResourceTemplate(d *Doc, ti int, r blueprint.Resource, b *blueprint.Bl
 			// the opening order above.
 			d.Line(ti, "{{- end }}")
 		}
+	}
+	if statusGuarded {
+		d.Line(ti, "{{- end }}")
 	}
 	if conditional {
 		d.Line(ti, "{{- end }}")

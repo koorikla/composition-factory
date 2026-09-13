@@ -192,13 +192,49 @@ func TestStatusWireRendersTheObservedValue(t *testing.T) {
 	}
 }
 
-// The unobserved cases: the render must SUCCEED and the field must be
-// cleanly absent — never "<no value>", never a hard render failure. Each
-// case is one rung of the guard chain being genuinely missing, plus the
-// degenerate shapes (nil, non-map) a hand-written observed fixture or a
-// half-populated resource can produce, which hasKey alone would hard-fail
-// on (a nil intermediate is a "wrong type for value" execution error —
-// measured, not assumed).
+func hasDocKind(t *testing.T, rendered, kind string) bool {
+	t.Helper()
+	for _, docText := range strings.Split(rendered, "\n---\n") {
+		trimmed := strings.TrimSpace(docText)
+		if trimmed == "" {
+			continue
+		}
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(docText), &doc); err != nil {
+			t.Fatalf("rendered output is not valid YAML: %v\n---\n%s", err, docText)
+		}
+		if doc["kind"] == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// CF-481: Composed resources referencing status fields of another resource
+// must be gated entirely until prerequisite status fields exist in observed state.
+func TestStatusWireGatesDependentResourceWhenUnobserved(t *testing.T) {
+	got, err := Composition(wireBlueprint(), wireCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmplBody := extractTemplate(t, got)
+
+	rendered, err := renderTemplateObserved(t, tmplBody,
+		map[string]any{"providerName": "localstack"}, nil)
+	if err != nil {
+		t.Fatalf("render must succeed when source is unobserved, got: %v", err)
+	}
+	if hasDocKind(t, rendered, "QueuePolicy") {
+		t.Fatalf("QueuePolicy must NOT be rendered while main-queue status is unobserved; got rendered output:\n%s", rendered)
+	}
+	if !hasDocKind(t, rendered, "Queue") {
+		t.Fatalf("Queue must be rendered while unobserved; got rendered output:\n%s", rendered)
+	}
+}
+
+// CF-481: The unobserved cases: the render must SUCCEED, the dependent resource
+// must be cleanly gated (not rendered at all), and the source resource must appear.
+// Never "<no value>", never a hard render failure.
 func TestStatusWireOmitsTheFieldWhenUnobserved(t *testing.T) {
 	got, err := Composition(wireBlueprint(), wireCRDs(t))
 	if err != nil {
@@ -240,10 +276,11 @@ func TestStatusWireOmitsTheFieldWhenUnobserved(t *testing.T) {
 			if err != nil {
 				t.Fatalf("render must succeed when the source is unobserved, got: %v", err)
 			}
-			fp := policyForProvider(t, rendered)
-			if _, present := fp["queueUrl"]; present {
-				t.Errorf("queueUrl must be omitted while unobserved, got %v\n---\n%s",
-					fp["queueUrl"], rendered)
+			if hasDocKind(t, rendered, "QueuePolicy") {
+				t.Errorf("QueuePolicy must be omitted while unobserved\n---\n%s", rendered)
+			}
+			if !hasDocKind(t, rendered, "Queue") {
+				t.Errorf("Queue must be rendered while unobserved\n---\n%s", rendered)
 			}
 			for _, bad := range []string{"<no value>", "<nil>"} {
 				if strings.Contains(rendered, bad) {
@@ -254,10 +291,9 @@ func TestStatusWireOmitsTheFieldWhenUnobserved(t *testing.T) {
 	}
 }
 
-// A resource whose ONLY field is a status wire: while unobserved its
-// forProvider must render as an explicit empty map, not a bare key that
-// YAML decodes as null (the same all-optional problem writeMapField solves
-// for optional parameters, extended to wire guards).
+// CF-481: A resource whose ONLY field is a status wire: while unobserved it
+// must not render at all (avoiding empty objects dispatched to controllers),
+// and once observed it renders with its fields.
 func TestForProviderIsEmptyMapWhenOnlyStatusWireIsUnobserved(t *testing.T) {
 	b := wireBlueprint()
 	b.Spec.Resources[1].Fields = map[string]blueprint.Field{
@@ -274,15 +310,8 @@ func TestForProviderIsEmptyMapWhenOnlyStatusWireIsUnobserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	doc := renderedPolicyDoc(t, rendered)
-	spec, _ := doc["spec"].(map[string]any)
-	fp, present := spec["forProvider"]
-	if !present || fp == nil {
-		t.Fatalf("forProvider = %v (present=%v), want an explicit empty map while the only "+
-			"wire is unobserved\n---\n%s", fp, present, rendered)
-	}
-	if m, ok := fp.(map[string]any); !ok || len(m) != 0 {
-		t.Errorf("forProvider = %v, want an empty map\n---\n%s", fp, rendered)
+	if hasDocKind(t, rendered, "QueuePolicy") {
+		t.Fatalf("QueuePolicy must not render while its only status wire is unobserved\n---\n%s", rendered)
 	}
 
 	// And once observed, the same template renders the value.
@@ -294,6 +323,131 @@ func TestForProviderIsEmptyMapWhenOnlyStatusWireIsUnobserved(t *testing.T) {
 	if fp := policyForProvider(t, rendered); fp["queueUrl"] != "https://q" {
 		t.Errorf("queueUrl = %v, want https://q\n---\n%s", fp["queueUrl"], rendered)
 	}
+}
+
+func TestStatusWireMultipleDependencies(t *testing.T) {
+	b := wireBlueprint()
+	b.Spec.Resources[1].Fields["maxMessageSize"] = blueprint.Field{
+		From: "resources.main-queue.status.atProvider.maxMessageSize",
+	}
+	got, err := Composition(b, wireCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmplBody := extractTemplate(t, got)
+
+	t.Run("neither observed", func(t *testing.T) {
+		rendered, err := renderTemplateObserved(t, tmplBody,
+			map[string]any{"providerName": "localstack"}, nil)
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if hasDocKind(t, rendered, "QueuePolicy") {
+			t.Errorf("QueuePolicy must not render when neither status field is observed\n---\n%s", rendered)
+		}
+	})
+
+	t.Run("only url observed", func(t *testing.T) {
+		rendered, err := renderTemplateObserved(t, tmplBody,
+			map[string]any{"providerName": "localstack"},
+			map[string]any{"main-queue": map[string]any{"resource": map[string]any{
+				"status": map[string]any{"atProvider": map[string]any{
+					"url": "https://q",
+				}}}}})
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if hasDocKind(t, rendered, "QueuePolicy") {
+			t.Errorf("QueuePolicy must not render when only url is observed\n---\n%s", rendered)
+		}
+	})
+
+	t.Run("only maxMessageSize observed", func(t *testing.T) {
+		rendered, err := renderTemplateObserved(t, tmplBody,
+			map[string]any{"providerName": "localstack"},
+			map[string]any{"main-queue": map[string]any{"resource": map[string]any{
+				"status": map[string]any{"atProvider": map[string]any{
+					"maxMessageSize": 2048,
+				}}}}})
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if hasDocKind(t, rendered, "QueuePolicy") {
+			t.Errorf("QueuePolicy must not render when only maxMessageSize is observed\n---\n%s", rendered)
+		}
+	})
+
+	t.Run("both observed", func(t *testing.T) {
+		rendered, err := renderTemplateObserved(t, tmplBody,
+			map[string]any{"providerName": "localstack"},
+			map[string]any{"main-queue": map[string]any{"resource": map[string]any{
+				"status": map[string]any{"atProvider": map[string]any{
+					"url": "https://q", "maxMessageSize": 2048,
+				}}}}})
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if !hasDocKind(t, rendered, "QueuePolicy") {
+			t.Fatalf("QueuePolicy must render when both status fields are observed\n---\n%s", rendered)
+		}
+		fp := policyForProvider(t, rendered)
+		if fp["queueUrl"] != "https://q" {
+			t.Errorf("queueUrl = %v, want https://q", fp["queueUrl"])
+		}
+		if fp["maxMessageSize"] != float64(2048) {
+			t.Errorf("maxMessageSize = %v, want 2048", fp["maxMessageSize"])
+		}
+	})
+}
+
+func TestStatusWireWithWhenCondition(t *testing.T) {
+	b := wireBlueprint()
+	b.Spec.XRD.Parameters["enablePolicy"] = blueprint.Parameter{
+		Type: "boolean", Required: true,
+	}
+	b.Spec.Resources[1].When = "params.enablePolicy"
+
+	got, err := Composition(b, wireCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	tmplBody := extractTemplate(t, got)
+
+	t.Run("when false and observed", func(t *testing.T) {
+		rendered, err := renderTemplateObserved(t, tmplBody,
+			map[string]any{"providerName": "localstack", "enablePolicy": false},
+			observedQueue("https://q"))
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if hasDocKind(t, rendered, "QueuePolicy") {
+			t.Errorf("QueuePolicy must not render when when: condition is false")
+		}
+	})
+
+	t.Run("when true and unobserved", func(t *testing.T) {
+		rendered, err := renderTemplateObserved(t, tmplBody,
+			map[string]any{"providerName": "localstack", "enablePolicy": true},
+			nil)
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if hasDocKind(t, rendered, "QueuePolicy") {
+			t.Errorf("QueuePolicy must not render when status is unobserved")
+		}
+	})
+
+	t.Run("when true and observed", func(t *testing.T) {
+		rendered, err := renderTemplateObserved(t, tmplBody,
+			map[string]any{"providerName": "localstack", "enablePolicy": true},
+			observedQueue("https://q"))
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		if !hasDocKind(t, rendered, "QueuePolicy") {
+			t.Errorf("QueuePolicy must render when when: is true and status is observed")
+		}
+	})
 }
 
 // The guard idiom is hasKey/kindIs, never `with` (spec §8: {{- with }} is

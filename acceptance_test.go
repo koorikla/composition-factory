@@ -195,11 +195,14 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 		"region: eu-north-1",
 		"kind: ClusterProviderConfig",
 		"name: localstack",
-		"kind: QueuePolicy",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered output missing %q\n---\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "kind: QueuePolicy") {
+		t.Errorf("QueuePolicy must NOT be rendered while main-queue is unobserved — the status wire's "+
+			"resource guard failed open\n---\n%s", got)
 	}
 	if strings.Contains(got, "queueUrl") {
 		t.Errorf("queueUrl must be absent while main-queue is unobserved — the status wire's "+
@@ -228,6 +231,9 @@ func TestAcceptanceXQueueRenders(t *testing.T) {
 		t.Fatalf("crossplane composition render --observed-resources: %v\n%s", err, renderedObserved)
 	}
 	gotObserved := string(renderedObserved)
+	if !strings.Contains(gotObserved, "kind: QueuePolicy") {
+		t.Errorf("rendered output missing kind: QueuePolicy when main-queue is observed\n---\n%s", gotObserved)
+	}
 	const wiredURL = "queueUrl: https://sqs.eu-north-1.amazonaws.com/000000000000/demo-main-queue"
 	if !strings.Contains(gotObserved, wiredURL) {
 		t.Errorf("rendered output missing %q — the observed status value did not flow across "+
@@ -605,12 +611,13 @@ func TestAcceptanceStatusRefRenders(t *testing.T) {
 		if strings.Contains(got, "queueUrl") {
 			t.Errorf("queueUrl must be omitted entirely until the queue is observed\n---\n%s", got)
 		}
-		// Both composed documents must still be present — the guard omits one
-		// field, never a resource.
-		for _, want := range []string{"kind: Queue", "kind: QueuePolicy"} {
-			if !strings.Contains(got, want) {
-				t.Errorf("rendered output missing %q\n---\n%s", want, got)
-			}
+		// CF-481: Dependent resources referencing status fields of another resource
+		// must be gated entirely until prerequisite status fields exist in observed state.
+		if !strings.Contains(got, "kind: Queue") {
+			t.Errorf("rendered output missing %q\n---\n%s", "kind: Queue", got)
+		}
+		if strings.Contains(got, "kind: QueuePolicy") {
+			t.Errorf("QueuePolicy must not be rendered while main-queue status is unobserved\n---\n%s", got)
 		}
 		for _, bad := range []string{"<no value>", "<nil>"} {
 			if strings.Contains(got, bad) {
