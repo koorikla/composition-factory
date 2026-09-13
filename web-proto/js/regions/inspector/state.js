@@ -15,6 +15,11 @@ export var state = {
   root: null,
   box: null,   // #insp
   fseg: null,  // #fseg
+  vseg: null,  // #vseg
+  searchEl: null, // #insp-search
+  view: "manifest", // "manifest" | "fields"
+  search: "",
+  manifestDraft: null, // { res: string, text: string, err: string|null }
 
   filter: "req",              // "req" | "set" | "all"
   warnMsg: null,              // verbatim server error to show, or null

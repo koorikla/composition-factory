@@ -1,3 +1,26 @@
+var view = readView();
+var search = "";
+var manifestDraft = null;
+var manifestYAML = "";
+
+function readView() {
+  try { return localStorage.getItem("cf-insp-view") === "fields" ? "fields" : "manifest"; }
+  catch (_) { return "manifest"; }
+}
+
+function searchHitsHtml(fields, q) {
+  var ql = q.toLowerCase();
+  var hits = fields.filter(function (f) {
+    return f.path.toLowerCase().indexOf(ql) !== -1 || (f.description || "").toLowerCase().indexOf(ql) !== -1;
+  }).slice(0, 30);
+  if (!hits.length) return '<div class="empty">No schema field matches “' + esc(q) + '”.</div>';
+  return '<div class="insp-sec" style="padding:6px 12px"><div class="lbl" style="margin-bottom:4px">Schema matches (' + hits.length + ')</div>' +
+    hits.map(function (f) {
+      return '<div class="search-hit" data-search-hit="' + esc(f.path) + '" role="button" tabindex="0" style="padding:4px 0;border-bottom:1px solid var(--rule);cursor:pointer">' +
+        '<div style="display:flex;gap:6px;align-items:baseline"><code style="font-family:var(--mono);font-size:11px;min-width:0;overflow-wrap:anywhere">' + esc(f.path) + '</code><span class="t" style="color:var(--faint);font-size:9.5px">' + esc(f.type) + '</span></div>' +
+        (f.description ? '<div class="fld-d" style="margin:0">' + esc(f.description.slice(0, 140)) + '</div>' : '') + '</div>';
+    }).join("") + '</div>';
+}
 /**
  * Region: INSPECTOR. Root element: #region-inspector (body: #insp, filter: #fseg).
  * Modular coordinator orchestrating:
@@ -16,6 +39,8 @@ import { mapResourceCoordinates, deleteEnvKeyFromDoc, renameEnvKeyInDoc, parseEn
 import { state, PARAM_TYPES } from "./inspector/state.js";
 import { scaffoldResourceFields } from "./canvas.js";
 import { essentialsHtml } from "./inspector/essentials.js";
+import { manifestHtml } from "./inspector/manifest.js";
+import { setView } from "./inspector/events.js";
 import {
   renderXRD, paramsOf, isParamLocked, cleanParamRefs, paramFrom, cloneProps, memberParent,
   memberContainer, commitMembers, inferFnMeta, parseInputYAML, serializeInputYAML, getPathVal,
@@ -420,8 +445,10 @@ function fieldRow(res, f, params, otherResources, otherStatusMap, env) {
   }
 
   var isReq = isFieldEffectivelyRequired(f, res);
-  if (filter === "req" && !(isReq || f.branch || entry || mapEntries.length)) return "";
-  if (filter === "set" && !entry && !mapEntries.length) return "";
+  if (!search) {
+    if (filter === "req" && !(isReq || f.branch || entry || mapEntries.length)) return "";
+    if (filter === "set" && !entry && !mapEntries.length) return "";
+  }
 
   var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
     '<div class="fld-h"><span class="n" title="' + esc(f.path) + '">' + esc(f.path) + '</span><span class="t">' + esc(f.type) + "</span>" +
@@ -770,7 +797,7 @@ async function renderResource(res) {
   // for-each: repeat this resource N times, N from an integer parameter
   var allParams = paramsOf(doc);
   var intParams = Object.keys(allParams).filter(function (n) { return allParams[n].type === "integer"; });
-  h += '<div class="fld"><div class="frow" style="margin-bottom:0">' +
+  h += '<div class="ctrl-row" style="padding:4px 12px"><div class="frow" style="margin-bottom:0">' +
     '<span class="lbl" style="flex:0 0 auto">for each</span>' +
     '<select class="tsel" data-foreach="' + esc(res.name) + '" style="flex:1;min-width:0" ' +
     'title="Repeat this resource N times \u2014 N comes from an integer parameter">' +
@@ -812,7 +839,7 @@ async function renderResource(res) {
     selectedWhenVal = src + "." + w.param;
   }
 
-  h += '<div class="fld"><div class="frow" style="margin-bottom:0">' +
+  h += '<div class="ctrl-row" style="padding:4px 12px"><div class="frow" style="margin-bottom:0">' +
     '<span class="lbl" style="flex:0 0 auto">when</span>' +
     '<select class="tsel" data-when-param="' + esc(res.name) + '" style="flex:1;min-width:0" ' +
     'title="Compose this resource only when the condition holds">' +
@@ -881,10 +908,26 @@ async function renderResource(res) {
         }).join("")
       : "";
     h += essentialsHtml(res, flds, doc, params, otherResources, otherStatusMap, env);
+    var mf = null;
+    if (view === "manifest" && !manifestDraft) {
+      mf = await api.getResourceManifest(res.name).catch(function (e) { return { error: e.message }; });
+      manifestYAML = (mf && mf.yaml) || "";
+    }
+    if (t !== renderToken) return;
 
-    var body = branchRows +
-      fields.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap, env); }).join("");
-    h += body || '<div class="empty">No fields match this filter.</div>';
+
+    if (view === "manifest") {
+      h += manifestHtml(res, manifestYAML, mf && mf.error, params, otherResources, otherStatusMap);
+      if (search) h += searchHitsHtml(fields, search);
+    } else {
+      var q = search.toLowerCase();
+      var visible = q ? fields.filter(function (f) {
+        return f.path.toLowerCase().indexOf(q) !== -1 || (f.description || "").toLowerCase().indexOf(q) !== -1;
+      }) : fields;
+      var body = (q ? "" : branchRows) +
+        visible.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap, env); }).join("");
+      h += body || '<div class="empty">No fields match this filter.</div>';
+    }
 
     // Crossplane Envelope section (if this CRD defines envelope properties)
     if (detail && detail.envelope && detail.envelope.length > 0) {
@@ -1396,6 +1439,10 @@ function setEnvelopeField(path, form) {
 
 
 Object.defineProperties(state, {
+  view: { get() { return view; }, set(v) { view = v; }, configurable: true },
+  search: { get() { return search; }, set(v) { search = v; }, configurable: true },
+  manifestDraft: { get() { return manifestDraft; }, set(v) { manifestDraft = v; }, configurable: true },
+  manifestYAML: { get() { return manifestYAML; }, set(v) { manifestYAML = v; }, configurable: true },
   store: { get() { return store; }, set(v) { store = v; }, configurable: true }, api: { get() { return api; }, set(v) { api = v; }, configurable: true },
   root: { get() { return root; }, set(v) { root = v; }, configurable: true }, box: { get() { return box; }, set(v) { box = v; }, configurable: true },
   fseg: { get() { return fseg; }, set(v) { fseg = v; }, configurable: true }, filter: { get() { return filter; }, set(v) { filter = v; }, configurable: true },
@@ -1425,8 +1472,11 @@ export function init(rootEl, deps) {
   root = rootEl;
   box = root.querySelector("#insp");
   fseg = root.querySelector("#fseg");
+  var vseg = root.querySelector("#vseg");
+  var searchEl = root.querySelector("#insp-search");
 
-  bindInspectorEvents(box, fseg);
+  bindInspectorEvents(box, fseg, vseg, searchEl);
+  setView(view);
 
   if (box) {
     box.addEventListener("click", function (e) {
@@ -1471,6 +1521,7 @@ export function init(rootEl, deps) {
     pendingNewMapEntry = null;
     pendingFocusParam = null;
     warnMsg = null;
+    manifestDraft = null;
     render();
   });
 

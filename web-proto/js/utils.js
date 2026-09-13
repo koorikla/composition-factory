@@ -1,3 +1,4 @@
+import { esc } from "./dom.js";
 /**
  * utils.js — shared utility functions for web-proto regions.
  */
@@ -589,3 +590,22 @@ export function generateEnvironmentConfigYAML(doc, selInfo) {
   return lines.join("\n");
 }
 
+
+/** Prototype-style YAML highlighting over plain text. */
+export function highlight(text) {
+  return text.split("\n").map(function (line) {
+    if (/^\s*#/.test(line)) return '<span class="cm">' + esc(line) + "</span>";
+    var m = line.match(/^(\s*(?:-\s+)?)([\w.$/"'-]+):(\s*)(.*)$/);
+    if (m) {
+      var val = m[4];
+      var h = esc(m[1]) + '<span class="kk">' + esc(m[2]) + "</span>:" + m[3];
+      if (val) {
+        var cls = /\{\{/.test(val) ? "tm" : "st";
+        h += '<span class="' + cls + '">' + esc(val) + "</span>";
+      }
+      return h;
+    }
+    if (/\{\{/.test(line)) return '<span class="tm">' + esc(line) + "</span>";
+    return esc(line);
+  }).join("\n");
+}

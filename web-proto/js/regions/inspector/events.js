@@ -1,3 +1,4 @@
+import { openManifestEditor, closeManifestEditor, applyManifest, onManifestKeydown } from "./manifest.js";
 /**
  * Submodule: inspector/events.js
  * DOM event listeners, action dispatch maps, and mutation commits.
@@ -68,6 +69,10 @@ export function sectionOf(el) {
 }
 
 export var boxClickActions = [
+  { selector: "[data-manifest-edit]", needsDoc: true, run: function () { var r = state.selectedResource(); if (r) openManifestEditor(r, state.manifestYAML); } },
+  { selector: "[data-manifest-apply]", needsDoc: true, run: function (btn) { applyManifest(btn.closest("#insp") || state.box); } },
+  { selector: "[data-manifest-cancel]", needsDoc: true, run: function () { closeManifestEditor(); } },
+  { selector: "[data-search-hit]", needsDoc: false, run: function (el) { setView("fields"); if (el && el.getAttribute("data-search-hit")) { state.search = el.getAttribute("data-search-hit"); if (state.searchEl) state.searchEl.value = state.search; } } },
   {
     selector: "[data-quick-snippet], [data-env-quick-snippet]",
     run: function (chip) {
@@ -1167,10 +1172,31 @@ export function onFsegClick(e) {
   state.render();
 }
 
-export function bindInspectorEvents(box, fseg) {
+export function bindInspectorEvents(box, fseg, vseg, searchEl) {
+  state.vseg = vseg;
+  state.searchEl = searchEl;
+  if (vseg) {
+    vseg.addEventListener("click", function (e) {
+      var b = e.target.closest("button");
+      if (!b) return;
+      var v = b.getAttribute("data-view");
+      if (v) setView(v);
+    });
+  }
+  if (searchEl) {
+    var searchTimer = null;
+    searchEl.addEventListener("input", function (_e) {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () {
+        state.search = (searchEl.value || "").trim();
+        state.render();
+      }, 150);
+    });
+  }
   box.addEventListener("click", onBoxClick);
   box.addEventListener("change", onBoxChange);
   box.addEventListener("keydown", function (e) {
+    if (onManifestKeydown(e, box)) return;
     var t = e.target;
     if (!t) return;
     if (t.matches && t.matches("input[data-env-name]")) {
@@ -1240,4 +1266,18 @@ export function bindInspectorEvents(box, fseg) {
     triggerExpressionPreview(t, isEnv, path);
   });
   if (fseg) fseg.addEventListener("click", onFsegClick);
+}
+
+export function setView(v) {
+  state.view = v;
+  try { localStorage.setItem("cf-insp-view", v); } catch (_) {}
+  if (state.vseg) {
+    Array.prototype.forEach.call(state.vseg.children, function (c) {
+      c.setAttribute("aria-pressed", String(c.getAttribute("data-view") === v));
+    });
+  }
+  if (state.fseg) {
+    state.fseg.hidden = (v === "manifest");
+  }
+  state.render();
 }

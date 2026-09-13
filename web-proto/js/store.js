@@ -184,7 +184,7 @@ export const store = {
       return doc;
     } catch (e) {
       from.push(target);
-      this.emit("error", { status: e.status, message: e.message, source });
+      this.emit("error", { status: e.status, message: e.message, source, detail: e.detail });
       return null;
     }
   },
@@ -420,6 +420,17 @@ export const store = {
    * @param {string} to
    * @returns {Promise<Blueprint|null>}
    */
+  /**
+   * PUT /api/blueprint/resources/{name}/manifest — one undo step; the
+   * server's {error,path,line} reaches the "error" topic as `detail`.
+   * @param {string} name
+   * @param {string} yamlText
+   * @returns {Promise<Blueprint|null>}
+   */
+  async setResourceManifest(name, yamlText) {
+    return this._paramOp("setResourceManifest", function () { return api.putResourceManifest(name, yamlText); });
+  },
+
   async renameParameter(name, to) {
     return this._paramOp("renameParameter", function () { return api.renameParameter(name, to); });
   },

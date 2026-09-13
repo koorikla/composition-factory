@@ -176,5 +176,5 @@
  * @property {Blueprint} doc Emitted whenever the persisted blueprint document changes.
  * @property {string|null} selection Emitted when selectedResource changes.
  * @property {GenerateResponse} generate Emitted after a successful generate().
- * @property {{status: number, message: string, source: string}} error Emitted on failed API calls.
+ * @property {{status: number, message: string, source: string, detail?: any}} error Emitted on failed API calls.
  */
