@@ -129,7 +129,15 @@ function selectedResource() {
 }
 
 function entryOf(res, path, isEnvelope) {
-  var map = isEnvelope ? (res && res.envelope) : (res && res.fields);
+  var map;
+  if (isEnvelope) {
+    map = res && res.envelope;
+  } else if (path && path.indexOf("annotations.") === 0) {
+    map = res && res.annotations;
+    path = path.slice("annotations.".length);
+  } else {
+    map = res && res.fields;
+  }
   var f = map && map[path];
   if (!f || typeof f !== "object") return null;
   var from = typeof f.from === "string" ? f.from : "";
@@ -938,16 +946,38 @@ async function renderResource(res) {
     h += '<div class="insp-sec" style="margin-top:14px;padding:8px 12px;border-top:1px solid var(--rule);background:var(--surface)">' +
       '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Annotations</div>' +
       annKeys.map(function (k) {
-        var f = anns[k];
-        var val = f.from ? "\u2190 " + f.from : (f.raw ? "raw" : f.value);
-        var fullBinding = f.from ? formatWireBinding(f.from, res.name, "annotations." + k) : "";
+        var annPath = "annotations." + k;
+        var f = anns[k] || {};
+        var dm = docMode(f);
+        var m = uiMode[annPath] || dm;
+        var fullBinding = f.from ? formatWireBinding(f.from, res.name, annPath) : "";
         var rowTitle = fullBinding || (k + (f.from ? " \u2190 " + f.from : ""));
-        return '<div class="frow ann-row' + (fullBinding ? ' has-wire' : '') + '" style="margin-bottom:2px" title="' + esc(rowTitle) + '" data-wire-binding="' + esc(fullBinding) + '" tabindex="0" role="button">' +
-          '<span class="ann-key" title="' + esc(k) + '">' + esc(k) + '</span>' +
-          '<span class="ann-val dg" title="' + esc(rowTitle) + '">' + esc(val) + '</span>' +
-          '<button class="del" data-ann-del="' + esc(k) + '" title="Remove annotation">\u00d7</button>' +
-          (fullBinding ? '<div class="ann-binding-detail" title="' + esc(fullBinding) + '">' + esc(fullBinding) + '</div>' : '') +
+        var wired = m === "w" && dm === "w" && !uiMode[annPath] && f && f.from;
+
+        var rowHtml = '<div class="ann-row' + (fullBinding ? ' has-wire' : '') + '" data-path="' + esc(annPath) + '" style="margin-bottom:4px;padding:6px 8px;background:var(--surface-2);border-radius:4px;border:1px solid var(--rule);box-sizing:border-box" title="' + esc(rowTitle) + '" data-wire-binding="' + esc(fullBinding) + '" tabindex="0" role="button">' +
+          '<div class="frow" style="margin-bottom:3px;align-items:center">' +
+          '<span class="ann-key" title="' + esc(k) + '" style="font-family:var(--mono);font-size:11px;color:var(--ink-2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">' + esc(k) + '</span>' +
+          modeButtons(annPath, m, false) +
+          '<button class="del" data-ann-del="' + esc(k) + '" title="Remove annotation" style="margin-left:4px">\u00d7</button>' +
           '</div>';
+
+        if (m === "w") {
+          if (wired) {
+            rowHtml += boundChipHtml(res, annPath, f);
+            if (fullBinding) {
+              rowHtml += '<div class="ann-binding-detail" title="' + esc(fullBinding) + '">' + esc(fullBinding) + '</div>';
+            }
+          } else {
+            rowHtml += wireSelectHtml(annPath, "string", params, otherResources, otherStatusMap, false, false, f && f.from, env);
+          }
+        } else if (m === "r") {
+          rowHtml += rawEditorHtml(annPath, (dm === "r" && f) ? f.raw : "", false, res, params, otherResources, otherStatusMap);
+        } else {
+          rowHtml += '<input class="val" data-v="' + esc(annPath) + '" data-path="' + esc(annPath) + '" value="' + esc((dm === "v" && f) ? (f.value !== undefined ? f.value : "") : "") + '" placeholder="value">';
+        }
+
+        rowHtml += '</div>';
+        return rowHtml;
       }).join("") +
       '<div class="frow" style="margin-top:4px;margin-bottom:0">' +
       '<input class="tin" data-ann-key placeholder="prefix/name" value="' + esc(annDraftKey || "") + '" style="flex:1;min-width:0">' +
@@ -1389,6 +1419,21 @@ function setField(path, form) {
       var rs = doc.spec.resources || [];
       for (var i = 0; i < rs.length; i++) {
         if (rs[i].name === sel) {
+          if (path.indexOf("annotations.") === 0) {
+            var annKey = path.slice("annotations.".length);
+            rs[i].annotations = rs[i].annotations || {};
+            if (form === null) {
+              delete rs[i].annotations[annKey];
+              if (Object.keys(rs[i].annotations).length === 0) delete rs[i].annotations;
+            } else {
+              var cleanForm = {};
+              if (form.from) cleanForm.from = form.from;
+              else if (form.raw) cleanForm.raw = form.raw;
+              else if (form.value !== undefined && form.value !== null) cleanForm.value = form.value;
+              rs[i].annotations[annKey] = cleanForm;
+            }
+            return;
+          }
           rs[i].fields = rs[i].fields || {};
           if (form === null) delete rs[i].fields[path];
           else rs[i].fields[path] = form;

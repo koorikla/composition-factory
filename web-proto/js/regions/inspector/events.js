@@ -66,7 +66,7 @@ export async function commitEnvelopeValue(path, kind, text) {
  * search the section the event came from, not the whole pane.
  */
 export function sectionOf(el) {
-  var scope = el && el.closest ? el.closest(".essentials, .fld") : null;
+  var scope = el && el.closest ? el.closest(".essentials, .fld, .ann-row") : null;
   return scope || state.box || document.querySelector("#insp");
 }
 
@@ -117,6 +117,7 @@ export var boxClickActions = [
       var adk = el.getAttribute("data-ann-del");
       var selRes = state.selectedResource();
       if (!selRes) return;
+      delete state.uiMode["annotations." + adk];
       state.store.replaceDoc(function (d) {
         var r = d.spec.resources.find(function (x) { return x.name === selRes.name; });
         if (r && r.annotations) { delete r.annotations[adk]; if (!Object.keys(r.annotations).length) delete r.annotations; }
