@@ -167,3 +167,18 @@ test('theme button cycles system → light → dark → system', async ({ page }
   await page.click('#themeBtn')
   await expect(html).not.toHaveAttribute('data-theme')
 })
+
+// playwright.config seeds cf-insp-view=fields through storageState so the
+// list-driving specs above start in the Fields view; this describe opts out to
+// guard the product's true default outside cf471.
+test.describe('default inspector view', () => {
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  test('a fresh browser opens a resource in the Manifest view', async ({ page }) => {
+    await page.goto('/')
+    await page.click('.node[data-id="work-queue"] .node-h')
+    await expect(page.locator('#insp pre.manifest-view')).toBeVisible()
+    await expect(page.locator('#vseg button[data-view="manifest"]')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('#fseg')).toBeHidden()
+  })
+})

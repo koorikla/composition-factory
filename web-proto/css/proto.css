@@ -981,3 +981,31 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .port .port-warn{flex:0 0 auto;line-height:1}
 
 svg.wires path:focus-visible{outline:none;stroke-width:4px !important;filter:drop-shadow(0 0 6px var(--wire-xrd))}
+
+/* ---- inspector Manifest view (CF-471): the resource as manifest-shaped YAML, the in-place editor, schema search hits ---- */
+.insp-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--rule);flex:0 0 auto}
+.insp-tools .tin{height:22px;font-size:11px}
+.ctrl-row{padding:4px 12px;border-bottom:1px solid var(--rule)}
+.manifest-sec{margin-top:12px;border-top:1px solid var(--rule)}
+.manifest-h{display:flex;align-items:center;gap:8px;padding:8px 12px 4px}
+.manifest-t{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.manifest-hint{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.manifest-view{margin:0;padding:6px 12px 10px;font-family:var(--mono);font-size:11px;line-height:1.45;
+  color:var(--ink-2);white-space:pre;overflow-x:auto;tab-size:2}
+.manifest-view .kk{color:var(--wire-xrd)} .manifest-view .st{color:var(--ok)}
+.manifest-view .tm{color:var(--warn)} .manifest-view .cm{color:var(--muted);font-style:italic}
+.manifest-editor{display:block;width:100%;box-sizing:border-box;min-height:220px;resize:vertical;
+  font-family:var(--mono);font-size:11px;line-height:1.45;padding:6px 12px;border:0;border-top:1px solid var(--rule);
+  background:var(--sunk);color:var(--ink);outline:none;tab-size:2;white-space:pre;overflow:auto}
+.manifest-editor:focus{box-shadow:inset 0 0 0 1px var(--wire-xrd)}
+.manifest-bar{display:flex;gap:6px;align-items:center;padding:6px 12px;border-top:1px solid var(--rule)}
+.manifest-bar select{flex:1;min-width:0}
+.manifest-err{border-top:1px solid var(--rule)}
+.search-hits{padding:6px 12px}
+.search-hits .lbl{display:block;margin-bottom:4px}
+.search-hit{padding:4px 0;border-bottom:1px solid var(--rule);cursor:pointer}
+.search-hit:hover,.search-hit:focus-visible{background:var(--sunk)}
+.search-hit-h{display:flex;gap:6px;align-items:baseline}
+.search-hit code{font-family:var(--mono);font-size:11px;min-width:0;overflow-wrap:anywhere}
+.search-hit .t{font-family:var(--mono);font-size:9.5px;color:var(--faint);flex-shrink:0}
+.search-hit .fld-d{margin:0}

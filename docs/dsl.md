@@ -271,10 +271,12 @@ resource's `fields` as nested manifest-shaped YAML. A plain scalar is a `value:`
 whose only key is `value`, `from`, `raw` or `template` is that wrapper; everything else
 recurses. The kind's schema decides the grammar: a map node's children become `[key]`
 entries, an array-of-objects' items become `[i]`, object members use dots. Arrays of scalars
-read as a flow list (`command: [sh, -c]`) and store as a comma-separated `value:`. A whole
-object or map set verbatim is always written explicitly as `{raw: "..."}`. A genuine literal
-map that happens to be exactly `{from: x}` is written `{from: {value: x}}`.
-
+read as a flow list (`command: [sh, -c]`) and store as a comma-separated `value:` (spaces
+around the commas are dropped, so `"a, b"` normalises to `"a,b"`). A whole object or map set
+verbatim is always written explicitly as `{raw: "..."}`. A mapping whose keys are *all*
+wrapper names would read back as a wrapper, so every one of its entries is written with an
+explicit `{value: …}` — the common case is a single entry, `annotations: {from: {value: x}}`;
+a mapping that mixes wrapper-named and other keys stays bare, and so does the root.
 
 ---
 

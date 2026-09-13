@@ -1,4 +1,3 @@
-import { openManifestEditor, closeManifestEditor, applyManifest, onManifestKeydown } from "./manifest.js";
 /**
  * Submodule: inspector/events.js
  * DOM event listeners, action dispatch maps, and mutation commits.
@@ -8,6 +7,9 @@ import { fanOut } from "../../wires.js";
 import { setAppLabel, setServiceSelector, clearServiceSelector } from "../../profiles.js";
 import { state } from "./state.js";
 import { insertSnippetIntoTextarea, triggerExpressionPreview } from "./preview.js";
+import {
+  openManifestEditor, closeManifestEditor, applyManifest, onManifestKeydown, insertManifestSnippet, writeView,
+} from "./manifest.js";
 import {
   paramsOf, isParamLocked, cleanParamRefs, cleanMemberRefs, renameMemberRefs,
   cloneProps, memberParent, memberContainer, commitMembers, paramFrom, parseInputYAML,
@@ -72,7 +74,18 @@ export var boxClickActions = [
   { selector: "[data-manifest-edit]", needsDoc: true, run: function () { var r = state.selectedResource(); if (r) openManifestEditor(r, state.manifestYAML); } },
   { selector: "[data-manifest-apply]", needsDoc: true, run: function (btn) { applyManifest(btn.closest("#insp") || state.box); } },
   { selector: "[data-manifest-cancel]", needsDoc: true, run: function () { closeManifestEditor(); } },
-  { selector: "[data-search-hit]", needsDoc: false, run: function (el) { setView("fields"); if (el && el.getAttribute("data-search-hit")) { state.search = el.getAttribute("data-search-hit"); if (state.searchEl) state.searchEl.value = state.search; } } },
+  {
+    selector: "[data-search-hit]",
+    run: function (el) {
+      // The hit's path becomes the query first; setView renders the list.
+      var path = el.getAttribute("data-search-hit");
+      if (path) {
+        state.search = path;
+        if (state.searchEl) state.searchEl.value = path;
+      }
+      setView("fields");
+    }
+  },
   {
     selector: "[data-quick-snippet], [data-env-quick-snippet]",
     run: function (chip) {
@@ -813,6 +826,10 @@ export function onBoxChange(e) {
     state.setEnvKeyField(envValKey, "value", t.value.trim());
     return;
   }
+  if (t.matches("select[data-manifest-snippet]")) {
+    insertManifestSnippet(box, t);
+    return;
+  }
   if (t.matches("select[data-insert-snippet], select[data-env-insert-snippet]")) {
     var isEnv = t.hasAttribute("data-env-insert-snippet");
     var path = t.getAttribute(isEnv ? "data-env-insert-snippet" : "data-insert-snippet");
@@ -1268,9 +1285,12 @@ export function bindInspectorEvents(box, fseg, vseg, searchEl) {
   if (fseg) fseg.addEventListener("click", onFsegClick);
 }
 
+/** Switch between the Manifest and Fields views: persist the choice, press
+ *  the matching #vseg button, show the Required/Set/All segment only for
+ *  the list, then render. */
 export function setView(v) {
   state.view = v;
-  try { localStorage.setItem("cf-insp-view", v); } catch (_) {}
+  writeView(v);
   if (state.vseg) {
     Array.prototype.forEach.call(state.vseg.children, function (c) {
       c.setAttribute("aria-pressed", String(c.getAttribute("data-view") === v));

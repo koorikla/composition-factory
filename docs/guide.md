@@ -56,10 +56,11 @@ Click **Validate** in the topbar to execute a real `crossplane composition rende
 
 ---
 
-## 6. Inspector: Essentials Form, Manifest View & Search
+## 6. The Inspector: Essentials, Manifest and Fields
 
-Selecting any composed resource card opens the Inspector panel with two integrated views:
-- **Essentials Form**: Top-level high-impact fields configured per kind (e.g. `image`, `replicas`, `containerPort`, selector alignment). Each essentials entry offers an **expose** action to instantly elevate literals into configurable XRD parameters, plus an interactive environment variable repeater.
-- **Manifest Editor (Default)**: Bottom section renders resource `fields` as clean, nested manifest-shaped YAML. Click **edit** to edit YAML directly with schema validation, line-accurate error reporting, and snippet autocompletion (`⌘⏎` to apply, `Esc` to cancel).
-- **Fields Toggle**: Switch from **Manifest** to **Fields** view to inspect the full schema tree (Required, Set, All).
-- **Unified Search**: Search query filters both schema matches in Manifest view and active fields in Fields view.
+Selecting a resource card opens it in the inspector.
+
+- **Essentials** sit on top: the handful of typed rows that make the kind work (a Deployment's app label, image, replicas and container port; a Service's target app; a Queue's region), each taking a literal, a wire or a raw template. A row that names a parameter has an **expose** button: it declares an XRD parameter with the current value as its default and wires the field to it. Workloads get an environment-variable repeater whose values can be literals or wires.
+- **Manifest** (the default view below the essentials) shows the resource's `fields` as nested, manifest-shaped YAML — a native kind as the object it composes, a managed resource as its `spec.forProvider` — with the blueprint's own `{from: …}` / `{raw: …}` wrappers at the leaves (grammar in [dsl.md](dsl.md#manifest-view-of-a-resource)). **edit** swaps the view for a textarea; **Apply** (`⌘⏎`) sends the YAML through the same schema gate as the field routes, so an unknown key, a scalar at an object position or a value of the wrong type is refused with the offending line named and selected, and the editor stays open. **Cancel** (`Esc`) discards. The dropdown inserts a parameter or sibling-status wire at the cursor. A change made elsewhere while the editor is open re-renders the pane but keeps what you typed.
+- **Fields** restores the full schema list with its Required / Set / All segment.
+- **Search** (the box under the pane header) matches field paths and descriptions. In the Fields view it filters the list and, while a query is active, searches every schema leaf regardless of the Required / Set / All choice; in the Manifest view it lists the matching schema fields under the manifest, and clicking one opens the Fields view on it. The view choice persists across reloads.

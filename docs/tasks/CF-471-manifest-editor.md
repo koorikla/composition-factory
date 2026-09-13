@@ -38,8 +38,26 @@ Go: `internal/manifest/manifest_test.go` and `internal/api/manifest_test.go` exa
 `docs/superpowers/plans/2026-09-12-prefilled-fields.md` Tasks 6 and 8; MCP additions as in
 Task 10. Playwright: `tests/cf471-manifest-editor.spec.js` as in Task 11.
 
-**Fails today with:** not run by the brief author; the implementer pastes the first failing
-runs into the handover.
+**Fails today with** (the nine-case spec, run at 57b62d2 before the completing commit — the
+plan's five-case spec landed together with the implementation in f357769 and its red run was
+not captured; six of the nine cases were therefore already green):
+
+```
+  1) tests/cf471-manifest-editor.spec.js:51:3 › CF-471 — manifest editor, view toggle and search › an unknown key keeps the editor open, names the line and selects it
+    Error: expect(received).toBe(expected) // Object.is equality
+    Expected: "  replicaz: 4"
+    Received: ""
+  2) tests/cf471-manifest-editor.spec.js:90:3 › CF-471 — manifest editor, view toggle and search › the snippet dropdown inserts a wrapper at the cursor without touching the document
+    Error: expect(locator).toHaveValue(expected) failed
+    Expected pattern: /\{(from: params\.|raw: ')/
+    Received string:  "spec:\n  replicas: 2\n  selector: …"   (the manifest, untouched)
+  3) tests/cf471-manifest-editor.spec.js:111:3 › CF-471 — manifest editor, view toggle and search › an open editor survives a re-render caused by an essentials edit
+    Error: expect(locator).toHaveValue(expected) failed
+    Expected pattern: /# keep me/
+    Received string:  "spec:\n  replicas: 2\n  selector: …"   (the open-time text; the typed line was lost)
+  3 failed
+  6 passed (16.6s)
+```
 
 ## Contract
 

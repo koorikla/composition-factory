@@ -1,8 +1,8 @@
-import { esc } from "./dom.js";
 /**
  * utils.js — shared utility functions for web-proto regions.
  */
 
+import { esc } from "./dom.js";
 import { store as defaultStore } from "./store.js";
 
 /** Node color families across the canvas and palette. */

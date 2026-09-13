@@ -15,11 +15,14 @@ export var state = {
   root: null,
   box: null,   // #insp
   fseg: null,  // #fseg
-  vseg: null,  // #vseg
+  vseg: null,  // #vseg (Manifest | Fields)
   searchEl: null, // #insp-search
-  view: "manifest", // "manifest" | "fields"
-  search: "",
-  manifestDraft: null, // { res: string, text: string, err: string|null }
+
+  view: "manifest",           // "manifest" | "fields" — persisted in localStorage (cf-insp-view)
+  search: "",                 // field search text: filters the Fields list, lists schema hits under the manifest
+  manifestDraft: null,        // { res, text, err, errLine } while the manifest editor is open, else null
+  manifestYAML: "",           // the selected resource's manifest YAML as last fetched (what "edit" opens with)
+  manifestLoaded: false,      // true once that fetch succeeded for the selected resource; Apply refuses otherwise
 
   filter: "req",              // "req" | "set" | "all"
   warnMsg: null,              // verbatim server error to show, or null

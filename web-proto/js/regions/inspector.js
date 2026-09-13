@@ -1,26 +1,3 @@
-var view = readView();
-var search = "";
-var manifestDraft = null;
-var manifestYAML = "";
-
-function readView() {
-  try { return localStorage.getItem("cf-insp-view") === "fields" ? "fields" : "manifest"; }
-  catch (_) { return "manifest"; }
-}
-
-function searchHitsHtml(fields, q) {
-  var ql = q.toLowerCase();
-  var hits = fields.filter(function (f) {
-    return f.path.toLowerCase().indexOf(ql) !== -1 || (f.description || "").toLowerCase().indexOf(ql) !== -1;
-  }).slice(0, 30);
-  if (!hits.length) return '<div class="empty">No schema field matches “' + esc(q) + '”.</div>';
-  return '<div class="insp-sec" style="padding:6px 12px"><div class="lbl" style="margin-bottom:4px">Schema matches (' + hits.length + ')</div>' +
-    hits.map(function (f) {
-      return '<div class="search-hit" data-search-hit="' + esc(f.path) + '" role="button" tabindex="0" style="padding:4px 0;border-bottom:1px solid var(--rule);cursor:pointer">' +
-        '<div style="display:flex;gap:6px;align-items:baseline"><code style="font-family:var(--mono);font-size:11px;min-width:0;overflow-wrap:anywhere">' + esc(f.path) + '</code><span class="t" style="color:var(--faint);font-size:9.5px">' + esc(f.type) + '</span></div>' +
-        (f.description ? '<div class="fld-d" style="margin:0">' + esc(f.description.slice(0, 140)) + '</div>' : '') + '</div>';
-    }).join("") + '</div>';
-}
 /**
  * Region: INSPECTOR. Root element: #region-inspector (body: #insp, filter: #fseg).
  * Modular coordinator orchestrating:
@@ -28,6 +5,7 @@ function searchHitsHtml(fields, q) {
  *   - inspector/preview.js: CEL & Go-template expression preview, snippet catalogue, live debouncing
  *   - inspector/events.js: DOM event listeners, action dispatch maps, and mutation commits
  *   - inspector/essentials.js: per-kind essentials form (profile rows, expose-as-parameter, env repeater)
+ *   - inspector/manifest.js: Manifest view (manifest-shaped YAML, in-place editor, view choice, schema search hits)
  */
 
 import { store as defaultStore } from "../store.js";
@@ -39,7 +17,7 @@ import { mapResourceCoordinates, deleteEnvKeyFromDoc, renameEnvKeyInDoc, parseEn
 import { state, PARAM_TYPES } from "./inspector/state.js";
 import { scaffoldResourceFields } from "./canvas.js";
 import { essentialsHtml } from "./inspector/essentials.js";
-import { manifestHtml } from "./inspector/manifest.js";
+import { manifestHtml, searchHitsHtml, readView, afterManifestRender } from "./inspector/manifest.js";
 import { setView } from "./inspector/events.js";
 import {
   renderXRD, paramsOf, isParamLocked, cleanParamRefs, paramFrom, cloneProps, memberParent,
@@ -136,7 +114,11 @@ var kindsPromise = null;         // cached GET /api/kinds
 var fieldsCache = {};            // "apiVersion|kind" -> {fields,total}
 var kindDetailCache = {};        // "apiVersion|kind" -> {kind, envelope, status}
 
-
+var view = readView();           // "manifest" | "fields" — persisted in localStorage (cf-insp-view)
+var search = "";                 // field search text: filters the Fields list, lists schema hits under the manifest
+var manifestDraft = null;        // { res, text, err, errLine } while the manifest editor is open, else null
+var manifestYAML = "";           // the selected resource's manifest YAML as last fetched (what "edit" opens with)
+var manifestLoaded = false;      // true once that fetch succeeded for the selected resource; Apply refuses otherwise
 
 function selectedResource() {
   var doc = store.state.doc, sel = store.state.selectedResource;
@@ -797,7 +779,7 @@ async function renderResource(res) {
   // for-each: repeat this resource N times, N from an integer parameter
   var allParams = paramsOf(doc);
   var intParams = Object.keys(allParams).filter(function (n) { return allParams[n].type === "integer"; });
-  h += '<div class="ctrl-row" style="padding:4px 12px"><div class="frow" style="margin-bottom:0">' +
+  h += '<div class="ctrl-row"><div class="frow" style="margin-bottom:0">' +
     '<span class="lbl" style="flex:0 0 auto">for each</span>' +
     '<select class="tsel" data-foreach="' + esc(res.name) + '" style="flex:1;min-width:0" ' +
     'title="Repeat this resource N times \u2014 N comes from an integer parameter">' +
@@ -839,7 +821,7 @@ async function renderResource(res) {
     selectedWhenVal = src + "." + w.param;
   }
 
-  h += '<div class="ctrl-row" style="padding:4px 12px"><div class="frow" style="margin-bottom:0">' +
+  h += '<div class="ctrl-row"><div class="frow" style="margin-bottom:0">' +
     '<span class="lbl" style="flex:0 0 auto">when</span>' +
     '<select class="tsel" data-when-param="' + esc(res.name) + '" style="flex:1;min-width:0" ' +
     'title="Compose this resource only when the condition holds">' +
@@ -912,9 +894,9 @@ async function renderResource(res) {
     if (view === "manifest" && !manifestDraft) {
       mf = await api.getResourceManifest(res.name).catch(function (e) { return { error: e.message }; });
       manifestYAML = (mf && mf.yaml) || "";
+      manifestLoaded = !!(mf && !mf.error);
     }
     if (t !== renderToken) return;
-
 
     if (view === "manifest") {
       h += manifestHtml(res, manifestYAML, mf && mf.error, params, otherResources, otherStatusMap);
@@ -992,6 +974,7 @@ async function renderResource(res) {
   var __snap = snapshotFocusedEdit();
   box.innerHTML = h;
   restoreFocusedEdit(__snap);
+  afterManifestRender(box);
   updateAllPreviews();
 }
 
@@ -1443,6 +1426,7 @@ Object.defineProperties(state, {
   search: { get() { return search; }, set(v) { search = v; }, configurable: true },
   manifestDraft: { get() { return manifestDraft; }, set(v) { manifestDraft = v; }, configurable: true },
   manifestYAML: { get() { return manifestYAML; }, set(v) { manifestYAML = v; }, configurable: true },
+  manifestLoaded: { get() { return manifestLoaded; }, set(v) { manifestLoaded = v; }, configurable: true },
   store: { get() { return store; }, set(v) { store = v; }, configurable: true }, api: { get() { return api; }, set(v) { api = v; }, configurable: true },
   root: { get() { return root; }, set(v) { root = v; }, configurable: true }, box: { get() { return box; }, set(v) { box = v; }, configurable: true },
   fseg: { get() { return fseg; }, set(v) { fseg = v; }, configurable: true }, filter: { get() { return filter; }, set(v) { filter = v; }, configurable: true },
@@ -1522,6 +1506,7 @@ export function init(rootEl, deps) {
     pendingFocusParam = null;
     warnMsg = null;
     manifestDraft = null;
+    manifestLoaded = false;
     render();
   });
 

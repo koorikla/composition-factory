@@ -1,6 +1,5 @@
-import { highlight } from "../utils.js";
 import { esc } from "../dom.js";
-import { mapResourceCoordinates } from "../utils.js";
+import { mapResourceCoordinates, highlight } from "../utils.js";
 /**
  * Region: OUTPUT + TOPBAR behavior.
  *

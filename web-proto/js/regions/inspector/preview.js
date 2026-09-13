@@ -216,6 +216,9 @@ export function insertSnippetIntoTextarea(textarea, snippet) {
   }
   var isEnv = textarea.hasAttribute("data-env-raw");
   var path = textarea.getAttribute(isEnv ? "data-env-raw" : "data-raw");
+  // A textarea without a field path (the manifest editor) only takes the
+  // text; previewing and committing belong to the per-field raw editors.
+  if (path === null) return;
   triggerExpressionPreview(textarea, isEnv, path);
   if (isEnv) {
     commitEnvelopeValue(path, "raw", textarea.value);

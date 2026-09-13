@@ -415,12 +415,6 @@ export const store = {
   },
 
   /**
-   * POST /api/blueprint/parameters/{name}/rename
-   * @param {string} name
-   * @param {string} to
-   * @returns {Promise<Blueprint|null>}
-   */
-  /**
    * PUT /api/blueprint/resources/{name}/manifest — one undo step; the
    * server's {error,path,line} reaches the "error" topic as `detail`.
    * @param {string} name
@@ -431,6 +425,12 @@ export const store = {
     return this._paramOp("setResourceManifest", function () { return api.putResourceManifest(name, yamlText); });
   },
 
+  /**
+   * POST /api/blueprint/parameters/{name}/rename
+   * @param {string} name
+   * @param {string} to
+   * @returns {Promise<Blueprint|null>}
+   */
   async renameParameter(name, to) {
     return this._paramOp("renameParameter", function () { return api.renameParameter(name, to); });
   },
@@ -490,7 +490,9 @@ export const store = {
       this.emit("doc", doc);
       return doc;
     } catch (e) {
-      this.emit("error", { status: e.status, message: e.message, source });
+      // detail carries the server's structured body ({error, path, line} for
+      // a manifest rejection) so the UI can act on more than the message.
+      this.emit("error", { status: e.status, message: e.message, source, detail: e.detail });
       return null;
     }
   },
