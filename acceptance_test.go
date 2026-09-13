@@ -1983,7 +1983,13 @@ func TestAcceptanceAllStarterExamplesRender(t *testing.T) {
 			xrd := filepath.Join(outDir, "xrds", b.Spec.XRD.Plural+"."+b.Spec.XRD.Group+".yaml")
 			fns := filepath.Join(outDir, "functions.yaml")
 
-			rendered, err := renderComposition(t, xrFile, comp, fns, "--xrd", xrd, "--timeout", "5m")
+			renderArgs := []string{xrFile, comp, fns, "--xrd", xrd, "--timeout", "5m"}
+			envDir := filepath.Join(outDir, "environmentconfigs")
+			if info, err := os.Stat(envDir); err == nil && info.IsDir() {
+				renderArgs = append(renderArgs, "--required-resources", envDir)
+			}
+
+			rendered, err := renderComposition(t, renderArgs...)
 			if err != nil {
 				t.Fatalf("crossplane composition render: %v\n%s", err, rendered)
 			}
