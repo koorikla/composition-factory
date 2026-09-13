@@ -4,7 +4,7 @@
  */
 
 import { fanOut } from "../../wires.js";
-import { setAppLabel } from "../../profiles.js";
+import { setAppLabel, setServiceSelector, clearServiceSelector } from "../../profiles.js";
 import { state } from "./state.js";
 import { insertSnippetIntoTextarea, triggerExpressionPreview } from "./preview.js";
 import {
@@ -57,6 +57,16 @@ export async function commitEnvelopeValue(path, kind, text) {
   if (ok !== null) delete state.uiMode["env:" + path];
 }
 
+/**
+ * The section a control belongs to. The same path renders controls in the
+ * essentials and again in the field list, so a lookup keyed by path must
+ * search the section the event came from, not the whole pane.
+ */
+export function sectionOf(el) {
+  var scope = el && el.closest ? el.closest(".essentials, .fld") : null;
+  return scope || state.box || document.querySelector("#insp");
+}
+
 export var boxClickActions = [
   {
     selector: "[data-quick-snippet], [data-env-quick-snippet]",
@@ -66,8 +76,8 @@ export var boxClickActions = [
       var snippet = chip.getAttribute("data-snippet-val");
       if (!snippet) return;
       var taSelector = isEnv ? ('textarea[data-env-raw="' + CSS.escape(path) + '"]') : ('textarea[data-raw="' + CSS.escape(path) + '"]');
-      var box = state.box || document.querySelector("#insp");
-      var ta = box ? box.querySelector(taSelector) : null;
+      var scope = sectionOf(chip);
+      var ta = scope ? scope.querySelector(taSelector) : null;
       if (ta) {
         insertSnippetIntoTextarea(ta, snippet);
       }
@@ -228,10 +238,10 @@ export var boxClickActions = [
       var p2 = ok.getAttribute("data-npok");
       var isEnv = p2.indexOf("env:") === 0;
       var realPath = isEnv ? p2.slice(4) : p2;
-      var box = state.box || document.querySelector("#insp");
-      var nameEl = box.querySelector('[data-npname="' + CSS.escape(p2) + '"]');
-      var typeEl = box.querySelector('[data-nptype="' + CSS.escape(p2) + '"]');
-      var reqEl = box.querySelector('input[type="checkbox"][data-npreq="' + CSS.escape(p2) + '"]');
+      var scope = sectionOf(ok);
+      var nameEl = scope.querySelector('[data-npname="' + CSS.escape(p2) + '"]');
+      var typeEl = scope.querySelector('[data-nptype="' + CSS.escape(p2) + '"]');
+      var reqEl = scope.querySelector('input[type="checkbox"][data-npreq="' + CSS.escape(p2) + '"]');
       var isReq = reqEl ? reqEl.checked : (ok.getAttribute("data-npreq") === "true");
       var name = nameEl && nameEl.value.trim();
       var type = (typeEl && typeEl.value) || "string";
@@ -474,9 +484,79 @@ export var boxClickActions = [
           var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname2; });
           if (!r) return;
           r.fields = r.fields || {};
-          delete r.fields["spec.selector"];
-          delete r.fields["spec.selector.app"];
-          r.fields["spec.selector[app]"] = { value: matchApp };
+          setServiceSelector(r.fields, matchApp);
+        });
+      });
+    }
+  },
+  {
+    selector: "[data-expose]",
+    needsDoc: true,
+    run: function (btn, doc) {
+      var path = btn.getAttribute("data-expose");
+      var base = btn.getAttribute("data-expose-name") || path.split(/[.[]/).pop().replace(/]$/, "");
+      var type = btn.getAttribute("data-expose-type") || "string";
+      var res = state.selectedResource();
+      if (!res) return;
+      var entry = state.entryOf(res, path);
+      var literal = entry && entry.value ? entry.value : "";
+      var params = paramsOf(doc);
+      var name = base;
+      if (params[name]) {
+        // Collision: suffix the resource name in CamelCase (image -> imageWebApi).
+        name = base + res.name.split(/[^a-zA-Z0-9]+/).filter(Boolean).map(function (s) { return s[0].toUpperCase() + s.slice(1); }).join("");
+      }
+      state.op(function () { return state.store.addParameter(name, { type: type, required: false, default: literal }); })
+        .then(function (d) {
+          if (d === null) return null;
+          return state.setField(path, { from: "params." + name, value: "", raw: "" });
+        })
+        .then(function (r) { if (r !== null) delete state.uiMode[path]; });
+    }
+  },
+  {
+    selector: "[data-env-row-add]",
+    needsDoc: true,
+    run: function (btn) {
+      var prefix = btn.getAttribute("data-env-row-add");
+      var rname = state.store.state.selectedResource;
+      // The next index is read inside the mutator: replaceDoc runs queued
+      // mutators on the latest doc, so two quick clicks append two rows.
+      state.op(function () {
+        return state.store.replaceDoc(function (d) {
+          var r = (d.spec.resources || []).find(function (x) { return x.name === rname; });
+          if (!r) return;
+          r.fields = r.fields || {};
+          var n = 0;
+          Object.keys(r.fields).forEach(function (k) {
+            var mm = k.indexOf(prefix + "[") === 0 && /^\[(\d+)\]\./.exec(k.slice(prefix.length));
+            if (mm) n = Math.max(n, parseInt(mm[1], 10) + 1);
+          });
+          r.fields[prefix + "[" + n + "].name"] = { value: "VAR_" + (n + 1) };
+        });
+      });
+    }
+  },
+  {
+    selector: "[data-env-row-del]",
+    needsDoc: true,
+    run: function (btn) {
+      var parts = btn.getAttribute("data-env-row-del").split("|");
+      var prefix = parts[0], del = parseInt(parts[1], 10);
+      var rname = state.store.state.selectedResource;
+      state.op(function () {
+        return state.store.replaceDoc(function (d) {
+          var r = (d.spec.resources || []).find(function (x) { return x.name === rname; });
+          if (!r || !r.fields) return;
+          var next = {};
+          Object.keys(r.fields).forEach(function (k) {
+            var mm = k.indexOf(prefix + "[") === 0 && /^\[(\d+)\](\..*)$/.exec(k.slice(prefix.length));
+            if (!mm) { next[k] = r.fields[k]; return; }
+            var i = parseInt(mm[1], 10);
+            if (i === del) return;
+            next[prefix + "[" + (i > del ? i - 1 : i) + "]" + mm[2]] = r.fields[k];
+          });
+          r.fields = next;
         });
       });
     }
@@ -570,17 +650,6 @@ export function onBoxClick(e) {
     }
   }
 }
-
-export var wlSimpleFieldMap = {
-  "data-wl-replicas": "spec.replicas",
-  "data-wl-image": "spec.template.spec.containers[0].image",
-  "data-wl-cname": "spec.template.spec.containers[0].name",
-  "data-wl-cport": "spec.template.spec.containers[0].ports[0].containerPort",
-  "data-svc-app": "spec.selector[app]",
-  "data-svc-port": "spec.ports[0].port",
-  "data-svc-tgtport": "spec.ports[0].targetPort",
-  "data-svc-type": "spec.type"
-};
 
 export var directCommitMap = {
   "data-v": function (t) { commitValue(t.getAttribute("data-v"), "value", t.value); },
@@ -746,7 +815,7 @@ export function onBoxChange(e) {
     t.value = "";
     if (!snippet) return;
     var taSelector = isEnv ? ('textarea[data-env-raw="' + CSS.escape(path) + '"]') : ('textarea[data-raw="' + CSS.escape(path) + '"]');
-    var ta = box.querySelector(taSelector);
+    var ta = sectionOf(t).querySelector(taSelector);
     if (ta) {
       insertSnippetIntoTextarea(ta, snippet);
     }
@@ -797,31 +866,19 @@ export function onBoxChange(e) {
     return;
   }
 
-  for (var wlAttr in wlSimpleFieldMap) {
-    if (t.hasAttribute(wlAttr)) {
-      var wlRname = t.getAttribute(wlAttr);
-      var wlPath = wlSimpleFieldMap[wlAttr];
-      var wlVal = t.value.trim();
-      (function (rName, fPath, fVal) {
-        state.op(function () {
-          return state.store.replaceDoc(function (d) {
-            var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rName; });
-            if (!r) return;
-            r.fields = r.fields || {};
-            if (fVal) r.fields[fPath] = { value: fVal };
-            else delete r.fields[fPath];
-            // A blueprint from disk may still carry the whole selector as one
-            // raw/dotted entry; leaving it beside the [app] entry would emit
-            // both, so the map entry supersedes it.
-            if (fPath === "spec.selector[app]") {
-              delete r.fields["spec.selector"];
-              delete r.fields["spec.selector.app"];
-            }
-          });
-        });
-      })(wlRname, wlPath, wlVal);
-      return;
-    }
+  if (t.hasAttribute("data-svc-app")) {
+    var svcRname = t.getAttribute("data-svc-app");
+    var svcVal = t.value.trim();
+    state.op(function () {
+      return state.store.replaceDoc(function (d) {
+        var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === svcRname; });
+        if (!r) return;
+        r.fields = r.fields || {};
+        if (svcVal) setServiceSelector(r.fields, svcVal);
+        else clearServiceSelector(r.fields);
+      });
+    });
+    return;
   }
 
   for (var directAttr in directCommitMap) {
@@ -1153,7 +1210,7 @@ export function bindInspectorEvents(box, fseg) {
       if (t.matches && t.matches("[data-npname]")) {
         e.preventDefault();
         var npKey = t.getAttribute("data-npname");
-        var npAddBtn = box.querySelector('[data-npok="' + CSS.escape(npKey) + '"]');
+        var npAddBtn = sectionOf(t).querySelector('[data-npok="' + CSS.escape(npKey) + '"]');
         if (npAddBtn) npAddBtn.click();
         return;
       }

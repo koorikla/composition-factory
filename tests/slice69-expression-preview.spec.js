@@ -1,6 +1,8 @@
 // Slice 69 — expression authoring: preview and snippets (Track 3)
 // The inspector exposes snippet catalogue and live in-process preview
 // when a field is in Raw (R) template mode.
+// region is a set field, so the essentials section renders its own copy of
+// its controls (CF-470); every locator here is scoped to the field-list row.
 const { test, expect } = require('@playwright/test')
 const { resetDoc, ENGINE, guardPageErrors } = require('./helpers')
 guardPageErrors()
@@ -15,18 +17,18 @@ test('inspector in raw mode displays snippet selector, quick chips, and live pre
   await page.click('.node[data-id="work-queue"] .node-h')
 
   // Switch region field to Raw (R) mode
-  const rawBtn = page.locator('#insp button[data-m="r"][data-path="region"]')
+  const rawBtn = page.locator('#insp .fld button[data-m="r"][data-path="region"]')
   await expect(rawBtn).toBeVisible()
   await rawBtn.click()
 
   // Verify raw textarea, snippet selector, and quick chips are rendered
-  const textarea = page.locator('#insp textarea[data-raw="region"]')
+  const textarea = page.locator('#insp .fld textarea[data-raw="region"]')
   await expect(textarea).toBeVisible()
 
-  const snippetSelect = page.locator('#insp select[data-insert-snippet="region"]')
+  const snippetSelect = page.locator('#insp .fld select[data-insert-snippet="region"]')
   await expect(snippetSelect).toBeVisible()
 
-  const xrChip = page.locator('#insp button[data-quick-snippet="region"][data-snippet-val="{{ $xr }}"]')
+  const xrChip = page.locator('#insp .fld button[data-quick-snippet="region"][data-snippet-val="{{ $xr }}"]')
   await expect(xrChip).toBeVisible()
 
   // Click $xr snippet chip
@@ -34,7 +36,7 @@ test('inspector in raw mode displays snippet selector, quick chips, and live pre
   await expect(textarea).toHaveValue('{{ $xr }}')
 
   // Live preview should show rendered output
-  const preview = page.locator('#insp .expr-preview[data-preview-for="region"]')
+  const preview = page.locator('#insp .fld .expr-preview[data-preview-for="region"]')
   await expect(preview).toBeVisible()
   await expect(preview).toHaveClass(/ok/)
   await expect(preview.locator('.expr-preview-body')).toContainText('sample-xnotify')
@@ -46,9 +48,9 @@ test('typing template expressions updates live preview and shows syntax/runtime 
   await page.click('.node[data-id="work-queue"] .node-h')
 
   // Switch region field to Raw mode
-  await page.locator('#insp button[data-m="r"][data-path="region"]').click()
-  const textarea = page.locator('#insp textarea[data-raw="region"]')
-  const preview = page.locator('#insp .expr-preview[data-preview-for="region"]')
+  await page.locator('#insp .fld button[data-m="r"][data-path="region"]').click()
+  const textarea = page.locator('#insp .fld textarea[data-raw="region"]')
+  const preview = page.locator('#insp .fld .expr-preview[data-preview-for="region"]')
 
   // Type valid interpolation
   await textarea.fill('{{ $xr }}-custom-queue')
@@ -74,10 +76,10 @@ test('snippet dropdown inserts parameter and status expressions', async ({ page 
   await page.goto('/')
   await page.click('.node[data-id="work-queue"] .node-h')
 
-  await page.locator('#insp button[data-m="r"][data-path="region"]').click()
-  const textarea = page.locator('#insp textarea[data-raw="region"]')
-  const snippetSelect = page.locator('#insp select[data-insert-snippet="region"]')
-  const preview = page.locator('#insp .expr-preview[data-preview-for="region"]')
+  await page.locator('#insp .fld button[data-m="r"][data-path="region"]').click()
+  const textarea = page.locator('#insp .fld textarea[data-raw="region"]')
+  const snippetSelect = page.locator('#insp .fld select[data-insert-snippet="region"]')
+  const preview = page.locator('#insp .fld .expr-preview[data-preview-for="region"]')
 
   // Select providerName parameter snippet
   await snippetSelect.selectOption('{{ $spec.providerName }}')

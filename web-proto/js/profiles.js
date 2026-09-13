@@ -131,6 +131,23 @@ export function setAppLabel(fields, value) {
 }
 
 /**
+ * Set the app a Service routes to as a `spec.selector[app]` entry; the
+ * legacy spellings of the same selector (whole map as raw, or dotted
+ * `.app`) are removed so emit sees one form.
+ */
+export function setServiceSelector(fields, value) {
+  clearServiceSelector(fields);
+  fields["spec.selector[app]"] = { value: value };
+}
+
+/** Remove the Service's app selector in every spelling. */
+export function clearServiceSelector(fields) {
+  delete fields["spec.selector[app]"];
+  delete fields["spec.selector"];
+  delete fields["spec.selector.app"];
+}
+
+/**
  * Only the index's native kinds ("k8s") get a Kubernetes starter: a provider
  * CRD that happens to be called Service or Job must keep its schema scaffold.
  * @returns {{starter:(name:string)=>Object, essentials:Array}|null}
@@ -144,23 +161,4 @@ export function profileFor(kind, provider) {
     starter: function (name) { return starterFor(kind, name) || {}; },
     essentials: ess || [],
   };
-}
-
-export function isFieldSet(e) { return !!e && (!!e.from || (e.raw !== undefined && e.raw !== null && e.raw !== "") || (e.value !== undefined && e.value !== null && e.value !== "")); }
-
-export function coveredByWhole(fields, k) {
-  for (var br = k.indexOf("["); br !== -1; br = k.indexOf("[", br + 1)) {
-    var parent = k.slice(0, br);
-    var key = k.slice(br + 1, k.indexOf("]", br));
-    if (isFieldSet(fields[parent]) || isFieldSet(fields[parent + "." + key])) return true;
-  }
-  var parts = k.split(".");
-  for (var i = 1; i < parts.length; i++) {
-    if (isFieldSet(fields[parts.slice(0, i).join(".")])) return true;
-  }
-  return false;
-}
-
-export function hasPartUnder(fields, k) {
-  return Object.keys(fields).some(function (x) { return x.indexOf(k + ".") === 0 || x.indexOf(k + "[") === 0; });
 }
