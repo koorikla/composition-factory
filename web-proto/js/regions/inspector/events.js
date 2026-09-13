@@ -267,13 +267,19 @@ export var boxClickActions = [
       state.op(function () { return state.store.addParameter(name, { type: type, required: isReq }); })
         .then(function (docAfter) {
           if (docAfter === null) return null;
+          state.pendingNewParam = null;
+          delete state.uiMode[p2];
           if (isEnv) {
             return state.setEnvelopeField(realPath, { from: "params." + name, value: "", raw: "" });
           }
           return state.setField(realPath, { from: "params." + name, value: "", raw: "" });
         })
         .then(function (r) {
-          if (r !== null) { state.pendingNewParam = null; delete state.uiMode[p2]; }
+          if (r !== null) {
+            state.pendingNewParam = null;
+            delete state.uiMode[p2];
+            state.render();
+          }
         });
     }
   },
