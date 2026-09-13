@@ -251,6 +251,8 @@ func New(o Options) (http.Handler, error) {
 	mux.HandleFunc("DELETE /api/blueprint/parameters/{name}", srv.handleDeleteParameter)
 	mux.HandleFunc("POST /api/blueprint/resources", srv.handleAddResource)
 	mux.HandleFunc("PUT /api/blueprint/resources/{name}", srv.handleSetResource)
+	mux.HandleFunc("GET /api/blueprint/resources/{name}/manifest", srv.handleGetResourceManifest)
+	mux.HandleFunc("PUT /api/blueprint/resources/{name}/manifest", srv.handleSetResourceManifest)
 	mux.HandleFunc("POST /api/blueprint/resources/{name}/rename", srv.handleRenameResource)
 	mux.HandleFunc("DELETE /api/blueprint/resources/{name}", srv.handleDeleteResource)
 	mux.HandleFunc("GET /api/providers", srv.handleListProviders)

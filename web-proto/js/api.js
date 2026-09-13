@@ -19,7 +19,7 @@
  */
 
 /**
- * @typedef {Error & {status: number}} ApiError
+ * @typedef {Error & {status: number, detail?: any}} ApiError
  */
 
 /**
@@ -143,6 +143,7 @@ async function request(method, path, body = undefined, opts = undefined) {
     console.warn("[API ERROR]", res.status, path, message);
     const err = /** @type {ApiError} */ (new Error(message));
     err.status = res.status;
+    err.detail = data;
     throw err;
   } 
   if (options.responseType === "text") {
@@ -447,3 +448,13 @@ export function previewExpression(expression, resource, blueprint) {
 }
 
 
+
+/** GET /api/blueprint/resources/{name}/manifest → {yaml} */
+export function getResourceManifest(name) {
+  return request("GET", "/api/blueprint/resources/" + encodeURIComponent(name) + "/manifest");
+}
+
+/** PUT /api/blueprint/resources/{name}/manifest — replaces fields in full; returns the doc. */
+export function putResourceManifest(name, yamlText) {
+  return request("PUT", "/api/blueprint/resources/" + encodeURIComponent(name) + "/manifest", { yaml: yamlText });
+}

@@ -79,6 +79,11 @@
         <span class="lbl" id="insp-drag-handle" style="cursor:default">Inspector</span><span class="sp"></span>
         <button class="btn sm" id="pane-float-r" title="Float window / Lock in place" style="padding:0 5px;margin-right:4px">⛶</button>
         <button class="del" id="pane-close-r" title="Close inspector">×</button>
+        <input class="tin" id="insp-search" placeholder="search fields…" aria-label="Search fields" style="flex:0 1 140px;height:22px;font-size:11px">
+        <div class="seg" id="vseg" title="Manifest: YAML editor · Fields: schema list">
+          <button data-view="manifest" aria-pressed="true">Manifest</button>
+          <button data-view="fields" aria-pressed="false">Fields</button>
+        </div>
         <div class="seg" id="fseg">
           <button data-f="req" aria-pressed="true">Required</button>
           <button data-f="set" aria-pressed="false">Set</button>

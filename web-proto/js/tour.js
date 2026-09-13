@@ -49,7 +49,7 @@ const STEPS = [
   {
     target: "#insp",
     title: "Objects, maps and annotations",
-    body: "Select a card and the inspector shows its fields — Required / Set / All. Map fields take per-key entries (tags[team]); annotations take wires too, e.g. an IAM role ARN into a ServiceAccount annotation. Val / Wire / Raw toggles switch a field between literal value, wire and raw template.",
+    body: "Select a card and the inspector shows its essentials on top and a manifest-style YAML editor below (Manifest view); switch to Fields for the full schema list — Required / Set / All — with search in both views. Val / Wire / Raw toggles switch a field between literal value, wire and raw template.",
   },
   {
     target: "#insp",

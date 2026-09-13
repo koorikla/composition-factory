@@ -22,6 +22,8 @@ then open <http://127.0.0.1:8080>.
 | `js/api.js` | fetch wrappers for every endpoint; throws `{status, message}` with the server's verbatim error text |
 | `js/store.js` | single state container `{doc, selectedResource, positions, undoStack, redoStack, lastGenerate, generateError}` + pub/sub (topics: `doc`, `selection`, `generate`, `error`) |
 | `js/wires.js` | pure doc helpers: `listWires(doc)`, `fanOut(doc, param)` |
+| `js/profiles.js` | per-kind profiles, good-practice starters and essentials configurations |
+| `js/regions/inspector/manifest.js` | manifest-style YAML editor, snippet dropdown and schema error line-targeting |
 | `js/main.js` | boot: imports the region modules, then `store.loadDoc()` |
 | `js/regions/*.js` | one module per region, each owned by its region agent |
 

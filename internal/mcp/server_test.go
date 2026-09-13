@@ -244,8 +244,8 @@ func TestListToolsAdvertisesTheFullOperationSet(t *testing.T) {
 	}
 	want := []string{
 		"add_function", "add_parameter", "add_provider", "add_resource", "adopt_composition", "delete_parameter", "delete_resource", "generate",
-		"get_blueprint", "get_kind_fields", "list_kinds", "list_providers", "preview_expression",
-		"rename_parameter", "rename_resource", "render_check", "replace_blueprint", "update_parameter", "update_resource",
+		"get_blueprint", "get_kind_fields", "get_resource_manifest", "list_kinds", "list_providers", "preview_expression",
+		"rename_parameter", "rename_resource", "render_check", "replace_blueprint", "set_resource_manifest", "update_parameter", "update_resource",
 	}
 	var got []string
 	for _, tool := range res.Tools {
@@ -1233,4 +1233,24 @@ func TestPreviewExpressionParity(t *testing.T) {
 	if res["rendered"] != "hello sample-xqueue" {
 		t.Errorf("rendered = %v, want hello sample-xqueue", res["rendered"])
 	}
+}
+
+// --- get_resource_manifest / set_resource_manifest ---
+
+func TestResourceManifestRoundTrip(t *testing.T) {
+	s := newStack(t)
+	got := s.toolOK(t, "get_resource_manifest", map[string]any{"name": "main-queue"})
+	y, _ := got["yaml"].(string)
+	if !strings.Contains(y, "region:") {
+		t.Fatalf("manifest lacks region:\n%s", y)
+	}
+	s.toolOK(t, "set_resource_manifest", map[string]any{"name": "main-queue", "yaml": y})
+}
+
+func TestSetResourceManifestErrorMatchesHTTP(t *testing.T) {
+	s := newStack(t)
+	body := `{"yaml":"regionn: x\n"}`
+	s.assertToolErrorMatchesHTTP(t,
+		"set_resource_manifest", map[string]any{"name": "main-queue", "yaml": "regionn: x\n"},
+		http.MethodPut, "/api/blueprint/resources/main-queue/manifest", body)
 }

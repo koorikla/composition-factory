@@ -22,7 +22,13 @@ module.exports = defineConfig({
   testDir: 'tests',
   workers: 1,  // one live engine — parallel workers corrupt each other's doc state
   timeout: 15000,
-  use: { baseURL },
+  use: {
+    baseURL,
+    // The inspector defaults to the Manifest view; the 28 specs that drive the
+    // Required/Set/All field list get that view seeded here instead of each
+    // clicking the toggle. cf471 opts out with an empty storageState.
+    storageState: { cookies: [], origins: [{ origin: baseURL, localStorage: [{ name: "cf-insp-view", value: "fields" }] }] },
+  },
   webServer: {
     // The e2e engine runs against its own scratch cache (${scratchDir}/cache)
     // seeded from tests/fixtures/cache so specs never skip or pass based on host

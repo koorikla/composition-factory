@@ -224,6 +224,19 @@ func (s *server) register(srv *sdk.Server) {
 	sdk.AddTool(srv, updateResource, s.updateResource)
 
 	sdk.AddTool(srv, &sdk.Tool{
+		Name: "get_resource_manifest",
+		Description: "One composed resource's set fields rendered as nested manifest-shaped YAML. " +
+			"Literals are plain scalars; wires and raw values appear as {from: ...} / {raw: ...} wrappers.",
+	}, s.getResourceManifest)
+
+	sdk.AddTool(srv, &sdk.Tool{
+		Name: "set_resource_manifest",
+		Description: "Replace a composed resource's fields IN FULL from manifest-shaped YAML. The kind's schema " +
+			"decides map/array/object grammar; an unknown key or malformed wrapper fails naming the path and line " +
+			"in the error text. Same CRD validation as update_resource.",
+	}, s.setResourceManifest)
+
+	sdk.AddTool(srv, &sdk.Tool{
 		Name: "rename_resource",
 		Description: "Rename a composed resource and rewrite every cross-resource status reference " +
 			"(resources.<name>.status.<path>), atomically, then persist. Renaming to the same name is a no-op " +
@@ -541,6 +554,37 @@ func (s *server) updateResource(_ context.Context, _ *sdk.CallToolRequest, in up
 		return nil, nil, errors.New("name is required")
 	}
 	return s.bridge(http.MethodPut, "/api/blueprint/resources/"+url.PathEscape(in.Name), rawOrNull(in.Resource))
+}
+
+type getResourceManifestInput struct {
+	Name string `json:"name" jsonschema:"The declared composed resource."`
+}
+
+// getResourceManifest mirrors GET /api/blueprint/resources/{name}/manifest.
+func (s *server) getResourceManifest(_ context.Context, _ *sdk.CallToolRequest, in getResourceManifestInput) (*sdk.CallToolResult, any, error) {
+	if in.Name == "" {
+		return nil, nil, errors.New("name is required")
+	}
+	return s.bridge(http.MethodGet, "/api/blueprint/resources/"+url.PathEscape(in.Name)+"/manifest", nil)
+}
+
+type setResourceManifestInput struct {
+	Name string `json:"name" jsonschema:"The declared composed resource."`
+	YAML string `json:"yaml" jsonschema:"Manifest-shaped YAML of the resource's fields (see get_resource_manifest)."`
+}
+
+// setResourceManifest mirrors PUT /api/blueprint/resources/{name}/manifest.
+func (s *server) setResourceManifest(_ context.Context, _ *sdk.CallToolRequest, in setResourceManifestInput) (*sdk.CallToolResult, any, error) {
+	if in.Name == "" {
+		return nil, nil, errors.New("name is required")
+	}
+	body, err := json.Marshal(struct {
+		YAML string `json:"yaml"`
+	}{YAML: in.YAML})
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode request: %w", err)
+	}
+	return s.bridge(http.MethodPut, "/api/blueprint/resources/"+url.PathEscape(in.Name)+"/manifest", body)
 }
 
 type renameResourceInput struct {

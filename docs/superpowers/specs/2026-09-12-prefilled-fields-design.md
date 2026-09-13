@@ -1,6 +1,6 @@
 # Pre-filled fields, essentials form and manifest editor — design
 
-Date: 2026-09-12. Status: approved in conversation, ready for a plan.
+Date: 2026-09-12. Status: implemented on branch prefill-fields.
 
 ## Problem
 

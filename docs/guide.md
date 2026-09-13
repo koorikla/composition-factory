@@ -53,3 +53,13 @@ Composition Factory includes curated starter blueprints accessible via the **Exa
 ## 5. Live Render Validation
 
 Click **Validate** in the topbar to execute a real `crossplane composition render` against an XR synthesized from your XRD. The status chip reports the composed resource count or exact Crossplane engine validation errors.
+
+---
+
+## 6. Inspector: Essentials Form, Manifest View & Search
+
+Selecting any composed resource card opens the Inspector panel with two integrated views:
+- **Essentials Form**: Top-level high-impact fields configured per kind (e.g. `image`, `replicas`, `containerPort`, selector alignment). Each essentials entry offers an **expose** action to instantly elevate literals into configurable XRD parameters, plus an interactive environment variable repeater.
+- **Manifest Editor (Default)**: Bottom section renders resource `fields` as clean, nested manifest-shaped YAML. Click **edit** to edit YAML directly with schema validation, line-accurate error reporting, and snippet autocompletion (`⌘⏎` to apply, `Esc` to cancel).
+- **Fields Toggle**: Switch from **Manifest** to **Fields** view to inspect the full schema tree (Required, Set, All).
+- **Unified Search**: Search query filters both schema matches in Manifest view and active fields in Fields view.
