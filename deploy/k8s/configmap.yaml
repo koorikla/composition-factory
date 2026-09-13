@@ -140,6 +140,10 @@ data:
             type: string
             required: true
             description: PostgreSQL database name.
+          username:
+            type: string
+            default: postgres
+            description: Master username for the RDS database instance.
           instanceClass:
             type: string
             default: db.t4g.micro
@@ -162,6 +166,9 @@ data:
           fields:
             region: {from: params.region}
             dbName: {from: params.dbName}
+            username: {from: params.username}
+            passwordSecretRef.name: {value: "rds-master-pass"}
+            passwordSecretRef.key: {value: "password"}
             instanceClass: {from: params.instanceClass}
             allocatedStorage: {from: params.allocatedStorage}
             engine: {value: "postgres"}

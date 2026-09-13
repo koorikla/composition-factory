@@ -1,8 +1,12 @@
 package examples
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
 )
@@ -168,5 +172,115 @@ func TestPortableDatabaseStarterObtainsPasswordFromEnvironmentNotXRSpec(t *testi
 	}
 	if passField.From != "env.password" {
 		t.Errorf("db-secret stringData[POSTGRES_PASSWORD] from = %q, want %q", passField.From, "env.password")
+	}
+}
+
+func TestRDSStarterConfiguresUsernameAndPasswordSecretRef(t *testing.T) {
+	ex, err := Get("rds-postgres")
+	if err != nil {
+		t.Fatalf("failed to get rds-postgres example: %v", err)
+	}
+	b, err := blueprint.Parse([]byte(ex.YAML))
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	res := b.ResourceNamed("db-instance")
+	if res == nil {
+		t.Fatalf("rds-postgres missing db-instance resource")
+	}
+
+	usernameField, ok := res.Fields["username"]
+	if !ok {
+		t.Errorf("db-instance missing username field")
+	} else {
+		if usernameField.From != "" {
+			if usernameField.From != "params.username" {
+				t.Errorf("db-instance username from = %q, want %q", usernameField.From, "params.username")
+			}
+			param, ok := b.Spec.XRD.Parameters["username"]
+			if !ok {
+				t.Errorf("rds-postgres missing username XRD parameter")
+			} else if param.Default != "postgres" {
+				t.Errorf("rds-postgres username parameter default = %q, want %q", param.Default, "postgres")
+			}
+		} else if usernameField.Value != "postgres" {
+			t.Errorf("db-instance username value = %v, want %q", usernameField.Value, "postgres")
+		}
+	}
+
+	nameField, ok := res.Fields["passwordSecretRef.name"]
+	if !ok {
+		t.Errorf("db-instance missing passwordSecretRef.name field")
+	} else if nameField.Value == "" && nameField.From == "" {
+		t.Errorf("db-instance passwordSecretRef.name must be non-empty")
+	}
+
+	keyField, ok := res.Fields["passwordSecretRef.key"]
+	if !ok {
+		t.Errorf("db-instance missing passwordSecretRef.key field")
+	} else if keyField.Value == "" && keyField.From == "" {
+		t.Errorf("db-instance passwordSecretRef.key must be non-empty")
+	}
+}
+
+func TestConfigMapRDSBlueprintHasUsernameAndPasswordSecretRef(t *testing.T) {
+	cmPath := filepath.Join("..", "..", "deploy", "k8s", "configmap.yaml")
+	data, err := os.ReadFile(cmPath)
+	if err != nil {
+		t.Fatalf("failed to read deploy/k8s/configmap.yaml: %v", err)
+	}
+
+	var cm struct {
+		Data map[string]string `yaml:"data"`
+	}
+	if err := yaml.Unmarshal(data, &cm); err != nil {
+		t.Fatalf("failed to unmarshal configmap: %v", err)
+	}
+
+	rdsYAML, ok := cm.Data["rds.cf.yaml"]
+	if !ok {
+		t.Fatalf("deploy/k8s/configmap.yaml missing rds.cf.yaml entry")
+	}
+
+	b, err := blueprint.Parse([]byte(rdsYAML))
+	if err != nil {
+		t.Fatalf("failed to parse rds.cf.yaml in configmap: %v", err)
+	}
+	res := b.ResourceNamed("db-instance")
+	if res == nil {
+		t.Fatalf("configmap rds.cf.yaml missing db-instance resource")
+	}
+
+	usernameField, ok := res.Fields["username"]
+	if !ok {
+		t.Errorf("configmap db-instance missing username field")
+	} else {
+		if usernameField.From != "" {
+			if usernameField.From != "params.username" {
+				t.Errorf("configmap db-instance username from = %q, want %q", usernameField.From, "params.username")
+			}
+			param, ok := b.Spec.XRD.Parameters["username"]
+			if !ok {
+				t.Errorf("configmap rds.cf.yaml missing username XRD parameter")
+			} else if param.Default != "postgres" {
+				t.Errorf("configmap rds.cf.yaml username parameter default = %q, want %q", param.Default, "postgres")
+			}
+		} else if usernameField.Value != "postgres" {
+			t.Errorf("configmap db-instance username value = %v, want %q", usernameField.Value, "postgres")
+		}
+	}
+
+	nameField, ok := res.Fields["passwordSecretRef.name"]
+	if !ok {
+		t.Errorf("configmap db-instance missing passwordSecretRef.name field")
+	} else if nameField.Value == "" && nameField.From == "" {
+		t.Errorf("configmap db-instance passwordSecretRef.name must be non-empty")
+	}
+
+	keyField, ok := res.Fields["passwordSecretRef.key"]
+	if !ok {
+		t.Errorf("configmap db-instance missing passwordSecretRef.key field")
+	} else if keyField.Value == "" && keyField.From == "" {
+		t.Errorf("configmap db-instance passwordSecretRef.key must be non-empty")
 	}
 }
