@@ -1,0 +1,72 @@
+[2026-09-13T06:24:02.006Z] [INIT] Launching browser with executablePath: /Users/kaurkallas/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing
+[2026-09-13T06:24:02.647Z] [MISSION] Starting M2: The Status Wire (IRSA)
+[2026-09-13T06:24:02.647Z] [STEP] Resetting to blank blueprint
+[2026-09-13T06:24:03.355Z] [SHOT] Saved 01-m2-blank-arrival.png
+[2026-09-13T06:24:03.832Z] [SHOT] Saved 02-m2-sources-tab.png
+[2026-09-13T06:24:04.386Z] [SHOT] Saved 03-m2-sources-search-iam.png
+[2026-09-13T06:24:04.390Z] [ACTION] Clicking Add on provider-aws-iam
+[2026-09-13T06:24:05.992Z] [SHOT] Saved 04-m2-sources-iam-added.png
+[2026-09-13T06:24:07.287Z] [SHOT] Saved 05-m2-kinds-filter-role.png
+[2026-09-13T06:24:07.288Z] [ACTION] Dropping kind "Role" at (300, 200)
+[2026-09-13T06:24:08.456Z] [SHOT] Saved 06-m2-role-dropped.png
+[2026-09-13T06:24:09.103Z] [SHOT] Saved 07-m2-kinds-filter-sa.png
+[2026-09-13T06:24:09.103Z] [ACTION] Dropping kind "ServiceAccount" at (700, 200)
+[2026-09-13T06:24:10.277Z] [SHOT] Saved 08-m2-sa-dropped.png
+[2026-09-13T06:24:10.894Z] [SHOT] Saved 09-m2-sa-inspector.png
+[2026-09-13T06:24:11.925Z] [SHOT] Saved 10-m2-sa-annotation-added.png
+[2026-09-13T06:24:11.926Z] [ACTION] Wiring Role status.atProvider.arn to ServiceAccount annotation
+[2026-09-13T06:24:12.788Z] [SHOT] Saved 11-m2-wire-connected.png
+[2026-09-13T06:24:13.398Z] [SHOT] Saved 12-m2-after-layout.png
+[2026-09-13T06:24:13.398Z] [ACTION] Triggering Validate
+[2026-09-13T06:24:16.493Z] [SHOT] Saved 13-m2-validate-status.png
+[2026-09-13T06:24:16.493Z] [ACTION] Triggering Generate
+[2026-09-13T06:24:16.529Z] [DIALOG] confirm: "Generate will write manifests to disk in '.testrun-ux/out', overwriting existing files.
+
+Proceed?"
+[2026-09-13T06:24:18.668Z] [SHOT] Saved 14-m2-generate-status.png
+[2026-09-13T06:24:18.669Z] [RESULT] M2 Generated output files: ["compositions","functions.yaml","providerconfigs","xrds"]
+[2026-09-13T06:24:18.669Z] [MISSION] Starting M3: Connection Secret (RDS PostgreSQL)
+[2026-09-13T06:24:18.669Z] [STEP] Resetting to blank blueprint
+[2026-09-13T06:24:19.350Z] [SHOT] Saved 15-m3-blank-arrival.png
+[2026-09-13T06:24:20.334Z] [SHOT] Saved 16-m3-sources-search-rds.png
+[2026-09-13T06:24:20.337Z] [ACTION] Clicking Add on provider-aws-rds
+[2026-09-13T06:24:21.943Z] [SHOT] Saved 17-m3-sources-rds-added.png
+[2026-09-13T06:24:23.291Z] [SHOT] Saved 18-m3-kinds-filter-instance.png
+[2026-09-13T06:24:23.292Z] [ACTION] Dropping kind "Instance" at (400, 200)
+[2026-09-13T06:24:24.473Z] [SHOT] Saved 19-m3-instance-dropped.png
+[2026-09-13T06:24:25.060Z] [SHOT] Saved 20-m3-instance-inspector.png
+[2026-09-13T06:24:25.498Z] [ACTION] Configuring RDS fields and connection secret envelope
+[2026-09-13T06:24:26.375Z] [SHOT] Saved 21-m3-instance-configured.png
+[2026-09-13T06:24:26.376Z] [ACTION] Triggering Validate for M3
+[2026-09-13T06:24:29.483Z] [SHOT] Saved 22-m3-validate-status.png
+[2026-09-13T06:24:29.483Z] [ACTION] Triggering Generate for M3
+[2026-09-13T06:24:29.513Z] [DIALOG] confirm: "Generate will write manifests to disk in '.testrun-ux/out', overwriting existing files.
+
+Proceed?"
+[2026-09-13T06:24:31.638Z] [SHOT] Saved 23-m3-generate-status.png
+[2026-09-13T06:24:31.639Z] [MISSION] Starting Extra Area: Essentials Form & Manifest Editor
+[2026-09-13T06:24:31.639Z] [STEP] Resetting to blank blueprint
+[2026-09-13T06:24:32.317Z] [SHOT] Saved 24-extra-blank-arrival.png
+[2026-09-13T06:24:33.162Z] [ACTION] Dropping kind "Deployment" at (350, 200)
+[2026-09-13T06:24:34.354Z] [SHOT] Saved 25-extra-deployment-dropped.png
+[2026-09-13T06:24:34.936Z] [SHOT] Saved 26-extra-deployment-inspector-default.png
+[2026-09-13T06:24:34.937Z] [CHECK] Manifest view active count: 0
+[2026-09-13T06:24:34.938Z] [ACTION] Clicking Fields view toggle
+[2026-09-13T06:24:35.534Z] [SHOT] Saved 27-extra-fields-view.png
+[2026-09-13T06:24:35.536Z] [CHECK] Essentials section count: 1
+[2026-09-13T06:24:35.568Z] [SHOT] Saved 28-extra-essentials-form.png
+[2026-09-13T06:24:35.569Z] [ACTION] Clicking Expose on replicas
+[2026-09-13T06:24:36.137Z] [SHOT] Saved 29-extra-replicas-exposed.png
+[2026-09-13T06:24:36.138Z] [ACTION] Switching back to Manifest view
+[2026-09-13T06:24:36.717Z] [SHOT] Saved 30-extra-manifest-view.png
+[2026-09-13T06:24:36.721Z] [ACTION] Clicking Edit button in manifest view
+[2026-09-13T06:24:37.257Z] [ACTION] Testing snippet dropdown
+[2026-09-13T06:24:37.803Z] [SHOT] Saved 31-extra-snippet-selected.png
+[2026-09-13T06:24:37.804Z] [ACTION] Testing Apply button
+[2026-09-13T06:24:37.843Z] [HTTP_ERROR] 400 http://127.0.0.1:8090/api/blueprint/resources/deployment/manifest
+[2026-09-13T06:24:37.844Z] [CONSOLE] [error] Failed to load resource: the server responded with a status of 400 (Bad Request)
+[2026-09-13T06:24:37.847Z] [CONSOLE] [warning] [API ERROR] 400 /api/blueprint/resources/deployment/manifest did not find expected key
+[2026-09-13T06:24:38.373Z] [SHOT] Saved 33-extra-after-apply.png
+[2026-09-13T06:24:38.375Z] [ACTION] Searching "containerPort" in inspector search
+[2026-09-13T06:24:38.956Z] [SHOT] Saved 32-extra-manifest-search.png
+[2026-09-13T06:24:38.957Z] [COMPLETE] All missions executed successfully
