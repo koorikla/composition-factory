@@ -45,7 +45,7 @@ test-cluster: build
 test-cluster-crd: build
 	./scripts/cluster/test-cluster-crd.sh
 
-# Lane D: in-cluster verification using floci AWS emulator and provider-aws-sqs.
+# Lane D: in-cluster verification using floci AWS emulator and AWS starters.
 test-floci: build
 	./scripts/cluster/test-floci.sh
 
