@@ -25,7 +25,7 @@ spec:
         description: Master username for PostgreSQL.
       password:
         type: string
-        default: postgres
+        required: true
         description: Master password for PostgreSQL.
       image:
         type: string

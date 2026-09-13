@@ -1,6 +1,7 @@
 package examples
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
@@ -88,5 +89,23 @@ func TestExampleIconColorDesignTokenHygiene(t *testing.T) {
 	}
 	if cron.Icon.Color != "var(--wire-status)" {
 		t.Errorf("k8s-cronjob color = %q, want %q", cron.Icon.Color, "var(--wire-status)")
+	}
+}
+
+func TestStarterExamplesHaveNoLiteralCredentialDefaults(t *testing.T) {
+	for _, ex := range All() {
+		b, err := blueprint.Parse([]byte(ex.YAML))
+		if err != nil {
+			t.Fatalf("%s: parse failed: %v", ex.ID, err)
+		}
+		for paramName, p := range b.Spec.XRD.Parameters {
+			nameLower := strings.ToLower(paramName)
+			if (strings.Contains(nameLower, "password") ||
+				strings.Contains(nameLower, "credential") ||
+				nameLower == "secret" ||
+				nameLower == "token") && p.Default != "" {
+				t.Errorf("starter %q declares parameter %q with literal credential default %q; credentials must not have XRD defaults", ex.ID, paramName, p.Default)
+			}
+		}
 	}
 }
