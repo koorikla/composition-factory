@@ -20,7 +20,7 @@ test('tree explorer displays categorized artifacts and switches editor on click'
   // Tree items exist
   const bpItem = page.locator('#tree-root .tree-item[data-t="bp"]')
   await expect(bpItem).toBeVisible()
-  await expect(bpItem).toContainText('xnotify.cf.yaml')
+  await expect(bpItem).toContainText(/doc\.cf\.yaml|xnotify\.cf\.yaml/)
 
   const compItem = page.locator('#tree-root .tree-item[data-t="comp"]')
   await expect(compItem).toBeVisible()

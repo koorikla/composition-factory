@@ -67,12 +67,22 @@ function bpTabLabel(doc) {
   return name + ".cf.yaml";
 }
 
+function bpTreeLabel(doc) {
+  if (servedBlueprintPath) {
+    var slashIdx = Math.max(servedBlueprintPath.lastIndexOf("/"), servedBlueprintPath.lastIndexOf("\\"));
+    var base = slashIdx >= 0 ? servedBlueprintPath.slice(slashIdx + 1) : servedBlueprintPath;
+    if (base) return base;
+  }
+  var name = doc && doc.metadata && doc.metadata.name || "blueprint";
+  return name + ".cf.yaml";
+}
+
 function buildTree() {
   if (!el.treeRoot) return;
   var doc = store.state.doc;
   var g = store.state.lastGenerate;
   var outputs = (g && g.outputs || []);
-  var bpLabel = bpTabLabel(doc);
+  var bpLabel = bpTreeLabel(doc);
   var name = doc && doc.metadata && doc.metadata.name || "blueprint";
 
   var bpPath = servedBlueprintPath || (name + ".cf.yaml");
