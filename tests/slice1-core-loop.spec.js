@@ -129,7 +129,7 @@ test('output tabs switch between the real generated files and the blueprint', as
   await expect(page.locator('#meta')).toContainText('lines · deterministic')
   await page.click('#tabs button[data-t="xrd"]')
   await expect(page.locator('#code')).toContainText('kind: CompositeResourceDefinition')
-  await expect(page.locator('#tabs button[data-t="bp"]')).toHaveText('xnotify.cf.yaml')
+  await expect(page.locator('#tabs button[data-t="bp"]')).toHaveText(/doc\.cf\.yaml|xnotify\.cf\.yaml/)
   await page.click('#tabs button[data-t="bp"]')
   await expect(page.locator('#code')).toContainText('kind: Blueprint')
   await expect(page.locator('#code')).toContainText('from: params.region')

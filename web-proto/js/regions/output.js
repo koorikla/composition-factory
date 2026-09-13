@@ -62,12 +62,7 @@ var isContainerEnv = false;
 
 /* ---------- tree explorer + tabs (built live) ---------- */
 
-function bpTabLabel(doc) {
-  var name = doc && doc.metadata && doc.metadata.name || "blueprint";
-  return name + ".cf.yaml";
-}
-
-function bpTreeLabel(doc) {
+function bpFileLabel(doc) {
   if (servedBlueprintPath) {
     var slashIdx = Math.max(servedBlueprintPath.lastIndexOf("/"), servedBlueprintPath.lastIndexOf("\\"));
     var base = slashIdx >= 0 ? servedBlueprintPath.slice(slashIdx + 1) : servedBlueprintPath;
@@ -82,7 +77,7 @@ function buildTree() {
   var doc = store.state.doc;
   var g = store.state.lastGenerate;
   var outputs = (g && g.outputs || []);
-  var bpLabel = bpTreeLabel(doc);
+  var bpLabel = bpFileLabel(doc);
   var name = doc && doc.metadata && doc.metadata.name || "blueprint";
 
   var bpPath = servedBlueprintPath || (name + ".cf.yaml");
@@ -217,7 +212,7 @@ function updateBreadcrumb() {
 
 
 function buildTabs() {
-  var bpLabel = bpTabLabel(store.state.doc);
+  var bpLabel = bpFileLabel(store.state.doc);
   var genFailed = !store.state.lastGenerate || !!store.state.generateError;
   var genDis = genFailed ? ' disabled aria-disabled="true"' : '';
   var h =
@@ -751,19 +746,17 @@ function drawWarn(doc) {
 
 function drawTopbarCrumb(doc) {
   if (!el.crumb) return;
-  var name = doc && doc.metadata && doc.metadata.name || "blueprint";
   var crumbHtml;
   if (servedBlueprintPath) {
     var slashIdx = Math.max(servedBlueprintPath.lastIndexOf("/"), servedBlueprintPath.lastIndexOf("\\"));
     if (slashIdx >= 0) {
       var dir = servedBlueprintPath.slice(0, slashIdx + 1);
-      var base = servedBlueprintPath.slice(slashIdx + 1);
-      crumbHtml = esc(dir) + "<b>" + esc(base) + "</b>";
+      crumbHtml = esc(dir) + "<b>" + esc(bpFileLabel(doc)) + "</b>";
     } else {
-      crumbHtml = "<b>" + esc(servedBlueprintPath) + "</b>";
+      crumbHtml = "<b>" + esc(bpFileLabel(doc)) + "</b>";
     }
   } else {
-    crumbHtml = "<b>" + esc(name) + ".cf.yaml</b>";
+    crumbHtml = "<b>" + esc(bpFileLabel(doc)) + "</b>";
   }
   var av = doc && doc.apiVersion || "";
   var schemaV = av.indexOf("/") >= 0 ? av.split("/").pop() : av;
@@ -785,9 +778,12 @@ function drawTopbar(doc) {
       }
       if (typeof r.blueprint === "string" && r.blueprint) {
         servedBlueprintPath = r.blueprint;
-        drawTopbarCrumb((store && store.state && store.state.doc) || doc);
+        var curDoc = (store && store.state && store.state.doc) || doc;
+        drawTopbarCrumb(curDoc);
         buildTree();
         updateBreadcrumb();
+        var bpTab = el.tabs && el.tabs.querySelector('[data-t="bp"]');
+        if (bpTab) bpTab.textContent = bpFileLabel(curDoc);
       }
       if (typeof r.outDir === "string") {
         outDir = r.outDir || ".";
@@ -813,8 +809,8 @@ function drawTopbar(doc) {
       syncTplSourceState(curDocEngine);
     });
   }
-  var bp = el.tabs.querySelector('[data-t="bp"]');
-  if (bp) bp.textContent = bpTabLabel(doc);
+  var bp = el.tabs && el.tabs.querySelector('[data-t="bp"]');
+  if (bp) bp.textContent = bpFileLabel(doc);
 }
 
 function chipOk(n, written, previewCount) {
