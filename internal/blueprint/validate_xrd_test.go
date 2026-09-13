@@ -85,3 +85,172 @@ func TestValidateXRDNameLengthBoundary(t *testing.T) {
 		t.Errorf("error %q does not contain %q", err.Error(), wantSubstr)
 	}
 }
+
+func TestValidateXRDStatus(t *testing.T) {
+	baseBP := func() *Blueprint {
+		return &Blueprint{
+			APIVersion: "factory.crossplane.io/v1alpha1",
+			Kind:       "Blueprint",
+			Metadata:   Metadata{Name: "test-bp"},
+			Spec: Spec{
+				XRD: XRD{
+					Group:   "platform.sparky.ee",
+					Kind:    "XQueue",
+					Plural:  "xqueues",
+					Version: "v1alpha1",
+					Scope:   "Namespaced",
+					Parameters: map[string]Parameter{
+						"providerName": {Type: "string", Required: true},
+						"tags":         {Type: "integer", Required: true},
+					},
+				},
+				Resources: []Resource{
+					{
+						Name: "sqs",
+						Kind: "Queue",
+					},
+					{
+						Name:    "looped",
+						Kind:    "Queue",
+						ForEach: "params.tags",
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("valid status definitions", func(t *testing.T) {
+		bp := baseBP()
+		bp.Spec.XRD.Status = map[string]Parameter{
+			"url": {
+				Type:        "string",
+				Description: "The queue URL",
+				From:        "resources.sqs.status.atProvider.url",
+			},
+			"metrics": {
+				Type: "object",
+				Properties: map[string]Parameter{
+					"arn": {
+						Type: "string",
+						From: "resources.sqs.status.atProvider.arn",
+					},
+				},
+			},
+		}
+		if err := bp.Validate(); err != nil {
+			t.Fatalf("expected valid status, got error: %v", err)
+		}
+	})
+
+	t.Run("rejects array in status", func(t *testing.T) {
+		bp := baseBP()
+		bp.Spec.XRD.Status = map[string]Parameter{
+			"items": {Type: "array"},
+		}
+		err := bp.Validate()
+		if err == nil || !strings.Contains(err.Error(), "type \"array\" is not supported in M1") {
+			t.Fatalf("want array rejection error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects invalid status name", func(t *testing.T) {
+		bp := baseBP()
+		bp.Spec.XRD.Status = map[string]Parameter{
+			"true": {Type: "string"},
+		}
+		err := bp.Validate()
+		if err == nil || !strings.Contains(err.Error(), "invalid status field name") {
+			t.Fatalf("want invalid status field name error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects properties on non-object", func(t *testing.T) {
+		bp := baseBP()
+		bp.Spec.XRD.Status = map[string]Parameter{
+			"url": {
+				Type: "string",
+				Properties: map[string]Parameter{
+					"sub": {Type: "string"},
+				},
+			},
+		}
+		err := bp.Validate()
+		if err == nil || !strings.Contains(err.Error(), "properties is only valid on type \"object\"") {
+			t.Fatalf("want properties on non-object error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects from on object with properties", func(t *testing.T) {
+		bp := baseBP()
+		bp.Spec.XRD.Status = map[string]Parameter{
+			"endpoint": {
+				Type: "object",
+				From: "resources.sqs.status.atProvider.endpoint",
+				Properties: map[string]Parameter{
+					"sub": {Type: "string"},
+				},
+			},
+		}
+		err := bp.Validate()
+		if err == nil || !strings.Contains(err.Error(), "an object with properties cannot specify from: directly") {
+			t.Fatalf("want from on object error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects malformed from status wire", func(t *testing.T) {
+		bp := baseBP()
+		bp.Spec.XRD.Status = map[string]Parameter{
+			"url": {
+				Type: "string",
+				From: "params.url",
+			},
+		}
+		err := bp.Validate()
+		if err == nil || !strings.Contains(err.Error(), "a status wire must reference another resource's observed status") {
+			t.Fatalf("want malformed status wire error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects looped resource target", func(t *testing.T) {
+		bp := baseBP()
+		bp.Spec.XRD.Status = map[string]Parameter{
+			"url": {
+				Type: "string",
+				From: "resources.looped.status.atProvider.url",
+			},
+		}
+		err := bp.Validate()
+		if err == nil || !strings.Contains(err.Error(), "is looped (forEach:") {
+			t.Fatalf("want looped resource error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects from on input parameter", func(t *testing.T) {
+		bp := baseBP()
+		bp.Spec.XRD.Parameters["queueName"] = Parameter{
+			Type: "string",
+			From: "resources.sqs.status.atProvider.url",
+		}
+		err := bp.Validate()
+		if err == nil || !strings.Contains(err.Error(), "from is not supported on input parameters") {
+			t.Fatalf("want from on input parameter error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects from on nested input parameter member", func(t *testing.T) {
+		bp := baseBP()
+		bp.Spec.XRD.Parameters["config"] = Parameter{
+			Type: "object",
+			Properties: map[string]Parameter{
+				"subField": {
+					Type: "string",
+					From: "resources.sqs.status.atProvider.url",
+				},
+			},
+		}
+		err := bp.Validate()
+		if err == nil || !strings.Contains(err.Error(), "from is not supported on input parameters") {
+			t.Fatalf("want from on parameter member error, got: %v", err)
+		}
+	})
+}

@@ -277,6 +277,9 @@ func validateParameterMembers(paramPath string, p Parameter) error {
 			}
 			continue
 		}
+		if mp.From != "" {
+			return fmt.Errorf("%s: from is not supported on input parameters (only valid on spec.xrd.status fields)", mPath)
+		}
 		if len(mp.Properties) > 0 {
 			return fmt.Errorf("%s: properties are only valid on type: object members (this member is %q)",
 				mPath, mp.Type)
@@ -521,6 +524,9 @@ func (b *Blueprint) Validate() error {
 		return err
 	}
 	if err := b.validateParameters(); err != nil {
+		return err
+	}
+	if err := b.validateStatus(); err != nil {
 		return err
 	}
 	if err := b.validateTemplates(); err != nil {

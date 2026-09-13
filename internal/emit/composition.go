@@ -179,6 +179,11 @@ func writeTemplateBody(d *Doc, ti int, b *blueprint.Blueprint, crds []schema.CRD
 			return err
 		}
 	}
+	if len(b.Spec.XRD.Status) > 0 {
+		if err := writeCompositeStatusTemplate(d, ti, b, crds, wantNamespaced); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1173,25 +1178,25 @@ var scalarStatusTypes = map[string]bool{
 // where the wire sits on r, preformatted (`field "queueUrl"`,
 // `annotation "eks.amazonaws.com/role-arn"`), so one resolver serves both
 // surfaces without the field messages changing a byte.
-func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) (guard, expr, leafType string, err error) {
+func resolveStatusWire(ref blueprint.FromRef, context string, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) (guard, expr, leafType string, err error) {
 	src := b.ResourceNamed(ref.Resource)
 	if src == nil {
 		// Validate refuses this before any emitter runs; kept as a defensive
 		// error because planFields is reachable from in-memory blueprints.
-		return "", "", "", fmt.Errorf("resource %q %s: references the status of unknown resource %q",
-			r.Name, what, ref.Resource)
+		return "", "", "", fmt.Errorf("%s: references the status of unknown resource %q",
+			context, ref.Resource)
 	}
 	crd, err := resolveKind(crds, *src, wantNamespaced)
 	if err != nil {
-		return "", "", "", fmt.Errorf("resource %q %s: %w", r.Name, what, err)
+		return "", "", "", fmt.Errorf("%s: %w", context, err)
 	}
 	nodes, err := crd.Status()
 	if err != nil {
-		return "", "", "", fmt.Errorf("resource %q %s: %w", r.Name, what, err)
+		return "", "", "", fmt.Errorf("%s: %w", context, err)
 	}
 	if len(nodes) == 0 {
-		return "", "", "", fmt.Errorf("resource %q %s: kind %q declares no status schema in its CRD; "+
-			"nothing can be wired from resource %q's status", r.Name, what, src.Kind, ref.Resource)
+		return "", "", "", fmt.Errorf("%s: kind %q declares no status schema in its CRD; "+
+			"nothing can be wired from resource %q's status", context, src.Kind, ref.Resource)
 	}
 
 	path := strings.Join(ref.StatusPath, ".")
@@ -1213,29 +1218,131 @@ func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blu
 			}
 		}
 		if branches[path] {
-			return "", "", "", fmt.Errorf("resource %q %s: status path %q on %s addresses an object "+
+			return "", "", "", fmt.Errorf("%s: status path %q on %s addresses an object "+
 				"subtree, not a scalar leaf -- interpolating it would render Go's fmt of the map, "+
-				"which is valid YAML and silently wrong", r.Name, what, path, crd.Kind)
+				"which is valid YAML and silently wrong", context, path, crd.Kind)
 		}
 		if s := closestPath(path, suggestions); s != "" {
-			return "", "", "", fmt.Errorf("resource %q %s: status path %q is not in %s's status "+
-				"schema; did you mean %q?", r.Name, what, path, crd.Kind, s)
+			return "", "", "", fmt.Errorf("%s: status path %q is not in %s's status "+
+				"schema; did you mean %q?", context, path, crd.Kind, s)
 		}
-		return "", "", "", fmt.Errorf("resource %q %s: status path %q is not in %s's status schema",
-			r.Name, what, path, crd.Kind)
+		return "", "", "", fmt.Errorf("%s: status path %q is not in %s's status schema",
+			context, path, crd.Kind)
 	}
 	if !scalarStatusTypes[leaf.Type] {
 		typ := leaf.Type
 		if typ == "" {
 			typ = "untyped"
 		}
-		return "", "", "", fmt.Errorf("resource %q %s: status path %q on %s is %s, and a wire can "+
+		return "", "", "", fmt.Errorf("%s: status path %q on %s is %s, and a wire can "+
 			"only carry a scalar (string, integer, number, boolean) -- a composite would render "+
-			"Go's fmt of the value", r.Name, what, path, crd.Kind, typ)
+			"Go's fmt of the value", context, path, crd.Kind, typ)
 	}
 
 	guard, expr = statusGuard(ref.Resource, ref.StatusPath)
 	return guard, expr, leaf.Type, nil
+}
+
+func statusWire(ref blueprint.FromRef, r blueprint.Resource, what string, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) (guard, expr, leafType string, err error) {
+	return resolveStatusWire(ref, fmt.Sprintf("resource %q %s", r.Name, what), b, crds, wantNamespaced)
+}
+
+func planCompositeStatusFields(b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) ([]forProviderField, error) {
+	if len(b.Spec.XRD.Status) == 0 {
+		return nil, nil
+	}
+	var plan []forProviderField
+
+	var collect func(prefix string, params map[string]blueprint.Parameter) error
+	collect = func(prefix string, params map[string]blueprint.Parameter) error {
+		names := make([]string, 0, len(params))
+		for n := range params {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+
+		for _, n := range names {
+			p := params[n]
+			fullPath := n
+			if prefix != "" {
+				fullPath = prefix + "." + n
+			}
+
+			if p.Type == "object" && len(p.Properties) > 0 {
+				if err := collect(fullPath, p.Properties); err != nil {
+					return err
+				}
+				continue
+			}
+
+			if p.From != "" {
+				ref, err := blueprint.ParseFrom(p.From)
+				if err != nil {
+					return fmt.Errorf("spec.xrd.status.%s: %w", fullPath, err)
+				}
+				guard, expr, leafType, err := resolveStatusWire(ref, fmt.Sprintf("spec.xrd.status.%s", fullPath), b, crds, wantNamespaced)
+				if err != nil {
+					return err
+				}
+				if !isFieldTypeCompatible(p.Type, leafType, false) {
+					return fmt.Errorf("spec.xrd.status.%s has type %q in the XRD schema, but status path %q has type %q — incompatible types",
+						fullPath, p.Type, strings.Join(ref.StatusPath, "."), leafType)
+				}
+
+				rhs := "{{ " + expr + " }}"
+				if p.Type == "string" {
+					rhs = fmt.Sprintf("{{ %s | quote }}", expr)
+				}
+				plan = append(plan, forProviderField{
+					path:  fullPath,
+					rhs:   rhs,
+					guard: guard,
+				})
+			}
+		}
+		return nil
+	}
+
+	if err := collect("", b.Spec.XRD.Status); err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+func writeCompositeStatusTemplate(d *Doc, ti int, b *blueprint.Blueprint, crds []schema.CRD, wantNamespaced bool) error {
+	plan, err := planCompositeStatusFields(b, crds, wantNamespaced)
+	if err != nil {
+		return err
+	}
+	if len(plan) == 0 {
+		return nil
+	}
+
+	root, err := buildNativeTree(b.Spec.XRD.Kind, plan)
+	if err != nil {
+		return err
+	}
+
+	d.Line(ti, "---")
+	d.Line(ti, "apiVersion: %s/%s", b.Spec.XRD.Group, b.Spec.XRD.Version)
+	d.Line(ti, "kind: %s", b.Spec.XRD.Kind)
+	d.Line(ti, "status:")
+
+	unconditional, guards := root.analyze()
+	if !unconditional && len(guards) > 0 {
+		conds := make([]string, len(guards))
+		for i, g := range guards {
+			conds[i] = "(" + g + ")"
+		}
+		d.Line(ti+1, "{{- if or %s }}", strings.Join(conds, " "))
+		writeNativeChildren(d, ti+1, root.children)
+		d.Line(ti+1, "{{- else }}")
+		d.Line(ti+1, "{}")
+		d.Line(ti+1, "{{- end }}")
+	} else {
+		writeNativeChildren(d, ti+1, root.children)
+	}
+	return nil
 }
 
 // forEachCountTypes are the status-leaf types an observed loop bound

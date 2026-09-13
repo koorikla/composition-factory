@@ -2462,3 +2462,120 @@ spec:
 		})
 	}
 }
+
+func TestLoadStatusDefinitions(t *testing.T) {
+	body := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue
+spec:
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2
+  xrd:
+    group: platform.sparky.ee
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+    status:
+      url:
+        type: string
+        description: "The queue URL"
+        from: resources.main-queue.status.atProvider.url
+      arn:
+        type: string
+        from: resources.main-queue.status.atProvider.arn
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2
+      fields:
+        region: {value: "eu-north-1"}
+`
+	b, err := Parse([]byte(body))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(b.Spec.XRD.Status) != 2 {
+		t.Fatalf("len(XRD.Status) = %d, want 2", len(b.Spec.XRD.Status))
+	}
+	urlParam := b.Spec.XRD.Status["url"]
+	if urlParam.Type != "string" || urlParam.Description != "The queue URL" || urlParam.From != "resources.main-queue.status.atProvider.url" {
+		t.Errorf("url = %+v, want string with description and from wire", urlParam)
+	}
+}
+
+func TestValidateRejectsInvalidStatusWire(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusYAML string
+		wantSubstr string
+	}{
+		{
+			name: "unknown resource",
+			statusYAML: `
+    status:
+      url:
+        type: string
+        from: resources.nonexistent.status.atProvider.url
+`,
+			wantSubstr: "unknown resource",
+		},
+		{
+			name: "invalid status ref syntax",
+			statusYAML: `
+    status:
+      url:
+        type: string
+        from: invalid-ref
+`,
+			wantSubstr: "resources.<name>.status.<path>",
+		},
+		{
+			name: "invalid status field name",
+			statusYAML: `
+    status:
+      "bad-name":
+        type: string
+        from: resources.main-queue.status.atProvider.url
+`,
+			wantSubstr: "invalid status field name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `
+apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: xqueue
+spec:
+  sources:
+    - provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2
+  xrd:
+    group: platform.sparky.ee
+    kind: XQueue
+    plural: xqueues
+    version: v1alpha1
+    scope: Namespaced
+    parameters:
+      providerName: {type: string, required: true}
+` + tt.statusYAML + `
+  resources:
+    - name: main-queue
+      kind: Queue
+      provider: xpkg.upbound.io/upbound/provider-aws-sqs:v2
+      fields:
+        region: {value: "eu-north-1"}
+`
+			_, err := Parse([]byte(body))
+			if err == nil || !strings.Contains(err.Error(), tt.wantSubstr) {
+				t.Fatalf("err = %v, want substring %q", err, tt.wantSubstr)
+			}
+		})
+	}
+}

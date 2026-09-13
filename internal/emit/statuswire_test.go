@@ -405,3 +405,95 @@ func TestStatusWireIntegerLeafIsAccepted(t *testing.T) {
 		t.Errorf("maxMessageSize = %v (%T), want the observed integer 2048", fp["maxMessageSize"], fp["maxMessageSize"])
 	}
 }
+
+func renderedCompositeDoc(t *testing.T, rendered string, kind string) map[string]any {
+	t.Helper()
+	for _, docText := range strings.Split(rendered, "\n---\n") {
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(docText), &doc); err != nil {
+			t.Fatalf("rendered output is not valid YAML: %v\n---\n%s", err, docText)
+		}
+		if doc["kind"] == kind {
+			return doc
+		}
+	}
+	t.Fatalf("no %s document in the rendered output\n---\n%s", kind, rendered)
+	return nil
+}
+
+func TestStatusWireXRStatusRendersObservedValue(t *testing.T) {
+	b := wireBlueprint()
+	b.Spec.XRD.Status = map[string]blueprint.Parameter{
+		"url": {
+			Type: "string",
+			From: "resources.main-queue.status.atProvider.url",
+		},
+		"maxMessageSize": {
+			Type: "integer",
+			From: "resources.main-queue.status.atProvider.maxMessageSize",
+		},
+	}
+	got, err := Composition(b, wireCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	rendered, err := renderTemplateObserved(t, extractTemplate(t, got),
+		map[string]any{"providerName": "localstack"},
+		observedQueue("https://sqs.eu-north-1.amazonaws.com/1/demo"))
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	doc := renderedCompositeDoc(t, rendered, "XQueue")
+	st, ok := doc["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("doc[status] is not a map: %v", doc["status"])
+	}
+	if st["url"] != "https://sqs.eu-north-1.amazonaws.com/1/demo" {
+		t.Errorf("status.url = %v, want https://sqs.eu-north-1.amazonaws.com/1/demo", st["url"])
+	}
+}
+
+func TestStatusWireXRStatusOmitsWhenUnobserved(t *testing.T) {
+	b := wireBlueprint()
+	b.Spec.XRD.Status = map[string]blueprint.Parameter{
+		"url": {
+			Type: "string",
+			From: "resources.main-queue.status.atProvider.url",
+		},
+	}
+	got, err := Composition(b, wireCRDs(t))
+	if err != nil {
+		t.Fatalf("Composition: %v", err)
+	}
+	rendered, err := renderTemplateObserved(t, extractTemplate(t, got),
+		map[string]any{"providerName": "localstack"},
+		nil)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	doc := renderedCompositeDoc(t, rendered, "XQueue")
+	st, ok := doc["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("doc[status] is not a map: %v", doc["status"])
+	}
+	if _, present := st["url"]; present {
+		t.Errorf("status.url must be absent when unobserved, got %v", st["url"])
+	}
+}
+
+func TestStatusWireXRStatusUnknownPathRejectedWithSuggestion(t *testing.T) {
+	b := wireBlueprint()
+	b.Spec.XRD.Status = map[string]blueprint.Parameter{
+		"url": {
+			Type: "string",
+			From: "resources.main-queue.status.atProvider.ur",
+		},
+	}
+	_, err := Composition(b, wireCRDs(t))
+	if err == nil {
+		t.Fatal("expected error for unknown status path, got nil")
+	}
+	if !strings.Contains(err.Error(), "atProvider.ur") || !strings.Contains(err.Error(), "atProvider.url") {
+		t.Errorf("err = %v, want suggestion for atProvider.url", err)
+	}
+}

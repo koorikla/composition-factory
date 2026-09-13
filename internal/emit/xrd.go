@@ -39,47 +39,8 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 	d.Line(5, "spec:")
 	d.Line(6, "type: object")
 	d.Line(6, "properties:")
-
-	names := make([]string, 0, len(x.Parameters))
-	for n := range x.Parameters {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		p := x.Parameters[n]
-		d.Line(7, "%s:", formatYAMLKey(n))
-		d.Line(8, "type: %s", p.Type)
-		if p.Description != "" {
-			// User-authored free text: quote it. Unquoted, a ": " sequence is
-			// an invalid mapping-value indicator (parse error) and a " #"
-			// sequence silently truncates the rest of the string as a comment.
-			d.Line(8, "description: %s", quoteYAML(p.Description))
-		}
-		if p.Default != "" {
-			d.Line(8, "default: %s", defaultYAML(p.Type, p.Default))
-		}
-		if len(p.Enum) > 0 {
-			d.Line(8, "enum:")
-			for _, e := range p.Enum {
-				// Strings are quoted so YAML keywords/numbers are not
-				// reinterpreted as bool/number/null on a type: string field.
-				// Non-string types (integer, number, boolean) are emitted bare
-				// so the Kubernetes API server accepts them as the declared type.
-				d.Line(8, "- %s", enumYAML(p.Type, e))
-			}
-		}
-		if p.Type == "object" && len(p.Properties) == 0 {
-			// The v1 free-form map. Byte-identical to what this emitter
-			// wrote before typed members existed — a propertyless object
-			// parameter keeps additionalProperties: string exactly.
-			d.Line(8, "additionalProperties:")
-			d.Line(9, "type: string")
-		}
-		if p.Type == "object" && len(p.Properties) > 0 {
-			writeObjectMembers(d, 8, p)
-		}
-	}
-	if req := requiredParams(x); len(req) > 0 {
+	writeParameterProperties(d, 7, x.Parameters)
+	if req := requiredParams(x.Parameters); len(req) > 0 {
 		formatted := make([]string, len(req))
 		for i, r := range req {
 			formatted[i] = formatYAMLKey(r)
@@ -89,36 +50,69 @@ func XRD(b *blueprint.Blueprint) ([]byte, error) {
 	d.Comment("required lists only the parameters the blueprint marks Required.")
 	d.Comment("A merely-dereferenced parameter is safe unforced: the Composition")
 	d.Comment("guards every optional access with hasKey, never a bare dereference.")
+
+	if len(x.Status) > 0 {
+		d.Line(5, "status:")
+		d.Line(6, "type: object")
+		d.Line(6, "properties:")
+		writeParameterProperties(d, 7, x.Status)
+		if req := requiredParams(x.Status); len(req) > 0 {
+			formatted := make([]string, len(req))
+			for i, r := range req {
+				formatted[i] = formatYAMLKey(r)
+			}
+			d.Line(6, "required: [%s]", strings.Join(formatted, ", "))
+		}
+	}
 	return d.Bytes(), nil
 }
 
+func writeParameterProperties(d *Doc, ind int, params map[string]blueprint.Parameter) {
+	names := make([]string, 0, len(params))
+	for n := range params {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		p := params[n]
+		d.Line(ind, "%s:", formatYAMLKey(n))
+		d.Line(ind+1, "type: %s", p.Type)
+		if p.Description != "" {
+			// User-authored free text: quote it. Unquoted, a ": " sequence is
+			// an invalid mapping-value indicator (parse error) and a " #"
+			// sequence silently truncates the rest of the string as a comment.
+			d.Line(ind+1, "description: %s", quoteYAML(p.Description))
+		}
+		if p.Default != "" {
+			d.Line(ind+1, "default: %s", defaultYAML(p.Type, p.Default))
+		}
+		if len(p.Enum) > 0 {
+			d.Line(ind+1, "enum:")
+			for _, e := range p.Enum {
+				// Strings are quoted so YAML keywords/numbers are not
+				// reinterpreted as bool/number/null on a type: string field.
+				// Non-string types (integer, number, boolean) are emitted bare
+				// so the Kubernetes API server accepts them as the declared type.
+				d.Line(ind+1, "- %s", enumYAML(p.Type, e))
+			}
+		}
+		if p.Type == "object" && len(p.Properties) == 0 {
+			// The v1 free-form map. Byte-identical to what this emitter
+			// wrote before typed members existed — a propertyless object
+			// parameter keeps additionalProperties: string exactly.
+			d.Line(ind+1, "additionalProperties:")
+			d.Line(ind+2, "type: string")
+		}
+		if p.Type == "object" && len(p.Properties) > 0 {
+			writeObjectMembers(d, ind+1, p)
+		}
+	}
+}
+
 // requiredParams returns the explicitly-required parameters, sorted.
-//
-// This deliberately does NOT also include every parameter some template
-// dereferences. An earlier version of this emitter unioned the two: the idea
-// was that a Go template dereferencing a missing XR field renders the
-// literal string "<no value>" into a live managed resource, and since that
-// string is legal YAML the whole validate -> render -> validate pipeline
-// still exits 0 -- so forcing every dereferenced parameter to be required
-// looked like the mitigation.
-//
-// That union is now both unnecessary and actively harmful. The Composition
-// emitter (internal/emit/composition.go) no longer takes a bare dereference
-// on trust: it gives a required parameter direct, unguarded template access
-// (safe, because the XRD gate makes its presence unconditional on any valid
-// XR) and gates every access to a non-required parameter behind hasKey
-// (safe, because the guarded branch only renders when the key provably
-// exists). Both paths are independently immune to "<no value>" -- the
-// mitigation this field's Required-only-ness now needs to protect is nothing.
-// Unioning in the dereferenced set here would not close any remaining gap;
-// it would only strip optionality from every parameter a template happens to
-// read, which is precisely what "required" is supposed to let a blueprint
-// author NOT do. If you're reading this because you're tempted to restore
-// the union believing it closes a hole: it doesn't, not anymore -- read
-// composition.go's hasKey handling first.
-func requiredParams(x blueprint.XRD) []string {
-	out := make([]string, 0, len(x.Parameters))
-	for n, p := range x.Parameters {
+func requiredParams(params map[string]blueprint.Parameter) []string {
+	out := make([]string, 0, len(params))
+	for n, p := range params {
 		if p.Required {
 			out = append(out, n)
 		}

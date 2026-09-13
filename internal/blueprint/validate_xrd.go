@@ -2,6 +2,7 @@ package blueprint
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -60,6 +61,90 @@ func validateXRD(x XRD) error {
 			"the server and the crossplane CLI default it differently")
 	default:
 		return fmt.Errorf("spec.xrd.scope: unknown scope %q", x.Scope)
+	}
+	return nil
+}
+
+// validateStatus validates spec.xrd.status definitions and status wire constraints.
+func (b *Blueprint) validateStatus() error {
+	x := b.Spec.XRD
+	if len(x.Status) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(x.Status))
+	for n := range x.Status {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	for _, n := range names {
+		p := x.Status[n]
+		if err := b.validateStatusParameter("spec.xrd.status."+n, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *Blueprint) validateStatusParameter(path string, p Parameter) error {
+	segs := strings.Split(path, ".")
+	name := segs[len(segs)-1]
+	if !paramNameRE.MatchString(name) || yamlParamKeywords[strings.ToLower(name)] {
+		return fmt.Errorf("%s: invalid status field name "+
+			"(must be camelCase, e.g. maxMessageSize, and not a YAML keyword like yes/no/true/false)", path)
+	}
+
+	if p.Type == "array" {
+		return fmt.Errorf("%s: type \"array\" is not supported in M1", path)
+	}
+	if !validTypes[p.Type] {
+		return fmt.Errorf("%s: unknown type %q", path, p.Type)
+	}
+
+	if err := validateParameterScalars(path, p); err != nil {
+		return err
+	}
+
+	if len(p.Properties) > 0 {
+		if p.Type != "object" {
+			return fmt.Errorf("%s: properties is only valid on type \"object\" (got type %q)", path, p.Type)
+		}
+		if p.From != "" {
+			return fmt.Errorf("%s: an object with properties cannot specify from: directly", path)
+		}
+		propNames := make([]string, 0, len(p.Properties))
+		for m := range p.Properties {
+			propNames = append(propNames, m)
+		}
+		sort.Strings(propNames)
+		for _, m := range propNames {
+			if err := b.validateStatusParameter(path+".properties."+m, p.Properties[m]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if p.From != "" {
+		target, statusPath, ok := StatusRef(p.From)
+		if !ok {
+			return fmt.Errorf("%s: a status wire must reference another resource's observed status as resources.<name>.status.<path> (got %q)",
+				path, p.From)
+		}
+		decl := b.ResourceNamed(target)
+		if decl == nil {
+			return fmt.Errorf("%s: references unknown resource %q", path, target)
+		}
+		if decl.ForEach != "" {
+			return fmt.Errorf("%s: resource %q is looped (forEach: %s), so its composed documents are named %s-0, %s-1, ... and the un-indexed key %q never appears in the observed resources map -- the reference could never resolve. Reference an unlooped resource",
+				path, target, decl.ForEach, target, target, target)
+		}
+		for _, seg := range strings.Split(statusPath, ".") {
+			if !paramNameRE.MatchString(seg) {
+				return fmt.Errorf("%s: status path segment %q in %q is not a valid field name (must be camelCase, e.g. atProvider.url)",
+					path, seg, p.From)
+			}
+		}
 	}
 	return nil
 }

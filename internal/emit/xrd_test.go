@@ -577,3 +577,59 @@ func TestXRDKeywordParametersAndRequired(t *testing.T) {
 		t.Errorf("nested required missing string %q: %v", "on", nestedReq)
 	}
 }
+
+func TestXRDStatusProperties(t *testing.T) {
+	b := testBlueprint()
+	b.Spec.XRD.Status = map[string]blueprint.Parameter{
+		"url": {
+			Type:        "string",
+			Description: "The queue URL",
+		},
+		"arn": {
+			Type: "string",
+		},
+		"details": {
+			Type: "object",
+			Properties: map[string]blueprint.Parameter{
+				"count": {Type: "integer"},
+			},
+		},
+	}
+
+	got, err := XRD(b)
+	if err != nil {
+		t.Fatalf("XRD: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := yaml.Unmarshal(got, &parsed); err != nil {
+		t.Fatalf("sigs.k8s.io/yaml.Unmarshal failed: %v\n---\n%s", err, got)
+	}
+
+	statusProps := dig(t, parsed, "spec", "versions", 0, "schema", "openAPIV3Schema",
+		"properties", "status", "properties").(map[string]any)
+
+	if urlProp, ok := statusProps["url"].(map[string]any); !ok {
+		t.Errorf("status.url missing or not a map: %v", statusProps)
+	} else {
+		if urlProp["type"] != "string" {
+			t.Errorf("status.url.type = %v, want string", urlProp["type"])
+		}
+		if urlProp["description"] != "The queue URL" {
+			t.Errorf("status.url.description = %v, want 'The queue URL'", urlProp["description"])
+		}
+	}
+
+	if arnProp, ok := statusProps["arn"].(map[string]any); !ok {
+		t.Errorf("status.arn missing: %v", statusProps)
+	} else if arnProp["type"] != "string" {
+		t.Errorf("status.arn.type = %v, want string", arnProp["type"])
+	}
+
+	detailsProps := dig(t, statusProps, "details", "properties").(map[string]any)
+	if countProp, ok := detailsProps["count"].(map[string]any); !ok {
+		t.Errorf("status.details.count missing: %v", detailsProps)
+	} else if countProp["type"] != "integer" {
+		t.Errorf("status.details.count.type = %v, want integer", countProp["type"])
+	}
+}

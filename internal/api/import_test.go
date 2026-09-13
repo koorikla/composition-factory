@@ -110,7 +110,7 @@ spec:
     kind: XTest
     plural: xtests
     version: v1alpha1
-    status:
+    unknownField:
       someUnknownKey: true
 `
 	rec := httptest.NewRecorder()
@@ -119,7 +119,7 @@ spec:
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body)
 	}
-	if !strings.Contains(rec.Body.String(), "status") {
+	if !strings.Contains(rec.Body.String(), "unknownField") {
 		t.Fatalf("expected error naming unknown field, got: %s", rec.Body)
 	}
 }

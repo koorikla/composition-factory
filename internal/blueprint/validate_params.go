@@ -33,6 +33,9 @@ func (b *Blueprint) validateParameters() error {
 				"mapping would render Go's fmt of the slice (\"[a b c]\") -- valid YAML, silently "+
 				"wrong. Use a scalar parameter, or a raw: field for a literal list", n)
 		}
+		if p.From != "" {
+			return fmt.Errorf("spec.xrd.parameters.%s: from is not supported on input parameters (only valid on spec.xrd.status fields)", n)
+		}
 		if !validTypes[p.Type] {
 			return fmt.Errorf("spec.xrd.parameters.%s: unknown type %q", n, p.Type)
 		}

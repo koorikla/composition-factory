@@ -253,10 +253,11 @@ type XRD struct {
 	Version    string               `json:"version"`
 	Scope      string               `json:"scope"`
 	Parameters map[string]Parameter `json:"parameters"`
+	Status     map[string]Parameter `json:"status,omitempty"`
 }
 
-// Parameter is one spec field of the composite API. It is single-source: this
-// declaration produces both the XRD schema and the template default.
+// Parameter is one spec or status field of the composite API. It is single-source: this
+// declaration produces both the XRD schema and the template default or status wire.
 //
 // Properties, valid ONLY on type: object, declares typed members: the
 // parameter stops being the v1 free-form string map (additionalProperties:
@@ -279,6 +280,7 @@ type Parameter struct {
 	Default     string               `json:"default,omitempty"`
 	Description string               `json:"description,omitempty"`
 	Properties  map[string]Parameter `json:"properties,omitempty"`
+	From        string               `json:"from,omitempty"`
 }
 
 // UnmarshalJSON permits scalar values (booleans, numbers, strings) for Default and Enum.
@@ -290,6 +292,7 @@ func (p *Parameter) UnmarshalJSON(data []byte) error {
 		Default     any                  `json:"default"`
 		Description string               `json:"description"`
 		Properties  map[string]Parameter `json:"properties,omitempty"`
+		From        any                  `json:"from"`
 	}
 	var raw rawParam
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -314,6 +317,13 @@ func (p *Parameter) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("default: %w", err)
 		}
 		p.Default = s
+	}
+	if raw.From != nil {
+		s, err := scalarToString(raw.From)
+		if err != nil {
+			return fmt.Errorf("from: %w", err)
+		}
+		p.From = s
 	}
 	return nil
 }
