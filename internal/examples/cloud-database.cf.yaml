@@ -23,6 +23,10 @@ spec:
         type: string
         default: postgres
         description: Master username for PostgreSQL.
+      password:
+        type: string
+        required: true
+        description: Master password for PostgreSQL.
       image:
         type: string
         default: postgres:15-alpine
@@ -31,10 +35,6 @@ spec:
         type: integer
         default: "1"
         description: Number of database replicas in the StatefulSet.
-  environment:
-    password:
-      type: string
-      description: Master password for PostgreSQL.
   resources:
     - name: db-secret
       kind: Secret
@@ -42,7 +42,7 @@ spec:
       fields:
         stringData[POSTGRES_DB]: {from: params.dbName}
         stringData[POSTGRES_USER]: {from: params.username}
-        stringData[POSTGRES_PASSWORD]: {from: env.password}
+        stringData[POSTGRES_PASSWORD]: {from: params.password}
     - name: db-service
       kind: Service
       provider: k8s

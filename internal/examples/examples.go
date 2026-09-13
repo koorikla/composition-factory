@@ -157,7 +157,7 @@ func All() []Example {
 			ID:          "cloud-database",
 			Name:        "Cloud-Agnostic Portable Database",
 			Description: "Zero-dependency portable database abstraction composing an in-cluster PostgreSQL StatefulSet, Service, and credentials Secret.",
-			Tags:        []string{"Cloud-Agnostic", "Database", "PostgreSQL", "Kubernetes", "StatefulSet", "Environment"},
+			Tags:        []string{"Cloud-Agnostic", "Database", "PostgreSQL", "Kubernetes", "StatefulSet"},
 			Sources:     []string{},
 			Icon:        ExampleIcon{Label: "DB", Color: "#059669"},
 			YAML:        strings.TrimSpace(cloudDatabaseYAML),
