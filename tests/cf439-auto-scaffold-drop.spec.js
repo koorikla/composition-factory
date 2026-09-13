@@ -33,8 +33,8 @@ test.describe('CF-439 — Auto-scaffold minimum required fields on canvas drop a
       const r = (doc.spec.resources || []).find(x => x.name === 'stateful-set');
       if (!r || !r.fields) return null;
       return {
-        hasSelector: !!r.fields['spec.selector.matchLabels'],
-        hasLabels: !!r.fields['spec.template.metadata.labels'],
+        hasSelector: !!r.fields['spec.selector.matchLabels[app]'],
+        hasLabels: !!r.fields['spec.template.metadata.labels[app]'],
         cName: r.fields['spec.template.spec.containers[0].name'] && r.fields['spec.template.spec.containers[0].name'].value,
         cImage: r.fields['spec.template.spec.containers[0].image'] && r.fields['spec.template.spec.containers[0].image'].value,
       };
@@ -42,7 +42,7 @@ test.describe('CF-439 — Auto-scaffold minimum required fields on canvas drop a
       hasSelector: true,
       hasLabels: true,
       cName: 'stateful-set',
-      cImage: 'nginx:latest',
+      cImage: 'nginx:1.27',
     });
   });
 
@@ -99,8 +99,8 @@ test.describe('CF-439 — Auto-scaffold minimum required fields on canvas drop a
       const r = updatedDoc.spec.resources.find(x => x.name === 'empty-deployment');
       if (!r || !r.fields) return null;
       return {
-        hasSelector: !!r.fields['spec.selector.matchLabels'],
-        hasLabels: !!r.fields['spec.template.metadata.labels'],
+        hasSelector: !!r.fields['spec.selector.matchLabels[app]'],
+        hasLabels: !!r.fields['spec.template.metadata.labels[app]'],
         cName: r.fields['spec.template.spec.containers[0].name'] && r.fields['spec.template.spec.containers[0].name'].value,
         cImage: r.fields['spec.template.spec.containers[0].image'] && r.fields['spec.template.spec.containers[0].image'].value,
       };
@@ -108,7 +108,7 @@ test.describe('CF-439 — Auto-scaffold minimum required fields on canvas drop a
       hasSelector: true,
       hasLabels: true,
       cName: 'empty-deployment',
-      cImage: 'nginx:latest',
+      cImage: 'nginx:1.27',
     });
   });
 

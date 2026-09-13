@@ -632,8 +632,8 @@ function workloadPresetHtml(res, doc, _allParams, _otherResources) {
       return "";
     }
 
-    const selAppF = fields["spec.selector.matchLabels"] || fields["spec.selector.matchLabels.app"] || fields["spec.selector.matchLabels[app]"];
-    const tmplAppF = fields["spec.template.metadata.labels"] || fields["spec.template.metadata.labels.app"] || fields["spec.template.metadata.labels[app]"];
+    const selAppF = fields["spec.selector.matchLabels[app]"] || fields["spec.selector.matchLabels"] || fields["spec.selector.matchLabels.app"];
+    const tmplAppF = fields["spec.template.metadata.labels[app]"] || fields["spec.template.metadata.labels"] || fields["spec.template.metadata.labels.app"];
     const selAppVal = extractApp(selAppF);
     const tmplAppVal = extractApp(tmplAppF);
     const appLabel = selAppVal || tmplAppVal || res.name;
@@ -670,7 +670,7 @@ function workloadPresetHtml(res, doc, _allParams, _otherResources) {
   }
 
   if (kind === "Service") {
-    const selAppF = fields["spec.selector"] || fields["spec.selector.app"] || fields["spec.selector[app]"];
+    const selAppF = fields["spec.selector[app]"] || fields["spec.selector"] || fields["spec.selector.app"];
     let selAppVal = "";
     if (selAppF) {
       if (selAppF.value) selAppVal = selAppF.value;
@@ -712,9 +712,11 @@ function workloadPresetHtml(res, doc, _allParams, _otherResources) {
         '<span class="dg" style="font-size:10px">Quick match:</span>';
       candidateWorkloads.forEach(function (cw) {
         var cwFields = cw.fields || {};
-        var cwMatchF = cwFields["spec.selector.matchLabels"] || cwFields["spec.template.metadata.labels"];
+        var cwMatchF = cwFields["spec.selector.matchLabels[app]"] || cwFields["spec.selector.matchLabels"] || cwFields["spec.template.metadata.labels"];
         var cwApp = "";
-        if (cwMatchF && cwMatchF.raw) {
+        if (cwMatchF && cwMatchF.value) {
+          cwApp = cwMatchF.value;
+        } else if (cwMatchF && cwMatchF.raw) {
           try {
             var parsed = JSON.parse(cwMatchF.raw);
             if (parsed && typeof parsed === "object" && parsed.app) cwApp = parsed.app;
@@ -761,25 +763,55 @@ function metadataConventionsHtml(res) {
   return h;
 }
 
+function isFieldSet(e) { return !!e && (!!e.from || (e.raw !== undefined && e.raw !== null && e.raw !== "") || (e.value !== undefined && e.value !== null && e.value !== "")); }
+
+/** True when a default at key k is already covered by a whole-value entry:
+ *  a dotted ancestor (`spec.template: {raw}` covers the container block) or,
+ *  for a map/list entry, its parent or the dotted spelling of the same key
+ *  (`spec.selector.matchLabels: {raw}` covers `spec.selector.matchLabels[app]`).
+ *  Writing the default beside such an entry makes emit refuse the doc. */
+function coveredByWhole(fields, k) {
+  for (var br = k.indexOf("["); br !== -1; br = k.indexOf("[", br + 1)) {
+    var parent = k.slice(0, br);
+    var key = k.slice(br + 1, k.indexOf("]", br));
+    if (isFieldSet(fields[parent]) || isFieldSet(fields[parent + "." + key])) return true;
+  }
+  var parts = k.split(".");
+  for (var i = 1; i < parts.length; i++) {
+    if (isFieldSet(fields[parts.slice(0, i).join(".")])) return true;
+  }
+  return false;
+}
+
+/** The mirror image: the doc already sets something inside k, so a
+ *  whole-value default at k would collide with it the other way round. */
+function hasPartUnder(fields, k) {
+  return Object.keys(fields).some(function (x) { return x.indexOf(k + ".") === 0 || x.indexOf(k + "[") === 0; });
+}
+
 function checkMissingRequired(res, flds) {
   if (!res) return false;
   var rf = res.fields || {};
-  function isSet(e) { return !!e && (!!e.from || (e.raw !== undefined && e.raw !== null && e.raw !== "") || (e.value !== undefined && e.value !== null && e.value !== "")); }
   function hasField(p) {
-    if (isSet(rf[p])) return true;
-    return Object.keys(rf).some(function (k) { return (k === p || k.startsWith(p + ".") || k.startsWith(p + "[")) && isSet(rf[k]); });
+    if (isFieldSet(rf[p])) return true;
+    return Object.keys(rf).some(function (k) { return (k === p || k.startsWith(p + ".") || k.startsWith(p + "[")) && isFieldSet(rf[k]); });
   }
+  // A path is missing when nothing at or under it is set and no whole-value
+  // entry above it covers it (spec.template, spec.template.spec or
+  // spec.template.spec.containers as raw all supply the container). A
+  // template that only has labels still lacks its container.
+  function missing(p) { return !hasField(p) && !coveredByWhole(rf, p); }
   var k = res.kind;
   if (k === "Deployment" || k === "StatefulSet" || k === "DaemonSet") {
-    if (!hasField("spec.selector.matchLabels") && !hasField("spec.selector")) return true;
-    if (!hasField("spec.template.metadata.labels") && !hasField("spec.template")) return true;
-    if (!hasField("spec.template.spec.containers[0].name") && !hasField("spec.template")) return true;
-    if (!hasField("spec.template.spec.containers[0].image") && !hasField("spec.template")) return true;
-    if (k === "StatefulSet" && !hasField("spec.serviceName")) return true;
+    if (missing("spec.selector.matchLabels") && missing("spec.selector")) return true;
+    if (missing("spec.template.metadata.labels")) return true;
+    if (missing("spec.template.spec.containers[0].name")) return true;
+    if (missing("spec.template.spec.containers[0].image")) return true;
+    if (k === "StatefulSet" && missing("spec.serviceName")) return true;
   } else if (k === "Job") {
-    if (!hasField("spec.template.metadata.labels") && !hasField("spec.template")) return true;
-    if (!hasField("spec.template.spec.containers[0].name") && !hasField("spec.template")) return true;
-    if (!hasField("spec.template.spec.containers[0].image") && !hasField("spec.template")) return true;
+    if (missing("spec.template.metadata.labels")) return true;
+    if (missing("spec.template.spec.containers[0].name")) return true;
+    if (missing("spec.template.spec.containers[0].image")) return true;
   } else if (k === "CronJob") {
     if (!hasField("spec.schedule") || !hasField("spec.jobTemplate.spec.template.spec.containers[0].name") || !hasField("spec.jobTemplate.spec.template.spec.containers[0].image")) return true;
   } else if (k === "Service") {
@@ -791,7 +823,7 @@ function checkMissingRequired(res, flds) {
       if (!isFieldEffectivelyRequired(f, res)) return false;
       if (hasField(f.path)) return false;
       var parts = f.path.split(".");
-      for (var j = 1; j < parts.length; j++) { if (isSet(rf[parts.slice(0, j).join(".")])) return false; }
+      for (var j = 1; j < parts.length; j++) { if (isFieldSet(rf[parts.slice(0, j).join(".")])) return false; }
       return true;
     })) return true;
   } else if (k === "Queue" || k === "Bucket" || k === "Instance") {
@@ -807,14 +839,15 @@ async function scaffoldResource(resName) {
   if (!res) return;
   var flds = null;
   try { var meta = await kindMeta(res); if (meta) flds = await fieldsFor(meta.apiVersion, res.kind); } catch (_) {}
-  var defaults = scaffoldResourceFields(res, flds, doc, true);
+  var defaults = scaffoldResourceFields(res, flds);
   await op(function () {
     return store.replaceDoc(function (d) {
       var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === resName; });
       if (!r) return;
       r.fields = r.fields || {};
       Object.keys(defaults).forEach(function (k) {
-        if (!r.fields[k] || (!r.fields[k].value && !r.fields[k].from && !r.fields[k].raw)) r.fields[k] = defaults[k];
+        if (isFieldSet(r.fields[k]) || coveredByWhole(r.fields, k) || hasPartUnder(r.fields, k)) return;
+        r.fields[k] = defaults[k];
       });
     });
   });
