@@ -19,6 +19,7 @@ import { esc } from "../dom.js";
 import { startDrag } from "../drag.js";
 import { listWires, fanOut, envFanOut, parseFrom, parseWhen } from "../wires.js";
 import { famOf, uniqueResourceName, COLORS, getEnvConfigName } from "../utils.js";
+import { profileFor, containerPrefix, STARTER_IMAGE } from "../profiles.js";
 import { switchTab } from "./palette.js";
 import {
   XR_ID,
@@ -1624,62 +1625,30 @@ function onDragLeave(e) {
   if (e.target === cwEl) cwEl.style.outline = "";
 }
 
-export function scaffoldResourceFields(res, flds, _doc, isExplicit) {
+export function scaffoldResourceFields(res, flds) {
   const fields = {};
   const kind = res && res.kind || "";
   const name = res && res.name || "";
 
-  // 1. Native Kubernetes Workloads: nested required trees
-  if (kind === "Deployment") {
-    fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: name }) };
-    fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: name }) };
-    if (isExplicit) {
-      fields["spec.template.spec.containers[0].name"] = { value: name };
-      fields["spec.template.spec.containers[0].image"] = { value: "nginx:latest" };
-    }
-  } else if (kind === "StatefulSet" || kind === "DaemonSet") {
-    fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: name }) };
-    fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: name }) };
-    fields["spec.template.spec.containers[0].name"] = { value: name };
-    fields["spec.template.spec.containers[0].image"] = { value: "nginx:latest" };
-    if (kind === "StatefulSet") {
-      fields["spec.serviceName"] = { value: name };
-    }
-  } else if (kind === "Job") {
-    fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: name }) };
-    fields["spec.template.spec.containers[0].name"] = { value: name };
-    fields["spec.template.spec.containers[0].image"] = { value: "nginx:latest" };
-    fields["spec.template.spec.restartPolicy"] = { value: "Never" };
-  } else if (kind === "CronJob") {
-    fields["spec.schedule"] = { value: "*/5 * * * *" };
-    fields["spec.jobTemplate.spec.template.spec.containers[0].name"] = { value: name };
-    fields["spec.jobTemplate.spec.template.spec.containers[0].image"] = { value: "nginx:latest" };
-    fields["spec.jobTemplate.spec.template.spec.restartPolicy"] = { value: "Never" };
-  } else if (kind === "Service") {
-    fields["spec.selector"] = { raw: JSON.stringify({ app: name }) };
-    fields["spec.ports[0].port"] = { raw: "80" };
-    fields["spec.type"] = { value: "ClusterIP" };
-  }
+  // 1. Native kinds: the profile's starter. Drop and the Scaffold button
+  // write the same thing.
+  const profile = profileFor(kind, res && res.provider);
+  if (profile) Object.assign(fields, profile.starter(name));
 
   // 2. Required branches from schema
   const branches = (flds && flds.requiredBranches) || [];
+  const c = containerPrefix(kind);
   branches.forEach(function (b) {
     if (b.path === "spec.selector") {
-      if (!fields["spec.selector.matchLabels"] && !fields["spec.selector"]) {
-        fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: name }) };
+      if (!fields["spec.selector.matchLabels[app]"] && !fields["spec.selector[app]"]) {
+        fields["spec.selector.matchLabels[app]"] = { value: name };
       }
     } else if (b.path === "spec.template") {
-      if (!fields["spec.template.metadata.labels"]) {
-        fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: name }) };
+      if (!fields["spec.template.metadata.labels[app]"]) {
+        fields["spec.template.metadata.labels[app]"] = { value: name };
       }
-      if (isExplicit || kind !== "Deployment") {
-        if (!fields["spec.template.spec.containers[0].name"]) {
-          fields["spec.template.spec.containers[0].name"] = { value: name };
-        }
-        if (!fields["spec.template.spec.containers[0].image"]) {
-          fields["spec.template.spec.containers[0].image"] = { value: "nginx:latest" };
-        }
-      }
+      if (!fields[c + ".name"]) fields[c + ".name"] = { value: name };
+      if (!fields[c + ".image"]) fields[c + ".image"] = { value: STARTER_IMAGE };
     }
   });
 
@@ -1806,8 +1775,7 @@ async function onDrop(e) {
 
   const scaffoldedFields = scaffoldResourceFields(
     { name: name, kind: entry.kind, provider: entry.provider || "", apiVersion: entry.apiVersion || "" },
-    flds,
-    d
+    flds
   );
 
   S.replaceDoc(function (next) {

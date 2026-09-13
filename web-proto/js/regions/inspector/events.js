@@ -4,6 +4,7 @@
  */
 
 import { fanOut } from "../../wires.js";
+import { setAppLabel } from "../../profiles.js";
 import { state } from "./state.js";
 import { insertSnippetIntoTextarea, triggerExpressionPreview } from "./preview.js";
 import {
@@ -454,10 +455,7 @@ export var boxClickActions = [
           var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname; });
           if (!r) return;
           r.fields = r.fields || {};
-          delete r.fields["spec.selector.matchLabels.app"];
-          delete r.fields["spec.template.metadata.labels.app"];
-          r.fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: val }) };
-          r.fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: val }) };
+          setAppLabel(r.fields, val);
           if (!r.fields["spec.template.spec.containers[0].name"]) {
             r.fields["spec.template.spec.containers[0].name"] = { value: rname };
           }
@@ -476,9 +474,9 @@ export var boxClickActions = [
           var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === rname2; });
           if (!r) return;
           r.fields = r.fields || {};
+          delete r.fields["spec.selector"];
           delete r.fields["spec.selector.app"];
-          r.fields["spec.selector"] = { raw: JSON.stringify({ app: matchApp }) };
-          r.fields["spec.ports[0].port"] = { raw: "8080" };
+          r.fields["spec.selector[app]"] = { value: matchApp };
         });
       });
     }
@@ -578,7 +576,7 @@ export var wlSimpleFieldMap = {
   "data-wl-image": "spec.template.spec.containers[0].image",
   "data-wl-cname": "spec.template.spec.containers[0].name",
   "data-wl-cport": "spec.template.spec.containers[0].ports[0].containerPort",
-  "data-svc-app": "spec.selector.app",
+  "data-svc-app": "spec.selector[app]",
   "data-svc-port": "spec.ports[0].port",
   "data-svc-tgtport": "spec.ports[0].targetPort",
   "data-svc-type": "spec.type"
@@ -792,10 +790,7 @@ export function onBoxChange(e) {
           var r = (d.spec && d.spec.resources || []).find(function (x) { return x.name === wlAppRname; });
           if (!r) return;
           r.fields = r.fields || {};
-          delete r.fields["spec.selector.matchLabels.app"];
-          delete r.fields["spec.template.metadata.labels.app"];
-          r.fields["spec.selector.matchLabels"] = { raw: JSON.stringify({ app: wlAppVal }) };
-          r.fields["spec.template.metadata.labels"] = { raw: JSON.stringify({ app: wlAppVal }) };
+          setAppLabel(r.fields, wlAppVal);
         });
       });
     }
@@ -815,6 +810,13 @@ export function onBoxChange(e) {
             r.fields = r.fields || {};
             if (fVal) r.fields[fPath] = { value: fVal };
             else delete r.fields[fPath];
+            // A blueprint from disk may still carry the whole selector as one
+            // raw/dotted entry; leaving it beside the [app] entry would emit
+            // both, so the map entry supersedes it.
+            if (fPath === "spec.selector[app]") {
+              delete r.fields["spec.selector"];
+              delete r.fields["spec.selector.app"];
+            }
           });
         });
       })(wlRname, wlPath, wlVal);
