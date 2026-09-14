@@ -105,12 +105,7 @@ func Generate(b *blueprint.Blueprint, crds []schema.CRD, outDir string, opts ...
 		out = append(out, Output{Path: filepath.Join(outDir, "providerconfigs", fam+".yaml"), Body: pcs[fam]})
 	}
 	for _, envCfg := range b.EffectiveEnvironmentConfigs() {
-		targetPath := ""
-		if outDir != "" {
-			targetPath = filepath.Join(outDir, "environmentconfigs", envCfg.Name+".yaml")
-		}
-		existingData := readExistingEnvironmentConfigData(targetPath)
-		cfgBytes, err := EnvironmentConfig(b, envCfg, existingData)
+		cfgBytes, err := EnvironmentConfig(b, envCfg)
 		if err != nil {
 			return nil, err
 		}

@@ -1,21 +1,15 @@
 package emit
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/koorikla/compositionfactory/internal/blueprint"
-	"sigs.k8s.io/yaml"
 )
 
 // EnvironmentConfig renders one EnvironmentConfig resource.
-// If existing data is provided (e.g. from an existing file on disk), values for declared
-// environment keys that have no value and no default in the blueprint are preserved.
-func EnvironmentConfig(b *blueprint.Blueprint, cfg blueprint.EnvironmentConfig, existing ...map[string]string) ([]byte, error) {
+func EnvironmentConfig(b *blueprint.Blueprint, cfg blueprint.EnvironmentConfig) ([]byte, error) {
 	d := NewDoc()
 	header(d, blueprintSource(b))
 	d.Line(0, "apiVersion: apiextensions.crossplane.io/v1beta1")
@@ -46,10 +40,6 @@ func EnvironmentConfig(b *blueprint.Blueprint, cfg blueprint.EnvironmentConfig, 
 		}
 		sort.Strings(envKeys)
 		data := cfg.EffectiveData()
-		var existingData map[string]string
-		if len(existing) > 0 {
-			existingData = existing[0]
-		}
 		for _, k := range envKeys {
 			envKey := b.Spec.Environment[k]
 			fk := formatYAMLKey(k)
@@ -57,8 +47,6 @@ func EnvironmentConfig(b *blueprint.Blueprint, cfg blueprint.EnvironmentConfig, 
 				d.Line(1, "%s: %s", fk, formatEnvVal(envKey, val))
 			} else if envKey.Default != "" {
 				d.Line(1, "%s: %s", fk, formatEnvDefault(envKey))
-			} else if existingVal, ok := existingData[k]; ok && existingVal != "" {
-				d.Line(1, "%s: %s", fk, formatEnvVal(envKey, existingVal))
 			} else {
 				d.Line(1, "%s: %s", fk, formatEnvVal(envKey, ""))
 			}
@@ -95,76 +83,5 @@ func formatEnvVal(k blueprint.EnvironmentKey, val string) string {
 		return val
 	default:
 		return fmt.Sprintf("%q", val)
-	}
-}
-
-// readExistingEnvironmentConfigData reads the data map from an existing EnvironmentConfig YAML file on disk.
-func readExistingEnvironmentConfigData(path string) map[string]string {
-	if path == "" {
-		return nil
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var doc struct {
-		Data map[string]any `json:"data"`
-	}
-	if err := yaml.Unmarshal(content, &doc); err != nil || len(doc.Data) == 0 {
-		return nil
-	}
-	result := make(map[string]string, len(doc.Data))
-	for k, v := range doc.Data {
-		s, err := scalarToString(v)
-		if err == nil {
-			result[k] = s
-		}
-	}
-	return result
-}
-
-func scalarToString(v any) (string, error) {
-	if v == nil {
-		return "", nil
-	}
-	switch val := v.(type) {
-	case string:
-		return val, nil
-	case bool:
-		if val {
-			return "true", nil
-		}
-		return "false", nil
-	case float64:
-		if val == float64(int64(val)) {
-			return strconv.FormatInt(int64(val), 10), nil
-		}
-		return strconv.FormatFloat(val, 'f', -1, 64), nil
-	case float32:
-		f64 := float64(val)
-		if f64 == float64(int64(f64)) {
-			return strconv.FormatInt(int64(f64), 10), nil
-		}
-		return strconv.FormatFloat(f64, 'f', -1, 64), nil
-	case int:
-		return strconv.Itoa(val), nil
-	case int32:
-		return strconv.FormatInt(int64(val), 10), nil
-	case int64:
-		return strconv.FormatInt(val, 10), nil
-	case uint:
-		return strconv.FormatUint(uint64(val), 10), nil
-	case uint32:
-		return strconv.FormatUint(uint64(val), 10), nil
-	case uint64:
-		return strconv.FormatUint(val, 10), nil
-	case json.Number:
-		return val.String(), nil
-	case map[string]any:
-		return "", fmt.Errorf("expected scalar (string, number, or boolean), got mapping")
-	case []any:
-		return "", fmt.Errorf("expected scalar (string, number, or boolean), got list")
-	default:
-		return "", fmt.Errorf("expected scalar (string, number, or boolean), got %T", v)
 	}
 }
