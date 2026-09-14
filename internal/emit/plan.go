@@ -238,3 +238,110 @@ func checkResourceRequiredFields(r blueprint.Resource, crd schema.CRD, allowUnco
 	}
 	return nil
 }
+
+// CheckOptionalParamWires inspects all resource fields in b wired from XRD parameters (from: params.<name>).
+// For every wire where the parameter is not required (neither required nor required through a parent object)
+// but the target CRD field is marked required in the schema, it returns a diagnostic warning string naming
+// the resource, the parameter, and the field path.
+func CheckOptionalParamWires(b *blueprint.Blueprint, crds []schema.CRD) []string {
+	if b == nil {
+		return nil
+	}
+	wantNamespaced := b.Spec.XRD.Scope == "Namespaced"
+	var warnings []string
+
+	for _, r := range b.Spec.Resources {
+		if len(r.Fields) == 0 {
+			continue
+		}
+		crd, err := resolveKind(crds, r, wantNamespaced)
+		if err != nil {
+			continue
+		}
+		nodes, err := crd.FieldTree()
+		if err != nil || len(nodes) == 0 {
+			continue
+		}
+
+		leafFields := index.Fields(nodes, index.FieldQuery{})
+		branches := index.RequiredBranches(nodes)
+
+		byPath := make(map[string]index.Field, len(leafFields)+len(branches))
+		for _, f := range leafFields {
+			byPath[f.Path] = f
+		}
+		for _, br := range branches {
+			byPath[br.Path] = br
+		}
+
+		// Sort field keys for deterministic diagnostic output.
+		fieldKeys := make([]string, 0, len(r.Fields))
+		for p := range r.Fields {
+			fieldKeys = append(fieldKeys, p)
+		}
+		sort.Strings(fieldKeys)
+
+		for _, p := range fieldKeys {
+			f := r.Fields[p]
+			from := strings.TrimSpace(f.From)
+			if !strings.HasPrefix(from, "params.") {
+				continue
+			}
+
+			sf, ok := byPath[p]
+			if !ok {
+				norm := arrayIdxRE.ReplaceAllString(p, "[0]")
+				sf, ok = byPath[norm]
+			}
+			if !ok {
+				basePath, _, _ := blueprint.ParseFieldPath(p)
+				normBase := arrayIdxRE.ReplaceAllString(basePath, "[0]")
+				sf, ok = byPath[normBase]
+			}
+			if !ok {
+				trimmed := strings.TrimPrefix(p, "spec.forProvider.")
+				sf, ok = byPath[trimmed]
+				if !ok {
+					normTrimmed := arrayIdxRE.ReplaceAllString(trimmed, "[0]")
+					sf, ok = byPath[normTrimmed]
+				}
+			}
+
+			isFieldReq := ok && (sf.Required || sf.RequiredChain)
+			if !isFieldReq {
+				continue
+			}
+
+			paramPath := strings.TrimSpace(strings.TrimPrefix(from, "params."))
+			if isXRDParamRequired(b.Spec.XRD, paramPath) {
+				continue
+			}
+
+			warnings = append(warnings, fmt.Sprintf("resource %q: optional parameter %q feeds required field %q — if omitted, Crossplane will reject the composed resource at runtime", r.Name, paramPath, p))
+		}
+	}
+
+	return warnings
+}
+
+func isXRDParamRequired(xrd blueprint.XRD, paramPath string) bool {
+	parts := strings.Split(paramPath, ".")
+	if len(parts) == 0 {
+		return false
+	}
+	p, ok := xrd.Parameters[parts[0]]
+	if !ok || !p.Required {
+		return false
+	}
+	for i := 1; i < len(parts); i++ {
+		if p.Properties == nil {
+			return false
+		}
+		sub, ok := p.Properties[parts[i]]
+		if !ok || !sub.Required {
+			return false
+		}
+		p = sub
+	}
+	return true
+}

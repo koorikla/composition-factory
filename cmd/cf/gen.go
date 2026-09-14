@@ -174,6 +174,10 @@ func (c *GenCmd) run(out io.Writer) (int, error) {
 			fmt.Fprintf(out, "warning: composed native Kubernetes kinds require cluster RBAC permissions not pre-granted to Crossplane; apply %s to your cluster\n", o.Path)
 		}
 	}
+
+	for _, w := range emit.CheckOptionalParamWires(b, crds) {
+		fmt.Fprintf(out, "warning: %s\n", w)
+	}
 	return 0, nil
 }
 
