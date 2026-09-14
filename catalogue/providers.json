@@ -309,7 +309,7 @@
   },
   {
     "name": "provider-argocd",
-    "ref": "ghcr.io/crossplane-contrib/provider-argocd:v0.14.3",
+    "ref": "ghcr.io/crossplane-contrib/provider-argocd:v0.15.1",
     "description": "Crossplane provider to provision and manage Argo CD objects",
     "source": "https://github.com/crossplane-contrib/provider-argocd",
     "license": "Apache-2.0"
@@ -3039,7 +3039,7 @@
   },
   {
     "name": "provider-mongodbatlas",
-    "ref": "ghcr.io/crossplane-contrib/provider-mongodbatlas:v1.3.1",
+    "ref": "ghcr.io/crossplane-contrib/provider-mongodbatlas:v1.4.2",
     "description": "MongoDB Atlas Provider based on Terrajet",
     "source": "https://github.com/crossplane-contrib/provider-mongodbatlas",
     "license": "Apache-2.0"
@@ -3088,7 +3088,7 @@
   },
   {
     "name": "provider-palette",
-    "ref": "ghcr.io/crossplane-contrib/provider-palette:v0.29.9",
+    "ref": "ghcr.io/crossplane-contrib/provider-palette:v0.30.1",
     "description": "Crossplane provider for Spectro Cloud Palette. Auto-generated from TF provider via Upjet.",
     "source": "https://github.com/crossplane-contrib/provider-palette",
     "license": "Apache-2.0"
