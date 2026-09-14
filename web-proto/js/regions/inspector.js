@@ -394,18 +394,18 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
 
 
 
-function isFieldEffectivelyRequired(f, res) {
+function isFieldEffectivelyRequired(f, res, isEnvelope) {
   if (!f) return false;
   if (f.branch) return true;
   if (!f.required && !f.requiredChain) return false;
   if (f.requiredChain) return true;
   var parts = f.path.split(".");
-  var resFields = (res && res.fields) || {};
+  var resFields = (res && (isEnvelope ? res.envelope : res.fields)) || {};
   for (var i = 1; i < parts.length; i++) {
     var ancestor = parts.slice(0, i).join(".");
     var hasSet = Object.keys(resFields).some(function (k) {
       if (k === ancestor || k.startsWith(ancestor + ".") || k.startsWith(ancestor + "[")) {
-        return !!entryOf(res, k);
+        return !!entryOf(res, k, isEnvelope);
       }
       return false;
     });
@@ -545,7 +545,8 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap, env) {
   var isStatusWire = wired && entry.from && entry.from.indexOf("resources.") === 0;
   var isEnvWire = wired && entry.from && entry.from.indexOf("env.") === 0;
   var isAuto = !entry && (f.path === "providerConfigRef.name" || f.path === "providerConfigRef.kind");
-  var showReq = f.required && !isAuto;
+  var isReq = isFieldEffectivelyRequired(f, res, true);
+  var showReq = isReq && !isAuto;
   var isXr = entry && !entry.from && entry.raw === "{{ $xr }}";
 
   var h = '<div class="fld' + (dm === "w" && entry ? " wired" : "") + (isAuto ? " auto-defaulted" : "") + '" style="padding-left:' + (12 + (f.depth || 0) * 11) + 'px">' +
@@ -569,7 +570,7 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap, env) {
         h += '<div style="margin-top:2px"><span class="wire-warn" style="color:var(--warn);font-size:10px" title="Optional parameter wired to required field: render will omit if missing">&#9888; optional param into required field</span></div>';
       }
     } else {
-      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, true, !!showReq, isXr ? "$xr" : (entry && entry.from), env);
+      h += wireSelectHtml(f.path, f.type, params, otherResources, otherStatusMap, true, !!(f.required && !isAuto), isXr ? "$xr" : (entry && entry.from), env);
     }
   } else if (m === "r") {
     h += rawEditorHtml(f.path, entry ? entry.raw : "", true, res, params, otherResources, otherStatusMap);
@@ -585,7 +586,7 @@ function envelopeFieldRow(res, f, params, otherResources, otherStatusMap, env) {
       ? "auto: ClusterProviderConfig / $spec.providerName"
       : (f.path === "providerConfigRef.kind"
         ? "auto: ClusterProviderConfig / $spec.providerName"
-        : (f.required ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from envelope"));
+        : (showReq ? "required &#8212; set a value or wire it" : "unset &#8212; omitted from envelope"));
     h += '<input class="val" data-env-v="' + esc(f.path) + '" value="' + esc((dm === "v" && entry) ? entry.value : "") +
       '" placeholder="' + ph + '">';
   }
