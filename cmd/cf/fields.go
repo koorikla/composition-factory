@@ -40,6 +40,9 @@ func (c *FieldsCmd) Run(out io.Writer) error {
 	}
 
 	refs := AssembleProviders(store, b, nil, false)
+	if len(refs) == 0 {
+		refs, _ = store.List()
+	}
 
 	idx, err := api.BuildIndex(store, refs, b, blueprintDir)
 	if err != nil {

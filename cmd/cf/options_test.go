@@ -235,7 +235,7 @@ current-context: test-ctx
 	})
 }
 
-func TestAssembleProvidersFallsBackToStoreListWhenSourcesEmpty(t *testing.T) {
+func TestAssembleProvidersExcludesCachedProvidersWhenSourcesEmpty(t *testing.T) {
 	dir := t.TempDir()
 	store := cache.New(filepath.Join(dir, "cache"))
 	refA := "example.org/provider-a:v1"
@@ -243,12 +243,10 @@ func TestAssembleProvidersFallsBackToStoreListWhenSourcesEmpty(t *testing.T) {
 	saveTestProvider(t, store, refA)
 	saveTestProvider(t, store, refB)
 
-	want := []string{refA, refB}
-
 	t.Run("NilBlueprint", func(t *testing.T) {
 		got := AssembleProviders(store, nil, nil, false)
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("AssembleProviders(nil) = %v, want %v", got, want)
+		if len(got) != 0 {
+			t.Errorf("AssembleProviders(nil) = %v, want empty", got)
 		}
 	})
 
@@ -259,8 +257,8 @@ func TestAssembleProvidersFallsBackToStoreListWhenSourcesEmpty(t *testing.T) {
 			},
 		}
 		got := AssembleProviders(store, bp, nil, false)
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("AssembleProviders(empty sources) = %v, want %v", got, want)
+		if len(got) != 0 {
+			t.Errorf("AssembleProviders(empty sources) = %v, want empty", got)
 		}
 	})
 }
@@ -327,6 +325,48 @@ spec:
 	}
 
 	wantCached := []string{refCached}
+	if !reflect.DeepEqual(opts.CachedProviders, wantCached) {
+		t.Errorf("opts.CachedProviders = %v, want %v", opts.CachedProviders, wantCached)
+	}
+}
+
+func TestBuildAPIOptionsExcludesCachedProvidersFromProvidersOnBlankBlueprint(t *testing.T) {
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, "cache")
+	store := cache.New(cacheDir)
+	refA := "example.org/provider-a:v1"
+	refB := "example.org/provider-b:v1"
+	saveTestProvider(t, store, refA)
+	saveTestProvider(t, store, refB)
+
+	bpPath := filepath.Join(dir, "blank.cf.yaml")
+	bpYAML := `apiVersion: factory.crossplane.io/v1alpha1
+kind: Blueprint
+metadata:
+  name: blank-bp
+spec:
+  sources: []
+  xrd:
+    group: example.org
+    kind: XTest
+    plural: xtests
+    version: v1alpha1
+    scope: Namespaced
+`
+	if err := os.WriteFile(bpPath, []byte(bpYAML), 0o644); err != nil {
+		t.Fatalf("write blueprint: %v", err)
+	}
+
+	opts, err := buildAPIOptions(bpPath, cacheDir, filepath.Join(dir, "out"), filepath.Join(dir, ".cf.lock"), nil, false)
+	if err != nil {
+		t.Fatalf("buildAPIOptions: %v", err)
+	}
+
+	if len(opts.Providers) != 0 {
+		t.Errorf("opts.Providers = %v, want empty", opts.Providers)
+	}
+
+	wantCached := []string{refA, refB}
 	if !reflect.DeepEqual(opts.CachedProviders, wantCached) {
 		t.Errorf("opts.CachedProviders = %v, want %v", opts.CachedProviders, wantCached)
 	}

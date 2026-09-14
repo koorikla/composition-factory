@@ -65,8 +65,7 @@ func buildAPIOptions(blueprintPath, cacheDir, outDir, lockPath string, cl *clust
 // 1. if a cluster client is provided and syncClusterNow is true, syncs live cluster CRDs and installed Crossplane providers into the store
 // 2. inspects declared blueprint sources in document order, deduplicating references
 // 3. checks store cache presence, warning on os.Stderr for missing providers so startup continues with a partial index
-// 4. if no blueprint sources are declared (or b is nil), falls back to all cached providers in store.List()
-// 5. if a cluster client is provided, ensures cluster.ProviderLabel is included in refs
+// 4. if a cluster client is provided, ensures cluster.ProviderLabel is included in refs
 func AssembleProviders(store *cache.Store, b *blueprint.Blueprint, cl *cluster.Client, syncClusterNow bool) []string {
 	if store == nil {
 		return nil
@@ -126,17 +125,6 @@ func AssembleProviders(store *cache.Store, b *blueprint.Blueprint, cl *cluster.C
 				}
 				seen[s.Provider] = true
 				refs = append(refs, s.Provider)
-			}
-		}
-	}
-
-	// If no blueprint sources found, discover all cached providers
-	if b == nil || len(b.Spec.Sources) == 0 {
-		cached, _ := store.List()
-		for _, p := range cached {
-			if !seen[p] {
-				seen[p] = true
-				refs = append(refs, p)
 			}
 		}
 	}

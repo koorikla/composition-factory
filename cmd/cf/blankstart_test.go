@@ -90,9 +90,10 @@ func TestBuildAPIOptionsSurvivesUncachedSource(t *testing.T) {
 	}
 }
 
-// TestBlankBlueprintRetainsCachedProvidersAcrossSaves verifies CF-345 from the CLI wiring:
-// when started with a blank blueprint and cached providers, saving the blueprint
-// (PUT /api/blueprint) does NOT discard the cached providers or their kinds.
+// TestBlankBlueprintRetainsCachedProvidersAcrossSaves verifies CF-485 (issue #397)
+// alongside CF-345 from the CLI wiring: when started with a blank blueprint and cached
+// providers, undeclared cached providers are NOT loaded or served in /api/kinds or /api/providers,
+// and saving the blueprint (PUT /api/blueprint) preserves this clean state.
 func TestBlankBlueprintRetainsCachedProvidersAcrossSaves(t *testing.T) {
 	dir, _, cacheDir := seed(t)
 	blankPath := filepath.Join(dir, "blank.cf.yaml")
@@ -105,6 +106,9 @@ func TestBlankBlueprintRetainsCachedProvidersAcrossSaves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAPIOptions: %v", err)
 	}
+	if len(o.Providers) != 0 {
+		t.Fatalf("expected Providers to be empty on blank blueprint, got %v", o.Providers)
+	}
 	if len(o.CachedProviders) == 0 {
 		t.Fatalf("expected CachedProviders to be populated, got empty")
 	}
@@ -114,7 +118,7 @@ func TestBlankBlueprintRetainsCachedProvidersAcrossSaves(t *testing.T) {
 		t.Fatalf("api.New: %v", err)
 	}
 
-	// 1. Initial kinds should include the cached provider's kinds
+	// 1. Initial kinds should only include native kinds, NOT undeclared cached provider kinds
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/kinds", nil))
 	if rec.Code != http.StatusOK {
@@ -124,18 +128,31 @@ func TestBlankBlueprintRetainsCachedProvidersAcrossSaves(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&kindsResp); err != nil {
 		t.Fatalf("decode kinds: %v", err)
 	}
-	foundTestProviderKind := false
 	for _, k := range kindsResp.Kinds {
 		if k.Provider == "example.org/provider-test:v2" {
-			foundTestProviderKind = true
-			break
+			t.Fatalf("did not expect example.org/provider-test:v2 in initial kinds for blank blueprint")
 		}
 	}
-	if !foundTestProviderKind {
-		t.Fatalf("expected example.org/provider-test:v2 kind in kinds, got %d kinds", len(kindsResp.Kinds))
+
+	// 2. Initial /api/providers must be empty
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/providers", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/providers: %d", rec.Code)
+	}
+	var provsResp struct {
+		Providers []struct {
+			Ref string `json:"ref"`
+		} `json:"providers"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&provsResp); err != nil {
+		t.Fatalf("decode providers: %v", err)
+	}
+	if len(provsResp.Providers) != 0 {
+		t.Fatalf("expected 0 providers initially, got %d", len(provsResp.Providers))
 	}
 
-	// 2. Fetch current blueprint and PUT it back unchanged
+	// 3. Fetch current blueprint and PUT it back unchanged
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/blueprint", nil))
 	if rec.Code != http.StatusOK {
@@ -151,7 +168,7 @@ func TestBlankBlueprintRetainsCachedProvidersAcrossSaves(t *testing.T) {
 		t.Fatalf("PUT /api/blueprint: %d (%s)", rec.Code, rec.Body.String())
 	}
 
-	// 3. Kinds must STILL include the cached provider
+	// 4. Kinds must STILL not include the undeclared cached provider
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/kinds", nil))
 	if rec.Code != http.StatusOK {
@@ -161,39 +178,22 @@ func TestBlankBlueprintRetainsCachedProvidersAcrossSaves(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&kindsRespAfter); err != nil {
 		t.Fatalf("decode kinds after save: %v", err)
 	}
-	foundAfter := false
 	for _, k := range kindsRespAfter.Kinds {
 		if k.Provider == "example.org/provider-test:v2" {
-			foundAfter = true
-			break
+			t.Fatalf("undeclared cached provider example.org/provider-test:v2 appeared in kinds after PUT!")
 		}
 	}
-	if !foundAfter {
-		t.Fatalf("cached provider example.org/provider-test:v2 was dropped after PUT! got %d kinds", len(kindsRespAfter.Kinds))
-	}
 
-	// 4. /api/providers must STILL list the provider
+	// 5. /api/providers must STILL be empty
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/providers", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /api/providers after save: %d", rec.Code)
 	}
-	var provsResp struct {
-		Providers []struct {
-			Ref string `json:"ref"`
-		} `json:"providers"`
-	}
 	if err := json.NewDecoder(rec.Body).Decode(&provsResp); err != nil {
 		t.Fatalf("decode providers: %v", err)
 	}
-	foundProv := false
-	for _, p := range provsResp.Providers {
-		if p.Ref == "example.org/provider-test:v2" {
-			foundProv = true
-			break
-		}
-	}
-	if !foundProv {
-		t.Fatalf("cached provider example.org/provider-test:v2 missing from /api/providers after save")
+	if len(provsResp.Providers) != 0 {
+		t.Fatalf("expected 0 providers after save, got %d", len(provsResp.Providers))
 	}
 }
