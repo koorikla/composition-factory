@@ -921,12 +921,12 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .tour-card button { cursor: pointer; }
 
 /* canvas empty state */
-.canvas-empty-state{position:absolute;left:340px;top:48px;max-width:380px;background:var(--surface);
+.canvas-empty-state{position:absolute;left:-40px;top:174px;max-width:380px;background:var(--surface);
   border:1.5px dashed var(--rule-2);border-radius:8px;padding:16px 20px;box-shadow:var(--shadow);pointer-events:auto;z-index:2}
 .canvas-empty-title{font-family:var(--cond);font-size:13px;font-weight:700;letter-spacing:.05em;
   text-transform:uppercase;color:var(--wire-xrd);margin-bottom:8px}
 .canvas-empty-steps{display:flex;flex-direction:column;gap:8px}
-.canvas-empty-step{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--ink-2);line-height:1.4}
+.canvas-empty-step{display:flex;align-items:flex-start;gap:9px;font-size:12px;color:var(--ink-2);line-height:1.4}
 .canvas-empty-step strong{color:var(--ink)}
 .canvas-empty-tab-link{cursor:pointer;text-decoration:underline;text-underline-offset:2px;font-weight:700;transition:color .12s ease}
 .canvas-empty-step .canvas-empty-tab-link{color:var(--ink)}
@@ -935,7 +935,7 @@ svg.wires path.wire-selected{stroke-width:3.75;stroke:var(--warn, #f59e0b) !impo
 .canvas-empty-title .canvas-empty-tab-link:hover{color:var(--ink);text-decoration:underline}
 .canvas-empty-tab-link:focus-visible{outline:2px solid var(--wire-xrd);outline-offset:2px;border-radius:2px}
 .step-num{width:18px;height:18px;border-radius:50%;background:var(--wire-xrd-soft);color:var(--wire-xrd);
-  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10.5px;font-weight:700;flex:0 0 auto}
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10.5px;font-weight:700;flex:0 0 auto;margin-top:1px}
 
 /* spinner */
 .spinner{display:inline-block;width:9px;height:9px;border:2px solid currentColor;border-top-color:transparent;

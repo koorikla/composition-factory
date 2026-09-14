@@ -709,6 +709,7 @@ function render() {
     const el = canvasEl.querySelector('.node[data-id="' + CSS.escape(n) + '"]');
     if (el) applyCardSize(el, n);
   });
+  positionEmptyState();
   if (needsFit) {
     if (fitNodesToView(true) && schemaLoading.size === 0) {
       needsFit = false;
@@ -717,6 +718,27 @@ function render() {
   drawWires();
   // one extra pass after layout/fonts settle
   scheduleWires();
+}
+
+function positionEmptyState() {
+  const emptyEl = canvasEl ? canvasEl.querySelector("#canvas-empty-state") : null;
+  if (!emptyEl) return;
+  const xrEl = canvasEl.querySelector('.node[data-id="' + CSS.escape(XR_ID) + '"]');
+  const d = doc();
+  const hasEnv = !!(d && d.spec && ((d.spec.environment && Object.keys(d.spec.environment).length > 0) || (Array.isArray(d.spec.environmentConfigs) && d.spec.environmentConfigs.length > 0)));
+  const xrPos = S.getPosition(XR_ID) || { x: 40, y: 40 };
+  const xrW = xrEl ? xrEl.offsetWidth : 220;
+  const xrH = xrEl ? xrEl.offsetHeight : 140;
+  const emptyW = emptyEl.offsetWidth || 380;
+  let topY = xrPos.y + xrH + 24;
+  if (hasEnv) {
+    const envEl = canvasEl.querySelector('.node[data-id="' + CSS.escape(ENV_ID) + '"]');
+    const envPos = S.getPosition(ENV_ID) || { x: xrPos.x, y: topY };
+    const envH = envEl ? envEl.offsetHeight : 140;
+    topY = Math.max(topY, envPos.y + envH + 24);
+  }
+  emptyEl.style.left = Math.round(xrPos.x + (xrW - emptyW) / 2) + "px";
+  emptyEl.style.top = topY + "px";
 }
 
 /* ---------- wires ---------- */
@@ -1558,6 +1580,7 @@ function onPointerDown(e) {
     } else {
       S.setPosition(name, { x: lx, y: ly }, !autoPlaced.has(name));
     }
+    if (name === XR_ID || name === ENV_ID) positionEmptyState();
     drawWires();
     gestureEnd();
   }
@@ -1567,6 +1590,7 @@ function onPointerDown(e) {
     ly = start.y + (ev.clientY - sy) / view.k;
     el.style.left = lx + "px";
     el.style.top = ly + "px";
+    if (name === XR_ID || name === ENV_ID) positionEmptyState();
     scheduleWires();
   }
   const abortDrag = startDrag(e, mv, onUp);
