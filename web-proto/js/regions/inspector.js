@@ -906,24 +906,33 @@ async function renderResource(res) {
     }
     if (t !== renderToken) return;
 
+    var q = (search || "").toLowerCase();
+    var envItems = (detail && detail.envelope) || [];
+    var visibleEnv = q ? envItems.filter(function (f) {
+      return f.path.toLowerCase().indexOf(q) !== -1 || (f.description || "").toLowerCase().indexOf(q) !== -1;
+    }) : envItems;
+    var envRows = visibleEnv.map(function (f) {
+      return envelopeFieldRow(res, f, params, otherResources, otherStatusMap, env);
+    }).join("");
+
     if (view === "manifest") {
       h += manifestHtml(res, manifestYAML, mf && mf.error, params, otherResources, otherStatusMap);
-      if (search) h += searchHitsHtml(fields, search);
+      if (search) h += searchHitsHtml(fields, search, detail && detail.envelope);
     } else {
-      var q = search.toLowerCase();
       var visible = q ? fields.filter(function (f) {
         return f.path.toLowerCase().indexOf(q) !== -1 || (f.description || "").toLowerCase().indexOf(q) !== -1;
       }) : fields;
       var body = (q ? "" : branchRows) +
         visible.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap, env); }).join("");
-      h += body || '<div class="empty">No fields match this filter.</div>';
+      if (body) {
+        h += body;
+      } else if (!envRows) {
+        h += '<div class="empty">No fields match this filter.</div>';
+      }
     }
 
     // Crossplane Envelope section (if this CRD defines envelope properties)
     if (detail && detail.envelope && detail.envelope.length > 0) {
-      var envRows = detail.envelope.map(function (f) {
-        return envelopeFieldRow(res, f, params, otherResources, otherStatusMap, env);
-      }).join("");
       if (envRows) {
         var envSetCount = detail.envelope.filter(function (f) { return envelopeEntryOf(res, f.path); }).length;
         h += '<div class="insp-sec" style="margin-top:14px;padding:8px 12px;border-top:1px solid var(--rule);background:var(--surface)">' +

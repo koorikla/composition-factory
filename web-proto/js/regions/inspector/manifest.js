@@ -186,11 +186,23 @@ export function onManifestKeydown(e, box) {
 
 /** Up to 30 schema leaves whose path or description contains the query,
  *  listed under the manifest; a click opens the Fields view on that field. */
-export function searchHitsHtml(fields, q) {
+export function searchHitsHtml(fields, q, envelope) {
   var ql = q.toLowerCase();
-  var all = fields.filter(function (f) {
+  var match = function (f) {
     return f.path.toLowerCase().indexOf(ql) !== -1 || (f.description || "").toLowerCase().indexOf(ql) !== -1;
-  });
+  };
+  var all = fields.filter(match);
+  if (envelope && envelope.length) {
+    var seen = {};
+    for (var i = 0; i < all.length; i++) seen[all[i].path] = true;
+    for (var j = 0; j < envelope.length; j++) {
+      var ef = envelope[j];
+      if (!seen[ef.path] && match(ef)) {
+        all.push(ef);
+        seen[ef.path] = true;
+      }
+    }
+  }
   var hits = all.slice(0, 30);
   if (!hits.length) return '<div class="empty">No schema field matches “' + esc(q) + '”.</div>';
   var count = hits.length < all.length ? "first " + hits.length + " of " + all.length : String(all.length);
