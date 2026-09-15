@@ -345,18 +345,20 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
   }
 
   if (otherResources && otherResources.length > 0) {
+    var seenWireValues = Object.create(null);
     var isRefField = /Ref(\.name)?$|Refs(\[\d+\])?(\.name)?$|Selector(\.matchLabels)?$/i.test(path);
     if (isRefField || fieldType === "string" || !fieldType) {
       h += '<optgroup label="Resource Name (*Ref)">';
       otherResources.forEach(function (r) {
         var wireVal = "resources." + r.name + ".status.atProvider.id";
+        seenWireValues[wireVal] = true;
         var isSel = currentFrom === wireVal || currentFrom === ("resources." + r.name + ".metadata.name");
-        h += '<option value="' + esc(wireVal) + '"' + (isSel ? " selected" : "") + '>' + esc(r.name) + ' (name / ID)</option>';
+        h += '<option value="' + esc(wireVal) + '" title="' + esc(wireVal) + '"' + (isSel ? " selected" : "") + '>' + esc(r.name) + ' (name / ID)</option>';
       });
       h += '</optgroup>';
     }
 
-    h += '<optgroup label="Resource Status">';
+    var statusOpts = "";
     otherResources.forEach(function (r) {
       var rawSfs = (otherStatusMap && otherStatusMap[r.name]) || [
         { path: "atProvider.url", type: "string" },
@@ -367,12 +369,16 @@ function wireSelectHtml(path, fieldType, params, otherResources, otherStatusMap,
       sfs.forEach(function (sf) {
         if (!fieldType || compatible(sf.type, fieldType)) {
           var wireVal = "resources." + r.name + ".status." + sf.path;
+          if (seenWireValues[wireVal]) return;
+          seenWireValues[wireVal] = true;
           var isSel = currentFrom === wireVal;
-          h += '<option value="' + esc(wireVal) + '"' + (isSel ? " selected" : "") + '>' + esc(wireVal) + "</option>";
+          statusOpts += '<option value="' + esc(wireVal) + '"' + (isSel ? " selected" : "") + '>' + esc(wireVal) + "</option>";
         }
       });
     });
-    h += '</optgroup>';
+    if (statusOpts.length > 0) {
+      h += '<optgroup label="Resource Status">' + statusOpts + '</optgroup>';
+    }
   }
 
   h += '<option value="__new__">+ new XRD parameter&#8230;</option></select></div>';
