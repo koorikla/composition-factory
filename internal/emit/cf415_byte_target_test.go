@@ -411,10 +411,7 @@ print("OK")
 }
 
 func TestCF415_KCLRuntimeExecution(t *testing.T) {
-	dockerBin, err := exec.LookPath("docker")
-	if err != nil {
-		t.Skip("docker not available")
-	}
+	dockerBin := requireDocker(t)
 
 	crds := nativeTestCRDs(t)
 	b := &blueprint.Blueprint{
@@ -453,6 +450,9 @@ func TestCF415_KCLRuntimeExecution(t *testing.T) {
 	cmd.Stdin = strings.NewReader(kclBody)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if isDockerDaemonError(string(out), err) {
+			t.Skipf("Docker daemon unavailable: %v\nOutput:\n%s", err, out)
+		}
 		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out)
 	}
 

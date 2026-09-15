@@ -1434,10 +1434,7 @@ func TestCF430_KCLArrayEmissionSuppressesEmptyElements(t *testing.T) {
 	}
 
 	// Runtime verification using Docker if available
-	dockerBin, err := exec.LookPath("docker")
-	if err != nil {
-		return
-	}
+	dockerBin := requireDocker(t)
 
 	kclBody, err := kclTemplateBody(b, crds)
 	if err != nil {
@@ -1450,6 +1447,9 @@ func TestCF430_KCLArrayEmissionSuppressesEmptyElements(t *testing.T) {
 	cmd1.Stdin = strings.NewReader(kclBody)
 	out1, err := cmd1.CombinedOutput()
 	if err != nil {
+		if isDockerDaemonError(string(out1), err) {
+			t.Skipf("Docker daemon unavailable: %v\nOutput:\n%s", err, out1)
+		}
 		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out1)
 	}
 	out1Str := string(out1)
@@ -1463,6 +1463,9 @@ func TestCF430_KCLArrayEmissionSuppressesEmptyElements(t *testing.T) {
 	cmd2.Stdin = strings.NewReader(kclBody)
 	out2, err := cmd2.CombinedOutput()
 	if err != nil {
+		if isDockerDaemonError(string(out2), err) {
+			t.Skipf("Docker daemon unavailable: %v\nOutput:\n%s", err, out2)
+		}
 		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out2)
 	}
 	out2Str := string(out2)
@@ -1600,10 +1603,7 @@ func TestCF433_KCLAnnotationsOptionalGuard(t *testing.T) {
 	}
 
 	// 3. Runtime verification via Docker
-	dockerBin, err := exec.LookPath("docker")
-	if err != nil {
-		return
-	}
+	dockerBin := requireDocker(t)
 
 	// Case A: optional parameters omitted -> annotations for optional params and unobserved status MUST be omitted cleanly
 	cmdA := exec.Command(dockerBin, "run", "-i", "--rm", "kcllang/kcl:v0.11.0", "kcl", "run",
@@ -1611,6 +1611,9 @@ func TestCF433_KCLAnnotationsOptionalGuard(t *testing.T) {
 	cmdA.Stdin = strings.NewReader(kclBody)
 	outA, err := cmdA.CombinedOutput()
 	if err != nil {
+		if isDockerDaemonError(string(outA), err) {
+			t.Skipf("Docker daemon unavailable: %v\nOutput:\n%s", err, outA)
+		}
 		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, outA)
 	}
 	outAStr := string(outA)
@@ -1630,6 +1633,9 @@ func TestCF433_KCLAnnotationsOptionalGuard(t *testing.T) {
 	cmdB.Stdin = strings.NewReader(kclBody)
 	outB, err := cmdB.CombinedOutput()
 	if err != nil {
+		if isDockerDaemonError(string(outB), err) {
+			t.Skipf("Docker daemon unavailable: %v\nOutput:\n%s", err, outB)
+		}
 		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, outB)
 	}
 	outBStr := string(outB)
@@ -1729,10 +1735,7 @@ func TestCF427_KCLOptionalMetadataNameFallback(t *testing.T) {
 	}
 
 	// Runtime verification via Docker
-	dockerBin, err := exec.LookPath("docker")
-	if err != nil {
-		return
-	}
+	dockerBin := requireDocker(t)
 
 	kclBody, err := kclTemplateBody(bp, crds)
 	if err != nil {
@@ -1745,6 +1748,9 @@ func TestCF427_KCLOptionalMetadataNameFallback(t *testing.T) {
 	cmd1.Stdin = strings.NewReader(kclBody)
 	out1, err := cmd1.CombinedOutput()
 	if err != nil {
+		if isDockerDaemonError(string(out1), err) {
+			t.Skipf("Docker daemon unavailable: %v\nOutput:\n%s", err, out1)
+		}
 		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out1)
 	}
 	out1Str := string(out1)
@@ -1764,6 +1770,9 @@ func TestCF427_KCLOptionalMetadataNameFallback(t *testing.T) {
 	cmd2.Stdin = strings.NewReader(kclBody)
 	out2, err := cmd2.CombinedOutput()
 	if err != nil {
+		if isDockerDaemonError(string(out2), err) {
+			t.Skipf("Docker daemon unavailable: %v\nOutput:\n%s", err, out2)
+		}
 		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out2)
 	}
 	out2Str := string(out2)
@@ -1826,22 +1835,23 @@ func TestMetadataNameByteTarget_KCL(t *testing.T) {
 		t.Errorf("expected KCL to base64.encode static metadata name %q, got:\n%s", expected, s)
 	}
 
-	dockerBin, err := exec.LookPath("docker")
-	if err == nil {
-		kclBody, err := kclTemplateBody(b, crds)
-		if err != nil {
-			t.Fatalf("kclTemplateBody: %v", err)
+	dockerBin := requireDocker(t)
+	kclBody, err := kclTemplateBody(b, crds)
+	if err != nil {
+		t.Fatalf("kclTemplateBody: %v", err)
+	}
+	cmd := exec.Command(dockerBin, "run", "-i", "--rm", "kcllang/kcl:v0.11.0", "kcl", "run",
+		"-D", `params={"oxr": {"metadata": {"name": "test-xr"}, "spec": {}}}`, "-")
+	cmd.Stdin = strings.NewReader(kclBody)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if isDockerDaemonError(string(out), err) {
+			t.Skipf("Docker daemon unavailable: %v\nOutput:\n%s", err, out)
 		}
-		cmd := exec.Command(dockerBin, "run", "-i", "--rm", "kcllang/kcl:v0.11.0", "kcl", "run",
-			"-D", `params={"oxr": {"metadata": {"name": "test-xr"}, "spec": {}}}`, "-")
-		cmd.Stdin = strings.NewReader(kclBody)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out)
-		}
-		expectedB64 := "bXktc3RhdGljLXN2Yw==" // base64 of "my-static-svc"
-		if !strings.Contains(string(out), expectedB64) {
-			t.Errorf("expected base64 encoded static metadata name %q in KCL output, got:\n%s", expectedB64, string(out))
-		}
+		t.Fatalf("kcl docker execution failed: %v\nOutput:\n%s", err, out)
+	}
+	expectedB64 := "bXktc3RhdGljLXN2Yw==" // base64 of "my-static-svc"
+	if !strings.Contains(string(out), expectedB64) {
+		t.Errorf("expected base64 encoded static metadata name %q in KCL output, got:\n%s", expectedB64, string(out))
 	}
 }
