@@ -39,11 +39,11 @@ test('catalogue search ranks name matches above description matches and explains
   expect(lastNameIdx).toBeGreaterThanOrEqual(0)
   expect(lastNameIdx).toBeLessThan(firstDescIdx)
 
-  // 2. Explanation contract: description-only matches must show why they are listed.
+  // 2. Explanation contract: non-name matches must show why they are listed.
   const artifactRow = page.locator('#lrail .cat-row', { hasText: 'provider-gcp-artifact' }).first()
   const matchReason = artifactRow.locator('.cat-match-reason')
   await expect(matchReason).toBeVisible()
-  await expect(matchReason).toContainText(/description/i)
+  await expect(matchReason).toContainText(/(description|kind)/i)
 
   // Name matches should not show a description-match reason badge/line.
   const awsRow = page.locator('#lrail .cat-row', { hasText: 'provider-aws-iam' }).first()

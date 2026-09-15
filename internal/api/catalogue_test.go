@@ -269,3 +269,29 @@ func TestCatalogueQFiltersByServiceAndEngineWords(t *testing.T) {
 		})
 	}
 }
+
+// TestCatalogueQReturnsMatchedKind verifies that searching the catalogue via GET /api/catalogue?q=
+// populates matchedKind for rows matching on served CRD kinds (CF-491).
+func TestCatalogueQReturnsMatchedKind(t *testing.T) {
+	h := testHandler(t)
+
+	var res struct {
+		Providers []catalogue.Provider `json:"providers"`
+	}
+	if code := getJSON(t, h, "/api/catalogue?q=rds", &res); code != 200 {
+		t.Fatalf("status %d", code)
+	}
+
+	var foundDns bool
+	for _, p := range res.Providers {
+		if p.Name == "provider-gcp-dns" {
+			foundDns = true
+			if p.MatchedKind != "RecordSet" {
+				t.Errorf("provider-gcp-dns matchedKind = %q, want \"RecordSet\"", p.MatchedKind)
+			}
+		}
+	}
+	if !foundDns {
+		t.Fatalf("GET /api/catalogue?q=rds did not return provider-gcp-dns in results: %+v", res.Providers)
+	}
+}
