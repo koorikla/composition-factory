@@ -479,7 +479,7 @@ function drawKinds() {
       items.forEach(function (k) {
         const fam = famOf(k);
         const kClusterTag = k.provider === "cluster"
-          ? '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:rgba(6,182,212,0.12);color:#06b6d4;border-radius:3px;margin-right:4px">cluster</span>'
+          ? '<span class="pill" style="font-size:9.5px;padding:1px 4px;background:rgba(6,182,212,0.12);color:#06b6d4;border-radius:3px">cluster</span>'
           : "";
         const isNsK = isNamespacedKind(k);
         const isV2K = isV2Kind(k);
@@ -490,15 +490,17 @@ function drawKinds() {
         if (k.provider !== "cluster" && !/\.ya?ml$/.test(k.provider || "")) {
           if (isNsK) {
             const kScopeLabel = isV2K ? "namespaced (v2)" : "namespaced";
-            kScopeTag = '<span class="pill" style="font-size:9px;padding:0 4px;border-radius:3px;margin-right:4px;background:' + (kMatchesXRD ? 'rgba(34,197,94,0.12);color:var(--ok)' : 'rgba(255,255,255,0.06);color:var(--faint)') + '" title="' + (kMatchesXRD ? 'Matches XRD scope' : 'Does not match XRD scope') + '">' + esc(kScopeLabel) + '</span>';
+            kScopeTag = '<span class="pill" style="font-size:9px;padding:0 4px;border-radius:3px;background:' + (kMatchesXRD ? 'rgba(34,197,94,0.12);color:var(--ok)' : 'rgba(255,255,255,0.06);color:var(--faint)') + '" title="' + (kMatchesXRD ? 'Matches XRD scope' : 'Does not match XRD scope') + '">' + esc(kScopeLabel) + '</span>';
           } else if (isClusterK) {
-            kScopeTag = '<span class="pill" style="font-size:9px;padding:0 4px;border-radius:3px;margin-right:4px;background:' + (kMatchesXRD ? 'rgba(34,197,94,0.12);color:var(--ok)' : 'rgba(255,255,255,0.06);color:var(--faint)') + '" title="' + (kMatchesXRD ? 'Matches XRD scope' : 'Does not match XRD scope') + '">cluster-scoped</span>';
+            kScopeTag = '<span class="pill" style="font-size:9px;padding:0 4px;border-radius:3px;background:' + (kMatchesXRD ? 'rgba(34,197,94,0.12);color:var(--ok)' : 'rgba(255,255,255,0.06);color:var(--faint)') + '" title="' + (kMatchesXRD ? 'Matches XRD scope' : 'Does not match XRD scope') + '">cluster-scoped</span>';
           }
         }
 
         const fullTitle = k.kind +
           (k.apiVersion ? " \u00b7 " + k.apiVersion : "") +
           (k.provider ? " (" + k.provider + ")" : "");
+        const metaTags = kClusterTag + kScopeTag;
+        const metaHtml = metaTags ? '<div class="kind-meta">' + metaTags + '</div>' : '';
         h += '<div class="kind" draggable="true"' +
           ' title="' + esc(fullTitle) + '"' +
           ' tabindex="0" role="button" aria-label="Add ' + esc(k.kind) + '"' +
@@ -509,10 +511,10 @@ function drawKinds() {
           ' data-fields="' + (k.fields || 0) + '"' +
           ' data-scope="' + (isNsK ? "Namespaced" : "Cluster") + '">' +
           '<span class="sw" style="background:' + COLORS[fam] + '"></span>' +
-          '<span class="nm" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(fullTitle) + '">' + esc(k.kind) + '</span>' +
-          kClusterTag +
-          kScopeTag +
-          '<span class="req">' + (k.required | 0) + " req</span></div>";
+          '<span class="nm" title="' + esc(fullTitle) + '">' + esc(k.kind) + '</span>' +
+          '<span class="req">' + (k.required | 0) + " req</span>" +
+          metaHtml +
+          '</div>';
       });
     }
   });
