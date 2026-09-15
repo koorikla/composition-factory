@@ -80,6 +80,11 @@ let clusterInfo = null;      // live cluster connection status
 let clusterLoading = false;
 let clusterErr = null;
 
+function cleanProviderErr(err) {
+  const m = (err && err.message) || String(err || "");
+  return m.replace(/(https?:\/\/[^\s"'`<>?]+)\?[^\s"'`<>]+/g, "$1");
+}
+
 let previewTimer = null;
 let previewFor = null;       // "kind|av" currently shown/loading
 const previewCache = {};     // "kind|av" -> {total, required:[{path,type,description}]}
@@ -294,7 +299,7 @@ function drawKindsEmpty(q) {
       '</div>';
   }
   if (providersErr) {
-    h += '<div class="warnbar" role="alert" style="margin:0 0 10px;text-align:left">' + esc(providersErr) + '</div>';
+    h += '<div class="warnbar" role="alert" style="margin:0 0 10px;text-align:left;display:block;white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.4">' + esc(providersErr) + '</div>';
   }
   h += '<div style="margin-bottom:8px">No kinds match search query. Add a provider in <button class="btn link" data-tab-switch="src" style="font-weight:600;text-decoration:underline;cursor:pointer;color:inherit;background:none;border:none;padding:0;font-size:inherit">SOURCES</button>.</div>';
 
@@ -822,7 +827,7 @@ function drawSources() {
   // add/remove failures surface here, verbatim (the refactor that added
   // the functions rail dropped this render and the add handler with it —
   // both are load-bearing: without them the Add button is silently dead)
-  if (providersErr) h += '<div class="warnbar" role="alert" style="margin:0 10px">' + esc(providersErr) + "</div>";
+  if (providersErr) h += '<div class="warnbar" role="alert" style="margin:0 10px;display:block;white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.4;text-align:left">' + esc(providersErr) + "</div>";
   h += '<div class="grp"><span class="lbl">Providers Catalogue</span></div>' +
     '<div style="padding:0 10px 6px"><input id="cat-search" class="search" placeholder="Search OSS providers\u2026" aria-label="Search catalogue"></div>';
   if (catRows === null) {
@@ -1244,7 +1249,7 @@ function bindPaletteEvents() {
       }).then(function () {
         store.generate(false);
       }).catch(function (err) {
-        providersErr = err && err.message || String(err);
+        providersErr = cleanProviderErr(err);
         drawRail();
       });
     }
@@ -1316,7 +1321,7 @@ function bindPaletteEvents() {
       }).then(function () {
         store.generate(false);
       }).catch(function (err) {
-        providersErr = err && err.message || String(err);
+        providersErr = cleanProviderErr(err);
         drawRail();
       }).finally(function () {
         addBtn.disabled = false;
@@ -1347,7 +1352,7 @@ function bindPaletteEvents() {
         });
         drawRail();
       }).catch(function (err) {
-        providersErr = err && err.message || String(err);
+        providersErr = cleanProviderErr(err);
         drawRail();
       });
       return;

@@ -23,11 +23,22 @@
  */
 
 /**
+ * Strips query strings from URLs in error messages (e.g. signed blob storage URLs).
+ * @param {string} msg
+ * @returns {string}
+ */
+function stripUrlQueryParams(msg) {
+  if (!msg || typeof msg !== "string") return msg;
+  return msg.replace(/(https?:\/\/[^\s"'`<>?]+)\?[^\s"'`<>]+/g, "$1");
+}
+
+/**
  * Formats an upstream package/registry fetch error into a clear, actionable message.
  * @param {string} rawMsg
  * @returns {string}
  */
 function formatRegistryFetchError(rawMsg) {
+  rawMsg = stripUrlQueryParams(rawMsg);
   let ref = "";
   const refMatch = rawMsg && rawMsg.match(/(?:fetch|resolve image|digest|parse reference)\s+"([^"]+)"/i);
   if (refMatch) {
@@ -117,7 +128,7 @@ async function request(method, path, body = undefined, opts = undefined) {
     try { data = JSON.parse(text); } catch (_) { /* non-JSON body */ }
   }
   if (!res.ok) {
-    const rawMsg = (data && typeof data.error === "string" && data.error) || text;
+    const rawMsg = stripUrlQueryParams((data && typeof data.error === "string" && data.error) || text);
     let message = rawMsg;
     const statusText = res.statusText ? " " + res.statusText : "";
     const statusStr = res.status + statusText;
