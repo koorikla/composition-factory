@@ -56,137 +56,9 @@ let needsFit = true;
 
 /* ---------- small helpers ---------- */
 
-function shortPath(p, k) {
-  if (k === undefined) k = 2;
+function shortPath(p) {
   const seg = String(p).split(".");
-  return seg.length <= k ? p : "…" + seg.slice(-k).join(".");
-}
-
-function isSimilarSegment(a, b) {
-  if (!a || !b) return false;
-  if (a === b) return true;
-  if (a.startsWith(b) || b.startsWith(a)) return true;
-  return false;
-}
-
-function computeCardPortLabels(inPaths, envKeys, annKeys, statusRows) {
-  const items = [];
-  inPaths.forEach(function (p) {
-    items.push({ id: "in:" + p, rawPath: p, prefix: "", isId: false });
-  });
-  envKeys.forEach(function (p) {
-    items.push({ id: "env:" + p, rawPath: p, prefix: "env.", isId: false });
-  });
-  annKeys.forEach(function (k) {
-    items.push({ id: "ann:" + k, rawPath: k, prefix: "", isId: false });
-  });
-  statusRows.forEach(function (p) {
-    const isId = (p === "atProvider.id" || p === "id");
-    items.push({ id: "status:" + p, rawPath: p.replace(/^atProvider\./, ""), prefix: "", isId: isId });
-  });
-
-  // Step 1: Initial labels using standard shortPath
-  const labels = {};
-  items.forEach(function (it) {
-    labels[it.id] = it.isId ? "name / id" : (it.prefix + shortPath(it.rawPath));
-  });
-
-  // Step 2: Group by label to find collisions
-  const labelGroups = {};
-  items.forEach(function (it) {
-    const l = labels[it.id];
-    if (!labelGroups[l]) labelGroups[l] = [];
-    labelGroups[l].push(it);
-  });
-
-  // Step 3: Disambiguate colliding groups
-  Object.keys(labelGroups).forEach(function (lbl) {
-    const group = labelGroups[lbl];
-    if (group.length <= 1) return;
-
-    const tails = group.map(function (it) {
-      const segs = String(it.rawPath).split(".");
-      return segs.slice(-2).join(".");
-    });
-
-    const itemSegs = group.map(function (it) {
-      const segs = String(it.rawPath).split(".");
-      const prefixSegs = segs.slice(0, -2);
-      return {
-        raw: segs,
-        prefix: prefixSegs,
-        clean: prefixSegs.map(function (s, idx) {
-          return { name: s.replace(/\[\d+\]$/, ""), rawIdx: idx };
-        }).filter(function (s) {
-          return s.name && s.name !== "spec";
-        })
-      };
-    });
-
-    for (let i = 0; i < group.length; i++) {
-      const it = group[i];
-      if (it.isId) continue;
-      const myInfo = itemSegs[i];
-      const otherInfos = itemSegs.filter(function (_, idx) { return idx !== i; });
-      const otherNames = new Set();
-      otherInfos.forEach(function (oi) {
-        oi.clean.forEach(function (c) { otherNames.add(c.name); });
-      });
-
-      let chosen = null;
-      for (let j = myInfo.clean.length - 1; j >= 0; j--) {
-        const cand = myInfo.clean[j];
-        let conflict = false;
-        otherNames.forEach(function (on) {
-          if (isSimilarSegment(cand.name, on)) conflict = true;
-        });
-        if (!conflict) {
-          chosen = cand;
-          break;
-        }
-      }
-      if (!chosen && myInfo.clean.length > 0) {
-        chosen = myInfo.clean[myInfo.clean.length - 1];
-      }
-
-      const tail = tails[i];
-      if (chosen) {
-        const isAdjacent = (chosen.rawIdx === myInfo.raw.length - 3);
-        const sep = isAdjacent ? "." : "…";
-        labels[it.id] = (it.prefix || "") + "…" + chosen.name + sep + tail;
-      } else {
-        const segs = myInfo.raw;
-        labels[it.id] = (it.prefix || "") + (segs.length <= 3 ? it.rawPath : "…" + segs.slice(-3).join("."));
-      }
-    }
-  });
-
-  // Step 4: Safety check — if any labels are still duplicated, expand tail progressively
-  const finalCounts = {};
-  items.forEach(function (it) {
-    const l = labels[it.id];
-    finalCounts[l] = (finalCounts[l] || 0) + 1;
-  });
-
-  items.forEach(function (it) {
-    if (it.isId) return;
-    if (finalCounts[labels[it.id]] > 1) {
-      const segs = String(it.rawPath).split(".");
-      for (let k = 3; k <= segs.length; k++) {
-        const candidate = it.prefix + (k >= segs.length ? it.rawPath : "…" + segs.slice(-k).join("."));
-        let clash = false;
-        items.forEach(function (other) {
-          if (other !== it && labels[other.id] === candidate) clash = true;
-        });
-        if (!clash) {
-          labels[it.id] = candidate;
-          break;
-        }
-      }
-    }
-  });
-
-  return labels;
+  return seg.length <= 2 ? p : "…" + seg.slice(-2).join(".");
 }
 
 function doc() { return S.state.doc; }
@@ -383,47 +255,8 @@ function resourceCardHTML(d, r, sel) {
     if (schema.requiredPaths.length <= 8) return true;
     return sf && (sf.depth !== undefined ? sf.depth <= 1 : (p.split(".").length <= 2));
   }).sort() : [];
-  const inPaths = paths.concat(extra);
 
-  // Configured envelope fields (e.g. writeConnectionSecretToRef.name)
-  const envFields = r.envelope || {};
-  const envKeys = Object.keys(envFields).filter(function (p) { return formOf(envFields[p]); }).sort();
-
-  // Annotations: authored metadata entries render as rows
-  const anns = r.annotations || {};
-  const annKeys = Object.keys(anns).sort();
-
-  // Status outputs: wired paths always, plus the top atProvider leaves from
-  // the schema — displayed like inputs so "object depends on object" is
-  // visible before any wire exists.
-  const outStatusWires = listWires(d).filter(function (w) {
-    return w.kind === "status" && w.srcResource === r.name && isValidStatusPath(w.srcPath);
-  });
-  const seenStatus = {};
-  const statusRows = [];
-  outStatusWires.forEach(function (w) {
-    if (seenStatus[w.srcPath]) return;
-    seenStatus[w.srcPath] = true;
-    statusRows.push(w.srcPath);
-  });
-  const schemaLeaves = (statusLeavesFor(meta) || []).filter(isValidStatusPath);
-  // Ensure atProvider.id or id is offered as a primary output row for resource linking when present in schema
-  const idPath = schemaLeaves.find(function (p) { return p === "atProvider.id" || p === "id"; });
-  if (idPath && !seenStatus[idPath] && isValidStatusPath(idPath)) {
-    seenStatus[idPath] = true;
-    statusRows.unshift(idPath);
-  }
-  for (let si = 0; si < schemaLeaves.length && statusRows.length < STATUS_ROWS_SHOWN + Object.keys(seenStatus).length; si++) {
-    const p = schemaLeaves[si];
-    if (seenStatus[p] || !isValidStatusPath(p)) continue;
-    seenStatus[p] = true;
-    statusRows.push(p);
-    if (statusRows.length >= STATUS_ROWS_SHOWN && si >= STATUS_ROWS_SHOWN) break;
-  }
-
-  const portLabels = computeCardPortLabels(inPaths, envKeys, annKeys, statusRows);
-
-  inPaths.forEach(function (p) {
+  paths.concat(extra).forEach(function (p) {
     const f = fields[p] || null;
     const form = formOf(f);
     const sf = schema ? schema.byPath[p] : null;
@@ -467,11 +300,14 @@ function resourceCardHTML(d, r, sel) {
       warn: optWarn ? "Optional parameter wired to required field: render will omit if missing" : null,
       cls: optWarn ? "port-opt-warn" : "",
       ty: sf ? sf.type : "",
-      label: portLabels["in:" + p] || shortPath(p),
+      label: shortPath(p),
       title: title,
     });
   });
 
+  // Configured envelope fields (e.g. writeConnectionSecretToRef.name)
+  const envFields = r.envelope || {};
+  const envKeys = Object.keys(envFields).filter(function (p) { return formOf(envFields[p]); }).sort();
   envKeys.forEach(function (p) {
     const f = envFields[p];
     const parsed = f && f.from ? parseFrom(f.from) : null;
@@ -500,13 +336,15 @@ function resourceCardHTML(d, r, sel) {
       dotColor: dot,
       req: false,
       ty: "env",
-      label: portLabels["env:" + p] || ("env." + shortPath(p)),
+      label: "env." + shortPath(p),
       title: title,
     });
   });
 
   // Annotations: authored metadata entries render as rows (wire dots teal
   // when wired from status, xrd-blue from params)
+  const anns = r.annotations || {};
+  const annKeys = Object.keys(anns).sort();
   if (annKeys.length) {
     h += '<div class="node-grp">annotations</div>';
     annKeys.forEach(function (k) {
@@ -530,12 +368,39 @@ function resourceCardHTML(d, r, sel) {
         dotColor: wired && f.from.indexOf("resources.") === 0 ? "var(--wire-status)" : (wired && f.from.indexOf("env.") === 0 ? "var(--shared)" : "var(--wire-xrd)"),
         req: false,
         ty: wired ? "" : (f && f.raw !== undefined && f.raw !== "" ? "raw" : "value"),
-        label: portLabels["ann:" + k] || shortPath(k),
+        label: shortPath(k),
         title: title,
       });
     });
   }
 
+  // Status outputs: wired paths always, plus the top atProvider leaves from
+  // the schema — displayed like inputs so "object depends on object" is
+  // visible before any wire exists.
+  const outStatusWires = listWires(d).filter(function (w) {
+    return w.kind === "status" && w.srcResource === r.name && isValidStatusPath(w.srcPath);
+  });
+  const seenStatus = {};
+  const statusRows = [];
+  outStatusWires.forEach(function (w) {
+    if (seenStatus[w.srcPath]) return;
+    seenStatus[w.srcPath] = true;
+    statusRows.push(w.srcPath);
+  });
+  const schemaLeaves = (statusLeavesFor(meta) || []).filter(isValidStatusPath);
+  // Ensure atProvider.id or id is offered as a primary output row for resource linking when present in schema
+  const idPath = schemaLeaves.find(function (p) { return p === "atProvider.id" || p === "id"; });
+  if (idPath && !seenStatus[idPath] && isValidStatusPath(idPath)) {
+    seenStatus[idPath] = true;
+    statusRows.unshift(idPath);
+  }
+  for (let si = 0; si < schemaLeaves.length && statusRows.length < STATUS_ROWS_SHOWN + Object.keys(seenStatus).length; si++) {
+    const p = schemaLeaves[si];
+    if (seenStatus[p] || !isValidStatusPath(p)) continue;
+    seenStatus[p] = true;
+    statusRows.push(p);
+    if (statusRows.length >= STATUS_ROWS_SHOWN && si >= STATUS_ROWS_SHOWN) break;
+  }
   if (statusRows.length) {
     h += '<div class="node-grp" style="color:var(--wire-status);text-align:right">outputs</div>';
     statusRows.forEach(function (p) {
@@ -555,7 +420,7 @@ function resourceCardHTML(d, r, sel) {
         cls: "status",
         // outputs read right-aligned and short: the atProvider prefix is
         // noise at a glance, the full path lives in the title
-        label: portLabels["status:" + p] || (isId ? "name / id" : shortPath(p.replace(/^atProvider\./, ""))),
+        label: isId ? "name / id" : shortPath(p.replace(/^atProvider\./, "")),
         title: title,
       });
     });
