@@ -327,14 +327,9 @@ function drawKindsEmpty(q) {
       const isNameMatch = !qLower || (c.name || "").toLowerCase().indexOf(qLower) !== -1;
       let matchReasonHtml = "";
       if (qLower && !isNameMatch) {
-        const matchedKind = c.matchedKind || c.matched_kind;
-        if (matchedKind && matchedKind.toLowerCase().indexOf(qLower) !== -1) {
-          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(matchedKind) + '">' +
-            esc("Matches kind: " + matchedKind) + '</span>';
-        } else if (c.description && c.description.toLowerCase().indexOf(qLower) !== -1) {
-          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(c.description) + '">' +
-            esc("Matches description: " + c.description) + '</span>';
-        }
+        const descText = c.description ? "Matches description: " + c.description : "Matched on description";
+        matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(c.description || "") + '">' +
+          esc(descText) + '</span>';
       }
 
       h += '<div class="cat-row src-row' + (isInstalled ? ' is-installed' : '') + '" style="cursor:default" title="' + esc(c.description || c.name) + '">' +
@@ -855,14 +850,9 @@ function drawSources() {
       var isNameMatch = !qLower || (c.name || "").toLowerCase().indexOf(qLower) !== -1;
       var matchReasonHtml = "";
       if (qLower && !isNameMatch) {
-        var matchedKind = c.matchedKind || c.matched_kind;
-        if (matchedKind && matchedKind.toLowerCase().indexOf(qLower) !== -1) {
-          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(matchedKind) + '">' +
-            esc("Matches kind: " + matchedKind) + '</span>';
-        } else if (c.description && c.description.toLowerCase().indexOf(qLower) !== -1) {
-          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(c.description) + '">' +
-            esc("Matches description: " + c.description) + '</span>';
-        }
+        var descText = c.description ? "Matches description: " + c.description : "Matched on description";
+        matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(c.description || "") + '">' +
+          esc(descText) + '</span>';
       }
       h += '<div class="cat-row src-row' + (isInstalled ? " is-installed" : "") + '" style="cursor:default" title="' + esc(c.description || c.name) + '">' +
         '<span class="cat-body" style="min-width:0;' + (isInstalled ? 'flex:1 1 100%' : 'flex:1') + '">' +

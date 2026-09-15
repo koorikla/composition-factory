@@ -276,27 +276,6 @@ func Matches(p Provider, q string) bool {
 	return false
 }
 
-// MatchedKind returns the kind or service alias served by p that matches q, if any.
-// Exact (case-insensitive) matches are preferred over substring matches.
-// Returns "" if q is empty or no served kind matches.
-func MatchedKind(p Provider, q string) string {
-	q = strings.ToLower(strings.TrimSpace(q))
-	if q == "" {
-		return ""
-	}
-	for _, k := range packageKinds[p.Name] {
-		if strings.EqualFold(k, q) {
-			return k
-		}
-	}
-	for _, k := range packageKinds[p.Name] {
-		if strings.Contains(strings.ToLower(k), q) {
-			return k
-		}
-	}
-	return ""
-}
-
 // Search filters entries according to query and type ("provider", "function", or "").
 func Search(entries []Provider, query, typ string) []Provider {
 	query = strings.ToLower(strings.TrimSpace(query))
@@ -315,9 +294,6 @@ func Search(entries []Provider, query, typ string) []Provider {
 			continue
 		}
 		if query == "" || Matches(e, query) {
-			if query != "" {
-				e.MatchedKind = MatchedKind(e, query)
-			}
 			out = append(out, e)
 		}
 	}
