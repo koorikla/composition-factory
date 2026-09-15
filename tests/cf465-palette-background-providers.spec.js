@@ -182,7 +182,17 @@ test('unreferenced providers are strictly deferred and not loaded at startup on 
     expect(providers.length).toBe(0)
 
     // Canvas UI: SOURCES and KINDS must agree
+    await page.addInitScript(() => {
+      localStorage.setItem('cf:empty-start-offered', '1')
+    })
     await page.goto(serverURL + '/')
+
+    const overlay = page.locator('#examplesOverlay')
+    if (await overlay.isVisible()) {
+      await page.keyboard.press('Escape')
+      await expect(overlay).toBeHidden()
+    }
+
     await expect(page.locator('#region-palette')).toBeVisible()
 
     await page.click('#rtabs button[data-r="src"]')
