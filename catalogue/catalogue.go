@@ -64,6 +64,10 @@ type Provider struct {
 	// "Apache-2.0"), or the SPDX placeholder "NOASSERTION" when GitHub
 	// reports no detected license.
 	License string `json:"license"`
+	// MatchedKind is populated by Search when a query matches one of the CRD
+	// kinds or service aliases served by this package. Omitted when empty
+	// (unfiltered catalogue, or match came from name/description).
+	MatchedKind string `json:"matchedKind,omitempty"`
 }
 
 // Load parses the embedded providers.json into a slice of Provider. It
