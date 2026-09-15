@@ -17,7 +17,7 @@ import { mapResourceCoordinates, deleteEnvKeyFromDoc, renameEnvKeyInDoc, parseEn
 import { state, PARAM_TYPES } from "./inspector/state.js";
 import { scaffoldResourceFields } from "./canvas.js";
 import { essentialsHtml } from "./inspector/essentials.js";
-import { manifestHtml, searchHitsHtml, readView, afterManifestRender } from "./inspector/manifest.js";
+import { manifestHtml, searchHitsHtml, countSearchHits, setupSearchBadge, resetSearchBadge, updateSearchVisible, readView, afterManifestRender } from "./inspector/manifest.js";
 import { setView } from "./inspector/events.js";
 import {
   renderXRD, paramsOf, isParamLocked, cleanParamRefs, paramFrom, cloneProps, memberParent,
@@ -116,6 +116,8 @@ var kindDetailCache = {};        // "apiVersion|kind" -> {kind, envelope, status
 
 var view = readView();           // "manifest" | "fields" — persisted in localStorage (cf-insp-view)
 var search = "";                 // field search text: filters the Fields list, lists schema hits under the manifest
+var searchCountEl = null;        // #insp-search-count
+var wasSearching = false;        // true while a non-empty search is adjusting scroll
 var manifestDraft = null;        // { res, text, err, errLine } while the manifest editor is open, else null
 var manifestYAML = "";           // the selected resource's manifest YAML as last fetched (what "edit" opens with)
 var manifestLoaded = false;      // true once that fetch succeeded for the selected resource; Apply refuses otherwise
@@ -916,13 +918,20 @@ async function renderResource(res) {
       return envelopeFieldRow(res, f, params, otherResources, otherStatusMap, env);
     }).join("");
 
+    var hitCount = 0;
     if (view === "manifest") {
       h += manifestHtml(res, manifestYAML, mf && mf.error, params, otherResources, otherStatusMap);
-      if (search) h += searchHitsHtml(fields, search, detail && detail.envelope);
+      if (search) {
+        h += searchHitsHtml(fields, search, detail && detail.envelope);
+        hitCount = countSearchHits(fields, search, detail && detail.envelope);
+      }
     } else {
       var visible = q ? fields.filter(function (f) {
         return f.path.toLowerCase().indexOf(q) !== -1 || (f.description || "").toLowerCase().indexOf(q) !== -1;
       }) : fields;
+      if (search) {
+        hitCount = visible.length + visibleEnv.length;
+      }
       var body = (q ? "" : branchRows) +
         visible.map(function (f) { return fieldRow(res, f, params, otherResources, otherStatusMap, env); }).join("");
       if (body) {
@@ -1016,6 +1025,7 @@ async function renderResource(res) {
   restoreFocusedEdit(__snap);
   afterManifestRender(box);
   updateAllPreviews();
+  wasSearching = updateSearchVisible(box, search, view, hitCount, searchCountEl, wasSearching);
 }
 
 
@@ -1407,12 +1417,13 @@ function render() {
   if (!box) return;
   renderToken++;
   var doc = store.state.doc;
-  if (!doc) { box.innerHTML = '<div class="empty">No blueprint loaded.</div>'; return; }
   var sel = store.state.selectedResource;
-  if (!sel || sel === "xrd") { renderXRD(); return; }
-  if (sel === "environment") { renderEnvironment(); return; }
-  var res = selectedResource();
+  var res = (doc && sel && sel !== "xrd" && sel !== "environment") ? selectedResource() : null;
   if (!res) {
+    resetSearchBadge(searchCountEl);
+    if (!doc) { box.innerHTML = '<div class="empty">No blueprint loaded.</div>'; return; }
+    if (!sel || sel === "xrd") { renderXRD(); return; }
+    if (sel === "environment") { renderEnvironment(); return; }
     box.innerHTML = '<div class="empty">Resource "' + esc(sel) + '" not found in blueprint.</div>';
     return;
   }
@@ -1485,6 +1496,7 @@ Object.defineProperties(state, {
   store: { get() { return store; }, set(v) { store = v; }, configurable: true }, api: { get() { return api; }, set(v) { api = v; }, configurable: true },
   root: { get() { return root; }, set(v) { root = v; }, configurable: true }, box: { get() { return box; }, set(v) { box = v; }, configurable: true },
   fseg: { get() { return fseg; }, set(v) { fseg = v; }, configurable: true }, filter: { get() { return filter; }, set(v) { filter = v; }, configurable: true },
+  searchCountEl: { get() { return searchCountEl; }, set(v) { searchCountEl = v; }, configurable: true },
   warnMsg: { get() { return warnMsg; }, set(v) { warnMsg = v; }, configurable: true }, uiMode: { get() { return uiMode; }, set(v) { uiMode = v; }, configurable: true },
   pendingNewParam: { get() { return pendingNewParam; }, set(v) { pendingNewParam = v; }, configurable: true }, pendingNewMapEntry: { get() { return pendingNewMapEntry; }, set(v) { pendingNewMapEntry = v; }, configurable: true },
   pendingFocusParam: { get() { return pendingFocusParam; }, set(v) { pendingFocusParam = v; }, configurable: true }, paramOrder: { get() { return paramOrder; }, set(v) { paramOrder = v; }, configurable: true },
@@ -1513,6 +1525,7 @@ export function init(rootEl, deps) {
   fseg = root.querySelector("#fseg");
   var vseg = root.querySelector("#vseg");
   var searchEl = root.querySelector("#insp-search");
+  searchCountEl = setupSearchBadge(searchEl);
 
   bindInspectorEvents(box, fseg, vseg, searchEl);
   setView(view);
@@ -1553,6 +1566,8 @@ export function init(rootEl, deps) {
     render();
   });
   store.subscribe("selection", function () {
+    wasSearching = false;
+    if (box) box.scrollTop = 0;
     paramOrder = null;
     pendingRenamedParam = null;
     uiMode = {};

@@ -184,6 +184,28 @@ export function onManifestKeydown(e, box) {
   return false;
 }
 
+/** Total schema leaves whose path or description contains the query. */
+export function countSearchHits(fields, q, envelope) {
+  if (!q) return 0;
+  var ql = q.toLowerCase();
+  var match = function (f) {
+    return f.path.toLowerCase().indexOf(ql) !== -1 || (f.description || "").toLowerCase().indexOf(ql) !== -1;
+  };
+  var all = (fields || []).filter(match);
+  if (envelope && envelope.length) {
+    var seen = {};
+    for (var i = 0; i < all.length; i++) seen[all[i].path] = true;
+    for (var j = 0; j < envelope.length; j++) {
+      var ef = envelope[j];
+      if (!seen[ef.path] && match(ef)) {
+        all.push(ef);
+        seen[ef.path] = true;
+      }
+    }
+  }
+  return all.length;
+}
+
 /** Up to 30 schema leaves whose path or description contains the query,
  *  listed under the manifest; a click opens the Fields view on that field. */
 export function searchHitsHtml(fields, q, envelope) {
@@ -191,7 +213,7 @@ export function searchHitsHtml(fields, q, envelope) {
   var match = function (f) {
     return f.path.toLowerCase().indexOf(ql) !== -1 || (f.description || "").toLowerCase().indexOf(ql) !== -1;
   };
-  var all = fields.filter(match);
+  var all = (fields || []).filter(match);
   if (envelope && envelope.length) {
     var seen = {};
     for (var i = 0; i < all.length; i++) seen[all[i].path] = true;
@@ -204,7 +226,7 @@ export function searchHitsHtml(fields, q, envelope) {
     }
   }
   var hits = all.slice(0, 30);
-  if (!hits.length) return '<div class="empty">No schema field matches “' + esc(q) + '”.</div>';
+  if (!hits.length) return '<div class="empty search-hits-empty">No schema field matches “' + esc(q) + '”.</div>';
   var count = hits.length < all.length ? "first " + hits.length + " of " + all.length : String(all.length);
   return '<div class="insp-sec search-hits"><div class="lbl">Schema matches (' + count + ')</div>' +
     hits.map(function (f) {
@@ -212,4 +234,57 @@ export function searchHitsHtml(fields, q, envelope) {
         '<div class="search-hit-h"><code>' + esc(f.path) + '</code><span class="t">' + esc(f.type) + '</span></div>' +
         (f.description ? '<div class="fld-d">' + esc(f.description.slice(0, 140)) + '</div>' : '') + '</div>';
     }).join("") + '</div>';
+}
+
+/** Creates or finds the #insp-search-count badge next to #insp-search. */
+export function setupSearchBadge(searchEl) {
+  if (!searchEl || !searchEl.parentElement) return null;
+  var badge = searchEl.parentElement.querySelector("#insp-search-count");
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.id = "insp-search-count";
+    badge.className = "pill insp-search-count";
+    badge.hidden = true;
+    searchEl.insertAdjacentElement("afterend", badge);
+  }
+  return badge;
+}
+
+/** Resets the search count badge to hidden empty state. */
+export function resetSearchBadge(searchCountEl) {
+  if (!searchCountEl) return;
+  searchCountEl.hidden = true;
+  searchCountEl.textContent = "";
+  searchCountEl.classList.remove("zero");
+}
+
+/** Updates the search count badge and scrolls the first match into view. */
+export function updateSearchVisible(box, search, view, hitCount, searchCountEl, wasSearching) {
+  if (searchCountEl) {
+    if (search) {
+      searchCountEl.hidden = false;
+      searchCountEl.textContent = hitCount === 1 ? "1 match" : hitCount + " matches";
+      if (hitCount === 0) searchCountEl.classList.add("zero");
+      else searchCountEl.classList.remove("zero");
+    } else {
+      resetSearchBadge(searchCountEl);
+    }
+  }
+
+  if (search) {
+    var target = view === "manifest"
+      ? box.querySelector(".search-hits, .search-hits-empty, .empty")
+      : box.querySelector("#insp > .fld, #insp .fld, .empty");
+    if (target) {
+      var boxRect = box.getBoundingClientRect();
+      var targetRect = target.getBoundingClientRect();
+      var isInView = targetRect.top >= boxRect.top && targetRect.top <= boxRect.bottom - 40;
+      if (!isInView) {
+        box.scrollTop = Math.max(0, box.scrollTop + (targetRect.top - boxRect.top) - 4);
+      }
+    }
+    return true;
+  }
+  if (wasSearching) box.scrollTop = 0;
+  return false;
 }

@@ -985,6 +985,8 @@ svg.wires path:focus-visible{outline:none;stroke-width:4px !important;filter:dro
 /* ---- inspector Manifest view (CF-471): the resource as manifest-shaped YAML, the in-place editor, schema search hits ---- */
 .insp-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--rule);flex:0 0 auto}
 .insp-tools .tin{height:22px;font-size:11px}
+.insp-search-count{font-size:10px;font-family:var(--mono);padding:1px 6px;height:18px;display:inline-flex;align-items:center;background:var(--sunk);color:var(--ink-2);border:1px solid var(--rule);border-radius:9px;white-space:nowrap;flex:0 0 auto}
+.insp-search-count.zero{color:var(--muted);background:transparent}
 .ctrl-row{padding:4px 12px;border-bottom:1px solid var(--rule)}
 .manifest-sec{margin-top:12px;border-top:1px solid var(--rule)}
 .manifest-h{display:flex;align-items:center;gap:8px;padding:8px 12px 4px}

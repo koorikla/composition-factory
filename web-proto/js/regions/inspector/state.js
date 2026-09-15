@@ -17,6 +17,7 @@ export var state = {
   fseg: null,  // #fseg
   vseg: null,  // #vseg (Manifest | Fields)
   searchEl: null, // #insp-search
+  searchCountEl: null, // #insp-search-count
 
   view: "manifest",           // "manifest" | "fields" — persisted in localStorage (cf-insp-view)
   search: "",                 // field search text: filters the Fields list, lists schema hits under the manifest
