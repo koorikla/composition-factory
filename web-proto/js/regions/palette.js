@@ -334,10 +334,10 @@ function drawKindsEmpty(q) {
       if (qLower && !isNameMatch) {
         const matchedKind = c.matchedKind || c.matched_kind;
         if (matchedKind && matchedKind.toLowerCase().indexOf(qLower) !== -1) {
-          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(matchedKind) + '">' +
+          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px" title="' + esc(matchedKind) + '">' +
             esc("Matches kind: " + matchedKind) + '</span>';
         } else if (c.description && c.description.toLowerCase().indexOf(qLower) !== -1) {
-          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(c.description) + '">' +
+          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px" title="' + esc(c.description) + '">' +
             esc("Matches description: " + c.description) + '</span>';
         }
       }
@@ -862,10 +862,10 @@ function drawSources() {
       if (qLower && !isNameMatch) {
         var matchedKind = c.matchedKind || c.matched_kind;
         if (matchedKind && matchedKind.toLowerCase().indexOf(qLower) !== -1) {
-          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(matchedKind) + '">' +
+          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px" title="' + esc(matchedKind) + '">' +
             esc("Matches kind: " + matchedKind) + '</span>';
         } else if (c.description && c.description.toLowerCase().indexOf(qLower) !== -1) {
-          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(c.description) + '">' +
+          matchReasonHtml = '<span class="cat-match-reason dg" style="display:block;font-size:9.5px;color:var(--muted);margin-top:2px" title="' + esc(c.description) + '">' +
             esc("Matches description: " + c.description) + '</span>';
         }
       }

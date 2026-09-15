@@ -193,6 +193,8 @@ html,body{height:100%;overflow:hidden}
 .src-row .nm{font-family:var(--mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .src-row .dg{font-family:var(--mono);font-size:9px;color:var(--faint)}
 .cat-row .dg{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cat-row:has(.cat-match-reason){align-items:flex-start}
+.cat-row .cat-match-reason{white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.35;overflow:visible;text-overflow:clip}
 .cat-row.is-installed{flex-wrap:wrap;align-items:flex-start;padding:6px 12px;gap:3px}
 .cat-row.is-installed .cat-body{min-width:0;flex:1 1 100%}
 .cat-row.is-installed .pill{align-self:flex-start;margin-top:2px}
