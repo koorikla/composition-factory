@@ -13,7 +13,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
-    "eslint": "^10.10.0",
+    "eslint": "^10.11.0",
     "gifenc": "^1.0.3",
     "globals": "^17.12.0",
     "pngjs": "^7.0.0",
